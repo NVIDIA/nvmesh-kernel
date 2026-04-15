@@ -2576,3 +2576,401 @@ Add an `Encryption` column to the `ThinProvisioning.jsx` table:
 
 ---
 
+## Part 10 — CDV and TPV Allocation Statistics in Management UI
+
+### 10.1 Overview
+
+The management UI currently shows no runtime allocation statistics for CDVs or TPVs. This section designs the end-to-end flow: what stats exist, how they travel from kernel to management, how they are stored, and how the UI presents them.
+
+**CDV screen — new columns:**
+
+| Column | Meaning | Source |
+|--------|---------|--------|
+| Allocated Extents | CDV data extents currently assigned to TPVs | TOMA |
+| Free Extents | Data extents available for new allocation | TOMA (derived: `total − allocated`) |
+| Max Additional | Maximum additional data extents if CDV were expanded | Computed from `cdvConfig` |
+
+**TPV screen — new columns:**
+
+| Column | Meaning | Source |
+|--------|---------|--------|
+| CDV Extents | Number of CDV data extents held by this TPV | TOMA |
+| TPV Extents In Use | TPV extents with data written (mapped in xarray) | Client |
+
+### 10.2 Architecture Decisions
+
+**Decision #26 — Push via Kafka events, not polling.**
+Management does not poll TOMA or clients for statistics. TOMA and client push stats via Kafka, following the existing NVMesh pattern where all kernel → management communication is event-driven. Two new Kafka message types are added.
+
+**Decision #27 — Stats stored in volume documents, no new collections.**
+Runtime stats are stored as a `runtimeStats` sub-object on the existing volume document in MongoDB. This keeps stats co-located with the volume they describe and avoids new collections. The `runtimeStats` sub-object is always treated as stale-able (best-effort, not transactional).
+
+**Decision #28 — TOMA is authority for CDV-level stats; client is authority for TPV-extent-level stats.**
+TOMA owns the CDV allocator and knows how many CDV extents are allocated, free, and assigned to each TPV. The client owns the TPV allocator and knows how many TPV extents within its CDV extents are in use. Each authority pushes its own stats — no cross-component queries.
+
+### 10.3 Data Model — MongoDB Extensions
+
+**CDV document — new `runtimeStats` sub-object:**
+
+```javascript
+{
+    // existing fields: _id, uuid, volumeClass: 'CDV', capacity, cdvConfig, tpvCount, ...
+    runtimeStats: {
+        allocatedExtents: Number,     // CDV data extents currently allocated to TPVs
+        totalDataExtents: Number,     // total CDV data extents (physical capacity / extent size)
+        maxAddressableExtents: Number, // allocator area addressing limit
+        lastUpdated: Date,            // timestamp of last TOMA report
+    }
+}
+```
+
+Derived values (computed by UI, not stored):
+- `freeExtents = totalDataExtents − allocatedExtents`
+- `maxAdditional = maxAddressableExtents − totalDataExtents`
+
+**TPV document — new `runtimeStats` sub-object:**
+
+```javascript
+{
+    // existing fields: _id, uuid, volumeClass: 'TPV', tpvConfig, ...
+    runtimeStats: {
+        cdvExtents: Number,        // CDV data extents held by this TPV (from TOMA)
+        tpvExtentsInUse: Number,   // mapped TPV extents with data (from client)
+        tpvExtentsTotal: Number,   // virtual address space in TPV extents (from client)
+        lastUpdated: Date,
+    }
+}
+```
+
+### 10.4 CDV Stats: TOMA → Management
+
+#### Data source
+
+TOMA's in-memory `nvmeibt_cdv_alloc` struct provides:
+- `n_allocated` — CDV extents currently allocated
+- `total_data_extents` — total CDV data capacity in extents
+- `extents` xdlist — per-extent entries with `tpv_uuid`, from which per-TPV CDV extent counts are derived
+
+The `maxAddressableExtents` is computed from the allocator area geometry: one 4 KiB header block + one 4 KiB record per extent slot = `(allocatorSizeGB × 1 GiB / 4 KiB) − 1`.
+
+#### New Kafka message: `TOMAToManagement_TP.cdvAllocatorStats`
+
+Published by TOMA after every `CDV_ALLOC_EXTENT` and `CDV_FREE_EXTENT` operation. Uses the existing Kafka dedup mechanism with `cdv_uuid` as the unique key, so rapid alloc/free sequences coalesce into a single message per CDV.
+
+```json
+{
+    "messageType": "cdvAllocatorStats",
+    "cdvUUID": "<uuid>",
+    "allocatedExtents": 42,
+    "totalDataExtents": 100,
+    "maxAddressableExtents": 262143,
+    "perTPV": [
+        { "tpvUUID": "<uuid-1>", "cdvExtents": 12 },
+        { "tpvUUID": "<uuid-2>", "cdvExtents": 30 }
+    ]
+}
+```
+
+The `perTPV` array is built by iterating the `extents` xdlist and counting entries per `tpv_uuid`. This runs on TOMA's single main thread, so no additional locking is needed.
+
+Trigger frequency is appropriate because:
+- CDV extent allocations are infrequent (one alloc per `cdvExtentSizeMB` of new writes — 64 MB minimum)
+- The dedup mechanism further coalesces multiple operations into one message
+
+#### TOMA implementation (`nvmeibt_cdv_alloc.c`)
+
+New function `nvmeibt_cdv_alloc_publish_stats(cdv_uuid)`:
+
+```c
+static void nvmeibt_cdv_alloc_publish_stats(const char *cdv_uuid)
+{
+    struct nvmeibt_cdv_alloc *alloc;
+    KAFKA_PRODUCER_MSG_HEADER_VAR(hdr);
+
+    alloc = cdv_alloc_lookup(cdv_uuid);
+    if (!alloc || !alloc->ondisk_loaded)
+        return;
+
+    /* Build per-TPV breakdown by scanning extent list */
+    /* ... count extents per tpv_uuid ... */
+
+    /* Build JSON payload */
+    /* ... nvmeibt_Str_sprintf with allocatedExtents, totalDataExtents,
+           maxAddressableExtents, perTPV array ... */
+
+    nvmeibt_kafka_outgoing_msgs_queue_add(
+        cdv_uuid,                                   /* unique_key: coalesces per CDV */
+        json_buf,
+        NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW);  /* low priority: stats, not alerts */
+}
+```
+
+Called at the end of `handle_cdv_alloc_extent()` and `handle_cdv_free_extent()`, after the existing capacity-warning check.
+
+#### Management handler
+
+**`consts.js`** — add message type:
+```javascript
+TOMAToManagement_TP: {
+    cdvCapacityWarning: 'cdvCapacityWarning',
+    cdvAllocatorStats: 'cdvAllocatorStats',    // NEW
+}
+```
+
+**`kafkaRouter.js`** — add routing (next to existing `cdvCapacityWarning` case):
+```javascript
+case consts.kafkaMessageTypes.TOMAToManagement_TP.cdvAllocatorStats:
+    volumeModule.handleCDVAllocatorStats(message, callback);
+    break;
+```
+
+**`modules/volume.js`** — new handler:
+```javascript
+scope.handleCDVAllocatorStats = (message, callback) => {
+    const db = app.get('db');
+    const volumeCollection = db.collection('volume');
+    const now = new Date();
+
+    // Update CDV document with aggregate stats
+    volumeCollection.updateOne(
+        { uuid: message.cdvUUID, volumeClass: consts.volumeClass.CDV },
+        { $set: {
+            'runtimeStats.allocatedExtents': message.allocatedExtents,
+            'runtimeStats.totalDataExtents': message.totalDataExtents,
+            'runtimeStats.maxAddressableExtents': message.maxAddressableExtents,
+            'runtimeStats.lastUpdated': now,
+        }},
+        () => {}
+    );
+
+    // Update each TPV's CDV extent count
+    for (const entry of (message.perTPV || [])) {
+        volumeCollection.updateOne(
+            { uuid: entry.tpvUUID, volumeClass: consts.volumeClass.TPV },
+            { $set: {
+                'runtimeStats.cdvExtents': entry.cdvExtents,
+                'runtimeStats.lastUpdated': now,
+            }},
+            () => {}
+        );
+    }
+
+    callback();
+};
+```
+
+### 10.5 TPV Stats: Client → Management
+
+#### Data source
+
+The client kernel driver's `nvmeibc_tpv_allocator` struct provides:
+- `cdv_extents_count` — CDV extents held by this TPV
+- `free_tpv_extent_count` — free TPV extent slots within allocated CDV extents
+- `virtual_extents_total` — total virtual extents in the TPV
+- TPV extents in use = `(cdv_extents_count × n_slots) − free_tpv_extent_count`, where `n_slots = cdv_extent_size_mb × 1024 / tpv_extent_size_kb`
+
+These are exposed via `/proc/nvmeibc/tpv/<name>/allocator` (already implemented in `nvmeibc_tpv_proc.c`).
+
+#### Reporting mechanism
+
+The management agent (userspace process on each client node) already reads `/proc/nvmeibc/` for volume health monitoring and sends `ClientToManagement.keepalive` messages to management via Kafka on a configurable interval (default 10 seconds).
+
+**Approach:** The management agent reads `/proc/nvmeibc/tpv/*/allocator` for each attached TPV and emits a new Kafka message type `ClientToManagement.tpvStats` on the same keepalive cycle.
+
+#### New Kafka message: `ClientToManagement.tpvStats`
+
+```json
+{
+    "messageType": "tpvStats",
+    "clientID": "<client-hostname>",
+    "tpvs": [
+        {
+            "tpvUUID": "<uuid>",
+            "cdvExtents": 3,
+            "tpvExtentsInUse": 1842,
+            "tpvExtentsTotal": 262144
+        }
+    ]
+}
+```
+
+One message per client per keepalive cycle, containing stats for all attached TPVs on that client.
+
+#### Management handler
+
+**`consts.js`** — add message type:
+```javascript
+ClientToManagement: {
+    keepalive: 'keepalive',
+    updateAttachmentStatus: 'updateAttachmentStatus',
+    tpvStats: 'tpvStats',  // NEW
+    // ...
+}
+```
+
+**`kafkaRouter.js`** — add routing in `routeClientMessage()`:
+```javascript
+case msgType.tpvStats:
+    volumeModule.handleTPVStats(message, callback);
+    break;
+```
+
+**`modules/volume.js`** — new handler:
+```javascript
+scope.handleTPVStats = (message, callback) => {
+    const db = app.get('db');
+    const volumeCollection = db.collection('volume');
+    const now = new Date();
+
+    for (const entry of (message.payload?.tpvs || [])) {
+        volumeCollection.updateOne(
+            { uuid: entry.tpvUUID, volumeClass: consts.volumeClass.TPV },
+            { $set: {
+                'runtimeStats.tpvExtentsInUse': entry.tpvExtentsInUse,
+                'runtimeStats.tpvExtentsTotal': entry.tpvExtentsTotal,
+                'runtimeStats.lastUpdated': now,
+            }},
+            () => {}
+        );
+    }
+
+    callback();
+};
+```
+
+Note: `runtimeStats.cdvExtents` on the TPV document is written by the CDV stats handler (§10.4), not here. Both paths write `lastUpdated`, and the latest writer wins — this is acceptable since both timestamps will be close in time and the field is informational.
+
+### 10.6 "Max Additional Extents" Computation
+
+**Max addressable extents** is the upper limit on how many CDV data extents the allocator area can track, regardless of current CDV physical capacity. It is determined by the on-disk allocator format (one 4 KiB record per extent, plus a 4 KiB header):
+
+$$\text{maxAddressable} = \frac{\text{allocatorSizeGB} \times 1\,\text{GiB}}{4\,\text{KiB}} - 1$$
+
+For the default `allocatorSizeGB = 1`: 262,143 extent slots.
+
+**Total data extents** is how many CDV data extents actually exist given current CDV capacity:
+
+$$\text{totalDataExtents} = \frac{\text{CDV capacity} - \text{allocatorSizeGB} \times 1\,\text{GiB}}{\text{cdvExtentSizeMB} \times 1\,\text{MiB}}$$
+
+**Max additional** is the gap — how many more data extents could exist if the CDV volume were expanded:
+
+$$\text{maxAdditional} = \text{maxAddressable} - \text{totalDataExtents}$$
+
+Both `maxAddressable` and `totalDataExtents` are included in the TOMA stats message (§10.4) and stored in `runtimeStats`. The UI computes `maxAdditional` as a simple subtraction — no formula logic needed in the frontend.
+
+If `maxAdditional` is 0, the CDV has reached its allocator addressing limit and cannot benefit from expansion without increasing `allocatorSizeGB` (which requires CDV recreation).
+
+### 10.7 UI Changes
+
+#### CDV screen — `Volumes.jsx`
+
+The existing CDV annotation in the Name column (`(0/512 TPVs)`) is extended with allocation stats. Add three new columns visible only when the CDV filter is active (or always, with `—` for non-CDV volumes):
+
+```jsx
+{
+    name: 'Allocated',
+    field: 'runtimeStats.allocatedExtents',
+    filterable: false,
+    className: 'fixed-size-column sx-column',
+    rowClassName: 'fixed-size-column',
+    value: vol => vol.volumeClass === consts.volumeClass.CDV && vol.runtimeStats
+        ? vol.runtimeStats.allocatedExtents
+        : '—',
+},
+{
+    name: 'Free',
+    field: 'runtimeStats.totalDataExtents',
+    filterable: false,
+    className: 'fixed-size-column sx-column',
+    rowClassName: 'fixed-size-column',
+    value: vol => {
+        if (vol.volumeClass !== consts.volumeClass.CDV || !vol.runtimeStats) return '—';
+        const { totalDataExtents, allocatedExtents } = vol.runtimeStats;
+        return (totalDataExtents != null && allocatedExtents != null)
+            ? totalDataExtents - allocatedExtents
+            : '—';
+    },
+},
+{
+    name: 'Max Additional',
+    field: 'runtimeStats.maxAddressableExtents',
+    filterable: false,
+    className: 'fixed-size-column sx-column',
+    rowClassName: 'fixed-size-column',
+    value: vol => {
+        if (vol.volumeClass !== consts.volumeClass.CDV || !vol.runtimeStats) return '—';
+        const { maxAddressableExtents, totalDataExtents } = vol.runtimeStats;
+        return (maxAddressableExtents != null && totalDataExtents != null)
+            ? maxAddressableExtents - totalDataExtents
+            : '—';
+    },
+},
+```
+
+These columns show `—` until TOMA has processed the first alloc/free for the CDV (before that, `runtimeStats` is absent). A newly created CDV with no TPVs will show `—` until the first TPV allocates an extent.
+
+#### TPV screen — `ThinProvisioning.jsx`
+
+Add two new columns after "Virtual Size":
+
+```jsx
+{
+    name: 'CDV Extents',
+    field: 'runtimeStats.cdvExtents',
+    filterable: false,
+    className: 'fixed-size-column sx-column',
+    rowClassName: 'fixed-size-column',
+    value: tpvRow => tpvRow.runtimeStats?.cdvExtents != null
+        ? tpvRow.runtimeStats.cdvExtents
+        : '—',
+},
+{
+    name: 'TPV Extents In Use',
+    field: 'runtimeStats.tpvExtentsInUse',
+    filterable: false,
+    className: 'fixed-size-column sx-column',
+    rowClassName: 'fixed-size-column',
+    value: tpvRow => {
+        const stats = tpvRow.runtimeStats;
+        if (!stats || stats.tpvExtentsInUse == null) return '—';
+        return stats.tpvExtentsTotal
+            ? `${stats.tpvExtentsInUse} / ${stats.tpvExtentsTotal}`
+            : stats.tpvExtentsInUse;
+    },
+},
+```
+
+The "TPV Extents In Use" column shows `inUse / total` format (e.g., `1842 / 262144`) so the user can gauge how full the TPV's virtual address space is.
+
+#### Staleness indicator
+
+Both screens show `—` when `runtimeStats` is absent (TPV not yet attached, or CDV has never had an allocation). No special staleness UI is needed — the 3-second table auto-reload (already in `ThinProvisioning.jsx` and `Volumes.jsx`) will pick up updates within seconds of TOMA reporting.
+
+### 10.8 Implementation Steps
+
+**Step 1: TOMA Kafka publisher** (`toma/nvmeibt_cdv_alloc.c`)
+- Add `nvmeibt_cdv_alloc_publish_stats()` function
+- Call from `handle_cdv_alloc_extent()` and `handle_cdv_free_extent()` after existing capacity-warning logic
+- Build JSON with `allocatedExtents`, `totalDataExtents`, `maxAddressableExtents`, `perTPV` array
+- Publish via `nvmeibt_kafka_outgoing_msgs_queue_add()` with low priority and CDV UUID dedup key
+- Add `cdvAllocatorStats` to TOMA's Kafka message type enum
+
+**Step 2: Management handler** (`modules/volume.js`, `kafkaRouter.js`, `consts.js`)
+- Add `cdvAllocatorStats` to `consts.kafkaMessageTypes.TOMAToManagement_TP`
+- Add routing case in `kafkaRouter.js` `routeTOMAMessage()`
+- Implement `handleCDVAllocatorStats()` — update CDV and TPV volume documents
+
+**Step 3: Management agent TPV stats** (management agent codebase — outside this repo)
+- Add `/proc/nvmeibc/tpv/*/allocator` parsing to the agent's keepalive cycle
+- Emit `ClientToManagement.tpvStats` Kafka message per keepalive interval
+- Add `tpvStats` to `consts.kafkaMessageTypes.ClientToManagement`
+- Add routing case in `kafkaRouter.js` `routeClientMessage()`
+- Implement `handleTPVStats()` — update TPV volume documents
+
+**Step 4: UI columns** (`Volumes.jsx`, `ThinProvisioning.jsx`)
+- Add Allocated / Free / Max Additional columns to CDV table
+- Add CDV Extents / TPV Extents In Use columns to TPV table
+- Columns show `—` when `runtimeStats` is absent
+
+---
+
