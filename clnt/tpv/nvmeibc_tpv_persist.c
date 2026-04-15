@@ -584,6 +584,15 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		l2_extent_idx = l1_entries[i].extent_index;
 		l2_slot       = l1_entries[i].debug_meta;
 
+		/* TODO: remove or make debug-only once stable.
+		 * Sanity: L1 entry must point into our tree extent. */
+		if (l2_extent_idx != tree_ei) {
+			_NE(tpv_load_bad_l1,
+			    "TPV: @STR: L1[@LLU] references extent @LLU, expected tree extent @LLU; skipping",
+			    tpv->tpv_name, i, l2_extent_idx, tree_ei);
+			continue;
+		}
+
 		/* Record L1→L2 slot mapping. */
 		xa_store(&alloc->l1_to_l2_slot, i,
 			 xa_mk_value(l2_slot), GFP_NOIO);
@@ -609,6 +618,27 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 
 			if (data_idx == TPV_TREE_NULL)
 				continue;
+
+			/* TODO: remove or make debug-only once stable.
+			 * Sanity: L2 leaf must reference an extent that
+			 * TOMA says belongs to us. */
+			{
+				u64 k;
+				bool owned = false;
+
+				for (k = 0; k < toma_count; k++) {
+					if (toma_indices[k] == data_idx) {
+						owned = true;
+						break;
+					}
+				}
+				if (!owned) {
+					_NE(tpv_load_bad_extent,
+					    "TPV: @STR: L2[L1=@LLU,@LLU] references extent @LLU not in TOMA list; skipping",
+					    tpv->tpv_name, i, j, data_idx);
+					continue;
+				}
+			}
 
 			V    = i * N_L2 + j;
 			phys = persist_phys_of(alloc, data_idx, slot_in);
