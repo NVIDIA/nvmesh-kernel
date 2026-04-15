@@ -18,10 +18,10 @@
  * Persistence:
  *   Extent allocation metadata is stored on the CDV block device itself, in
  *   the allocator region at the beginning of the volume (before the data
- *   extents).  Each allocation/free writes a single 4 KiB record to the CDV
- *   synchronously via O_DIRECT|O_SYNC pwrite.  On allocator election (or on
- *   the first ALLOC request after TOMA restart), the allocator region is
- *   scanned to rebuild in-memory state.  No local state file is used.
+ *   extents).  Each allocation/free dispatches a 4 KiB record write to the
+ *   per-CDV I/O work queue (async, fire-and-forget).  On allocator election
+ *   (or on the first ALLOC request after TOMA restart), the allocator region
+ *   is scanned asynchronously to rebuild in-memory state.
  *
  * CDV allocator identity (allocator_toma_id, allocator_generation) is elected
  * by the RAFT leader via nvmeibt_cdv_alloc_elect() and distributed to all
@@ -31,7 +31,10 @@
  *
  * Threading:
  *   All public functions must be called from TOMA's single main thread (or
- *   with the global topology lock held).  No internal locks are taken.
+ *   with the global topology lock held).  All CDV I/O (scans + record/header
+ *   writes) is dispatched to a per-CDV worker thread (alloc->io_wq); results
+ *   are applied back on the main thread via the standard WQ finalize path.
+ *   Multiple CDVs are serviced in parallel (one WQ per CDV).
  */
 
 #ifndef NVMEIBT_CDV_ALLOC_H
@@ -126,7 +129,10 @@ struct nvmeibt_cdv_alloc {
 	uint64_t allocator_generation;	/* incremented on each allocator change; echoed in ALLOC responses */
 	bool     capacity_warning_sent;	/* true after CDVCapacityWarning sent; cleared on hysteresis */
 	bool     ondisk_loaded;		/* true after CDV allocator region has been scanned */
-	int      cdv_fd;		/* cached fd for /dev/nvmesh/<name>; -1 = not open */
+	bool     scan_in_progress;	/* true while async scan WQ entry is in flight */
+	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread */
+	char     dev_path[80];		/* /dev/nvmesh/<name>; resolved on main thread */
+	struct nvmeibt_wq *io_wq;	/* per-CDV I/O work queue (scan + writes) */
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
 };
 
@@ -224,10 +230,10 @@ void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation)
  * allocator_generation, and return 1 (newly elected — caller should push
  * CDV_ALLOCATOR_UPDATE to registrants).
  *
- * The on-disk extent records are scanned (and the hash rebuilt) whenever
- * ondisk_loaded is false, regardless of whether the sticky rule fired.
- * If the disk I/O path is not yet ready, the scan is deferred and retried
- * on the next call (e.g. next heartbeat).
+ * The on-disk extent records are scanned asynchronously on a worker thread
+ * whenever ondisk_loaded is false, regardless of whether the sticky rule
+ * fired.  If the disk I/O path is not yet ready, the scan is deferred and
+ * retried on the next call (e.g. next heartbeat).
  *
  * @cdv_uuid:       CDV UUID string.
  * @candidates:     Array of TOMA node hostname strings (first-pRAID RW nodes).
