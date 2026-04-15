@@ -2720,22 +2720,14 @@ static enum SEGMENT_STATUS_FOR_MGMT calc_seg_lot_status_for_mgmt(struct nvmeibt_
 
 static int8_t recalc_praid_report_to_mgmt_json(struct nvmeibt_praid *praid, struct nvmeibt_Str *json_payload)
 {
-	struct nvmeibt_praid_lot				*to_report_praid_lot;
+	struct nvmeibt_praid_lot				*to_report_praid_lot = &praid->praid_leader.to_report_praid_lot;
 	struct nvmeibt_seg_lot					*to_report_seg_lot;
-	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-	struct nvmeibt_praid_topo_ctx			*praid_topo_ctx;
-	BOOL									is_praid_activated;
-	BOOL									is_praid_booting, is_seg_booting;
-	enum SEGMENT_STATUS_FOR_MGMT			new_reported_persistent_status;
+	struct nvmeibt_praid_topo_ctx			*praid_topo_ctx = &to_report_praid_lot->topo_ctx;
+	BOOL									is_praid_activated = (praid_topo_ctx && praid_topo_ctx->is_activated);
+	BOOL									is_praid_booting = nvmeibt_praid_topo_is_client_sync_cmd_cold_recovery(praid_topo_ctx->registrants_sync_cmd);
 
 	TODO(Discuss with Tom and Yaniv, how we handle praid-down with no leader)
-	//
 	NFIN;
-
-	to_report_praid_lot = &praid->praid_leader.to_report_praid_lot;
-	praid_topo_ctx = &to_report_praid_lot->topo_ctx;
-	is_praid_booting = nvmeibt_praid_topo_is_client_sync_cmd_cold_recovery(praid_topo_ctx->registrants_sync_cmd);
-	is_praid_activated = (praid_topo_ctx && praid_topo_ctx->is_activated);
 	nvmeibt_Str_sprintf(json_payload,
 						"{\"uuid\": \"%s\", "
 						"\"raftTerm\": %d, "
@@ -2749,12 +2741,11 @@ static int8_t recalc_praid_report_to_mgmt_json(struct nvmeibt_praid *praid, stru
 						praid_topo_ctx->praid_version_major,
 						nvmeibt_raft_is_leader());
 	XDLIST_FOREACH_SAFE(to_report_seg_lot, &(to_report_praid_lot->all_seg_lot_list)) {
-		seg_topo_ctx = &to_report_seg_lot->seg_topo;
-
-		is_seg_booting = is_praid_booting |
+		struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx = &to_report_seg_lot->seg_topo;
+		const bool is_seg_booting = is_praid_booting |
 						 (nvmeibt_disk_segment_leader_is_remote_active_mem_tbl_init_command(seg_topo_ctx) &&
 						  nvmeibt_disk_segment_is_de_facto_owner(seg_topo_ctx));
-		new_reported_persistent_status = calc_seg_lot_status_for_mgmt(to_report_seg_lot, seg_topo_ctx, is_praid_activated, is_seg_booting);
+		const enum SEGMENT_STATUS_FOR_MGMT new_reported_persistent_status = calc_seg_lot_status_for_mgmt(to_report_seg_lot, seg_topo_ctx, is_praid_activated, is_seg_booting);
 		nvmeibt_Str_sprintf(json_payload,
 							"{\"segmentID\":\"%s\","
 							"\"status\":\"%s\","
