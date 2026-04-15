@@ -33,6 +33,7 @@ KEYS_DIR = '/etc/nvmesh/keys/'
 CONFIG_PATH = '/etc/nvmesh/configs/nvmeibc'
 USER_NVMESH_CONF_PATH = '/etc/nvmesh/nvmesh.conf'
 MGMT_HIDDEN_CONFIG_FILE_PATH = os.path.join(CONFIG_PATH, '.mgmt.nvmesh.conf')
+TPV_PROC_DIR = '/proc/nvmeibc/tpv'
 
 
 def readBashFile(filename):
@@ -61,6 +62,7 @@ class MessageTypes(object):
 		CONFIG_PROFILE_UPDATED = 'configProfileUpdated'
 		UPDATE_CONFIG_PROFILE_USER_OVERRIDE = 'updateConfigProfileUserOverride'
 		UPDATE_KEYS = 'updateKeys'
+		TPV_STATS = 'tpvStats'
 
 g = {}
 nvmesh_conf = {}
@@ -218,6 +220,69 @@ class ClientControlAgent(Daemon):
 		}
 
 		self.sendToMCS(MessageTypes.ToMgmt.KEEP_ALIVE, payload, keepaliveInterval=self.keepaliveInterval)
+
+		self.collectAndSendTPVStats()
+
+	def collectAndSendTPVStats(self):
+		"""Read /proc/nvmeibc/tpv/*/status and send tpvStats to management."""
+		if not os.path.isdir(TPV_PROC_DIR):
+			return
+
+		tpvs = []
+		try:
+			entries = os.listdir(TPV_PROC_DIR)
+		except OSError:
+			return
+
+		for tpv_name in entries:
+			status_path = os.path.join(TPV_PROC_DIR, tpv_name, 'status')
+			try:
+				stats = self.parseTPVStatus(status_path)
+				if stats:
+					tpvs.append(stats)
+			except Exception as e:
+				logger.debug("Failed to read TPV status for %s: %s", tpv_name, e)
+
+		if tpvs:
+			self.sendToMCS(MessageTypes.ToMgmt.TPV_STATS, payload={'tpvs': tpvs})
+
+	@staticmethod
+	def parseTPVStatus(path):
+		"""Parse /proc/nvmeibc/tpv/<name>/status into a dict for tpvStats."""
+		with open(path, 'r') as f:
+			content = f.read()
+
+		fields = {}
+		for line in content.strip().split('\n'):
+			key, _, value = line.partition(':')
+			fields[key.strip()] = value.strip()
+
+		uuid = fields.get('uuid')
+		if not uuid:
+			return None
+
+		# Parse "cdv_extents_allocated: 3 / 100"
+		cdv_alloc_str = fields.get('cdv_extents_allocated', '0 / 0')
+		parts = cdv_alloc_str.split('/')
+		cdv_extents = int(parts[0].strip()) if parts else 0
+
+		tpv_extent_size_kb = int(fields.get('tpv_extent_size_kb', '0'))
+		cdv_extent_size_mb = int(fields.get('cdv_extent_size_mb', '0'))
+		free_tpv_slots = int(fields.get('free_tpv_slots', '0'))
+		virtual_extents = int(fields.get('virtual_extents', '0'))
+
+		if tpv_extent_size_kb > 0 and cdv_extent_size_mb > 0:
+			n_slots = (cdv_extent_size_mb * 1024) // tpv_extent_size_kb
+			tpv_extents_in_use = max(0, (cdv_extents * n_slots) - free_tpv_slots)
+		else:
+			tpv_extents_in_use = 0
+
+		return {
+			'tpvUUID': uuid,
+			'cdvExtents': cdv_extents,
+			'tpvExtentsInUse': tpv_extents_in_use,
+			'tpvExtentsTotal': virtual_extents,
+		}
 
 	def handleMessage(self, msg):
 		msgObj = msg
