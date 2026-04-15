@@ -629,6 +629,11 @@ static void cdv_async_write_header(struct nvmeibt_cdv_alloc *alloc)
 	cdv_dispatch_write(alloc, hdr, 0ULL);
 }
 
+/* Forward declaration — defined in the incoming-message handler section. */
+static int cdv_send_response(struct nvmeibt_registrant_ctx *reg_ctx,
+			     enum NVMEIBT_CLIENT_MSG_TYPES msg_type,
+			     int data_length, void *data);
+
 /* ── Persist-then-respond: ALLOC write with deferred client response ────── */
 
 /*
