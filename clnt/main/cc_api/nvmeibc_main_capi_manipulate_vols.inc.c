@@ -385,59 +385,54 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 		_NI(i_tsbd02, "volume @DEV_NAME @HDR_UUID @C_VOL_VER - got command @STR. @STR.", hdr->name, hdr->uuid, hdr->version, __action(found), vat_str);
 		_NT(t_tsbd08, "referenceIDs=@INT", hdr->attachment.n_ref_ids);
 	}
-	if ((msg->updateType != UPDATETYPE_TOMA_VOL_CONFIG_TO_LOCAL_CLNT &&
-	     __verify_reservation_version_correctness(&msg->volumes[0], volume, p, &resrv_inc_ignored))) { // Verify reservation info, if fails send current volume information
-		res = _calc_reply_on_attach(hdr->name, volume, -1, resrv_inc_ignored, &reply_hdr);
-	} else if ((hdr->type & AUTO_EXTEND_VOLUME) && update_only) {
-		/* TPV grow or re-attach.  TPVs are not tracked in the regular
-		 * nvmeibc_volume list so !found is expected.  Look up the live
-		 * TPV by UUID: if it exists, this is a grow; if not, this is a
-		 * re-attach (TPV was detached and the MCS re-sends with
-		 * update_only because the CDV is still attached).
+	if (hdr->type & AUTO_EXTEND_VOLUME) {
+		/* TPV: handle grow, re-attach, or fresh attach.
+		 * Must be checked BEFORE reservation version correctness —
+		 * TPVs have no nvmeibc_volume, so __verify_reservation_version_correctness
+		 * with volume=NULL returns non-zero when state != READY, which would
+		 * short-circuit into _calc_reply_on_attach and skip the TPV path entirely.
 		 */
-		const struct nvmeibc_volume_conf *conf = &msg->volumes[0];
-		u64 new_virtual_size_bytes = (u64)conf->blocks << 12;
-		struct nvmeibc_tpv *tpv = nvmeibc_tpv_find_by_uuid(hdr->uuid);
-
-		if (tpv && new_virtual_size_bytes) {
-			_NI(tpv_grow_dispatch,
-			    "TPV @STR: live grow to @LLU bytes", hdr->name, new_virtual_size_bytes);
-			nvmeibc_tpv_grow(tpv, new_virtual_size_bytes);
-			res = NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED;
-			reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
-			nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
-			goto _out;
-		} else if (!tpv) {
-			/* TPV not found — this is a re-attach after detach.
-			 * Fall through to the fresh-attach path below.
+		if (update_only) {
+			/* TPV grow or re-attach.  TPVs are not tracked in the
+			 * regular nvmeibc_volume list so !found is expected.
+			 * Look up the live TPV by UUID: if it exists, this is
+			 * a grow; if not, this is a re-attach (TPV was detached
+			 * and the MCS re-sends with update_only because the CDV
+			 * is still attached).
 			 */
-			_NI(tpv_reattach_dispatch,
-			    "TPV @STR: not found on update; treating as fresh attach",
-			    hdr->name);
-		} else {
-			_NE(tpv_grow_not_found,
-			    "TPV @STR: grow failed - new_size=@LLU is zero",
-			    hdr->name, new_virtual_size_bytes);
-			res = NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED;
-			nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
-			goto _out;
+			const struct nvmeibc_volume_conf *conf = &msg->volumes[0];
+			u64 new_virtual_size_bytes = (u64)conf->blocks << 12;
+			struct nvmeibc_tpv *tpv = nvmeibc_tpv_find_by_uuid(hdr->uuid);
+
+			if (tpv && new_virtual_size_bytes) {
+				_NI(tpv_grow_dispatch,
+				    "TPV @STR: live grow to @LLU bytes", hdr->name, new_virtual_size_bytes);
+				nvmeibc_tpv_grow(tpv, new_virtual_size_bytes);
+				res = NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED;
+				reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
+				nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
+				goto _out;
+			} else if (!tpv) {
+				/* TPV not found — re-attach or first attach with
+				 * update_only (CDV already attached).  Fall through
+				 * to the fresh-attach path below.
+				 */
+				_NI(tpv_reattach_dispatch,
+				    "TPV @STR: not found on update; treating as fresh attach",
+				    hdr->name);
+			} else {
+				_NE(tpv_grow_not_found,
+				    "TPV @STR: grow failed - new_size=@LLU is zero",
+				    hdr->name, new_virtual_size_bytes);
+				res = NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED;
+				nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
+				goto _out;
+			}
 		}
-	} else if (update_only && !found) {
-		_NE(t_tsbd05, DMESG_PREFIX("@DEV_NAME") ": not found in full-configuration message, skipping update", hdr->name);
-                nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 0);
-		goto _out;
-	} else if ((hdr->type & AUTO_EXTEND_VOLUME) && !update_only) {
-		/* TPV attach: no physical disk segments; backed by a CDV.
-		 * Route to nvmeibc_tpv_attach() - bypasses nvmeibc_volume_attach()
-		 * entirely as TPVs are not tracked in the nvmeibc_volume list.
-		 */
+		/* Fresh TPV attach (or fall-through from re-attach above). */
 		_NI(tpv_dispatch_attach, "TPV @STR: dispatching to __setup_tpv", hdr->name);
 		rv = __setup_tpv(p, msg);
 		if (rv == -ENODEV) {
-			/* CDV not yet attached.  Try to defer with a retry context
-			 * so we don't send ATTACH_FAILED immediately (it would be
-			 * silently dropped while the client token is being set up).
-			 */
 			struct nvmeibc_tpv_cdv_retry *ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 			if (ctx) {
 				INIT_DELAYED_WORK(&ctx->dwork, tpv_cdv_retry_work_fn);
@@ -449,22 +444,23 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 				    hdr->name, TPV_CDV_RETRY_MAX, TPV_CDV_RETRY_MS);
 				schedule_delayed_work(&ctx->dwork,
 						      msecs_to_jiffies(TPV_CDV_RETRY_MS));
-				rv = -EAGAIN; /* retry context owns msg; skip reply and free */
+				rv = -EAGAIN;
 				goto _out_defer;
 			}
-			/* OOM: fall through and report ATTACH_FAILED immediately. */
 			_NE(tpv_cdv_retry_oom,
 			    "TPV @STR: kzalloc for CDV retry ctx failed, reporting ATTACH_FAILED",
 			    hdr->name);
 		}
-		res = _calc_reply_on_attach(hdr->name, NULL /* no nvmeibc_volume */,
-					    rv, resrv_inc_ignored, &reply_hdr);
-		/* TPVs bypass the topology/IO-permission lifecycle — IO is
-		 * always enabled once attached.  Override the default
-		 * PERMIT_NEVER set by nvmeibc_volume_header_create_from_msg()
-		 * so management receives ioEnabled=1. */
+		res = _calc_reply_on_attach(hdr->name, NULL, rv, resrv_inc_ignored, &reply_hdr);
 		if (!rv)
 			reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
+	} else if ((msg->updateType != UPDATETYPE_TOMA_VOL_CONFIG_TO_LOCAL_CLNT &&
+	     __verify_reservation_version_correctness(&msg->volumes[0], volume, p, &resrv_inc_ignored))) {
+		res = _calc_reply_on_attach(hdr->name, volume, -1, resrv_inc_ignored, &reply_hdr);
+	} else if (update_only && !found) {
+		_NE(t_tsbd05, DMESG_PREFIX("@DEV_NAME") ": not found in full-configuration message, skipping update", hdr->name);
+                nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 0);
+		goto _out;
 	} else {
 		rv = nvmeibc_volume_attach(p, msg);
 		res = _calc_reply_on_attach(hdr->name, volume, rv, resrv_inc_ignored, &reply_hdr);
