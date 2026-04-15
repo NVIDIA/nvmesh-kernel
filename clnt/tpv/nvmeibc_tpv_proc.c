@@ -148,6 +148,7 @@ static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
 	}
 	spin_unlock(&alloc->lock);
 
+	BUF_ADD("state_loaded:            %s\n",  READ_ONCE(tpv->state_loaded) ? "yes" : "no");
 	BUF_ADD("cdv_extents_count:       %llu\n", cdv_extents);
 	BUF_ADD("free_tpv_extent_count:   %llu\n", free_slots);
 	BUF_ADD("low_watermark:           %llu\n", alloc->low_watermark);

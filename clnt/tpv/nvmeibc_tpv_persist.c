@@ -424,9 +424,20 @@ void nvmeibc_tpv_persist_work_fn(struct work_struct *work)
 	spin_unlock(&tpv->persist_lock);
 
 	rv = nvmeibc_tpv_flush_state(tpv);
-	if (rv)
+	if (rv) {
 		_NE(tpv_bg_flush_fail, "TPV: @STR: background flush failed rv=@INT",
 		    tpv->tpv_name, rv);
+		/*
+		 * Re-arm the dirty flag so the detach path retries the flush
+		 * synchronously.  Do not re-schedule persist_work here to avoid
+		 * a hot-retry loop when the CDV transport is degraded; the next
+		 * IO event (alloc/free) will reschedule naturally, and detach
+		 * always flushes when dirty is set.
+		 */
+		spin_lock(&tpv->persist_lock);
+		tpv->dirty = true;
+		spin_unlock(&tpv->persist_lock);
+	}
 }
 EXPORT_SYMBOL(nvmeibc_tpv_persist_work_fn);
 
