@@ -183,7 +183,7 @@ void __give_jour_to_clnt(struct serverSimulator* S, u32* rv_cid, uuid_be *cuuid,
 	rv = __alloc_journal_range_when_ready(di, *rv_cid, *cuuid, nvmeib_get_utsname_nodename(), &jrc, rsp);
 	BUG_ON(rv < 0); // Including (-EALREADY), If (rv == -EAGAIN) then unitest environment has not waited for serjio to boot.
 	if (jrange_handle_ptr) {
-		*jrange_handle_ptr = nvmeibs_serjio_get_jrange_handle(di, *rv_cid, rv, NULL, NULL);
+		*jrange_handle_ptr = nvmeibs_serjio_get_jrange_handle(di, *rv_cid, rsp->rng_idx, NULL, NULL);
 		BUG_ON(IS_ERR_OR_NULL(*jrange_handle_ptr));
 	}
 }
