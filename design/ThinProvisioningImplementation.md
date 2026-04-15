@@ -1,0 +1,2578 @@
+# Thin Provisioning Implementation Plan — v3
+
+Based on: *2026-03 Minimal Extensible Thin Provisioned Volumes.md*
+
+Authoritative merged document. Supersedes ThinProvisioningImplementation1.md and ThinProvisioningImplementation2.md.
+
+---
+
+## Terminology
+
+| Term | Meaning |
+|------|---------|
+| **CDV** | Carrier Direct Volume — thick-provisioned shared volume holding capacity for TPVs |
+| **CDV\_extent** | Allocation unit carved from CDV; size is configurable per-CDV (`cdvExtentSizeMB`), power-of-2, between 64 MB and 64 GB |
+| **TPV** | Thin-Provisioned Volume — virtual volume riding on a CDV, exclusively attached to one client |
+| **TPV\_extent** | Fine-grained allocation unit within the TPV; size is configurable per-TPV (`tpvExtentSizeKB`), power-of-2, between 64 KB and 64 MB |
+| **CDV.allocator** | Central allocator running on a TOMA node; manages CDV\_extent allocation |
+| **TPV.allocator** | Client-local allocator; manages TPV\_extent sparse map within already-allocated CDV\_extents |
+
+---
+
+## Architecture Decisions (resolved)
+
+1. **CDV.allocator placement**: Dedicated TOMA node (central, not distributed).
+2. **CDV.allocator persistence**: A configurable area at the start of the CDV of size `allocatorSizeGB` GB (default 1 GB). Max addressable data extents = $(\texttt{allocatorSizeGB} \times 1\,\text{GB} - 4\,\text{KB}) / 24$ (see §2.2). Decoupled from `cdvExtentSizeMB` so the allocator area size can be chosen independently of the allocation granularity.
+3. **Management → kernel channel**: Existing MCS over Kafka (`AttachVolumes` / `DetachVolumes` / `UpdateVolume` messages extended with new fields).
+4. **CDV attach mode**: Hidden shared-RW to clients with a TPV on that CDV (so the kernel thin-provisioning code can access CDV data); non-hidden shared-RW to TOMA nodes that are candidate allocators (so TOMA can perform block I/O to the allocator metadata area).
+5. **TPV\_extent size**: Variable — configurable per-TPV at creation time (`tpvExtentSizeKB`). Different TPVs on the same CDV may use different TPV\_extent sizes.
+6. **TPV.Delete**: Force-reclaim from CDV.allocator via Kafka message to TOMA (no client attach needed).
+7. **MongoDB modeling**: Extend existing `volumes` collection; no new collections.
+8. **CDV\_extent allocation requests**: Client → TOMA allocator via the per-disk ADMIN channel (new opcode). TOMA notifies management only when CDV reaches 90% capacity via existing TOMA→management Kafka path.
+9. **TPV.allocator state persistence**: Centralized in CDV\_extent[0] (the first data CDV\_extent, at CDV byte offset `A`), which is reserved at CDV init as the **L1 table**. The L1 table is a flat array of 16-byte entries (8B `extent_index` pointer + 8B `debug_meta`). The first half of the L1 table points to **L2 tables**; each L2 entry is a leaf pointing to a data CDV\_extent (2-level path, common case). The second half of L1 points to **L2a tables**, each of whose entries points to an **L3 table**, whose leaves point to data CDV\_extents (3-level path, rarely needed). L2/L2a/L3 tables are CDV\_extents allocated from the pool when first needed. Data CDV\_extents contain **no per-extent metadata** — all virtual→physical mapping lives in the tree. TPV UUID is the sole identifier for TOMA-side ownership tracking (`cdv_extent_md`).
+10. **Allocator identity**: RAFT-committed `(allocator_toma_id, allocator_generation)` in CDV volume metadata. Propagated to clients via the CDV topology push that TOMAs already send. Allocator role is sticky — does not change with RAFT leader elections, only when the current allocator TOMA leaves the RAFT group.
+11. **New allocator selection rule**: Chosen from TOMAs hosting a RW-enabled disk segment in the CDV's first pRAID. One candidate → chosen by default. Multiple candidates → chosen at random by the RAFT leader (avoids bias).
+12. **Allocation transactionality**: Allocator writes `cdv_extent_md` durably to CDV disk **before** sending the allocation response (write-before-respond). Generation fencing discards stale-generation responses on the client.
+13. **CDV attach/detach lifecycle — auto-managed only**: CDV attachments are exclusively auto-managed by management; `POST /clients/attach` and `POST /clients/detach` reject CDV volumes with an error. Two independent reasons trigger CDV attachment to a node; both must be absent before the CDV is detached:
+    - **TOMA reason** (`toma:<cdvUUID>` referenceID): node hosts a RW disk segment in the CDV's first pRAID (i.e., is a candidate allocator). TOMA attachment is added by `attachCDVToAllTomaNodes()` when the first TPV on the CDV is attached to any client; it is removed by `onTPVDetached()` when the last active TPV is detached. Topology changes (`onTopologyUpdate()`) add/remove the TOMA ref for nodes that enter/leave the first pRAID. CDV deletion also triggers `detachCDVFromAllNodes()` as a defensive cleanup before the volume record is removed.
+    - **TPV client reason** (`tpv:<tpvUUID>` referenceID): node has a TPV backed by this CDV attached to it. Added by `attachTPV()` step `attachCDV`; removed by `detachTPV()` or `cleanupTPVReferencesForDetachedClient()` when the TPV is detached.
+    - A node that is both a TOMA candidate and hosts an active TPV will hold both refs simultaneously. TOMA attachment runs first within `attachTPV()` (so the CDV is non-hidden when the client's `tpv:` ref is added); a node is only detached when both refs are removed.
+    - **Hidden/non-hidden for mixed nodes**: if a node is simultaneously a TOMA candidate and a TPV client, it should have `isHidden=false` so TOMA can perform block I/O to the allocator area. Running `attachCDVToAllTomaNodes()` before `attachCDV()` in `attachTPV()` achieves this for the first TPV on a TOMA node. If the CDV was already attached hidden (from an earlier TPV on the same node), the `toma:` ref update via `updateOnlyRefIdIfPossible` preserves the existing `isHidden=true`. This edge case is accepted as a known limitation; in practice TOMA nodes are dedicated storage nodes and do not run TPVs.
+14. **CDV hidden-attach orchestration**: Management orchestrates. When a TPV is attached to a client, `attachTPV()` in `modules/client.js` first ensures all TOMA nodes have the CDV (non-hidden), then sends a hidden CDV `AttachVolumes` message to the TPV client, then sends the TPV `AttachVolumes` message.
+15. **RAID level for CDVs**: No restriction. User chooses RAID level freely (EC is recommended but not enforced by the UI or backend).
+16. **REST API for CDV/TPV creation**: Both CDV and TPV creation reuse `POST /volumes/save` with `volumeClass` and the appropriate config sub-object in the payload. The backend `createVolume` handler branches on `volumeClass`.
+17. **TOMA zeroing IO path**: The background zeroing worker issues zero-writes via the normal TOMA IO path to the EC volume. No special block-zero command path is needed.
+18. **Encryption scope**: No CDV-level encryption. Encryption is handled at the TPV level. If there is a TPV-layer rekey, zero-on-free on TPV delete is not formally required. Leaving it as always zero for now.
+
+---
+
+```mermaid
+graph TB
+    subgraph management["Management Layer"]
+        mgmt["Management Server\n(Node.js + MongoDB + Kafka)"]
+    end
+    subgraph toma_layer["TOMA Nodes"]
+        toma["TOMA Node\n(CDV.allocator, RAFT-elected, sticky)"]
+    end
+    subgraph client_layer["Storage Client (kernel)"]
+        client["Kernel Client\n(TPV.allocator in-memory)"]
+        tpvdev[("TPV block device\n(virtual gendisk, EXCLUSIVE_RW)")]
+    end
+    subgraph storage["Physical Storage"]
+        cdv[("CDV on NVMe\n(EC volume, shared-RW hidden)")]
+    end
+
+    mgmt -->|"AttachVolumes / DetachVolumes (MCS)"| client
+    mgmt -->|"CDVAllocatorFreeAll (Kafka)"| toma
+    toma -->|"CDV topology push (allocator_toma_id + generation)"| client
+    client -->|"CDV_ALLOC_EXTENT (ADMIN channel)"| toma
+    toma -.->|"write cdv_extent_md before respond"| cdv
+    client <-->|"RDMA data plane (R/W)"| cdv
+    client --- tpvdev
+```
+
+*Figure 7: System architecture layers. Management orchestrates attach/detach; TOMA runs the CDV.allocator with write-before-respond persistence; clients hold TPV.allocator state in-memory and access the CDV directly over RDMA.*
+
+---
+
+## Part 1 — Management Layer
+
+### 1.1 MongoDB Schema — Volume Model Extensions
+
+File: `nvmesh-management/validationSchemes/definitions/volume.js`
+
+Add the following fields to the existing volume validation schema:
+
+```js
+// Class discriminator — added alongside existing 'type' field (METADATA_VOLUME / DATA_VOLUME)
+volumeClass: {
+    type: String,
+    enum: ['REGULAR', 'CDV', 'TPV'],
+    default: 'REGULAR',
+},
+
+// CDV-specific fields (present when volumeClass === 'CDV')
+cdvConfig: {
+    maxTPVs:          { type: Number, default: 512 },   // mutable cap on hosted TPVs; default 512
+    cdvExtentSizeMB:  { type: Number, required: true }, // power-of-2, 64–65536 MB
+    allocatorSizeGB:  { type: Number, default: 1 },     // allocator area size in GB; integer >= 1
+},
+
+// TPV-specific fields (present when volumeClass === 'TPV')
+tpvConfig: {
+    cdvId:               { type: String, required: true },  // _id of parent CDV
+    cdvUUID:             { type: String, required: true },
+    tpvExtentSizeKB:     { type: Number, required: true }, // power-of-2, 64–65536 KB
+    // Constraint: tpvExtentSizeKB <= cdv.cdvConfig.cdvExtentSizeMB * 1024
+    virtualSizeGB:       { type: Number, required: true },  // current virtual size
+    maxVirtualSizeGB:    { type: Number, default: 1000 },   // hard cap (1 TB default)
+    exclusiveClient:     { type: String, default: null },   // clientID when attached
+    exclusiveClientUUID: { type: String, default: null },
+},
+```
+
+Also add a `tpvCount` field to CDV records (not in the schema definition above, managed directly by `createTPV` / `deleteTPVs`):
+
+```js
+tpvCount: { type: Number, default: 0 },  // tracked via $inc; never set directly
+```
+
+The `capacity` field on a TPV record holds the *virtual* capacity. Physical capacity consumed is tracked via CDV.allocator on-disk state, not in MongoDB.
+
+### 1.2 REST API — New and Modified Endpoints
+
+#### CDV creation — extends existing `POST /volumes/save`
+
+No new endpoint. CDV creation goes through the existing `POST /volumes/save` with `volumeClass: 'CDV'` and `cdvConfig` in the body. The `createVolume()` handler in `modules/volume.js` validates the CDV-specific fields (see §1.4). The frontend `VolumesService.create(volume)` requires no changes.
+
+#### TPV creation — extends existing `POST /volumes/save`
+
+TPV creation also goes through `POST /volumes/save` with `volumeClass: 'TPV'` and `tpvConfig` in the body. The `createVolume()` handler performs the cross-document validation (CDV lookup, `tpvCount` cap check, `tpvCount` increment) when it sees `volumeClass === 'TPV'`.
+
+#### New endpoints in `routes/volumes.js`
+
+```
+POST /volumes/tpv/update
+  Body: { _id, name?, description?, tpvConfig.maxVirtualSizeGB? }
+  → Mutable fields only: name, description, maxVirtualSizeGB.
+  → volumeClass and tpvConfig.cdvId are immutable.
+
+POST /volumes/tpv/delete
+  Body: [ _id, ... ]  (array of TPV _id strings)
+  → Requires tpvConfig.exclusiveClient === null for each (must be detached).
+  → Sends CDVAllocatorFreeAll Kafka message to TOMA for each TPV.
+  → Decrements CDV.tpvCount via $inc.
+  → Deletes TPV record.
+  → Errors reported same as regular volume delete (no disabled-button precondition in UI).
+
+POST /volumes/tpv/extend
+  Body: { tpvId, newSizeGB }
+  → Validates newSizeGB > current && <= tpvConfig.maxVirtualSizeGB.
+  → Updates tpvConfig.virtualSizeGB + capacity.
+  → If TPV is currently attached (exclusiveClient !== null), sends UpdateVolume
+    Kafka message to client with updated virtualSizeGB.
+```
+
+CDV create, update, delete, and extend all use the existing `/volumes` endpoints (`POST /volumes/save`, `POST /volumes/update`, `POST /volumes/delete`, `POST /volumes/extend`). The `updateVolume()` handler in `modules/volume.js` branches on `volumeClass === 'CDV'` to apply CDV-specific update logic: `maxTPVs` is mutable; `cdvExtentSizeMB` and `allocatorSizeGB` are immutable and ignored if present in the payload. If `maxTPVs` is set below the current `tpvCount`, the update is accepted — existing excess TPVs are unaffected, and new TPV creation is blocked until `tpvCount` drops below the new limit. Backend enforces "all TPVs must be deleted first" for CDV delete and returns a standard error if violated; no special UI handling.
+
+#### Modified endpoints
+
+`POST /clients/attach` — when `volumeClass === 'TPV'`:
+1. Reject if `tpvConfig.exclusiveClient !== null` (already attached elsewhere).
+2. Call `client.js:attachTPV(clientID, tpvID)` — see §1.4 for full orchestration.
+3. Set `tpvConfig.exclusiveClient = clientID`.
+
+`POST /clients/detach` — when `volumeClass === 'TPV'`:
+1. Call `client.js:detachTPV(clientID, tpvID)`.
+2. After client confirms detach, clear `tpvConfig.exclusiveClient`.
+
+### 1.3 Kafka/MCS Message Changes
+
+Files in `nvmesh-management/models/kafkaMessages/`
+
+#### Extend `VolumeMessage.js`
+
+```js
+// Added to VolumeMessage.toJSON() when volume.volumeClass is set:
+volumeClass: volume.volumeClass || 'REGULAR',
+tpvConfig:   volume.tpvConfig   || null,
+cdvConfig:   volume.cdvConfig   || null,
+isHidden:    volume.isHidden    || false,  // CDV hidden-attach flag
+```
+
+#### Extend `AttachVolumes.js`
+
+When attaching a TPV, include the full CDV configuration inline:
+
+```js
+{
+    messageType: 'AttachVolumes',
+    payload: {
+        volumes: [
+            {
+                ...tpvVolumeConf,
+                volumeClass: 'TPV',
+                tpvConfig: { ... },
+                cdvConf: {
+                    uuid:   cdv.uuid,
+                    name:   cdv.name,
+                    chunks: cdv.chunks,
+                    // ... full CDV volume configuration
+                }
+            }
+        ]
+    }
+}
+```
+
+The CDV hidden-attach is sent as a *separate* `AttachVolumes` message before this one (§1.4). The `cdvConf` inline field is provided so the kernel can cross-check it has the correct CDV already attached.
+
+#### New message: `CDVAllocatorFreeAll.js`
+
+Sent from management to TOMA when a TPV is deleted (force-reclaim all CDV\_extents owned by that TPV):
+
+```js
+// payload:
+{
+    cdvUUID: string,
+    tpvUUID: string,
+}
+```
+
+#### New message: `CDVCapacityWarning.js` (TOMA → management)
+
+TOMA sends this when the CDV.allocator finds fewer than 10% of extents free:
+
+```js
+// payload:
+{
+    cdvUUID:      string,
+    usedExtents:  number,
+    totalExtents: number,
+}
+```
+
+`CDVAllocatorRequest` and `CDVAllocatorResponse` are **not** management-layer messages — they flow directly between the client kernel and TOMA via the ADMIN channel.
+
+### 1.4 Module Changes
+
+#### `modules/volume.js`
+
+Extend `createVolume()` to handle CDV and TPV:
+
+```js
+// After existing field validation:
+if (volumeData.volumeClass === consts.volumeClass.CDV) {
+    const { cdvExtentSizeMB, allocatorSizeGB, maxTPVs } = volumeData.cdvConfig || {};
+
+    if (!consts.cdvExtentSizeMBValues.includes(cdvExtentSizeMB))
+        throw new Error('cdvExtentSizeMB must be a power-of-2 between 64 and 65536 MB');
+    if (!Number.isInteger(allocatorSizeGB) || allocatorSizeGB < 1)
+        throw new Error('allocatorSizeGB must be a positive integer (minimum 1)');
+
+    volumeData.tpvCount = 0;
+    volumeData.cdvConfig.maxTPVs = maxTPVs ?? 512;
+    volumeData.cdvConfig.allocatorSizeGB = allocatorSizeGB ?? 1;
+
+    // After volume is created and chunk layout is known:
+    await cdvTomaAutoAttach.initCDV(createdVolume);   // §5
+}
+
+if (volumeData.volumeClass === consts.volumeClass.TPV) {
+    const { cdvId, tpvExtentSizeKB, virtualSizeGB, maxVirtualSizeGB } = volumeData.tpvConfig || {};
+
+    const cdv = await db.volumes.findOne({ _id: cdvId, volumeClass: 'CDV' });
+    if (!cdv) throw new Error('Parent CDV not found');
+    if (cdv.tpvCount >= cdv.cdvConfig.maxTPVs)
+        throw new Error(`CDV is at capacity (${cdv.cdvConfig.maxTPVs} TPVs)`);
+    if (virtualSizeGB > cdv.capacity)
+        throw new Error('virtualSizeGB cannot exceed parent CDV capacity');
+
+    if (!consts.tpvExtentSizeKBValues.includes(tpvExtentSizeKB))
+        throw new Error('tpvExtentSizeKB must be a power-of-2 between 64 and 65536 KB');
+    if (tpvExtentSizeKB > cdv.cdvConfig.cdvExtentSizeMB * 1024)
+        throw new Error(`tpvExtentSizeKB (${tpvExtentSizeKB}) cannot exceed cdvExtentSizeMB * 1024`);
+
+    volumeData.tpvConfig.cdvUUID = cdv.uuid;
+    volumeData.capacity = virtualSizeGB;
+    volumeData.status = 'initializing';
+
+    // Insert TPV record, then atomically increment CDV.tpvCount:
+    await db.volumes.updateOne({ _id: cdvId }, { $inc: { tpvCount: 1 } });
+}
+
+// Strip class-specific configs from records that don't need them:
+if (!volumeData.volumeClass || volumeData.volumeClass === consts.volumeClass.REGULAR) {
+    delete volumeData.cdvConfig;
+    delete volumeData.tpvConfig;
+}
+```
+
+Extend `updateVolume()` to handle CDV-specific fields, and add new exported functions `updateTPV`, `deleteTPVs`, `extendTPV`:
+
+```js
+// In updateVolume(), branch on volumeClass === 'CDV':
+//   Mutable: name, description, cdvConfig.maxTPVs
+//   Immutable: cdvExtentSizeMB, allocatorSizeGB — strip from payload before update
+//   If maxTPVs < current tpvCount: accept; no error.
+//     Existing TPVs are unaffected; createTPV will reject new ones until tpvCount < maxTPVs.
+
+async function updateTPV({ _id, name, description, tpvConfig }, user) {
+    // Mutable: name, description, tpvConfig.maxVirtualSizeGB
+    // volumeClass and tpvConfig.cdvId are immutable — ignore if present in payload
+}
+
+async function deleteTPVs(ids, user) {
+    // For each id:
+    //   1. Load TPV; error if not found or not TPV class
+    //   2. Require tpvConfig.exclusiveClient === null
+    //   3. sendCDVAllocatorFreeAll(cdvUUID, tpvUUID)  [via modules/kafka.js]
+    //   4. db.volumes.updateOne({ _id: cdvId }, { $inc: { tpvCount: -1 } })
+    //   5. db.volumes.deleteOne({ _id })
+    // Return aggregate result (same shape as existing deleteVolumes)
+}
+
+async function extendTPV({ tpvId, newSizeGB }, user) {
+    // 1. Load TPV
+    // 2. Validate: newSizeGB > current && <= tpvConfig.maxVirtualSizeGB
+    // 3. Update: tpvConfig.virtualSizeGB, capacity
+    // 4. If exclusiveClient !== null: send UpdateVolume MCS Kafka message with new virtualSizeGB
+}
+```
+
+Add a `$lookup` aggregation for TPV queries to denormalize `tpvConfig.cdvName`:
+
+```js
+// Appended to the MongoDB aggregation pipeline only when filter includes
+// volumeClass: 'TPV', to avoid overhead on regular volume fetches:
+{ $lookup: {
+    from: 'volume',
+    localField: 'tpvConfig.cdvId',
+    foreignField: '_id',
+    as: '_cdv',
+    pipeline: [{ $project: { name: 1 } }]
+}},
+{ $addFields: { 'tpvConfig.cdvName': { $arrayElemAt: ['$_cdv.name', 0] } }},
+{ $unset: '_cdv' }
+```
+
+#### `modules/client.js`
+
+Add `attachTPV(clientID, tpvID, opts)`:
+1. Load TPV and parent CDV from MongoDB.
+2. Inspect `client.attachments[cdvUUID].referenceIDs` for an existing `tpv:<tpvUUID>` or `toma:<cdvUUID>` entry.
+3. If CDV is **not** already attached to this client, send `AttachVolumes` for CDV with `isHidden: true` and `reservation.mode = SHARED_READ_WRITE`. Wait for `block_devices` confirmation.
+4. Add `tpv:<tpvUUID>` to `client.attachments[cdvUUID].referenceIDs`.
+5. Send `AttachVolumes` for TPV with `reservation.mode = EXCLUSIVE_READ_WRITE` and `cdvConf` inline.
+6. Set `tpvConfig.exclusiveClient = clientID`.
+
+Add `detachTPV(clientID, tpvID, opts)`:
+1. Send `DetachVolumes` for TPV.
+2. After confirmation, remove `tpv:<tpvUUID>` from `client.attachments[cdvUUID].referenceIDs`.
+3. If no other `tpv:*` referenceID remains (all TPVs relying on this CDV have detached from this client) **and** no `toma:*` referenceID exists — the CDV is no longer required on this client — send a hidden `DetachVolumes` for the CDV.
+4. Clear `tpvConfig.exclusiveClient`.
+
+```mermaid
+sequenceDiagram
+    participant M as Management
+    participant C as Storage Client
+
+    rect rgb(235,245,255)
+        Note over M,C: attachTPV
+        M->>C: AttachVolumes(CDV, isHidden=true, SHARED_RW)
+        C-->>M: block_devices confirmed
+        Note over M: add tpv:tpvUUID to client referenceIDs
+        M->>C: AttachVolumes(TPV, EXCLUSIVE_RW, cdvConf inline)
+        C-->>M: block_devices confirmed
+        Note over M: set tpvConfig.exclusiveClient = clientID
+    end
+
+    rect rgb(255,245,235)
+        Note over M,C: detachTPV
+        M->>C: DetachVolumes(TPV)
+        C-->>M: detach confirmed
+        Note over M: remove tpv:tpvUUID from referenceIDs
+        alt no tpv:* and no toma:* referenceIDs remain
+            M->>C: DetachVolumes(CDV, hidden)
+            C-->>M: detach confirmed
+        end
+        Note over M: clear tpvConfig.exclusiveClient
+    end
+```
+
+*Figure 4: TPV attach/detach orchestration. The CDV is hidden-attached before the TPV is attached. The CDV is detached only when all TPV and TOMA references for that CDV are gone from this client.*
+
+#### Involuntary TPV detach — CDV cleanup requirement
+
+**Critical invariant:** A client that loses access to a TPV **must also lose access to the underlying CDV** (unless it still holds other `tpv:*` or `toma:*` references on that CDV). Writes to a TPV are physically performed on the CDV — the TPV is a virtual entity with no storage of its own. Leaving the CDV attached after TPV detach would allow an evicted client to continue issuing RDMA writes into the CDV, corrupting other TPVs.
+
+TOMA cannot enforce this on its own. The CDV reference tracking (`tpv:<tpvUUID>` entries in `client.attachments[cdvUUID].referenceIDs`) and the `tpvConfig.exclusiveClient` marker are MongoDB constructs managed entirely by the management layer. Therefore **management must handle CDV cleanup in every code path that can detach a TPV**, not only the normal user-initiated detach.
+
+Three involuntary detach paths in `modules/client.js` require TPV-aware logic:
+
+1. **Preemption** (`detachPreemptedClients`) — triggered when another client attaches the same volume with `preempt=PREEMPT, isDetachOthers=true`. Today this sends a raw `DetachVolumes` message without checking `volumeClass`. For TPVs it must additionally: remove the `tpv:<tpvUUID>` referenceID from the CDV attachment, conditionally detach the CDV if no references remain, and clear `tpvConfig.exclusiveClient`.
+
+2. **Stale client cleanup** (`removeAlreadyDetachedAttachments`) — triggered when a client goes offline and its attachments are marked `DETACHING_STALE`. Today this calls `setVolumeReservationOnClientRemoval()` which only touches `reservation.*` fields. For TPVs it must additionally clear `tpvConfig.exclusiveClient` and remove CDV `tpv:*` referenceIDs.
+
+3. **Client deletion** (`deleteClient`) — same as stale cleanup; only calls `setVolumeReservationOnClientRemoval()`. Needs the same TPV-specific additions.
+
+In all three cases, after removing a `tpv:<tpvUUID>` referenceID, the standard CDV detach logic applies: if no `tpv:*` and no `toma:*` referenceIDs remain on that CDV for this client, send `DetachVolumes` for the CDV.
+
+#### `modules/kafka.js`
+
+- Register consumer handler for `CDVCapacityWarning` messages from TOMA. On receipt: trigger CDV extend flow (reuse existing volume extend logic).
+- Add `sendCDVAllocatorFreeAll(cdvUUID, tpvUUID)` — publishes `CDVAllocatorFreeAll` message to TOMA.
+
+### 1.5 UI Changes
+
+See Part 8 for complete file-by-file implementation detail. Summary:
+
+- **Regular Volumes table (`/volumes`)**: Two filter checkboxes to the right of the Delete/Rebuild buttons: "Show regular volumes" and "Show CDVs", both checked by default. TPVs are never shown in this table (they have their own page).
+- **Create/Edit Volume dialog**: "Use as CDV" toggle appears on new-volume forms. When toggled on, CDV-specific fields appear (`cdvExtentSizeMB`, `allocatorSizeGB`, `maxTPVs`). In edit mode, `cdvExtentSizeMB` and `allocatorSizeGB` are shown read-only; `maxTPVs` remains editable. Any RAID level is allowed.
+- **New "Thin Provisioning" sidebar section** (top-level, after Volumes): one sub-item "TPV List" at `/thin-provisioning/tpv`.
+- **TPV list page**: FiltSortTable with columns Name, Parent CDV, Virtual Size, Max Size, Client, Status. Parent CDV column is filterable.
+- **Attach dialog**: Informational note when selecting a TPV to attach.
+
+---
+
+## Part 2 — TOMA: CDV.allocator
+
+### 2.1 Overview
+
+The CDV.allocator is a role held by exactly one TOMA at any time. It owns all CDV\_extent allocation and reclamation, persists its state in the first `allocatorSizeGB` GB of the CDV (a configurable property, default 1 GB), and is the sole authority on which extents are free, allocated, or pending zeroing.
+
+**Communication**: Clients send allocation requests to the allocator TOMA via the **per-disk ADMIN channel** — the same channel already used for journal range queries, resource location, and other control-plane operations. No Kafka is involved in the allocation hot path.
+
+**Discovery**: The identity of the current allocator TOMA (`allocator_toma_id`) is included in the CDV topology that TOMAs already push to subscribing clients at attach time and whenever it changes.
+
+**Election**: RAFT-committed state. Sticky — does not change when the RAFT leader rotates, only when the current allocator TOMA leaves the RAFT group (§2.6).
+
+### 2.2 On-Disk Format (Allocator Area)
+
+The allocator area occupies the first `allocatorSizeGB` GB of the CDV (bytes `0` to `A`). Data CDV\_extents follow immediately after. Two independent size parameters:
+
+- $A = \texttt{allocatorSizeGB} \times 1\,\text{GB}$ — allocator area size (configurable CDV property, default 1 GB)
+- $E = \texttt{cdvExtentSizeMB} \times 1\,\text{MB}$ — CDV\_extent size (configurable CDV property)
+
+```
+[0 .. A)       CDV.allocator: header (4 KB) + cdv_extent_md[N] array
+               where A = allocatorSizeGB * 1 GB
+[A   .. A+E)   CDV_extent[0]  — L1 mapping table (reserved at CDV init; never available for TPV data)
+[A+E .. A+2E)  CDV_extent[1]  — first allocatable extent (data or tree node)
+...
+Data CDV_extents contain only user data — no per-extent metadata headers.
+```
+
+```mermaid
+graph LR
+    A["[0, A)\nAllocator Area\nHeader 4 KB\n+ cdv_extent_md[N] array\nA = allocatorSizeGB x 1 GB"]
+    B["CDV_extent[0]\n[A, A+E)\nL1 mapping table\nreserved at CDV init\nnever TPV data"]
+    C["CDV_extent[1]\n[A+E, A+2E)\nFirst allocatable\ndata or tree node"]
+    D["..."]
+    E["CDV_extent[N-1]\n[A+(N-1)E, A+NxE)\nLast allocatable"]
+    A --> B --> C --> D --> E
+```
+
+*Figure 1: CDV physical layout. The allocator area (A bytes) holds only metadata. CDV_extent[0] is permanently the L1 mapping table root. All allocatable data extents start at CDV_extent[1] and contain no embedded headers.*
+
+`cdv_extent_md[i]` describes CDV\_extent $i$, at CDV byte offset $A + i \times E$. CDV\_extent[0] is always `CDV_EXTENT_L1`.
+
+#### Header
+
+```c
+#define CDV_ALLOC_MAGIC    0xCDVA110C
+#define CDV_ALLOC_HDR_SIZE 4096
+
+union cdv_alloc_header {
+    struct {
+        u32 magic;              // CDV_ALLOC_MAGIC
+        u32 version;
+        u64 allocator_size_gb;  // A in GB; verify config match on recovery
+        u64 cdv_extent_size_mb; // E in MB; verify config match on recovery
+        u64 total_extents;      // number of data CDV_extents = (CDV_capacity - A) / E
+        u64 allocated_extents;
+        u64 generation;         // incremented on every flush to disk
+    };
+    u8 _pad[CDV_ALLOC_HDR_SIZE];
+};
+```
+
+#### Per-extent metadata
+
+```c
+// Flat array of cdv_extent_md[total_extents] immediately following the header.
+// cdv_extent_md[i] → CDV_extent at CDV byte offset A + i * E.
+// cdv_extent_md[0] always has extent_type = CDV_EXTENT_L1.
+
+enum cdv_extent_type : u8 {
+    CDV_EXTENT_FREE = 0,  // available for allocation
+    CDV_EXTENT_L1   = 1,  // CDV_extent[0]: L1 mapping table root
+    CDV_EXTENT_L2   = 2,  // L2 table (2-level path leaf → data)
+    CDV_EXTENT_L2A  = 3,  // L2a table (3-level path: → L3 → data)
+    CDV_EXTENT_L3   = 4,  // L3 table (3-level path leaf → data)
+    CDV_EXTENT_DATA = 5,  // data extent owned by a TPV
+};
+
+struct cdv_extent_md {
+    u8  tpv_uuid[16];    // owning TPV UUID (DATA extents); all-zero for table/free extents
+    u8  extent_type;     // cdv_extent_type enum
+    u8  flags;           // bit 0: NEEDS_ZEROING before reuse
+    u8  reserved[6];
+};
+// sizeof(cdv_extent_md) = 24 bytes (unchanged)
+//
+// Max addressable extents = (A - 4 KB) / 24
+// where A = allocatorSizeGB * 1 GB
+//
+// Examples (default A = 1 GB):
+//   allocatorSizeGB=1 → ~44.7M extents addressable
+//   allocatorSizeGB=4 → ~178.9M extents addressable
+//
+// Actual extents present depends on CDV physical capacity:
+//   total_extents = (CDV_capacity_bytes - A) / E
+//   CDV_extent[0] is always L1; first allocatable extent is CDV_extent[1].
+```
+
+### 2.3 In-Memory State
+
+New file: `toma/nvmeibt_cdv_allocator.c`
+
+```c
+struct cdv_allocator {
+    u64                   cdv_uuid_hi, cdv_uuid_lo;
+    u64                   allocator_size_gb;   // A; constant after init
+    u64                   cdv_extent_size_mb;  // E; constant after init
+    u64                   total_extents;
+    unsigned long        *free_bitmap;          // 1 bit per extent, in RAM
+    struct cdv_extent_md *extent_md;            // RAM mirror of on-disk array
+    spinlock_t            lock;
+    struct list_head      needs_zeroing_list;
+    struct work_struct    zeroing_work;
+};
+
+// alloc():     find first clear bit, set it, write extent_md, flush header (generation++)
+// free():      clear bit, set NEEDS_ZEROING, enqueue zeroing_work
+// free_all():  scan extent_md, free all extents where tpv_uuid matches
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> FREE : CDV init (all extents)
+    FREE --> L1 : CDV_extent[0] reserved at init (never freed)
+    FREE --> DATA : CDV_ALLOC_EXTENT (for TPV data)
+    FREE --> TREE_NODE : CDV_ALLOC_EXTENT (L2 / L2a / L3 table)
+    DATA --> NEEDS_ZEROING : CDV_FREE_EXTENT or TPV delete (free_all)
+    TREE_NODE --> FREE : tree node freed (no more leaves)
+    NEEDS_ZEROING --> FREE : zeroing worker completes, clears tpv_uuid
+```
+
+*Figure 6: CDV extent lifecycle. DATA extents carry tpv_uuid in cdv_extent_md. NEEDS_ZEROING prevents reuse until the background zeroing worker clears the extent. CDV_extent[0] (L1) is assigned at CDV init and is permanent.*
+
+### 2.4 Cold Recovery (TOMA restart)
+
+Runs after CDV EC cold recovery completes, while IO gates are still closed:
+
+1. Read `cdv_alloc_header` from CDV offset 0; validate magic.
+2. Read `cdv_extent_md[total_extents]` array.
+3. Reconstruct `free_bitmap` and `needs_zeroing_list` from on-disk state.
+4. Open IO gates; resume allocator service.
+
+### 2.5 CDV Topology: Allocator Identity
+
+Extend the CDV topology payload sent by TOMA to subscribing clients during `DD_STG_TOMA_REREG`:
+
+```c
+struct nvmeibc_cdv_toma_topology {
+    // ... existing topology fields ...
+    u8  allocator_toma_id[...];   // node ID of the current CDV.allocator TOMA
+    u64 allocator_generation;     // epoch counter; increments on every allocator change
+};
+```
+
+The client stores `(allocator_toma_id, allocator_generation)` in its `nvmeibc_tpv` struct. When the allocator changes, TOMA pushes an updated topology to all CDV subscribers using the existing topology-update mechanism.
+
+### 2.6 Allocator Election via RAFT
+
+`(allocator_toma_id, allocator_generation)` is stored as a RAFT-committed field in the CDV's volume metadata.
+
+**Initial assignment** (CDV creation): RAFT leader selects the TOMA hosting the first RW-enabled disk segment of the CDV's first pRAID. Commits `allocator_toma_id` and `allocator_generation = 1`.
+
+**Stability rule**: Allocator does not change on RAFT leader rotation. It changes only when the RAFT group detects the current allocator TOMA has left (failed or evicted).
+
+**Re-election**:
+1. RAFT detects departure of current allocator TOMA.
+2. New RAFT leader proposes a new allocator: from TOMAs with RW-enabled segments in the CDV's first pRAID, select one at random. Single candidate → chosen by default.
+3. RAFT commits `new_allocator_toma_id` and `allocator_generation++`.
+4. All TOMAs push updated CDV topology to subscribed clients.
+5. Newly elected TOMA runs `cdv_allocator_cold_recovery()` (§2.4) before serving requests.
+
+```mermaid
+sequenceDiagram
+    participant R as RAFT Group
+    participant OA as Old Allocator TOMA
+    participant NA as New Allocator TOMA
+    participant C as Storage Client
+
+    OA--xR: departure detected (failure or eviction)
+    R->>R: select new allocator from first-pRAID TOMAs
+    R->>NA: commit: new allocator_toma_id, allocator_generation++
+    NA->>NA: cdv_allocator_cold_recovery()
+    Note over NA: read cdv_extent_md array, rebuild free_bitmap
+    Note over NA: orphaned extents (DATA but no tree leaf) flagged for NVCK
+    R->>C: CDV topology push (new allocator_toma_id + generation)
+    C->>C: update allocator identity in nvmeibc_tpv
+    Note over C: discard any in-flight responses with old generation
+    C->>NA: CDV_ALLOC_EXTENT (with new generation)
+    NA-->>C: cdv_alloc_resp (OK)
+```
+
+*Figure 8: Allocator re-election via RAFT. Allocator identity is sticky — changes only on TOMA departure, not on RAFT leader rotation. The new allocator completes cold recovery before serving requests. Clients fence stale responses by generation.*
+
+**Why first pRAID?** The allocator must read and write the CDV's allocator area (first `allocatorSizeGB` GB). A TOMA hosting a RW-enabled segment of the first pRAID is guaranteed to have a live path to that data.
+
+### 2.7 Allocation Transactionality and Split-Brain Protection
+
+#### Write-before-respond
+
+```
+alloc():
+  1. Lock allocator.
+  2. Find free extent idx in free_bitmap.
+  3. Write cdv_extent_md[idx] = {tpv_uuid, flags=0} to CDV disk. Wait for completion.
+  4. Increment generation; write header to CDV disk. Wait for completion.
+  5. Set bit in free_bitmap (RAM).
+  6. Unlock.
+  7. Send cdv_alloc_resp to client.
+```
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant T as Allocator TOMA
+    participant D as CDV Disk
+
+    C->>T: CDV_ALLOC_EXTENT(tpv_uuid, req_id, client_generation)
+    T->>T: lock, find free extent idx in free_bitmap
+    T->>D: write cdv_extent_md[idx].tpv_uuid (durable)
+    D-->>T: write confirmed
+    T->>D: write header (generation++) (durable)
+    D-->>T: write confirmed
+    T->>T: set bit in free_bitmap, unlock
+    T-->>C: cdv_alloc_resp(extent_index, allocator_generation)
+    Note over C: install extent_index into L2/L3 leaf in tree
+    Note over C: flush modified tree pages to CDV
+    Note over C: add n_slots slot addresses to free_tpv_extents
+
+    Note over C,T: Generation fencing on allocator failover
+    T->>C: CDV topology push (allocator_generation++)
+    C->>C: discard in-flight responses with old generation
+    C->>T: retry CDV_ALLOC_EXTENT with new (toma_id + generation)
+```
+
+*Figure 5: Write-before-respond allocation protocol. Both the extent metadata and the header are written durably to disk before the response is sent. Generation fencing discards stale responses after allocator failover.*
+
+Crash scenarios:
+- Before step 3: client gets no response, retries. New allocator sees extent as free. Consistent.
+- Between step 3 and step 7: client gets no response, retries. New allocator cold-recovers, finds extent allocated to this TPV. Client retries, gets a new extent. The first extent is "orphaned" — NVCK detects it (`tpv_uuid` set in `cdv_extent_md` but no corresponding leaf entry in the L1/L2/L3 tree). Recovery: clear the orphaned `cdv_extent_md` entry and return the extent to the free pool.
+
+#### Generation fencing
+
+Every `cdv_alloc_resp` carries `allocator_generation`. After re-election, clients receive topology with `allocator_generation++`. Clients discard responses with stale generation and retry with the new allocator.
+
+If a partitioned old allocator writes `cdv_extent_md` entries, the new allocator sees them during cold recovery and skips those extents. They become orphans detected by NVCK.
+
+#### Free path transactionality
+
+```
+free():
+  1. Set cdv_extent_md[idx].flags |= NEEDS_ZEROING. Persist to disk.
+  2. Keep bit set in free_bitmap (not yet reusable).
+  3. Enqueue zeroing_work.
+  4. Zeroing completes.
+  5. Clear cdv_extent_md[idx].tpv_uuid. Persist to disk.
+  6. Clear bit in free_bitmap (now reusable).
+```
+
+On crash between steps 1 and 5: cold recovery sees NEEDS\_ZEROING → re-enqueues zeroing before marking extent free.
+
+### 2.8 CDV\_extent Allocation Protocol (ADMIN Channel)
+
+New opcodes (add to `nvmeibc_config_ops` enum):
+
+```c
+NVMEIBC_MA_CDV_ALLOC_EXTENT = 0x20,
+NVMEIBC_MA_CDV_FREE_EXTENT  = 0x21,
+```
+
+Message structs:
+
+```c
+// NVMEIBC_MA_CDV_ALLOC_EXTENT request:
+struct nvmeibc_cdv_alloc_req {
+    u8  tpv_uuid[16];
+    u8  cdv_uuid[16];
+    u64 req_id;              // monotonically increasing per-TPV, for idempotency
+    u64 client_generation;   // allocator_generation the client believes is current
+};
+
+// Response:
+struct nvmeibc_cdv_alloc_resp {
+    u64 req_id;
+    u64 extent_index;        // data CDV_extent index i; CDV byte offset = A + i * E
+    u64 allocator_generation;
+    u8  status;              // 0=OK, 1=CDV_FULL, 2=WRONG_GENERATION, 3=ERROR
+};
+
+// NVMEIBC_MA_CDV_FREE_EXTENT request:
+struct nvmeibc_cdv_free_req {
+    u8  tpv_uuid[16];
+    u8  cdv_uuid[16];
+    u64 extent_index;
+};
+```
+
+Client sends to the admin channel of a disk belonging to the `allocator_toma_id` node. TOMA-side dispatches to `cdv_allocator_alloc()` / `cdv_allocator_free()`.
+
+On `CDV_FULL`: TOMA sends `CDVCapacityWarning` to management. Client pauses write IOs needing new allocation until a topology push signals capacity is available.
+
+On `WRONG_GENERATION`: Client re-fetches CDV topology via TOMA subscription, then retries.
+
+### 2.9 Recovery Changes to Existing TOMA Code
+
+In `toma/nvmeibt_recovery.c`:
+- After EC recovery completes, before IO gates open: call `cdv_allocator_cold_recovery(cdv_uuid)`.
+- Background scrubbing: skip unallocated extents by checking `free_bitmap[extent_idx]`.
+
+### 2.10 Bad-Path Fencing (Force Detach)
+
+When a new client needs to attach to a TPV whose `exclusiveClient` is non-responsive:
+1. Management sends `ForceDetachTPV` Kafka message to TOMA.
+2. TOMA instructs the target server to revoke all CDV segment registrations for the stale client.
+3. TOMA increments a per-TPV fencing cookie (a `u64 generation` field in a per-TPV cookie table in the CDV allocator header).
+4. Target stops accepting IO from stale client for CDV segments.
+5. Management clears `tpvConfig.exclusiveClient`.
+6. New client attaches; receives the current fencing cookie in the MCS attach message.
+7. Client presents this cookie in CDV\_extent allocation requests; TOMA validates.
+
+### 2.11 NVCK Support
+
+Add a check to NVCK that:
+- Reads `cdv_alloc_header` and `cdv_extent_md` array.
+- Verifies `allocated_extents` counter matches the count of non-zero UUID entries.
+- Reports extents in `NEEDS_ZEROING` state.
+- Reports extents whose `tpv_uuid` no longer exists in management.
+- Reports orphaned extents: `extent_type == CDV_EXTENT_DATA` and `tpv_uuid` set in `cdv_extent_md` but no corresponding leaf entry in the L1/L2/L3 tree. Safe to reclaim: clear `cdv_extent_md` entry and return extent to free pool.
+- Verifies RAFT-committed `allocator_toma_id` matches the TOMA currently serving alloc requests on the ADMIN channel.
+
+---
+
+## Part 3 — Kernel Client: TPV Datapath
+
+### 3.1 New Kernel Subdirectory: `clnt/tpv/`
+
+Files:
+- `nvmeibc_tpv.h` — data structures
+- `nvmeibc_tpv.c` — volume attach/detach, block device registration
+- `nvmeibc_tpv_allocator.c` — TPV\_extent map, alloc/free
+- `nvmeibc_tpv_io.c` — IO dispatch, zero-read, write-allocate
+- `nvmeibc_tpv_persist.c` — allocator state serialization to/from CDV
+- `nvmeibc_tpv_recovery.c` — cold recovery of allocator state
+
+### 3.2 New Volume Class Handling
+
+In `nvmeibc_main_capi_manipulate_vols.inc.c`, parse `volumeClass` from the MCS `AttachVolumes` message:
+
+```c
+enum nvmeibc_volume_class {
+    NVC_REGULAR = 0,
+    NVC_CDV     = 1,
+    NVC_TPV     = 2,
+};
+```
+
+Add `volume_class` and `is_hidden` to `nvmeibc_volume_header`.
+
+**CDV attach path** (`volume_class == NVC_CDV && is_hidden == 1`):
+- Perform full existing volume attach (discovery, IO channels, etc.).
+- Do **not** register a block device with the OS (`gendisk`). CDV is accessible internally as `nvmeibc_volume *` but invisible to user space.
+- Store the CDV volume pointer in a per-client CDV registry keyed by CDV UUID.
+
+**TPV attach path** (`volume_class == NVC_TPV`): delegated to `nvmeibc_tpv_attach()` in `clnt/tpv/nvmeibc_tpv.c` (§3.8).
+
+### 3.3 Core Data Structures
+
+```c
+// A single mapping entry: virtual_extent_index → physical byte offset in CDV.
+// phys_offset == 0 means unmapped (CDV offset 0 is inside the allocator area and is
+// never a valid TPV_extent location — safe sentinel).
+struct nvmeibc_tpv_extent_entry {
+    u64 phys_offset;
+};
+
+// Sparse map: xarray keyed by virtual extent index → nvmeibc_tpv_extent_entry*.
+struct nvmeibc_tpv_allocator {
+    struct xarray    extent_map;
+    spinlock_t       lock;
+    u32              tpv_extent_size_kb;
+    u64              virtual_extents_total;
+
+    struct list_head cdv_extent_list;      // nvmeibc_cdv_extent_ref entries
+    u64              cdv_extents_count;
+
+    struct list_head free_tpv_extents;     // available physical TPV_extent slots
+    u64              free_tpv_extent_count;
+
+    u64              low_watermark;        // schedule CDV alloc when count drops below
+                                           // default: 50 MB / tpv_extent_size
+};
+
+struct nvmeibc_cdv_extent_ref {
+    u64              extent_index;         // data CDV_extent index i
+    u64              allocated_count;      // TPV_extents in use within this CDV_extent
+    struct list_head node;
+};
+
+struct nvmeibc_tpv {
+    struct nvmeibc_volume        *cdv_vol;
+    struct nvmeibc_tpv_allocator  allocator;
+    struct nvmeibc_block_device  *block_dev;
+    char                          tpv_uuid[37];
+    u64                           virtual_size;         // bytes
+    atomic_t                      state;                // ATTACHING / ATTACHED / DETACHING
+
+    // CDV.allocator identity — learned from CDV topology at attach time,
+    // updated via topology push when allocator changes.
+    u8                            allocator_toma_id[...];
+    u64                           allocator_generation;
+    spinlock_t                    allocator_id_lock;
+
+    struct work_struct            cdv_alloc_work;
+    atomic_t                      cdv_alloc_pending;
+
+    struct work_struct            persist_work;
+    spinlock_t                    persist_lock;
+    bool                          dirty;
+};
+```
+
+### 3.4 Allocator State Persistence Format (L1/L2/L3 Tree in CDV\_extent[0])
+
+TPV.allocator mapping state is stored centrally in CDV\_extent[0] — always at CDV byte offset `A`. This extent is reserved as the **L1 table** at CDV init and is never available for TPV data. Data CDV\_extents (CDV\_extent[1] onwards) contain **only user data**: no header, no map, no wasted bytes at offset 0.
+
+$n_{\text{slots}} = \texttt{cdvExtentSizeMB} \times 1024 / \texttt{tpvExtentSizeKB}$ — number of TPV\_extent slots per data CDV\_extent. Because there is no per-extent header, all $n_{\text{slots}} \times (\texttt{tpvExtentSizeKB} \times 1024)$ bytes of each data CDV\_extent are available for data. Slot $s$ within data CDV\_extent $i$ occupies CDV bytes $[A + i \times E + s \times T,\; A + i \times E + (s+1) \times T)$ where $T = \texttt{tpvExtentSizeKB} \times 1024$.
+
+#### Tree entry format
+
+Every entry at every level is 16 bytes:
+
+```c
+struct tpv_tree_entry {
+    u64 extent_index;  // CDV_extent index of child table or data extent; 0 = null / not present
+    u64 debug_meta;    // sequence number, extent_type hint, reserved
+};
+#define TPV_TREE_NULL  0ULL  // null pointer; CDV_extent[0] is L1 root (never a child target)
+```
+
+#### L1 table (CDV\_extent[0])
+
+CDV\_extent[0] holds a flat array of $N_{L1} = E / 16$ entries ($E = \texttt{cdvExtentSizeMB} \times 1\,\text{MB}$), split into two halves:
+
+- **First half** $L1[0 \,..\, N_{L1}/2)$ — each non-null entry points to an **L2 table** CDV\_extent. L2 entries are leaves: each points to a **data** CDV\_extent (2-level path — the common case).
+- **Second half** $L1[N_{L1}/2 \,..\, N_{L1})$ — each non-null entry points to an **L2a table** CDV\_extent. L2a entries each point to an **L3 table** CDV\_extent. L3 entries are leaves pointing to a data CDV\_extent (3-level path — rarely used).
+
+L2, L2a, and L3 tables are CDV\_extents allocated from the free pool on demand, tracked with `extent_type = CDV_EXTENT_L2 / CDV_EXTENT_L2A / CDV_EXTENT_L3` in `cdv_extent_md`. Each table is a flat array of $N = E / 16$ entries of the same 16-byte format.
+
+```mermaid
+graph TD
+    L1["CDV_extent[0]: L1 Table\nN_L1 = E / 16 entries (16 bytes each)\nFirst half -> L2 tables (2-level, common)\nSecond half -> L2a tables (3-level, rare)"]
+
+    subgraph two_level["2-level path (common case)"]
+        L2_0["L2 Table 0\nN_L2 = E/16 leaves\neach leaf -> data CDV_extent"]
+        L2_1["L2 Table 1"]
+        L2_dots["..."]
+    end
+
+    subgraph three_level["3-level path (overflow)"]
+        L2a["L2a Table\nN_L2a = E/16 entries\neach entry -> L3 table"]
+        L3["L3 Table\nN_L3 = E/16 leaves\neach leaf -> data CDV_extent"]
+    end
+
+    DATA1[("Data CDV_extent\n(user data only, no headers)")]
+    DATA2[("Data CDV_extent")]
+    DATA3[("Data CDV_extent")]
+
+    L1 -->|"L1[0]"| L2_0
+    L1 -->|"L1[1]"| L2_1
+    L1 -->|"..."| L2_dots
+    L1 -->|"L1[N_L1/2]"| L2a
+    L2a --> L3
+    L2_0 -->|"leaf"| DATA1
+    L2_1 -->|"leaf"| DATA2
+    L3 -->|"leaf"| DATA3
+```
+
+*Figure 2: L1/L2/L3 mapping tree structure. CDV_extent[0] is the permanent L1 root. A 2-level lookup covers all realistic CDV sizes. The 3-level path (second half of L1) is an overflow for extreme configurations. Data extents contain no embedded metadata.*
+
+#### Address translation
+
+The tree maps a **group index** $G$ (group of $n_{\text{slots}}$ consecutive virtual TPV\_extents) to the CDV\_extent index of the data extent holding those slots. For virtual extent index $V$:
+
+$$
+\begin{aligned}
+G &= \lfloor V / n_{\text{slots}} \rfloor \\
+\text{slot} &= V \bmod n_{\text{slots}}
+\end{aligned}
+$$
+
+**2-level path** $(G < N_{L1}/2 \times N_{L2})$:
+
+$$
+\begin{aligned}
+L1_{\text{idx}} &= \lfloor G / N_{L2} \rfloor \quad (\text{must be} < N_{L1}/2) \\
+L2_{\text{idx}} &= G \bmod N_{L2} \\
+\text{data\_idx} &= L1[L1_{\text{idx}}].L2[L2_{\text{idx}}].\texttt{extent\_index} \quad (0 = \text{unmapped}) \\
+\text{phys\_offset} &= A + \text{data\_idx} \times E + \text{slot} \times T
+\end{aligned}
+$$
+
+**3-level path** $(G \geq N_{L1}/2 \times N_{L2})$:
+
+$$
+\begin{aligned}
+G' &= G - N_{L1}/2 \times N_{L2} \\
+L1_{\text{idx}} &= N_{L1}/2 + \lfloor G' / (N_{L2a} \times N_{L3}) \rfloor \\
+L2a_{\text{idx}} &= \lfloor G' / N_{L3} \rfloor \bmod N_{L2a} \\
+L3_{\text{idx}} &= G' \bmod N_{L3} \\
+\text{data\_idx} &= L1[L1_{\text{idx}}].L2a[L2a_{\text{idx}}].L3[L3_{\text{idx}}].\texttt{extent\_index} \\
+\text{phys\_offset} &= A + \text{data\_idx} \times E + \text{slot} \times T
+\end{aligned}
+$$
+
+```mermaid
+flowchart TD
+    V["Virtual extent index V"]
+    G_calc["G = floor(V / n_slots)\nslot = V mod n_slots"]
+    V --> G_calc
+
+    G_calc --> path_check{"G < N_L1/2 * N_L2 ?"}
+
+    path_check -->|"Yes: 2-level (common)"| two["L1_idx = G / N_L2\nL2_idx = G mod N_L2\ndata_idx = L1[L1_idx].L2[L2_idx].extent_index"]
+    path_check -->|"No: 3-level (overflow)"| three["G' = G - N_L1/2 * N_L2\nL1_idx = N_L1/2 + G' / (N_L2a * N_L3)\nL2a_idx = (G' / N_L3) mod N_L2a\nL3_idx = G' mod N_L3\ndata_idx = L1[...].L2a[...].L3[...].extent_index"]
+
+    two --> null_check{"data_idx == 0 ?\n(null = unmapped)"}
+    three --> null_check
+
+    null_check -->|"Yes: unmapped"| unmapped{"bio operation?"}
+    null_check -->|"No: mapped"| mapped["phys_offset = A + data_idx * E + slot * T\nsubmit bio to CDV block layer"]
+
+    unmapped -->|"READ"| zero["complete with zero pages\n(no CDV IO)"]
+    unmapped -->|"WRITE"| alloc["allocate new CDV_extent\ninstall leaf, then map and submit"]
+```
+
+*Figure 3: Virtual-to-physical address translation. Group G maps n_slots consecutive virtual extents to a single data CDV_extent. Null leaves (unmapped) return zeroes on read and trigger CDV_extent allocation on write.*
+
+A null leaf (`extent_index == 0`) means those $n_{\text{slots}}$ virtual extents are unmapped: reads return zeroes; no physical space is consumed.
+
+#### Capacity
+
+| $E$ (CDV\_extent size) | $N_{L1}/2$ | $N_{L2}$ | 2-level data extent groups | 2-level TPV\_extents (at 512 KB) |
+|---|---|---|---|---|
+| 64 MB | 2 M | 4 M | $8 \times 10^{12}$ | $8 \times 10^{12} \times n_{\text{slots}}$ |
+| 1 GB | 33.5 M | 67 M | $2.2 \times 10^{15}$ | effectively unbounded |
+
+The 2-level path covers any realistic CDV size. The 3-level path is a safety overflow for extreme configurations.
+
+#### Reconstruction at attach time (`nvmeibc_tpv_persist.c`)
+
+```c
+// nvmeibc_tpv_load_state():
+//
+// 1. CDV is attached (hidden). Read CDV_extent[0] (L1 table) into RAM.
+// 2. Walk all non-null L1 first-half entries (2-level):
+//    For each L1[L1_idx] with extent_index != 0:
+//      a. Read the L2 table CDV_extent into RAM.
+//      b. For each L2[L2_idx] with extent_index != 0 (= data_idx):
+//           G = L1_idx * N_L2 + L2_idx
+//           For slot s in [0, n_slots):
+//             V = G * n_slots + s
+//             phys_offset = A + data_idx * E + s * T
+//             xa_store(&allocator->extent_map, V, phys_offset)
+//           Add data CDV_extent reference to cdv_extent_list (allocated_count = n_slots)
+//         Null L2 slots add the corresponding (data_idx, slot) pairs to free_tpv_extents
+//         once the data CDV_extent arrives (on CDV_ALLOC response).
+// 3. Walk L1 second-half entries (3-level) analogously via L2a → L3.
+// 4. Open IO gates.
+```
+
+On flush: rewrite only the modified L2/L2a/L3 CDV\_extent pages. The L1 CDV\_extent (CDV\_extent[0]) is rewritten only when a new L2/L2a pointer is first installed.
+
+### 3.5 IO Path
+
+```c
+// nvmeibc_tpv_io.c
+
+static blk_qc_t nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio)
+{
+    struct nvmeibc_tpv *tpv = q->queuedata;
+    u64 virt_offset = bio->bi_iter.bi_sector << 9;
+    u64 extent_size = (u64)tpv->allocator.tpv_extent_size_kb << 10;
+
+    // For each extent-aligned segment of the bio:
+    //   virt_idx = virt_offset / extent_size
+    //   entry    = xa_load(&tpv->allocator.extent_map, virt_idx)
+    //
+    //   READ  + entry == NULL → complete bio with zero pages (no CDV IO)
+    //   WRITE + entry == NULL → nvmeibc_tpv_alloc_extent(tpv, virt_idx, &entry)
+    //                           then fall through to mapped case
+    //   mapped                → rewrite bio sector to (entry->phys_offset + intra_extent_offset)
+    //                           submit to cdv_vol's block layer
+    //   DISCARD               → nvmeibc_tpv_free_extent(tpv, virt_idx)
+    //                           complete bio immediately
+}
+```
+
+Bios crossing extent boundaries must be split using `bio_split` / `bio_chain`.
+
+```mermaid
+flowchart TD
+    bio_in["bio arrives at nvmeibc_tpv_make_request()"]
+    bio_in --> split_check{"crosses extent\nboundary?"}
+    split_check -->|Yes| split["bio_split + bio_chain\nprocess each sub-bio separately"]
+    split_check -->|No| lookup["virt_idx = virt_offset / extent_size\nentry = xa_load(extent_map, virt_idx)"]
+    split --> lookup
+
+    lookup --> op_check{"operation?"}
+
+    op_check -->|"READ + unmapped"| zero_read["complete with zero pages\nno CDV IO issued"]
+    op_check -->|"DISCARD"| discard["nvmeibc_tpv_free_extent(virt_idx)\ncomplete bio immediately"]
+    op_check -->|"WRITE + unmapped"| avail_check{"free_tpv_extents\navailable?"}
+    op_check -->|"READ/WRITE + mapped"| remap["phys sector = phys_offset + intra_offset\nsubmit bio to CDV block layer"]
+
+    avail_check -->|Yes| alloc_extent["pop from free_tpv_extents\nxa_store into extent_map\nschedule persist_work"]
+    avail_check -->|No| queue_bio["queue bio\nschedule cdv_alloc_work\n(CDV_ALLOC_EXTENT to TOMA)"]
+    alloc_extent --> remap
+    queue_bio --> wait["await CDV_ALLOC_EXTENT response\nthen retry queued bios"]
+```
+
+*Figure 10: TPV IO dispatch path. Reads to unmapped extents return zeroes without touching the CDV. Writes to unmapped extents trigger CDV_extent allocation. Bios crossing extent boundaries are split before processing.*
+
+### 3.6 TPV\_extent Alloc / Free
+
+```c
+// nvmeibc_tpv_allocator.c
+
+int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
+                              struct nvmeibc_tpv_extent_entry **out)
+{
+    // 1. Lock allocator.
+    // 2. Pop one entry from free_tpv_extents.
+    //    If empty: return -EAGAIN, queue bio for retry after CDV_extent arrives.
+    // 3. Build tpv_extent_entry (phys_offset from free entry).
+    // 4. xa_store into extent_map at virt_idx.
+    // 5. Decrement free_tpv_extent_count.
+    // 6. If free_tpv_extent_count < low_watermark: schedule cdv_alloc_work.
+    // 7. Mark dirty (schedule persist_work).
+    // 8. Unlock, return entry.
+}
+
+int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
+{
+    // 1. xa_erase from extent_map.
+    // 2. Enqueue physical offset onto free_tpv_extents.
+    // 3. Decrement allocated_count for the parent CDV_extent in cdv_extent_list.
+    // 4. If allocated_count drops to 0:
+    //      remove from cdv_extent_list, send CDVAllocatorFree to TOMA.
+    // 5. Mark dirty.
+}
+```
+
+### 3.7 CDV\_extent Request from Client
+
+When `cdv_alloc_work` fires (see §2.8 for message structs):
+
+1. Look up `(allocator_toma_id, allocator_generation)` from `nvmeibc_tpv`. Find admin channel to a disk belonging to that TOMA.
+2. Send `NVMEIBC_MA_CDV_ALLOC_EXTENT`. Set `cdv_alloc_pending = 1`.
+3. On response:
+   - `WRONG_GENERATION`: re-fetch CDV topology, update `(allocator_toma_id, allocator_generation)`, retry.
+   - `CDV_FULL`: pause write IOs awaiting allocation; resume on topology push after management extends CDV.
+   - `OK`: Compute group index `G` for this CDV\_extent assignment. Install `resp.extent_index` into the appropriate L2 or L3 leaf in the tree (allocating an L2/L2a/L3 table CDV\_extent first if the slot's parent table does not yet exist). Flush the modified tree pages to CDV. Add all $n_{\text{slots}}$ physical slot addresses $A + \text{resp.extent\_index} \times E + s \times T$ for $s \in [0,\, n_{\text{slots}})$ to `free_tpv_extents`. Add CDV\_extent reference to `cdv_extent_list`. Clear `cdv_alloc_pending`. Retry queued bios.
+
+When returning a CDV\_extent (all TPV\_extents freed): send `NVMEIBC_MA_CDV_FREE_EXTENT`.
+
+> **Security note (open item — needs security review):** The current kernel implementation sends `CDV_FREE_EXTENT` to TOMA without zeroing the physical CDV data first. The physical blocks remain intact on the CDV until TOMA's background zeroing worker clears them (if that path is implemented). On DISCARD (TRIM) the TPV immediately unmaps the virtual extent (so reads return zeros from the zero-fill path), but the stale data is visible at the CDV physical offset until zeroed. This must be reviewed with the security team to confirm whether the TOMA-side zeroing-before-reuse guarantee is sufficient, or whether the client must issue zero-writes before sending `CDV_FREE_EXTENT`.
+
+### 3.8 Attach / Detach
+
+**Attach** (`nvmeibc_tpv_attach`):
+1. Look up CDV in per-client CDV registry; assert it is attached and hidden.
+2. Allocate `nvmeibc_tpv`.
+3. Call `nvmeibc_tpv_load_state()` (§3.4); IO stays gated.
+4. For any tree inconsistency detected during load (e.g., `cdv_extent_md` records a DATA extent for this TPV but no corresponding leaf exists in the tree): call `nvmeibc_tpv_recovery()` to reconcile.
+5. Set watermark; schedule initial CDV\_extent request if `free_tpv_extent_count == 0`.
+6. Register block device. Open IO gates.
+
+**Detach** (`nvmeibc_tpv_detach`):
+1. Pause block device (quiesce IO).
+2. Flush dirty allocator state to CDV (synchronous persist).
+3. Unregister block device.
+4. Free `extent_map` and `cdv_extent_list`.
+5. Notify management via MCS that detach is complete.
+
+### 3.9 TPV.Delete
+
+From management (no client attach needed):
+1. Verify `tpvConfig.exclusiveClient === null`.
+2. Send `CDVAllocatorFreeAll(cdvUUID, tpvUUID)` to TOMA.
+3. TOMA scans `extent_md`, sets `NEEDS_ZEROING` on all matching extents, clears `tpv_uuid`.
+4. TOMA's background zeroing worker zeros each extent before resetting the free bit.
+5. Management deletes TPV record and decrements `CDV.tpvCount`.
+
+Zero-on-free prevents stale-data exposure. There is no CDV-level encryption; encryption is at the TPV level. Zero-on-free is always required until TPV-level rekeying can be confirmed (see Architecture Decision #17).
+
+### 3.10 TPV Grow
+
+`POST /volumes/tpv/extend` sends `UpdateVolume` MCS to client:
+- Client receives new `virtual_size`.
+- Updates `tpv->virtual_size` and `allocator.virtual_extents_total`.
+- Calls `set_capacity(gendisk, new_sectors)` to inform the OS.
+- No allocator state flush needed for grow (new extents start unmapped = read-as-zero).
+
+---
+
+## Part 4 — Testing
+
+### Unit / Integration Tests (management)
+
+Add to `nvmesh-management/test/`:
+
+- `test/tpv_lifecycle.js` — create CDV, create TPV, attach, detach, delete TPV, delete CDV
+- `test/tpv_quota.js` — attempt to create 513th TPV on a CDV, expect rejection
+- `test/tpv_extend.js` — extend TPV, verify schema update; verify UpdateVolume MCS is sent if attached
+- `test/tpv_attach_hidden_cdv.js` — verify CDV hidden-attach message precedes TPV exclusive-attach message
+
+### Bad-Path Tests (kernel)
+
+- Crash after write to TPV\_extent but before tree flush → recovery on re-attach re-walks the L1/L2/L3 tree; the unflushed mapping entry is absent, leaving that virtual extent unmapped (reads return zero). Physical slot is not visible in the tree and may be reclaimed if the parent data CDV\_extent shows no other mapped slots.
+- `cdv_alloc_req` in-flight when allocator TOMA crashes → RAFT elects new allocator, client receives topology update, retries. New allocator cold-recovered; `req_id` provides idempotency.
+- CDV\_extent allocated by TOMA (`cdv_extent_md` updated) but client crashes before installing the tree leaf → on re-attach, `cdv_extent_md` shows the extent as owned by this TPV but no L2/L3 leaf exists. NVCK detects as orphan; recovery clears the `cdv_extent_md` entry.
+- TPV detach races with ongoing write → verify IO drains before tree state flushes.
+- Force-delete TPV while 511 other TPVs are active on same CDV → TOMA scans only matching extents, no cross-TPV interference.
+
+### Scale Tests
+
+- 512 clients simultaneously attached to distinct TPVs on one CDV.
+- CDV at 90% capacity: `CDVCapacityWarning` fires, management extends CDV, TOMA resumes allocation.
+- 1000 concurrent writes across a single TPV: validate no allocator lock contention deadlock.
+
+---
+
+## Part 5 — CDV Auto-Attachment to TOMA Nodes
+
+### 5.1 Rationale
+
+A CDV should be attached to a given node whenever **either** of two independent reasons holds:
+
+1. **TOMA reason** — the node has a disk segment in the CDV's first pRAID, so its TOMA may need to act as the CDV allocator. This is true regardless of disk segment status.
+2. **TPV reason** — a TPV on that client uses this CDV for physical storage.
+
+The CDV is detached from a node only when **both** reasons are gone. A node may be a TOMA and also host TPVs, or it may be one without the other.
+
+### 5.2 Attachment Reference Tracking
+
+The existing `referenceIDs` array on `client.attachments[volumeUUID]` tracks why a volume is attached. Two namespaced prefixes for CDV:
+
+- `"tpv:<tpvUUID>"` — CDV attached because a TPV on this client uses it. Set by `attachTPV`, cleared by `detachTPV` or involuntary-detach cleanup.
+- `"toma:<cdvUUID>"` — CDV attached because this node is a candidate allocator. Set at CDV creation and on topology additions. Cleared on topology removals or CDV deletion. **Not** affected by TPV attach/detach.
+
+The two reference classes have **independent lifecycles**. CDV is detached from a node only when both classes are empty (handled by `detachVolumes` ref logic).
+
+```mermaid
+graph TD
+    subgraph refs["client.attachments[cdvUUID].referenceIDs (per node)"]
+        tpv_refs["tpv:tpvUUID entries\n(one per attached TPV that uses this CDV)"]
+        toma_refs["toma:cdvUUID entry\n(present if node is a first-pRAID allocator candidate)"]
+    end
+
+    attachTPV["attachTPV(clientID, tpvID)"] -->|"add tpv:tpvUUID"| tpv_refs
+    detachTPV["detachTPV(clientID, tpvID)"] -->|"remove tpv:tpvUUID"| tpv_refs
+    cdvCreate["CDV creation /\ntopology addition"] -->|"add toma:cdvUUID"| toma_refs
+    topoRemove["Topology removal /\nCDV deletion"] -->|"remove toma:cdvUUID"| toma_refs
+
+    tpv_refs --> check{"both tpv:* set\nand toma:* set\nare empty?"}
+    toma_refs --> check
+
+    check -->|"No: keep CDV attached"| keep["CDV remains attached to node"]
+    check -->|"Yes: detach"| detach_cdv["send DetachVolumes(CDV)"]
+```
+
+*Figure 9: CDV attachment reference tracking. Two independent reference classes prevent premature CDV detach. TPV detach only removes `tpv:` refs — it never touches `toma:` refs. A CDV is detached from a node only when all references of both classes are cleared.*
+
+### 5.3 Determining the TOMA Node Set
+
+All nodes that have any disk segment in the CDV's first pRAID chunk, **regardless of segment status** (NORMAL, INITIALIZING, DEAD, etc.):
+
+```js
+// modules/cdvTomaAutoAttach.js
+_firstPRaidNodeIds(cdv) {
+    if (!cdv.chunks || !cdv.chunks[0]) return [];
+    const firstChunk = cdv.chunks[0];
+    return [...new Set(
+        firstChunk.pRaids
+            .flatMap(pRaid => pRaid.diskSegments)
+            .map(seg => seg.node_id)
+    )];
+}
+```
+
+### 5.4 Module: `modules/cdvTomaAutoAttach.js`
+
+```js
+class CDVTomaAutoAttach {
+    // Attaches CDV to all first-pRAID nodes. Idempotent.
+    // Called at CDV creation and at startup reconciliation.
+    async attachCDVToAllTomaNodes(cdv)
+
+    // Queries all CDVs and calls attachCDVToAllTomaNodes for each.
+    // Run once at startup to recover from missed creation-time attaches.
+    async reconcileAllCDVs()
+
+    // Computes delta between previousNodeIds and current first-pRAID nodes,
+    // attaches new nodes, detaches removed nodes.
+    // Called after a pRAID segment change on a CDV's first chunk.
+    async reconcileFirstPRaidAttachments(cdv, previousNodeIds)
+
+    // Removes toma: referenceID from all first-pRAID nodes.
+    // Called only during CDV deletion.
+    async detachCDVFromAllNodes(cdv)
+
+    async attachCDVToNode(cdv, nodeId)
+    //   → attachVolumes() with referenceID = `toma:${cdv.uuid}`,
+    //     reservation = SHARED_READ_WRITE, isHidden = false
+
+    maybeDetachCDVFromNode(cdv, nodeId)
+    //   → detachVolumes() with referenceID = `toma:${cdv.uuid}`
+    //   → actual DetachVolumes sent only if no other refs (tpv:* or toma:*) remain
+}
+```
+
+**No `onTPVDetached` method.** TPV detach only removes `tpv:` refs — it never triggers removal of `toma:` refs. The `toma:` lifecycle is managed entirely by creation, topology changes, and CDV deletion.
+
+### 5.5 `toma:` Reference Lifecycle
+
+| Event | Action | Code path |
+|---|---|---|
+| CDV created (chunks allocated) | Add `toma:` ref on all first-pRAID nodes | `volume.js` `saveVolumes` → `attachCDVToAllTomaNodes` |
+| Management startup | Reconcile `toma:` refs for all CDVs | `bootstrapper.js` → `reconcileAllCDVs` |
+| Disk segment added/removed in first pRAID | Add/remove `toma:` ref on affected nodes | `volume.js` `handleSegmentChangeInPRaid` → `reconcileFirstPRaidAttachments` |
+| CDV deleted | Remove `toma:` ref from all nodes | `volume.js` delete path → `detachCDVFromAllNodes` |
+
+### 5.6 `tpv:` Reference Lifecycle
+
+| Event | Action | Code path |
+|---|---|---|
+| TPV attached to client | Add `tpv:` ref on that client | `client.js` `attachTPV` → `attachVolumes` with `tpv:<tpvUUID>` |
+| TPV detached from client | Remove `tpv:` ref on that client | `client.js` `detachTPV` → `detachVolumes` with `tpv:<tpvUUID>` |
+| Involuntary detach (preemption, stale, deletion) | Remove `tpv:` ref on that client | `client.js` `cleanupTPVReferencesForDetachedClient` |
+
+In all cases, `detachVolumes` sends an actual kernel `DetachVolumes` message for the CDV only when the `tpv:` removal leaves zero referenceIDs (no `tpv:*` and no `toma:*`) on that client.
+
+### 5.7 CDV Deletion
+
+In the CDV delete path:
+1. Verify all TPVs are deleted (backend check; returns error if not).
+2. Detach CDV from all TOMA-attached nodes (clear `toma:<cdvUUID>` referenceIDs via `detachCDVFromAllNodes`).
+3. Proceed with volume delete.
+
+### 5.8 Edge Cases
+
+- **Node failure**: TOMA attach timeout — management marks attachment as stale and proceeds with CDV delete or allocator re-election regardless. CDV is EC and tolerates node loss.
+- **New node joins with first-pRAID segment**: Triggered by `handleSegmentChangeInPRaid` → `reconcileFirstPRaidAttachments`.
+- **CDV extend**: Adds new pRAIDs (chunks[1], ...). TOMA attachment is keyed to `chunks[0]` only; no change needed.
+- **Multiple CDVs on same node**: Each generates an independent `toma:<cdvUUID>` referenceID; a node may hold multiple CDV TOMA attachments.
+- **Management crash during TPV detach**: `tpv:` ref may be stranded on the client. This is a pre-existing gap in all referenceID-based tracking. The `toma:` refs are unaffected — they persist correctly and are reconciled at next startup.
+- **Management crash during CDV creation**: `toma:` refs may not have been added yet. `reconcileAllCDVs` at startup fixes this.
+
+---
+
+## Part 6 — Observability: proc Files
+
+### 6.1 Client-Side: TPV Allocator State
+
+Using existing `nvmeib_public_proc_create` from `common_public/nvmeib_public_procfs.h`.
+
+**Directory**: `/proc/nvmesh/volumes/<tpv_name>/tpv/`
+
+Created in `nvmeibc_tpv.c` when the TPV block device is registered.
+
+#### `tpv_alloc` — allocator summary (text)
+
+```
+virtual_size_gb:       200
+virtual_extents_total: 409600
+tpv_extent_size_kb:    512
+cdv_extent_size_mb:    1024
+cdv_extents_count:     3
+free_tpv_extents:      1842
+low_watermark:         102
+mapped_extents:        4294
+cdv_alloc_pending:     0
+dirty:                 1
+allocator_toma_id:     <node-id>
+allocator_generation:  2
+```
+
+Fill callback: `nvmeibc_tpv_proc_fill_alloc(tpv, buf, len)`.
+
+#### `tpv_cdv_extents` — per-CDV\_extent breakdown (text)
+
+```
+extent_index  allocated  total_slots
+0             1024       2048
+1             2048       2048
+4             222        2048
+```
+
+Fill callback: `nvmeibc_tpv_proc_fill_cdv_extents(tpv, buf, len)` — walks `cdv_extent_list`.
+
+#### `tpv_alloc.json` — machine-readable JSON version
+
+Combines both views for tooling consumption.
+
+### 6.2 TOMA-Side: CDV Allocator State
+
+**Directory**: `/proc/nvmesh/toma/cdv/<cdv_name>/`
+
+Created in `toma/nvmeibt_cdv_allocator.c` when the allocator is initialized.
+
+#### `alloc_state` — allocator header summary (text)
+
+```
+cdv_name:             mycdv
+cdv_extent_size_mb:   1024
+total_extents:        1000
+allocated_extents:    6
+free_extents:         992
+needs_zeroing:        2
+generation:           47
+is_local_allocator:   1
+allocator_toma_id:    <node-id>
+allocator_generation: 2
+```
+
+#### `alloc_extents` — per-extent ownership table (text, allocated only)
+
+```
+extent_index  tpv_uuid                              flags
+0             550e8400-e29b-41d4-a716-446655440000  -
+1             550e8400-e29b-41d4-a716-446655440000  needs_zeroing
+4             7a3f9c21-1234-5678-abcd-ef0123456789  -
+```
+
+#### `alloc_state.json` — machine-readable JSON version
+
+### 6.3 Python Analysis Scripts
+
+- **`tools/tpv_inspect.py`**: Reads `/proc/nvmesh/volumes/*/tpv/tpv_alloc.json` from a node and produces a summary of all TPV allocator states.
+- **`tools/cdv_inspect.py`**: Reads `/proc/nvmesh/toma/cdv/*/alloc_state.json` from a TOMA node and cross-checks: `allocated_extents` vs. actual non-free row count, `tpv_uuid` values vs. management REST API, orphaned extents.
+
+---
+
+## Part 7 — Simulator Updates
+
+### 7.1 TOMA Simulator (`toma/nvmeibt_toma_simu.h/.c`)
+
+Add CDV allocator state:
+
+```c
+struct toma_cdv_alloc_sim {
+    u8               cdv_uuid[16];
+    u64              cdv_extent_size_mb;
+    u64              total_extents;
+    unsigned long   *free_bitmap;
+    struct {
+        u8  tpv_uuid[16];
+        u8  flags;
+    } *extent_md;
+    bool             is_local_allocator;
+    u64              allocator_generation;
+    spinlock_t       lock;
+};
+```
+
+Add ADMIN channel opcode handlers:
+
+```c
+case NVMEIBC_MA_CDV_ALLOC_EXTENT:
+    return toma_sim_handle_cdv_alloc(toma, req, resp);
+case NVMEIBC_MA_CDV_FREE_EXTENT:
+    return toma_sim_handle_cdv_free(toma, req, resp);
+```
+
+`toma_sim_handle_cdv_alloc()`:
+1. Check `req->client_generation == alloc_sim->allocator_generation`; if not, return `WRONG_GENERATION`.
+2. Find first clear bit in `free_bitmap`. If none, return `CDV_FULL`.
+3. Write `extent_md[idx].tpv_uuid = req->tpv_uuid` (simulates write-before-respond).
+4. Set bit in `free_bitmap`.
+5. Fill `resp->extent_index = idx`, `resp->allocator_generation`, `resp->status = OK`.
+
+Add `toma_sim_trigger_allocator_failover(cdv_uuid)` — simulates allocator TOMA death, picks new random TOMA instance, increments `allocator_generation`, pushes updated topology to subscribed client simulators.
+
+Extend `toma_msg_q_to_client` message types to include `CDV_TOPOLOGY_UPDATE` carrying `allocator_toma_id` and `allocator_generation`.
+
+### 7.2 Management Simulator (`mgmt/nvmeibm_mgmt_simu.h/.c`)
+
+Add CDV and TPV volume descriptors to the config database:
+
+```c
+struct sim_cdv_config {
+    u8   cdv_uuid[16];
+    u32  allocator_size_gb;  // default 1
+    u32  cdv_extent_size_mb;
+    u32  capacity_mb;
+    u32  max_tpvs;
+};
+
+struct sim_tpv_config {
+    u8   tpv_uuid[16];
+    u8   cdv_uuid[16];
+    u32  tpv_extent_size_kb;
+    u64  virtual_size_mb;
+};
+```
+
+Extend `nvmeibm_mcs_simu` to emit `AttachVolumes` messages when `mgmt_sim_attach_tpv(client_id, tpv_uuid)` is called:
+1. Look up TPV → find parent CDV.
+2. Emit `AttachVolumes` for CDV with `is_hidden=true`, `reservation.mode=SHARED_READ_WRITE`.
+3. After CDV attach confirmed: emit `AttachVolumes` for TPV with `cdvConf` inline and `volumeClass=TPV`.
+
+Add `mgmt_sim_attach_cdv_to_toma_nodes(cdv_uuid)` — simulates TOMA auto-attach on CDV creation.
+
+### 7.3 Client Simulator
+
+Add to `clientSimulator`:
+
+```c
+struct sim_tpv_state {
+    u8                   tpv_uuid[16];
+    u8                   cdv_uuid[16];
+    struct nvmeibc_tpv  *tpv;
+};
+
+struct sim_tpv_state tpvs[MAX_SIM_TPVS];
+int                  n_tpvs;
+```
+
+Helpers:
+
+```c
+int  clientSim_attach_tpv(clientSimulator *c, u8 *tpv_uuid);
+int  clientSim_tpv_write_verify(clientSimulator *c, u8 *tpv_uuid,
+                                u64 lba, u64 len, u8 pattern);
+void clientSim_tpv_crash(clientSimulator *c, u8 *tpv_uuid);
+```
+
+### 7.4 RAM Disk Simulator
+
+No structural changes — CDV allocator area is plain readable/writable memory in the simulated disk.
+
+Add initializer helper:
+
+```c
+void ramDiskSim_init_cdv_allocator(ramDiskSimulator *rd,
+                                   u32 allocator_size_gb,
+                                   u32 cdv_extent_size_mb,
+                                   u64 total_extents);
+```
+
+### 7.5 New Simulator Test Scenarios
+
+**`test_tpv_lifecycle.c`**: Create CDV (`cdvExtentSizeMB=64`) → TOMA attach → create/attach TPV (`tpvExtentSizeKB=512`) → write pattern → detach (verify flush) → re-attach (verify reconstruction) → delete TPV (verify zeroing/reclaim).
+
+**`test_tpv_allocator_recovery.c`**: Write data → `clientSim_tpv_crash` (no flush) → re-attach (verify `load_state` re-walks L1/L2/L3 tree and reconstructs extent_map) → verify read-back. Also test orphan case: TOMA allocated extent (`cdv_extent_md` updated) but client crashed before installing the tree leaf → verify NVCK detects orphan and `cdv_extent_md` entry is cleared.
+
+**`test_tpv_allocator_election.c`**: Attach CDV + TPVs → `toma_sim_trigger_allocator_failover` → verify topology update received → verify subsequent CDV\_extent requests reach new allocator → verify stale-generation requests rejected with `WRONG_GENERATION` and retried.
+
+**`test_tpv_watermark.c`**: Small CDV (2 CDV\_extents) → write until low-watermark fires CDV\_extent request → verify ADMIN channel request reaches TOMA → write until 90% full → verify `CDVCapacityWarning` fires → extend CDV → verify allocation resumes.
+
+---
+
+## Part 8 — UI Implementation Detail
+
+### 8.1 consts.js
+
+File: `nvmesh-management/consts.js`
+
+Add to `componentsPages` object (~line 1029):
+
+```js
+tpv: 'tpv',
+```
+
+Add new const groups:
+
+```js
+consts.volumeClass = {
+    REGULAR: 'REGULAR',
+    CDV:     'CDV',
+    TPV:     'TPV',
+};
+
+// Valid power-of-2 values for CDV and TPV extent sizes
+consts.cdvExtentSizeMBValues  = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+consts.tpvExtentSizeKBValues  = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+```
+
+### 8.2 Express Route — Thin Provisioning Page
+
+New file: `nvmesh-management/routes/thinProvisioning.js`
+
+```js
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+var express = require('express');
+var consts  = require('../consts.js');
+var router  = express.Router();
+
+router.get('/tpv', function(req, res) {
+    var renderData = {};
+    if (req.headers['x-pjax'])
+        renderData.layout = false;
+
+    renderData.user = { email: req.user.email, isAdmin: req.user.role === consts.userRoles.ADMIN };
+    renderData.componentName = consts.componentsPages.tpv;
+
+    res.render('react', renderData);
+});
+
+module.exports = router;
+```
+
+File: `nvmesh-management/app.js` — mount alongside existing routers:
+
+```js
+const thinProvisioningRouter = require('./routes/thinProvisioning.js');
+app.use('/thin-provisioning', thinProvisioningRouter);
+```
+
+### 8.3 Router Registration
+
+File: `public/javascripts/components/Router.jsx`
+
+Add to `componentsRegistry`:
+
+```js
+[consts.componentsPages.tpv]: `${pagesFolder}/thinProvisioning/ThinProvisioning.js`,
+```
+
+### 8.4 Sidebar — New "Thin Provisioning" Section
+
+File: `public/javascripts/components/shared/Sidebar.jsx`
+
+Insert a new top-level entry after the Volumes entry in the `links` array:
+
+```jsx
+{
+    icon: 'fa-cubes',
+    caption: 'Thin Provisioning',
+    adminOnly: false,
+    subItems: [
+        {
+            url: '/thin-provisioning/tpv',
+            icon: 'fa fa-database',
+            caption: 'TPV List',
+        }
+    ]
+},
+```
+
+### 8.5 Regular Volumes Table — CDV Filter Checkboxes
+
+File: `public/javascripts/components/pages/volumes/Volumes.jsx`
+
+Add two filter checkboxes **to the right of the Delete/Rebuild buttons** in the toolbar. Both are checked by default. TPVs are not shown in this table at all (they have their own page).
+
+```jsx
+// State (add near other useState declarations):
+const [showRegular, setShowRegular] = useState(true);
+const [showCDVs,    setShowCDVs]    = useState(true);
+
+// Filter applied to the loadVolumes call:
+const volumeClassFilter = useMemo(() => {
+    const classes = [];
+    if (showRegular) classes.push(consts.volumeClass.REGULAR, null, undefined);
+    if (showCDVs)    classes.push(consts.volumeClass.CDV);
+    // TPVs are excluded — they live on /thin-provisioning/tpv
+    return { volumeClass: { $in: classes } };
+}, [showRegular, showCDVs]);
+
+// In the toolbar JSX, to the right of the Rebuild button:
+<label style={{ marginLeft: 16, fontWeight: 'normal', cursor: 'pointer' }}>
+    <input
+        type="checkbox"
+        checked={showRegular}
+        onChange={e => setShowRegular(e.target.checked)}
+        style={{ marginRight: 4 }}
+    />
+    Regular volumes
+</label>
+<label style={{ marginLeft: 8, fontWeight: 'normal', cursor: 'pointer' }}>
+    <input
+        type="checkbox"
+        checked={showCDVs}
+        onChange={e => setShowCDVs(e.target.checked)}
+        style={{ marginRight: 4 }}
+    />
+    CDVs
+</label>
+```
+
+Pass `volumeClassFilter` into the `loadVolumes` call as an additional filter. For CDV rows, show TPV count as a sub-label in the Capacity column:
+
+```jsx
+// In the Capacity column value renderer:
+{volume.volumeClass === consts.volumeClass.CDV && volume.cdvConfig && (
+    <small className="text-muted"> ({volume.tpvCount || 0}/{volume.cdvConfig.maxTPVs} TPVs)</small>
+)}
+```
+
+### 8.6 Create/Edit Volume Dialog — CDV Toggle
+
+File: `public/javascripts/components/pages/volumes/createEditModal/CreateEditVolumeModal.jsx`
+
+#### Dropdown constants (add near top of file)
+
+```js
+// Power-of-2 values from 64 MB to 64 GB for CDV extent size
+const CDV_EXTENT_SIZE_OPTIONS = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536].map(mb => ({
+    value: mb,
+    label: mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`,
+}));
+```
+
+#### useForm default values
+
+The existing `useForm({ mode: 'all', defaultValues: volume })` call already receives `volume` as defaults. Since `volumeClass` and `cdvConfig` are now fields on volume records, they populate automatically. For new volumes `volumeClass` defaults to `'REGULAR'` and `cdvConfig.allocatorSizeGB` defaults to `1`.
+
+#### CDV toggle (create only)
+
+Insert **after the name/description block and before the RAID level selector**:
+
+```jsx
+{isCreate && (
+    <FormControl label="Carrier Direct Volume (CDV)">
+        <Controller
+            name="volumeClass"
+            control={control}
+            render={({ field }) => (
+                <Toggle
+                    checked={field.value === 'CDV'}
+                    onChange={checked => field.onChange(checked ? 'CDV' : 'REGULAR')}
+                    label="Use this volume as a CDV for thin provisioning"
+                />
+            )}
+        />
+    </FormControl>
+)}
+{!isCreate && volume.volumeClass === consts.volumeClass.CDV && (
+    <div className="alert alert-info">This volume is a Carrier Direct Volume (CDV).</div>
+)}
+```
+
+`volumeClass` is immutable after creation — toggle is hidden in edit mode.
+
+#### CDV-specific fields (conditional)
+
+```jsx
+{formData.volumeClass === consts.volumeClass.CDV && (
+    <fieldset className="cdv-config">
+        <legend>CDV Configuration</legend>
+
+        <FormControl
+            label="CDV Extent Size"
+            hint="Allocation unit carved from the CDV. Power-of-2, 64 MB – 64 GB.">
+            <Controller
+                name="cdvConfig.cdvExtentSizeMB"
+                control={control}
+                rules={{ required: formData.volumeClass === consts.volumeClass.CDV }}
+                render={({ field }) => (
+                    <Select
+                        {...field}
+                        options={CDV_EXTENT_SIZE_OPTIONS}
+                        placeholder="Select CDV extent size"
+                    />
+                )}
+            />
+        </FormControl>
+
+        <FormControl
+            label="Allocator Size (GB)"
+            hint="Space reserved at the start of the CDV for allocator metadata. Integer >= 1, default 1 GB. Determines how many CDV extents can be tracked: (allocatorSizeGB * 1 GB - 4 KB) / 24.">
+            <Controller
+                name="cdvConfig.allocatorSizeGB"
+                control={control}
+                rules={{
+                    required: formData.volumeClass === consts.volumeClass.CDV,
+                    validate: v => (Number.isInteger(Number(v)) && Number(v) >= 1) || 'Must be a positive integer',
+                }}
+                render={({ field }) => (
+                    <Input type="number" min={1} {...field} />
+                )}
+            />
+        </FormControl>
+
+        <FormControl
+            label="Max TPVs"
+            hint="Maximum number of TPVs this CDV can host. Default 512. Can be changed after creation. If lowered below the current TPV count, existing TPVs are unaffected; new TPV creation is blocked until the count drops below the new limit.">
+            <Controller
+                name="cdvConfig.maxTPVs"
+                control={control}
+                render={({ field }) => (
+                    <Input type="number" min={1} {...field} />
+                )}
+            />
+        </FormControl>
+    </fieldset>
+)}
+```
+
+No special submit-path fork needed. The existing `VolumesService.create(buildVolumePayload(data))` sends the full payload including `volumeClass: 'CDV'` and `cdvConfig`. The backend `createVolume` handler branches on `volumeClass` (§1.4).
+
+### 8.7 TPV Table Page
+
+New file: `public/javascripts/components/pages/thinProvisioning/ThinProvisioning.jsx`
+
+```jsx
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* global React, consts */
+
+import FiltSortTable from '../../filtsort-table/FiltSortTable.jsx';
+import { useAlerts } from '../../core/Alert.jsx';
+import { useConfirmationDialog } from '../../shared/ConfirmationDialog.jsx';
+import { VolumesService } from '../../services/api/volumes.service.js';
+import { extractErrorMsg } from '../../utils.js';
+import NewButton from '../../shared/NewButton.jsx';
+import CreateTPVModal from './CreateTPVModal.jsx';
+
+const { useRef, useState, useEffect } = React;
+
+const ThinProvisioning = () => {
+    const { successAlert, errorAlert } = useAlerts();
+    const [confirm] = useConfirmationDialog();
+    const [selectedTPVs, setSelectedTPVs] = useState([]);
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [editTPV, setEditTPV] = useState({});
+    const tableRef = useRef();
+
+    useEffect(() => {
+        const interval = setInterval(() => reloadTable(false), 3000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const reloadTable = (deselectMissingRows = true) => {
+        if (tableRef.current) {
+            tableRef.current.reloadRows(deselectMissingRows);
+            tableRef.current.reloadTotal();
+        }
+    };
+
+    const columns = [
+        { name: 'Name',         field: 'name',                      placeholder: 'Search by Name' },
+        { name: 'Parent CDV',   field: 'tpvConfig.cdvId',           placeholder: 'Filter by CDV',
+          value: tpv => tpv.tpvConfig?.cdvName || tpv.tpvConfig?.cdvId },
+        { name: 'Virtual Size', field: 'tpvConfig.virtualSizeGB',   placeholder: 'Filter by Size',
+          value: tpv => `${tpv.tpvConfig?.virtualSizeGB ?? '—'} GB` },
+        { name: 'Max Size',     field: 'tpvConfig.maxVirtualSizeGB',
+          value: tpv => `${tpv.tpvConfig?.maxVirtualSizeGB ?? '—'} GB` },
+        { name: 'Client',       field: 'tpvConfig.exclusiveClient',
+          value: tpv => tpv.tpvConfig?.exclusiveClient || <em>Detached</em> },
+        { name: 'Status',       field: 'status', value: tpv => tpv.status },
+    ];
+
+    const loadTPVs = async(filter, sort, page, count) => {
+        return await VolumesService.loadVolumes(
+            { ...filter, volumeClass: consts.volumeClass.TPV },
+            sort, page, count
+        );
+    };
+
+    const loadTotal = async(filter) => {
+        return await VolumesService.loadTotal({ ...filter, volumeClass: consts.volumeClass.TPV });
+    };
+
+    const deleteSelected = async() => {
+        const names = selectedTPVs.map(t => t.name).join(', ');
+        const confirmed = await confirm({ message: `Delete TPV(s): ${names}?` });
+        if (!confirmed) return;
+
+        const response = await VolumesService.deleteTPV(selectedTPVs.map(t => t._id));
+        if (response.success) {
+            successAlert('TPV(s) deleted');
+            reloadTable();
+        } else {
+            errorAlert(extractErrorMsg(response.error));
+        }
+    };
+
+    return (
+        <div>
+            <div className="page-header">
+                <h1>Thin-Provisioned Volumes</h1>
+                <div className="actions">
+                    <NewButton onClick={() => { setEditTPV({}); setShowCreateModal(true); }} label="New TPV" />
+                    <button
+                        className="btn btn-danger"
+                        disabled={!selectedTPVs.length}
+                        onClick={deleteSelected}>
+                        Delete
+                    </button>
+                </div>
+            </div>
+
+            <FiltSortTable
+                ref={tableRef}
+                columns={columns}
+                loadRows={loadTPVs}
+                loadTotal={loadTotal}
+                onSelectionChange={setSelectedTPVs}
+                onRowDoubleClick={tpv => { setEditTPV(tpv); setShowCreateModal(true); }}
+            />
+
+            {showCreateModal && (
+                <CreateTPVModal
+                    tpv={editTPV}
+                    onClose={() => setShowCreateModal(false)}
+                    onSuccess={() => {
+                        setShowCreateModal(false);
+                        reloadTable();
+                        successAlert('TPV saved');
+                    }}
+                />
+            )}
+        </div>
+    );
+};
+
+export default ThinProvisioning;
+```
+
+### 8.8 TPV Create/Edit Modal
+
+New file: `public/javascripts/components/pages/thinProvisioning/CreateTPVModal.jsx`
+
+```jsx
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* global React, ReactHookForm, consts */
+
+import Modal from '../../core/Modal.jsx';
+import FormControl from '../../core/FormControl.jsx';
+import Input from '../../core/Input.jsx';
+import Select from '../../core/Select.jsx';
+import { VolumesService } from '../../services/api/volumes.service.js';
+import { extractErrorMsg } from '../../utils.js';
+
+const { useForm, Controller } = ReactHookForm;
+const { useState, useEffect } = React;
+
+// Power-of-2 values from 64 KB to 64 MB for TPV extent size
+const TPV_EXTENT_SIZE_OPTIONS = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536].map(kb => ({
+    value: kb,
+    label: kb >= 1024 ? `${kb / 1024} MB` : `${kb} KB`,
+}));
+
+const CreateTPVModal = ({ tpv = {}, onClose, onSuccess }) => {
+    const isCreate = !tpv._id;
+    const [cdvOptions, setCdvOptions] = useState([]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submitError, setSubmitError] = useState(null);
+
+    const { register, handleSubmit, formState, control, watch } = useForm({
+        mode: 'all',
+        defaultValues: {
+            name:                          tpv.name || '',
+            description:                   tpv.description || '',
+            'tpvConfig.cdvId':             tpv.tpvConfig?.cdvId || '',
+            'tpvConfig.tpvExtentSizeKB':   tpv.tpvConfig?.tpvExtentSizeKB || '',
+            'tpvConfig.virtualSizeGB':     tpv.tpvConfig?.virtualSizeGB || '',
+            'tpvConfig.maxVirtualSizeGB':  tpv.tpvConfig?.maxVirtualSizeGB || 1000,
+        }
+    });
+
+    const selectedCdvId = watch('tpvConfig.cdvId');
+    const selectedCdv   = cdvOptions.find(c => c.value === selectedCdvId);
+
+    useEffect(() => {
+        VolumesService.getCDVs().then(res =>
+            setCdvOptions(res.map(cdv => ({
+                value: cdv._id,
+                label: `${cdv.name} (${cdv.tpvCount || 0}/${cdv.cdvConfig?.maxTPVs} TPVs, ${cdv.capacity} GB)`,
+                cdv,
+            })))
+        );
+    }, []);
+
+    const onSubmit = handleSubmit(async (data) => {
+        setIsSubmitting(true);
+        setSubmitError(null);
+
+        const payload = {
+            name:        data.name,
+            description: data.description,
+            volumeClass: consts.volumeClass.TPV,
+            tpvConfig: {
+                cdvId:            data['tpvConfig.cdvId'],
+                tpvExtentSizeKB:  Number(data['tpvConfig.tpvExtentSizeKB']),
+                virtualSizeGB:    Number(data['tpvConfig.virtualSizeGB']),
+                maxVirtualSizeGB: Number(data['tpvConfig.maxVirtualSizeGB']),
+            },
+        };
+
+        const response = isCreate
+            ? await VolumesService.create(payload)
+            : await VolumesService.updateTPV({ _id: tpv._id, ...payload });
+
+        if (response.success) {
+            onSuccess();
+        } else {
+            setSubmitError(extractErrorMsg(response.error));
+        }
+        setIsSubmitting(false);
+    });
+
+    return (
+        <Modal
+            title={isCreate ? 'Create TPV' : `Edit TPV: ${tpv.name}`}
+            onClose={onClose}
+            footer={
+                <>
+                    <button className="btn btn-default" onClick={onClose}>Cancel</button>
+                    <button
+                        className="btn btn-primary"
+                        onClick={onSubmit}
+                        disabled={!formState.isValid || isSubmitting}>
+                        {isCreate ? 'Create' : 'Update'}
+                    </button>
+                </>
+            }>
+
+            <FormControl label="Name" error={formState.errors.name?.message}>
+                <Input {...register('name', { required: 'Name is required' })} />
+            </FormControl>
+
+            <FormControl label="Description">
+                <Input {...register('description')} />
+            </FormControl>
+
+            <FormControl label="Parent CDV" error={formState.errors['tpvConfig.cdvId']?.message}>
+                <Controller
+                    name="tpvConfig.cdvId"
+                    control={control}
+                    rules={{ required: 'Parent CDV is required' }}
+                    render={({ field }) => (
+                        <Select
+                            {...field}
+                            options={cdvOptions}
+                            placeholder="Select CDV"
+                            isDisabled={!isCreate}
+                        />
+                    )}
+                />
+                {selectedCdv && (
+                    <small className="text-muted">
+                        CDV extent: {selectedCdv.cdv.cdvConfig?.cdvExtentSizeMB} MB
+                    </small>
+                )}
+            </FormControl>
+
+            <FormControl
+                label="TPV Extent Size"
+                hint={selectedCdv
+                    ? `Power-of-2, 64 KB – ${selectedCdv.cdv.cdvConfig?.cdvExtentSizeMB * 1024} KB (<= CDV extent size)`
+                    : 'Power-of-2, 64 KB – 64 MB'}
+                error={formState.errors['tpvConfig.tpvExtentSizeKB']?.message}>
+                <Controller
+                    name="tpvConfig.tpvExtentSizeKB"
+                    control={control}
+                    rules={{
+                        required: 'TPV extent size is required',
+                        validate: v => {
+                            const cdvMB = selectedCdv?.cdv.cdvConfig?.cdvExtentSizeMB;
+                            if (cdvMB && v > cdvMB * 1024)
+                                return `Cannot exceed CDV extent size (${cdvMB * 1024} KB)`;
+                            return true;
+                        },
+                    }}
+                    render={({ field }) => (
+                        <Select
+                            {...field}
+                            options={TPV_EXTENT_SIZE_OPTIONS.filter(o =>
+                                !selectedCdv || o.value <= selectedCdv.cdv.cdvConfig?.cdvExtentSizeMB * 1024
+                            )}
+                            placeholder="Select TPV extent size"
+                            isDisabled={!isCreate}
+                        />
+                    )}
+                />
+            </FormControl>
+
+            <FormControl
+                label="Virtual Size (GB)"
+                hint={selectedCdv ? `Max: ${selectedCdv.cdv.capacity} GB (parent CDV capacity)` : undefined}
+                error={formState.errors['tpvConfig.virtualSizeGB']?.message}>
+                <Input
+                    type="number"
+                    min={1}
+                    {...register('tpvConfig.virtualSizeGB', {
+                        required: 'Virtual size is required',
+                        min: { value: 1, message: 'Must be at least 1 GB' },
+                        validate: v => {
+                            if (selectedCdv && Number(v) > selectedCdv.cdv.capacity)
+                                return `Cannot exceed parent CDV capacity (${selectedCdv.cdv.capacity} GB)`;
+                            return true;
+                        },
+                    })}
+                />
+            </FormControl>
+
+            <FormControl label="Max Virtual Size (GB)" hint="Hard cap for future grows (default: 1000 GB).">
+                <Input
+                    type="number"
+                    min={1}
+                    {...register('tpvConfig.maxVirtualSizeGB', {
+                        min: { value: 1, message: 'Must be at least 1 GB' },
+                    })}
+                />
+            </FormControl>
+
+            {submitError && <div className="alert alert-danger">{submitError}</div>}
+        </Modal>
+    );
+};
+
+export default CreateTPVModal;
+```
+
+Note: TPV create calls `VolumesService.create(payload)` (same as CDV) — both go through `POST /volumes/save`.
+
+### 8.9 VolumesService Additions
+
+File: `public/javascripts/components/services/api/volumes.service.js`
+
+```js
+// Add to the VolumesService object:
+
+async updateTPV(tpv) {
+    return await apiService.post('/tpv/update', tpv);
+},
+
+async deleteTPV(tpvIds) {
+    return await apiService.post('/tpv/delete', tpvIds);
+},
+
+async extendTPV(payload) {
+    return await apiService.post('/tpv/extend', payload);
+},
+
+async getCDVs(filter = {}) {
+    return await apiService.get('/all/0/0', {
+        filter: { ...filter, volumeClass: 'CDV' },
+        projection: {}
+    });
+},
+```
+
+CDV creation uses the existing `create(volume)` method. TPV creation also uses the existing `create(volume)` method. Only update, delete, and extend need new methods (because they have different endpoint paths or payload shapes).
+
+### 8.10 Route Handlers in volumes.js
+
+File: `nvmesh-management/routes/volumes.js`
+
+```js
+// POST /volumes/tpv/update
+router.post('/tpv/update', isAdminRole, async function(req, res) {
+    try {
+        const result = await volumeModule.updateTPV(req.body, req.user);
+        createAuditRequestLog(req, 'updateTPV');
+        res.json(result);
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
+// POST /volumes/tpv/delete
+router.post('/tpv/delete', isAdminRole, async function(req, res) {
+    try {
+        const result = await volumeModule.deleteTPVs(req.body, req.user);
+        createAuditRequestLog(req, 'deleteTPV');
+        res.json(result);
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
+// POST /volumes/tpv/extend
+router.post('/tpv/extend', isAdminRole, async function(req, res) {
+    try {
+        const result = await volumeModule.extendTPV(req.body, req.user);
+        createAuditRequestLog(req, 'extendTPV');
+        res.json(result);
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+```
+
+### 8.11 Attach Dialog — TPV Informational Note
+
+File: `public/javascripts/components/pages/clients/AttachDetachModal.jsx`
+
+When a TPV is selected in the volume list, show an informational banner (no functional change):
+
+```jsx
+{vol.volumeClass === consts.volumeClass.TPV && (
+    <div className="alert alert-info" style={{ marginTop: 4, padding: '4px 8px', fontSize: '0.85em' }}>
+        <i className="fa fa-info-circle" />{' '}
+        CDV <strong>{vol.tpvConfig?.cdvName || vol.tpvConfig?.cdvId}</strong> will
+        also be attached as a hidden volume to provide physical storage.
+    </div>
+)}
+```
+
+`tpvConfig.cdvName` is populated by the backend via a `$lookup` aggregation (§1.4).
+
+---
+
+## Part 9 — File Checklist
+
+### New files
+
+- `nvmesh-management/routes/thinProvisioning.js` — Express GET handler for `/thin-provisioning/tpv`
+- `nvmesh-management/modules/cdvTomaAutoAttach.js` — CDV auto-attach to TOMA nodes
+- `nvmesh-management/models/kafkaMessages/CDVAllocatorFreeAll.js` — Kafka message: force-reclaim all TPV extents
+- `nvmesh-management/models/kafkaMessages/CDVCapacityWarning.js` — Kafka message: CDV near-full notification from TOMA
+- `public/javascripts/components/pages/thinProvisioning/ThinProvisioning.jsx` — TPV list page
+- `public/javascripts/components/pages/thinProvisioning/ThinProvisioning.js` — Compiled output
+- `public/javascripts/components/pages/thinProvisioning/CreateTPVModal.jsx` — TPV create/edit dialog
+- `public/javascripts/components/pages/thinProvisioning/CreateTPVModal.js` — Compiled output
+- `nvmesh-kernel/clnt/tpv/nvmeibc_tpv.h` — TPV data structures
+- `nvmesh-kernel/clnt/tpv/nvmeibc_tpv.c` — TPV attach/detach, block device
+- `nvmesh-kernel/clnt/tpv/nvmeibc_tpv_allocator.c` — TPV extent map, alloc/free
+- `nvmesh-kernel/clnt/tpv/nvmeibc_tpv_io.c` — TPV IO dispatch
+- `nvmesh-kernel/clnt/tpv/nvmeibc_tpv_persist.c` — TPV allocator state persistence
+- `nvmesh-kernel/clnt/tpv/nvmeibc_tpv_recovery.c` — TPV cold recovery
+- `nvmesh-kernel/toma/nvmeibt_cdv_allocator.c` — TOMA CDV.allocator implementation
+- `nvmesh-kernel/clnt/block/unitest/test_tpv_lifecycle.c` — Simulator test
+- `nvmesh-kernel/clnt/block/unitest/test_tpv_allocator_recovery.c` — Simulator test
+- `nvmesh-kernel/clnt/block/unitest/test_tpv_allocator_election.c` — Simulator test
+- `nvmesh-kernel/clnt/block/unitest/test_tpv_watermark.c` — Simulator test
+- `nvmesh-kernel/tools/tpv_inspect.py` — Python observability script
+- `nvmesh-kernel/tools/cdv_inspect.py` — Python observability script
+
+### Modified files
+
+- `nvmesh-management/consts.js` — Add `componentsPages.tpv`, `volumeClass`, extent size value arrays
+- `nvmesh-management/app.js` — Mount `thinProvisioningRouter` at `/thin-provisioning`
+- `nvmesh-management/modules/volume.js` — CDV/TPV branching in `createVolume` and `updateVolume`; new `updateTPV`, `deleteTPVs`, `extendTPV`; `cdvName` `$lookup` for TPV queries
+- `nvmesh-management/modules/client.js` — Add `attachTPV`, `detachTPV` helpers
+- `nvmesh-management/modules/kafka.js` — Add `CDVCapacityWarning` consumer; add `sendCDVAllocatorFreeAll`
+- `nvmesh-management/routes/volumes.js` — Add `/tpv/update`, `/tpv/delete`, `/tpv/extend` handlers
+- `nvmesh-management/validationSchemes/definitions/volume.js` — Add `volumeClass`, `cdvConfig`, `tpvConfig`, `tpvCount` fields
+- `nvmesh-management/models/kafkaMessages/VolumeMessage.js` — Add `volumeClass`, `tpvConfig`, `cdvConfig`, `isHidden` fields
+- `nvmesh-management/models/kafkaMessages/AttachVolumes.js` — Add `cdvConf` inline for TPV attaches
+- `public/javascripts/components/Router.jsx` — Add `tpv` -> `ThinProvisioning.js` entry
+- `public/javascripts/components/shared/Sidebar.jsx` — Add "Thin Provisioning" top-level nav section
+- `public/javascripts/components/pages/volumes/Volumes.jsx` — Add filter checkboxes (Show regular volumes / Show CDVs); CDV TPV count sub-label
+- `public/javascripts/components/pages/volumes/createEditModal/CreateEditVolumeModal.jsx` — CDV toggle + CDV config fieldset
+- `public/javascripts/components/services/api/volumes.service.js` — Add `updateTPV`, `deleteTPV`, `extendTPV`, `getCDVs`
+- `public/javascripts/components/pages/clients/AttachDetachModal.jsx` — TPV informational banner
+- `nvmesh-kernel/clnt/nvmeibc_main_capi_manipulate_vols.inc.c` — Parse `volumeClass`, `is_hidden`; route CDV/TPV attach
+- `nvmesh-kernel/toma/nvmeibt_recovery.c` — Call `cdv_allocator_cold_recovery` after EC recovery
+- `nvmesh-kernel/common_public/nvmeib_public_procfs.h` — (If needed) no struct changes expected
+- `nvmesh-kernel/clnt/block/unitest/toma/nvmeibt_toma_simu.h/.c` — Add CDV allocator sim state, ADMIN channel handlers, failover trigger
+- `nvmesh-kernel/clnt/block/unitest/mgmt/nvmeibm_mgmt_simu.h/.c` — Add CDV/TPV config descriptors, MCS message generation
+- `nvmesh-kernel/clnt/block/unitest/nvmesh_sim.h` — Add `sim_tpv_state` to client simulator
+
+---
+
+## Part 5 — TPV Encryption
+
+### 5.1 Overview
+
+TPV encryption follows architecture decision #18: encryption is at the TPV level, not the CDV level. The CDV stores raw (unencrypted) extents; each TPV independently manages its own LUKS container within the CDV extents it has been allocated.
+
+The management-side workflow mirrors regular volume encryption as closely as possible: the same "Encryption" dropdown button (Init Encryption, Add/Rotate/Delete Passphrase, Acknowledge Error), the same REST endpoints (`POST /volumes/initEncryption`, etc.), the same Kafka message types, and the same TOMA-side `cryptsetup` execution pattern. The differences are confined to (a) TOMA selection, (b) shadow device creation mechanism, and (c) a pre-allocation step during TPV creation.
+
+### 5.2 How Regular Volume Encryption Works (reference)
+
+For comparison, the regular volume encryption flow:
+
+```
+UI (Volumes.jsx)                   Encrypt dropdown → Init Encryption
+  ↓
+VolumesService.initEncryption()    POST /volumes/initEncryption
+  ↓
+routes/volumes.js                  Audit log + call encryptionModule
+  ↓
+volumeEncryption.js                runEncryptionCommand():
+  ├─ Fetch volume by UUID          Verify isEncrypted, !isInitialized
+  ├─ chooseTOMAForEncryption()     Round-robin across zone TOMAs
+  ├─ setEncryptionCommand()        DB: status = PENDING_SEND, $inc commandIndex
+  ├─ sendEncryptionCommandToTOMA() Build InitEncryption Kafka message, send to TOMA_COMMANDS topic
+  └─ updateLastCommandSent()       DB: status = SENT
+  ↓
+TOMA (nvmeibt_kafka.c)             toma_CMD_handler():
+  ├─ Validate bootTime, volume     Check encrypt_idx, no concurrent op
+  ├─ Create shadow volume          Attach same chunks as e_<name>
+  ├─ Write passphrase to file      /root/nvmesh_toma_tmp/old_passphrase_<shadow>
+  ├─ cryptsetup luksFormat          On /dev/nvmesh/e_<name>
+  ├─ Cleanup                        Detach shadow, delete passphrase file
+  └─ Send response via Kafka       encryptionCommandResponse to management topic
+  ↓
+kafkaRouter.js                     Route to volumeEncryption.handleCommandResponse()
+  ↓
+volumeEncryption.js                DB: status = EXECUTED, isInitialized = true, isReady = true
+```
+
+**Key TOMA details:**
+- Shadow volume `e_<name>` is created by re-attaching the same disk chunks as a separate block device
+- `cryptsetup luksFormat --sector-size=4096 --key-slot=<slot> --key-size=<keySize> --key-file=<file> /dev/nvmesh/e_<name>`
+- Passphrase ops (add/rotate/delete) use the same shadow mechanism with `luksAddKey`, `luksChangeKey`, `luksRemoveKey`
+- TOMA response codes: `SUCCESS(1)`, `CMD_ERR(2)`, `TOMA_ERR(3)`, `UNSEEN(4)`, `MANUAL_ACTION_NEEDED(5)`
+
+### 5.3 TPV Encryption — Architecture Decisions
+
+19. **No CDV-level encryption**: The CDV remains unencrypted. Each TPV independently manages its own LUKS container within its allocated CDV extents. This means different TPVs on the same CDV can have different encryption keys.
+20. **LUKS header location**: The LUKS header occupies the first bytes of the TPV's virtual address space, which maps to the TPV's first CDV data extent. The default encryption header size is 16 MB — well within the minimum CDV extent size of 64 MB.
+21. **First-extent pre-allocation**: When a TPV is created with `isEncrypted: true`, management pre-allocates the first CDV data extent for the TPV via `CDV_ALLOC_EXTENT` IB admin message. This guarantees backing storage for the LUKS header before encryption init. The allocated extent index is stored in `tpvConfig.firstExtentIndex`.
+22. **TOMA selection for TPV encryption**: Instead of zone-based round-robin (regular volumes), TPV encryption commands are sent to a TOMA node that has the parent CDV attached. This ensures `/dev/nvmesh/<cdv_name>` exists locally for shadow device creation.
+23. **Shadow device for TPVs**: TOMA creates a `dm-linear` device mapping from the CDV's block device at the correct byte offset, rather than creating a shadow-volume re-attach (which requires chunks). The dm-linear device is sized to the CDV extent size and points to the offset `A + firstExtentIndex × E` within the CDV.
+24. **Reuse existing REST endpoints**: The same encryption endpoints (`POST /volumes/initEncryption`, `addPassphrase`, etc.) work for both regular volumes and TPVs. The `volumeEncryption.js` module detects TPV via `volumeClass === 'TPV'` and branches TOMA selection and Kafka payload accordingly.
+25. **Reuse existing Kafka message types**: The existing `initEncryption`, `addPassphrase`, `deletePassphrase`, `rotatePassphrase` message types are extended with optional fields (`cdvName`, `cdvUUID`, `cdvByteOffset`, `shadowSizeSectors`). TOMA checks for the presence of `cdvName` to decide between shadow-volume and dm-linear execution paths.
+
+### 5.4 TPV Encryption Flow
+
+```
+UI (ThinProvisioning.jsx)          Encrypt dropdown → Init Encryption
+  ↓
+VolumesService.initEncryption()    POST /volumes/initEncryption  (same endpoint)
+  ↓
+routes/volumes.js                  Audit log + call encryptionModule  (same route handler)
+  ↓
+volumeEncryption.js                runEncryptionCommand():
+  ├─ Fetch volume by UUID          Verify isEncrypted, !isInitialized
+  ├─ chooseTOMAForEncryption()     ← NEW BRANCH: for TPV, pick TOMA with parent CDV attached
+  ├─ setEncryptionCommand()        DB: status = PENDING_SEND, $inc commandIndex  (unchanged)
+  ├─ sendEncryptionCommandToTOMA() ← EXTENDED: include cdvName, cdvByteOffset in payload
+  └─ updateLastCommandSent()       DB: status = SENT  (unchanged)
+  ↓
+TOMA (nvmeibt_kafka.c)             toma_CMD_handler():
+  ├─ Validate bootTime             (unchanged)
+  ├─ Detect TPV mode               Check payload.cdvName presence
+  ├─ Create dm-linear shadow       dmsetup create tpv_enc_<tpv_name> ...
+  │                                 "0 <sectors> linear /dev/nvmesh/<cdv_name> <start_sector>"
+  ├─ Write passphrase to file      (unchanged)
+  ├─ cryptsetup luksFormat          On /dev/mapper/tpv_enc_<tpv_name>
+  ├─ Cleanup                        dmsetup remove tpv_enc_<tpv_name>, delete passphrase file
+  └─ Send response via Kafka       encryptionCommandResponse  (unchanged)
+  ↓
+kafkaRouter.js                     Route to volumeEncryption.handleCommandResponse()  (unchanged)
+  ↓
+volumeEncryption.js                DB: status = EXECUTED, isInitialized = true, isReady = true  (unchanged)
+```
+
+### 5.5 CDV Extent Pre-allocation for Encrypted TPVs
+
+When `createTPV()` in `modules/volume.js` sees `isEncrypted: true`:
+
+1. After CDV validation, before inserting the TPV record, management sends a `CDV_ALLOC_EXTENT` IB admin message to the CDV allocator TOMA requesting one extent for the new TPV's UUID.
+2. The TOMA allocator responds with the extent index.
+3. The extent index is stored in `tpvConfig.firstExtentIndex`.
+4. The TPV record is inserted with `isReady: false` and `encryption: { isInitialized: false }`.
+
+**Failure handling**: If the pre-allocation fails (TOMA unavailable, CDV full), the TPV creation fails with an error. The user must ensure CDV has capacity before creating encrypted TPVs.
+
+**Byte offset calculation** (for the Kafka message to TOMA):
+```
+A = cdvConfig.allocatorSizeGB × 1 GiB
+E = cdvConfig.cdvExtentSizeMB × 1 MiB
+cdvByteOffset = A + firstExtentIndex × E
+shadowSizeSectors = E / 512
+```
+
+### 5.6 TOMA Selection for TPV Encryption
+
+**New function: `chooseTOMAForTPVEncryption(tpvVolume, callback)`** in `volumeEncryption.js`:
+
+1. Look up the parent CDV via `tpvConfig.cdvId`.
+2. Find TOMA nodes that have the CDV attached (query `server` collection for nodes in the CDV's first pRAID with `tomaStatus === UP`).
+3. Pick one (prefer the current CDV allocator TOMA if available, else random from candidates).
+4. Return the selected TOMA with its `bootTime` and `topics`.
+
+**Integration**: `chooseTOMAForEncryption()` gains a branch:
+```js
+if (volume.volumeClass === consts.volumeClass.TPV) {
+    return scope.chooseTOMAForTPVEncryption(volume, callback);
+}
+// ... existing zone round-robin for regular volumes
+```
+
+### 5.7 Kafka Message Changes
+
+The existing `EncryptionCommandMessage` base class gains optional CDV fields for TPV mode:
+
+```js
+// Added to EncryptionCommandMessage.toJSON() payload when cdvName is set:
+payload.cdvName = this.cdvName;            // CDV volume name (for /dev/nvmesh/<cdvName>)
+payload.cdvUUID = this.cdvUUID;            // CDV UUID
+payload.cdvByteOffset = this.cdvByteOffset; // byte offset within CDV for dm-linear start
+payload.shadowSizeSectors = this.shadowSizeSectors; // dm-linear size in 512-byte sectors
+```
+
+`volumeEncryption.js` populates these fields only for TPV volumes (when `volumeClass === 'TPV'`). For regular volumes the fields are absent, and TOMA falls back to the existing shadow-volume path.
+
+### 5.8 TOMA Changes (nvmeibt_kafka.c, nvmeibt_recovery.c)
+
+#### New shadow path: dm-linear
+
+When `start_encrypt_action()` detects `cdvName` in the parsed payload:
+
+1. Verify `/dev/nvmesh/<cdvName>` exists (CDV is attached to this TOMA).
+2. Construct the dm-linear table string: `"0 <shadowSizeSectors> linear /dev/nvmesh/<cdvName> <startSector>"` where `startSector = cdvByteOffset / 512`.
+3. Run: `dmsetup create tpv_enc_<volumeName> --table "<table>"`.
+4. Wait for `/dev/mapper/tpv_enc_<volumeName>` to appear.
+5. Run `cryptsetup` on `/dev/mapper/tpv_enc_<volumeName>` (same command construction as regular encryption).
+6. On completion (success or failure), run `dmsetup remove tpv_enc_<volumeName>`.
+
+The rest of the flow (passphrase file handling, response building, error codes) is identical to regular encryption.
+
+#### New struct fields in `encrypt_cmd_t`:
+```c
+char cdv_name[MAX_VOL_NAME_LEN];       // empty for regular volumes
+char cdv_uuid[UUID_STR_LEN];
+uint64_t cdv_byte_offset;
+uint64_t shadow_size_sectors;
+```
+
+#### Parsing (parse_CMD):
+- Extract optional `cdvName`, `cdvUUID`, `cdvByteOffset`, `shadowSizeSectors` from JSON payload.
+- If `cdvName[0] != '\0'`, set `is_tpv_encryption = true`.
+
+### 5.9 Management Module Changes
+
+#### `modules/volume.js` — `createTPV()`
+
+Add `isEncrypted` handling:
+
+```js
+// After CDV validation, before insertTPVRecord:
+function preAllocateFirstExtent(next) {
+    if (!volume.isEncrypted) return next();
+    // Send CDV_ALLOC_EXTENT to TOMA for this TPV's UUID
+    // On success: store extent index in tpvConfig.firstExtentIndex
+    // On failure: fail TPV creation with error
+}
+```
+
+TPV record changes when `isEncrypted`:
+```js
+isReady: !volume.isEncrypted,   // false if encrypted (wait for init)
+isEncrypted: !!volume.isEncrypted,
+encryption: volume.isEncrypted ? {
+    headerSize: volume.encryption?.headerSize || 16,
+    isInitialized: false,
+} : undefined,
+```
+
+#### `modules/volumeEncryption.js` — `chooseTOMAForEncryption()`
+
+Branch on `volume.volumeClass === 'TPV'` to use `chooseTOMAForTPVEncryption()` instead of zone round-robin.
+
+#### `modules/volumeEncryption.js` — `sendEncryptionCommandToTOMA()`
+
+When building the Kafka message for a TPV, compute and include CDV geometry:
+
+```js
+if (dbVolume.volumeClass === consts.volumeClass.TPV) {
+    // Look up parent CDV to get cdvConfig and CDV name
+    const cdv = await volumeCollection.findOne({ _id: dbVolume.tpvConfig.cdvId });
+    const A = cdv.cdvConfig.allocatorSizeGB * 1024 * 1024 * 1024;
+    const E = cdv.cdvConfig.cdvExtentSizeMB * 1024 * 1024;
+    encryptionObj.cdvName = cdv._id;
+    encryptionObj.cdvUUID = cdv.uuid;
+    encryptionObj.cdvByteOffset = A + dbVolume.tpvConfig.firstExtentIndex * E;
+    encryptionObj.shadowSizeSectors = E / 512;
+}
+```
+
+#### `modules/volumeEncryption.js` — `verifyEncryptionCommand()`
+
+No changes needed — the existing checks (`isEncrypted`, `isInitialized`, `action`) apply identically to TPVs.
+
+### 5.10 UI Changes
+
+#### `ThinProvisioning.jsx`
+
+Add the Encryption dropdown and modals, mirroring `Volumes.jsx`:
+
+**New imports:**
+```jsx
+import { DropdownButton, DropdownButtonItem } from '../../shared/DropdownButton.jsx';
+import InitEncryptionModal from '../volumes/InitEncryptionModal.jsx';
+import PassphraseModal from '../volumes/PassphraseModal.jsx';
+```
+
+**New state variables:**
+```jsx
+const [showInitEncryptionModal, setShowInitEncryptionModal] = useState(false);
+const [showPassphraseModal, setShowPassphraseModal] = useState(false);
+const [initData, setInitData] = useState({});
+const [passphraseCommandName, setPassphraseCommandName] = useState('');
+const [passphraseData, setPassphraseData] = useState({});
+```
+
+**New handlers** (identical pattern to `Volumes.jsx`):
+- `handleInitEncryption()` — open InitEncryptionModal with `{ slot: 1, keySize: 512 }`
+- `handleInitEncryptionSubmit(data)` — call `VolumesService.initEncryption(payload)`
+- `handleAddPassphrase()`, `handleRotatePassphrase()`, `handleDeletePassphrase()` — open PassphraseModal
+- `handlePassphraseSubmit(data)` — route to `VolumesService.addPassphrase/rotatePassphrase/deletePassphrase`
+- `handleAckEncryptionError()` — call `VolumesService.acknowledgeEncryptionError(payload)`
+
+**Toolbar addition** (after the Delete button):
+```jsx
+<DropdownButton label="Encryption"
+    disabled={!currUser.isAdmin || !selectedTPVs.length || selectedTPVs.some(v => !v.isEncrypted)}>
+    <DropdownButtonItem label="Init Encryption" onClick={handleInitEncryption}
+        disabled={selectedTPVs.some(v => !v.isEncrypted || v.encryption.isInitialized ||
+            [consts.encryptionCommandStatuses.SENT, consts.encryptionCommandStatuses.PENDING_SEND]
+                .includes(v.encryption.command?.status))}/>
+    <DropdownButtonItem label="Add Passphrase" onClick={handleAddPassphrase}
+        disabled={isPassphraseCmdDisabled}/>
+    <DropdownButtonItem label="Rotate Passphrase" onClick={handleRotatePassphrase}
+        disabled={isPassphraseCmdDisabled}/>
+    <DropdownButtonItem label="Delete Passphrase" onClick={handleDeletePassphrase}
+        disabled={isPassphraseCmdDisabled}/>
+    <DropdownButtonItem label="Acknowledge Error" onClick={handleAckEncryptionError}
+        disabled={selectedTPVs.some(v => !v.isEncrypted ||
+            !v.encryption.command?.response?.error ||
+            !!v.encryption.command?.response?.acknowledged)}/>
+</DropdownButton>
+```
+
+**New column** — add `Encryption` status column showing init state / command status.
+
+#### `CreateTPVModal.jsx`
+
+Add encryption toggle (same pattern as `CreateEditVolumeModal.jsx`):
+
+```jsx
+<div className="form-group">
+    <label>Encrypted</label>
+    <input type="checkbox" {...register('isEncrypted')} disabled={isEdit} />
+</div>
+{isEncrypted && (
+    <div className="form-group">
+        <label>Encryption Header Size (MB)</label>
+        <input type="number" {...register('encryption.headerSize')} min={1} max={100} defaultValue={16} />
+    </div>
+)}
+```
+
+### 5.11 Encryption Column in TPV Table
+
+Add an `Encryption` column to the `ThinProvisioning.jsx` table:
+
+```jsx
+{
+    name: 'Encryption',
+    field: 'isEncrypted',
+    className: 'fixed-size-column sx-column',
+    rowClassName: 'fixed-size-column',
+    value: tpvRow => {
+        if (!tpvRow.isEncrypted) return '—';
+        if (!tpvRow.encryption?.isInitialized) return <label className="label bg-yellow">Init Required</label>;
+        const cmdStatus = tpvRow.encryption?.command?.status;
+        if (cmdStatus === 'sent' || cmdStatus === 'pendingSend')
+            return <label className="label bg-blue">In Progress</label>;
+        if (tpvRow.encryption?.command?.response?.error && !tpvRow.encryption?.command?.response?.acknowledged)
+            return <label className="label bg-red">Error</label>;
+        return <label className="label bg-green">Encrypted</label>;
+    },
+},
+```
+
+### 5.12 Implementation Steps
+
+#### Phase 1 — Management Backend (can be developed and tested independently)
+
+**Step 1: TPV creation with encryption support** (`modules/volume.js`)
+- Extend `createTPV()` to accept `isEncrypted` and `encryption.headerSize`
+- Set `isReady: false` when encrypted
+- Add `encryption: { isInitialized: false }` sub-document
+- Wire the first-extent pre-allocation call (can be stubbed initially)
+- Store `tpvConfig.firstExtentIndex` on success
+
+**Step 2: TOMA selection for TPVs** (`modules/volumeEncryption.js`)
+- Implement `chooseTOMAForTPVEncryption(volume, callback)`
+- Look up parent CDV, find TOMAs with CDV attached (`tomaStatus === UP` in CDV's first pRAID)
+- Add branch in `chooseTOMAForEncryption()` for `volumeClass === 'TPV'`
+
+**Step 3: Kafka message extension** (`models/kafkaMessages/`)
+- Extend `EncryptionCommandMessage.toJSON()` with optional `cdvName`, `cdvUUID`, `cdvByteOffset`, `shadowSizeSectors`
+- Extend `volumeEncryption.js` `sendEncryptionCommandToTOMA()` to compute and inject CDV geometry for TPVs
+- No changes to `InitEncryption.js`, `AddPassphrase.js`, `DeletePassphrase.js` constructors — the CDV fields are set on the base class
+
+**Step 4: Integration test** (backend only)
+- Create an encrypted TPV via `POST /volumes/save`
+- Verify DB record: `isReady: false`, `isEncrypted: true`, `encryption.isInitialized: false`
+- Call `POST /volumes/initEncryption` with the TPV's UUID
+- Verify Kafka message includes CDV geometry fields
+- Simulate TOMA response: verify DB transitions to `isReady: true`, `encryption.isInitialized: true`
+
+#### Phase 2 — UI
+
+**Step 5: CreateTPVModal encryption fields** (`CreateTPVModal.jsx`)
+- Add `isEncrypted` checkbox (disabled on edit)
+- Add `encryption.headerSize` input (visible when encrypted, default 16)
+- Pass fields through in `onFormSubmit()`
+
+**Step 6: ThinProvisioning.jsx encryption toolbar** (`ThinProvisioning.jsx`)
+- Import and render `InitEncryptionModal`, `PassphraseModal`
+- Add all encryption state variables and handlers (copy pattern from `Volumes.jsx`)
+- Add `<DropdownButton label="Encryption">` with all five items
+- Add `isPassphraseCmdDisabled` computed variable
+- Add Encryption status column to table
+
+**Step 7: UI integration test**
+- Create encrypted TPV from UI → verify "Init Required" status
+- Init Encryption from toolbar → verify modal, submission, status change
+- Passphrase operations → verify modal variations and success/error alerts
+- Acknowledge Error → verify error state clears
+
+#### Phase 3 — TOMA
+
+**Step 8: TOMA Kafka parsing** (`nvmeibt_kafka.c`)
+- Extend `parse_CMD()` to extract `cdvName`, `cdvUUID`, `cdvByteOffset`, `shadowSizeSectors` from JSON payload
+- Add fields to `encrypt_cmd_t` struct
+
+**Step 9: TOMA dm-linear shadow path** (`nvmeibt_kafka.c` / `nvmeibt_recovery.c`)
+- In `start_encrypt_action()`: if `cdv_name[0] != '\0'`, branch to dm-linear path
+- Construct `dmsetup create` command string
+- Construct `cryptsetup` command referencing `/dev/mapper/tpv_enc_<name>` instead of `/dev/nvmesh/e_<name>`
+- Cleanup: `dmsetup remove tpv_enc_<name>` (in both success and failure paths)
+
+**Step 10: TOMA integration test**
+- Send mock `initEncryption` Kafka message with CDV fields
+- Verify dm-linear device created, cryptsetup executed, device cleaned up
+- Verify response Kafka message with correct result code
+
+#### Phase 4 — End-to-end
+
+**Step 11: Full flow test**
+- Create CDV → create encrypted TPV → Init Encryption → verify LUKS header on CDV extent
+- Add/Rotate/Delete passphrase → verify each command lifecycle
+- Error scenarios: TOMA down, CDV full, concurrent encryption attempts
+
+### 5.13 Risks and Open Questions
+
+1. **First-extent pre-allocation timing**: The `createTPV()` function currently runs entirely within management. Adding an IB admin message (`CDV_ALLOC_EXTENT`) to the creation path introduces an async dependency on TOMA availability. If TOMA is down, encrypted TPV creation fails. Mitigation: document this requirement; the user can retry once TOMA is up.
+
+2. **dm-linear device naming collisions**: If two concurrent encryption commands target different TPVs on the same CDV on the same TOMA, the dm-linear device names (`tpv_enc_<tpv_name>`) are unique per-TPV. No collision risk as long as TPV names are unique (enforced by MongoDB `_id`).
+
+3. **Client-side LUKS open**: After encryption init, when a client attaches the encrypted TPV, the client's management agent must `cryptsetup open` the TPV block device. This is the same flow as regular encrypted volumes — the attach path already handles it. Verify that the TPV block device (`/dev/nvmesh/<tpv_name>`) is accessible to the client agent at attach time.
+
+4. **CDV extent 0 conflict**: The allocator tree (L1 table) occupies CDV extent 0 (first data extent at offset `A`). The pre-allocated encryption extent for a TPV must be a **data extent** (index ≥ 0 from the allocator's perspective), not the allocator area itself. The `CDV_ALLOC_EXTENT` message returns data extent indices that start after the allocator area, so there is no conflict.
+
+5. **Passphrase operations after TPV extend**: If a TPV is extended and new CDV extents are allocated, the LUKS header remains in the first extent. Passphrase operations still target only the LUKS header, so they work correctly regardless of subsequent extent allocations.
+
+---
+
