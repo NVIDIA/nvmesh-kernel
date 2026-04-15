@@ -264,6 +264,23 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 
 	/* ── Mapped READ or WRITE — snapshot offset under RCU ─────────────── */
 	phys_off = entry->phys_offset + intra_offset;
+
+	/*
+	 * sync_flush: if this entry hasn't been persisted yet, park the bio
+	 * so it doesn't reach CDV before flush_state writes the L1/L2 tree.
+	 * Without this, a second thread hitting a just-allocated (but
+	 * unpersisted) entry would bypass the sync_flush gate entirely.
+	 */
+	if (tpv->sync_flush && is_write && !READ_ONCE(entry->persisted)) {
+		unsigned long sflags;
+
+		rcu_read_unlock();
+		spin_lock_irqsave(&tpv->pending_bio_lock, sflags);
+		bio_list_add(&tpv->pending_l1_flush_bios, bio);
+		spin_unlock_irqrestore(&tpv->pending_bio_lock, sflags);
+		return 0;
+	}
+
 	rcu_read_unlock();
 
 	nvmeibc_tpv_cdv_submit_bio(tpv, bio, phys_off);

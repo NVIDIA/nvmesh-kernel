@@ -384,6 +384,19 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		    "TPV: @STR: L1 write failed rv=@INT",
 		    tpv->tpv_name, rv);
 
+	/* Mark all xarray entries as persisted so the IO path can release
+	 * parked sync_flush bios.  Only on success — failed flushes must
+	 * not let data reach CDV with an unpersisted mapping. */
+	if (!rv) {
+		struct nvmeibc_tpv_extent_entry *e;
+		unsigned long xi;
+
+		rcu_read_lock();
+		xa_for_each(&alloc->extent_map, xi, e)
+			WRITE_ONCE(e->persisted, true);
+		rcu_read_unlock();
+	}
+
 out:
 	vfree(l2);
 	vfree(l1_buf);
@@ -696,6 +709,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			}
 			ee->phys_offset      = phys;
 			ee->cdv_extent_index = data_idx;
+			ee->persisted        = true;
 
 			rv = xa_err(xa_store(&alloc->extent_map, V,
 					     ee, GFP_NOIO));
