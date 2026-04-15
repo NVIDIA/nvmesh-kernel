@@ -27,7 +27,7 @@
 	 Note that every seg has its own range of lockid (due to idx_in_praid)
    - A client (registrant) receives a legitimate lock_id from all segments (TOMAs),
 	 select one of them, and use it for registration on all segs
-   
+
    Objectives:
    - Say a client that registered with lock_id=0x13 unregistered (using a msg/client-cut-off/whatever)
 	 and the local_disk is still present (the seg preserved its locks table in mem)
@@ -43,7 +43,7 @@
 		 allocate from the next zone, we first call
 		 lock_id_cache_zone_purge_launch_ask_all_registrants_to_forget_recoverable_lockids_cache_in_zone()
 	     which usually does nothing, since even if we reuse a zone, it was used ages ago.
-   
+
    Players:
    - seg_active->stale_registrants_hash_by_lockid
    - reg_ctx->n_stale_locks
@@ -58,7 +58,7 @@
 	 - lock_id_cache_alloc()
 	   - __lock_id_cache_alloc
    - reg_lock_id_cache_last_allocated_lockid
-   
+
    Client side
    - A client registers with a lockid (that was suggested by one of the praid's TOMAs)
    - A client unregisters (using an UNREGISTER msg / physical-disconnect)
@@ -79,7 +79,7 @@
 			 then TOMA will return the original stale-lock (TOMA is aware of every stale-lock)
 	   - If not yet received LOCK_CLEANED for this lockid then
 	     - Send STALE_LOCK, and wait for LOCK_CLEANED
-   
+
    stale-lock Workflow:
    - Per TOMA
    - A subscribes with a client_messaging_handle, a 8 bytes number whose 4 MSB bytes
@@ -91,8 +91,8 @@
    - The registrant is unregistered (We know that it will not perform any lock/IO)
 	 For a stale-lock to be relevant, the seg_active must remain functional,
 	 hence either the client sent an RT_UNREGISTER, or was unsubscribed from the disk
-   
-   
+
+
    - launch_non_ioable_registrant_removal() // Called after we know that the registrant will not access the local segment or its locks
 	 - remove_longing_registrant_on_seg_by_ctx()
 	 - launch_existing_active_registrant_removal()	// For a registrant that was active
@@ -1596,7 +1596,7 @@ void nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_
 	NFIN;
 	// Remove leftovers of stale_locks. This will also remove the stale_registrants
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->stale_registrants_hash_by_purified_lockid) {
-	    nvmeibt_seg_active_delete_all_stale_locks_of_registrant(seg_active, reg_ctx);
+		nvmeibt_seg_active_delete_all_stale_locks_of_registrant(seg_active, reg_ctx);
 	}
 	NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
 		nvmeibt_register_terminate_reg_ctx(reg_ctx, 0, NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE, 0);

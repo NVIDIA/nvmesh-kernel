@@ -137,7 +137,6 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 	struct nvmeibt_disk_segment				*disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
 	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
 	struct nvmeibt_praid_topo_ctx			*praid_topo_ctx = nvmeibt_seg_active_get_praid_applied_topo(seg_active);
-
 	N_Tf(gtyu765, "seg=@UUID_8 lock_init_mode=@LOCK_INIT_MODE dirty_init_mode=@DIRTY_INIT_MODE",
 		nvmeibt_seg_active_UUID_8(seg_active),
 		mem_tbl_init_mode_str(seg_topo_ctx->stale_locks_init_mode),
@@ -228,59 +227,34 @@ out:
 	return is_stale_rebuild_required;
 }
 
-static int ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *blkset_info_init_val)
+static int ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_blkset_info *binfo)
 {
-	int										rv = 0;
-	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-
-	// NFIN;
-	seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
-	N_Tf(trace_ds_metadata_ds_metadata_init_non_EC_dirty_bits, "seg=@UUID_8 init_mode=@INIT_MODE_STR",
-		nvmeibt_seg_active_UUID_8(seg_active),
-		mem_tbl_init_mode_str(seg_topo_ctx->dirty_bits_init_mode));
-
-	switch (seg_topo_ctx->dirty_bits_init_mode) {
+	const enum NVMEIBT_MEM_TBL_INIT_MODE mode = seg_active->active_seg_topo.dirty_bits_init_mode;
+	binfo->bits.txid = INITIAL_LAZY_READ_TXID;		// TxID not used in mirror
+	switch (mode) {
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE:
-		break;
+		return 0;
 	case NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO:
-		 // If no convict given client will read data and compare before syncing - previously was marked dirty nvmeib_dbits_entry_build_for_seg(idx_in_praid ^ 1)
-		blkset_info_init_val->bits.dirty = calc_dirty_bits_by_topo(seg_active);
-		rv = 1;
-		break;
+		binfo->bits.dirty = calc_dirty_bits_by_topo(seg_active);
+		return 1;
 	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
-		rv = 1;
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST:
-	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
+		return 1;			// Init to zero dbit
 	default:
-		N_Ef(error_ds_metadata_ds_metadata_init_non_EC_dirty_bits, "init_mode=@INIT_MODE", seg_topo_ctx->dirty_bits_init_mode);
-		rv = -1;
-		break;
+		N_Ef(dgy76gs, "seg=@UUID_8, illegal init_mode=@INIT_MODE_STR", nvmeibt_seg_active_UUID_8(seg_active), mem_tbl_init_mode_str(mode));
+		return -1;
 	}
-	blkset_info_init_val->bits.txid = INITIAL_LAZY_READ_TXID;
-
-	NFOUT;
-	return rv;
 }
 
 static int ds_metadata_prepare_non_EC_stale_locks_init_val(struct nvmeibt_seg_active *seg_active, union nvmeib_lock_id *lock_id_init_val, bool *is_stale_rebuild_required)
 {
-	int	 									rv = 0;
-	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-	union nvmeib_lock_id					stale_lock_zero = { .all = 0 };
-
-	NFIN;
-	seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
-
-	N_Tf(u876gt2, "Received @MEM_CTL_INIT_MODE_STR", mem_tbl_init_mode_str(seg_topo_ctx->stale_locks_init_mode));
-
-	*lock_id_init_val = stale_lock_zero;
-	switch (seg_topo_ctx->stale_locks_init_mode) {
+	const struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
+	const enum NVMEIBT_MEM_TBL_INIT_MODE mode = seg_topo_ctx->stale_locks_init_mode;
+	*lock_id_init_val = (union nvmeib_lock_id){ .all = 0 };
+	switch (mode) {
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT:
-		break;
 	case NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE:
-		break;
+		return 0;
 	case NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO:
 		if (nvmeibt_disk_segment_is_competent_owner(seg_topo_ctx)) {
 			*lock_id_init_val = nvmeib_stale_special_raid1.lock_id;
@@ -288,22 +262,14 @@ static int ds_metadata_prepare_non_EC_stale_locks_init_val(struct nvmeibt_seg_ac
 		} else {
 			nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
 		}
-		rv = 1;
-		break;
+		return 1;
 	case NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER:
 		nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
-		rv = 1;
-		break;
-	case NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST:
-	case NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN:
+		return 1;
 	default:
-		N_Ef(gy76x29, "init_mode=@INIT_MODE", seg_topo_ctx->stale_locks_init_mode);
-		rv = -1;
-		break;
+		N_Ef(dgy76gt, "seg=@UUID_8, illegal init_mode=@INIT_MODE_STR", nvmeibt_seg_active_UUID_8(seg_active), mem_tbl_init_mode_str(mode));
+		return -1;
 	}
-
-	NFOUT;
-	return rv;
 }
 
 bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_active)
