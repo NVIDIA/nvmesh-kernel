@@ -941,23 +941,15 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 	if (!alloc->ondisk_loaded) {
 		cdv_ondisk_scan_async(cdv_uuid, alloc);
 		/*
-		 * Scan dispatched to worker thread (or already in flight).
-		 * If the allocator has known in-memory extents, we must
-		 * retry (we might be missing some from disk).  If it has
-		 * none, return 0 extents — either this is a fresh CDV
-		 * or a restart scenario where recovery will adopt
-		 * orphans once TOMA disk I/O is available.
+		 * Scan dispatched to worker thread (or already in flight.
+		 * We cannot distinguish "fresh CDV" from "restart race" until
+		 * the scan completes — return -EAGAIN so the client retries
+		 * once the scan finishes and ondisk_loaded becomes true.
 		 */
-		if (alloc->n_allocated > 0) {
-			N_Wf(cdv_list_not_ready,
-			     "CDV-alloc: list cdv=@STR tpv=@STR ondisk scan in progress (n_alloc=@LLU); returning EAGAIN",
-			     cdv_uuid, tpv_uuid, alloc->n_allocated);
-			return -EAGAIN;
-		}
-		N_Wf(cdv_list_scan_deferred,
-		     "CDV-alloc: list cdv=@STR tpv=@STR scan in progress, 0 in-memory extents; returning empty",
-		     cdv_uuid, tpv_uuid);
-		/* Fall through — return 0 extents. */
+		N_Wf(cdv_list_not_ready,
+		     "CDV-alloc: list cdv=@STR tpv=@STR ondisk scan in progress (n_alloc=@LLU); returning EAGAIN",
+		     cdv_uuid, tpv_uuid, alloc->n_allocated);
+		return -EAGAIN;
 	}
 
 	/* Count matches first to size the output array. */
