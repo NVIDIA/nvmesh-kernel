@@ -49,6 +49,11 @@
 
 extern unsigned nvmeibc_io_max_retry_secs;
 
+bool tp_verify_l1_l2_extent_ownership;
+module_param(tp_verify_l1_l2_extent_ownership, bool, 0644);
+MODULE_PARM_DESC(tp_verify_l1_l2_extent_ownership,
+		 "Verify L1/L2 tree entries reference owned CDV extents during load_state");
+
 /* ── Forward declarations for sibling implementation files ────────────── */
 
 /* nvmeibc_tpv_io.c */
