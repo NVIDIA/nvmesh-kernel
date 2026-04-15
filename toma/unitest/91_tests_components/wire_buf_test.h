@@ -41,6 +41,8 @@ struct section_merge_test_ctx {
 // X-macro test list: X(func_name, "Test Name", "Description")
 //
 #define WIRE_BUF_TEST_LIST \
+	/************************* Serialized struct helpers ****************/ \
+	X(topo_idx_updated_getter_setter,				"topo_idx_updated getter/setter round-trip",	"Verifies split-field get/set for zero, positive, negative, and high-bit values") \
 	/************************* Complete merges *************************/ \
 	/* -- Complete: topo -- */ \
 	X(complete_topo_replaces,						"Complete topo replaces old",				"Old complete + new complete => output == new") \

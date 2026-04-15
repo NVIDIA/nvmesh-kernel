@@ -2828,16 +2828,7 @@ void nvmeibt_topology_convert_wire_topo_buf_to_serialized(struct nvmeibt_Buf *se
 {
 	N_Tf(dgtqbdo, "len=@SIZE_T", wire->buf_len);
 	if (wire->buf_len) {
-		// When converting from old wire format (smaller praid headers) to current format,
-		// the output buffer may need to be larger. Add extra space per praid for safety.
-		// In the worst case, each praid header grows by (sizeof(current) - sizeof(old)).
-		size_t extra_per_praid = sizeof(struct nvmeibt_praid_serialized_topo) - NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x310;
-		struct nvmeibt_topology_serialized_topo_header wire_header;
-		size_t out_size = 0;
-
-		nvmeibt_topology_convert_header_le_be((struct nvmeibt_topology_serialized_topo_header *)wire->data_buf, &wire_header);
-		out_size = wire->buf_len + (extra_per_praid * wire_header.praids_num);
-		NNVMEIBT_BUF_RESIZE(ciurz7q, serialized, out_size);
+		NNVMEIBT_BUF_RESIZE(ciurz7q, serialized, wire->buf_len);
 		memset(serialized->data_buf, 0, serialized->buf_len);
 		nvmeibt_convert_topo_le_be(wire->data_buf, serialized->data_buf, 0, JSON_output);
 	}

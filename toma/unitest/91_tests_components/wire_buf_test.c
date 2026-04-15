@@ -98,11 +98,11 @@ static int craft_topo_buf(char *buf, int buf_size,
 		memcpy(host_praid.eyecatcher, "PRAD", 4);
 		host_praid.uuid = praids[i].uuid;
 		host_praid.segs_num = (int8_t)praids[i].segs_num;
-		host_praid.topo_idx_updated = praids[i].topo_idx_updated;
+		nvmeibt_praid_serialized_set_topo_idx_updated(&host_praid, praids[i].topo_idx_updated);
 		host_praid.praid_version_major = praids[i].praid_version_major;
 		host_praid.praid_version_minor = praids[i].praid_version_minor;
 		host_praid.is_activated = 1;
-		nvmeibt_praid_convert_topo_le_be(&host_praid, p, TOMA_SW_COMPATIBILITY_VER);
+		nvmeibt_praid_convert_topo_le_be(&host_praid, p);
 		ptr += sizeof(*p);
 
 		for (int j = 0; j < praids[i].segs_num; j++) {
@@ -155,7 +155,7 @@ static struct nvmeibt_praid_serialized_topo *find_praid_in_topo(char *topo_data,
 	for (int i = 0; i < header.praids_num; i++) {
 		struct nvmeibt_praid_serialized_topo host_praid;
 
-		nvmeibt_praid_convert_topo_le_be(p, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+		nvmeibt_praid_convert_topo_le_be(p, &host_praid);
 		if (ARE_UUID_EQ(&host_praid.uuid, target_uuid)) {
 			return p;
 		}
@@ -174,6 +174,69 @@ static int get_topo_praid_count(const char *topo_data)
 
 	nvmeibt_topology_convert_header_le_be((struct nvmeibt_topology_serialized_topo_header *)topo_data, &header);
 	return header.praids_num;
+}
+
+/*******************    Serialized struct helpers    ***************************/
+
+DEFINE_TEST(topo_idx_updated_getter_setter)
+{
+	struct nvmeibt_praid_serialized_topo	p;
+	int64_t									val;
+	int										rv = -1;
+
+	(void)_ctx;
+
+	// Zero
+	memset(&p, 0, sizeof(p));
+	nvmeibt_praid_serialized_set_topo_idx_updated(&p, 0);
+	val = nvmeibt_praid_serialized_get_topo_idx_updated(&p);
+	TEST_ASSERT_EQ(val, 0);
+
+	// Small positive
+	nvmeibt_praid_serialized_set_topo_idx_updated(&p, 42);
+	val = nvmeibt_praid_serialized_get_topo_idx_updated(&p);
+	TEST_ASSERT_EQ(val, 42);
+
+	// -1 (uninitialized sentinel)
+	nvmeibt_praid_serialized_set_topo_idx_updated(&p, -1);
+	val = nvmeibt_praid_serialized_get_topo_idx_updated(&p);
+	TEST_ASSERT_EQ(val, -1);
+
+	// Negative sentinels used in incremental merge
+	nvmeibt_praid_serialized_set_topo_idx_updated(&p, -2);
+	val = nvmeibt_praid_serialized_get_topo_idx_updated(&p);
+	TEST_ASSERT_EQ(val, -2);
+
+	nvmeibt_praid_serialized_set_topo_idx_updated(&p, -3);
+	val = nvmeibt_praid_serialized_get_topo_idx_updated(&p);
+	TEST_ASSERT_EQ(val, -3);
+
+	// Packed value: raft_term=1 in upper 32, counter=100 in lower 32
+	nvmeibt_praid_serialized_set_topo_idx_updated(&p, (1LL << 32) | 100);
+	val = nvmeibt_praid_serialized_get_topo_idx_updated(&p);
+	TEST_ASSERT_EQ(val, (1LL << 32) | 100);
+
+	// Large raft_term in upper 32 bits
+	nvmeibt_praid_serialized_set_topo_idx_updated(&p, (0x7FFFFFFFLL << 32) | 0xFFFFFFFF);
+	val = nvmeibt_praid_serialized_get_topo_idx_updated(&p);
+	TEST_ASSERT_EQ(val, (0x7FFFFFFFLL << 32) | 0xFFFFFFFF);
+
+	// Verify byte-swap round-trip through convert function
+	{
+		struct nvmeibt_praid_serialized_topo	host, wire, back;
+		int64_t								test_val = (5LL << 32) | 999;
+
+		memset(&host, 0, sizeof(host));
+		nvmeibt_praid_serialized_set_topo_idx_updated(&host, test_val);
+		nvmeibt_praid_convert_topo_le_be(&host, &wire);
+		nvmeibt_praid_convert_topo_le_be(&wire, &back);
+		val = nvmeibt_praid_serialized_get_topo_idx_updated(&back);
+		TEST_ASSERT_EQ(val, test_val);
+	}
+
+	rv = 0;
+out:
+	return rv;
 }
 
 /*************************    Complete merges    *******************************/
@@ -600,8 +663,8 @@ DEFINE_TEST(incremental_topo_single_praid_updated)
 
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 20);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
 	rv = 0;
 out:
@@ -650,8 +713,8 @@ DEFINE_TEST(incremental_topo_single_praid_not_updated)
 
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 20);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
 	rv = 0;
 out:
@@ -701,21 +764,21 @@ DEFINE_TEST(incremental_topo_multi_praid_partial_update)
 
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 10);
 
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[1].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 3);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 30);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 30);
 
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[2].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 10);
 	rv = 0;
 out:
 	return rv;
@@ -770,9 +833,9 @@ DEFINE_TEST(incremental_topo_multi_praid_all_updated)
 	for (int i = 0; i < 3; i++) {
 		found = find_praid_in_topo(ctx->dst_buf, &old_praids[i].uuid);
 		TEST_ASSERT_NOT_NULL(found);
-		nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+		nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 		TEST_ASSERT_EQ(host_praid.praid_version_major, 5);
-		TEST_ASSERT_EQ(host_praid.topo_idx_updated, 50);
+		TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 50);
 	}
 	rv = 0;
 out:
@@ -836,17 +899,17 @@ DEFINE_TEST(incremental_topo_praid_with_segments)
 	// Updated praid: from incremental wire, has 2 segs
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 20);
 	TEST_ASSERT_EQ((int)nvmeibt_praid_wire_get_n_segs(found), 2);
 
 	// Kept praid: re-serialized from hash committed state (0 segs in test helper)
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[1].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 10);
 	TEST_ASSERT_EQ((int)nvmeibt_praid_wire_get_n_segs(found), 0);
 	rv = 0;
 out:
@@ -906,10 +969,10 @@ DEFINE_TEST(incremental_topo_praid_seg_count_changes)
 
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ((int)nvmeibt_praid_wire_get_n_segs(found), 3);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 20);
 	rv = 0;
 out:
 	return rv;
@@ -962,16 +1025,16 @@ DEFINE_TEST(incremental_topo_extra_uuid_ignored)
 	// New praid from incremental is included
 	found = find_praid_in_topo(ctx->dst_buf, &incr_praids[0].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 9);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 50);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 50);
 
 	// Old praid from hash is also present (appended in phase 2)
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 10);
 	rv = 0;
 out:
 	return rv;
@@ -1026,21 +1089,21 @@ DEFINE_TEST(incremental_topo_ordering_differs)
 	// A and C updated, B unchanged
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 4);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 40);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 40);
 
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[1].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 10);
 
 	found = find_praid_in_topo(ctx->dst_buf, &old_praids[2].uuid);
 	TEST_ASSERT_NOT_NULL(found);
-	nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 	TEST_ASSERT_EQ(host_praid.praid_version_major, 4);
-	TEST_ASSERT_EQ(host_praid.topo_idx_updated, 40);
+	TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 40);
 	rv = 0;
 out:
 	return rv;
@@ -1089,9 +1152,9 @@ DEFINE_TEST(incremental_topo_same_idx_keeps_old)
 
 		found = find_praid_in_topo(ctx->dst_buf, &old_praids[0].uuid);
 		TEST_ASSERT_NOT_NULL(found);
-		nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+		nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 		TEST_ASSERT_EQ(host_praid.praid_version_major, 1);
-		TEST_ASSERT_EQ(host_praid.topo_idx_updated, 10);
+		TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 10);
 	}
 	rv = 0;
 out:
@@ -1152,9 +1215,9 @@ DEFINE_TEST(incremental_topo_large_praid_count)
 
 		found = find_praid_in_topo(ctx->dst_buf, &old_praids[i].uuid);
 		TEST_ASSERT_NOT_NULL(found);
-		nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
+		nvmeibt_praid_convert_topo_le_be(found, &host_praid);
 		TEST_ASSERT_EQ(host_praid.praid_version_major, expected_ver);
-		TEST_ASSERT_EQ(host_praid.topo_idx_updated, expected_idx);
+		TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), expected_idx);
 	}
 	rv = 0;
 out:
@@ -3102,8 +3165,8 @@ DEFINE_TEST(topo_incremental_configs_complete_inplace)
 
 		found = find_praid_in_topo(topo_data_out, &old_praids[0].uuid);
 		TEST_ASSERT_NOT_NULL(found);
-		nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
-		TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+		nvmeibt_praid_convert_topo_le_be(found, &host_praid);
+		TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 20);
 		TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
 	}
 	persist_and_wire_buf_validate_len(dst);
@@ -3233,8 +3296,8 @@ DEFINE_TEST(all_sections_incremental_full_merge)
 
 		found = find_praid_in_topo(topo_data_out, &old_praids[0].uuid);
 		TEST_ASSERT_NOT_NULL(found);
-		nvmeibt_praid_convert_topo_le_be(found, &host_praid, TOMA_SW_COMPATIBILITY_VER);
-		TEST_ASSERT_EQ(host_praid.topo_idx_updated, 20);
+		nvmeibt_praid_convert_topo_le_be(found, &host_praid);
+		TEST_ASSERT_EQ(nvmeibt_praid_serialized_get_topo_idx_updated(&host_praid), 20);
 		TEST_ASSERT_EQ(host_praid.praid_version_major, 2);
 	}
 

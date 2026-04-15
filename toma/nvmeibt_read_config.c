@@ -640,9 +640,10 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		// sanity check
 		if (header->sw_ver != TOMA_SW_COMPATIBILITY_VER) {
 			// Allow backward compatible versions during hot upgrade
-			if (header->sw_ver == 0x00000310 || header->sw_ver == 0x00020800) {
-				// 0x00000310: v3.1->v3.3 transition (topo_idx_updated added to praid serialized topo)
+			if (header->sw_ver == 0x00020800) {
 				// 0x00020800: v2.8->v3.1 transition (sw_ver format change only)
+				// Note: 0x330 global topo is NOT accepted here because praid headers were 56 bytes
+				// (vs 48 now), and the parser would misalign. On rollback, the leader re-sends in 0x310 format.
 				N_Tf(qnbvd68, "Received topo from older TOMA sw_ver=@HEX08, current=@HEX08", header->sw_ver, TOMA_SW_COMPATIBILITY_VER);
 			} else {
 				N_Ef(qnbvd67, "Unknown structs version=@HEX08", header->sw_ver);
@@ -694,7 +695,7 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		nvmeibt_topology_convert_follower_header_le_be(header_ptr);
 		// sanity check
 		if (header_ptr->sw_ver != TOMA_SW_COMPATIBILITY_VER) {
-			if (header_ptr->sw_ver == 0x00000310 || header_ptr->sw_ver == 0x00020800) {
+			if (header_ptr->sw_ver == 0x00020800) {
 				N_Tf(dpli982, "Received active topo from older TOMA sw_ver=@HEX08", header_ptr->sw_ver);
 			} else {
 				N_Ef(dpli981, "Unknown structs version=@HEX08", header_ptr->sw_ver);

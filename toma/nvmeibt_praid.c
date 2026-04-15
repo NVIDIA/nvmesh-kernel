@@ -716,7 +716,7 @@ void nvmeibt_serialize_praid_lot_topo_to_wire(struct nvmeibt_praid_lot *praid_lo
 	serialized_praid.leader_did_all_segs_sync_registrants = praid_topo->leader_did_all_segs_sync_registrants;
 	serialized_praid.is_activated = praid_topo->is_activated;
 	serialized_praid.segs_num = n_segs;
-	serialized_praid.topo_idx_updated = praid_topo->topo_idx_updated;
+	nvmeibt_praid_serialized_set_topo_idx_updated(&serialized_praid, praid_topo->topo_idx_updated);
 
 	// Serialize disk_segments
 	seg_wire_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)out_segs_wire_topo_buf;
@@ -725,7 +725,7 @@ void nvmeibt_serialize_praid_lot_topo_to_wire(struct nvmeibt_praid_lot *praid_lo
 		seg_wire_topo_ptr++;
 	}
 
-	nvmeibt_praid_convert_topo_le_be(&serialized_praid, out_praid_wire_topo, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_praid_convert_topo_le_be(&serialized_praid, out_praid_wire_topo);
 
 	NFOUT;
 }
@@ -927,7 +927,8 @@ enum nvmeibt_add_rv nvmeibt_praid_upd_committed_topo(struct nvmeibt_praid_serial
 		nvmeibt_praid_UUID(praid),
 		praid_topo_ptr->praid_version_major, praid_topo_ptr->praid_version_minor,
 		committed_topo->praid_version_major, committed_topo->praid_version_minor,
-		praid_topo_ptr->is_activated, committed_topo->is_activated, praid_topo_ptr->topo_idx_updated, committed_topo->topo_idx_updated);
+		praid_topo_ptr->is_activated, committed_topo->is_activated,
+		nvmeibt_praid_serialized_get_topo_idx_updated(praid_topo_ptr), committed_topo->topo_idx_updated);
 
 	memset(committed_topo, 0, sizeof(*committed_topo));
 	committed_topo->praid_version_major = praid_topo_ptr->praid_version_major;
@@ -935,7 +936,7 @@ enum nvmeibt_add_rv nvmeibt_praid_upd_committed_topo(struct nvmeibt_praid_serial
 	committed_topo->registrants_sync_cmd = praid_topo_ptr->registrants_sync_cmd;
 	committed_topo->leader_did_all_segs_sync_registrants = praid_topo_ptr->leader_did_all_segs_sync_registrants;
 	committed_topo->is_activated = praid_topo_ptr->is_activated;
-	committed_topo->topo_idx_updated = praid_topo_ptr->topo_idx_updated;
+	committed_topo->topo_idx_updated = nvmeibt_praid_serialized_get_topo_idx_updated(praid_topo_ptr);
 	praid->was_praid_ever_activated |= praid_topo_ptr->is_activated;
 
 	rv = NVMEIBT_ADD_MODIFIED;

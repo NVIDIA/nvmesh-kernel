@@ -139,8 +139,6 @@ void read_rpc_config_from_persist(bool is_initial_read)
 #else
 		goto continue_reading;
 #endif
-	} else if (sw_ver == 0x00000310) {
-		N_WTf(hj3a06n, "SW_VER old but compatible @X != @X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
 	} else if (sw_ver != TOMA_SW_COMPATIBILITY_VER) {
 		N_WTf(hj3a05n, "SW_VER mismatch @X != @X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
 		if (is_initial_read) {
@@ -262,9 +260,6 @@ void update_traces(void) {
 #else
 		goto continue_reading;
 #endif
-	} else if (sw_ver == 0x00000310) {
-		N_WTf(hj3836n, "SW_VER old but compatible @X != @X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
-
 	} else if (sw_ver != TOMA_SW_COMPATIBILITY_VER) {
 		N_WTf(hj3835n, "SW_VER mismatch @X!=@X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
 		if (is_initial_read) {

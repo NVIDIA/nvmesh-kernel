@@ -1206,7 +1206,7 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
 		int										new_praid_total_size = 0;
 		int64_t									old_topo_idx_updated = 0;
 
-		nvmeibt_praid_convert_topo_le_be(new_praid_ptr, &new_serialized_praid, TOMA_SW_COMPATIBILITY_VER);
+		nvmeibt_praid_convert_topo_le_be(new_praid_ptr, &new_serialized_praid);
 		new_praid_segs_num = LE_SWAP8(new_praid_ptr->segs_num);
 		new_praid_total_size = sizeof(*new_praid_ptr) + new_praid_segs_num * sizeof(struct nvmeibt_serialized_seg_leader_topo);
 
@@ -1226,7 +1226,7 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
 		}
 
 		// Compare versions: use newer incremental or re-serialize from committed hash state
-		if (old_topo_idx_updated < new_serialized_praid.topo_idx_updated) {
+		if (old_topo_idx_updated < nvmeibt_praid_serialized_get_topo_idx_updated(&new_serialized_praid)) {
 			// Incremental is newer: copy from wire buffer
 			if (dst_data_ptr) {
 				memcpy(*dst_data_ptr, new_praid_ptr, new_praid_total_size);

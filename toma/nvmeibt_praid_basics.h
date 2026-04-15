@@ -46,7 +46,7 @@ struct nvmeibt_praid_topo_ctx {
 																	// - Early stop of leader's calculation
 	int										praid_version_major;	// Increased upon every praid change that affects clients
 	int										praid_version_minor;	// Increased upon every praid change
-	int64_t									topo_idx_updated;	// Last topo version in which the praid was updated
+	int64_t									topo_idx_updated;		// Last topo version in which the praid was updated
 	enum PRAID_REGISTRANTS_SYNC_CMD			registrants_sync_cmd;
 	int										leader_did_all_segs_sync_registrants;	// Used only ib the leader's context
 };
@@ -62,24 +62,31 @@ struct nvmeibt_praid_config {
 
 struct nvmeibt_praid_serialized_topo {
 	char									eyecatcher[4];							// 4
-    int										res_1;									// 8
+	int										topo_idx_updated_hi;					// 8  (upper 32 bits of topo_idx_updated, carried in former res_1)
 	union nvmeib_uuid						uuid;									// 24
 	int										praid_version_major;					// 28
 	int										praid_version_minor;					// 32
 	int										leader_did_all_segs_sync_registrants;	// 36
 	enum PRAID_REGISTRANTS_SYNC_CMD			registrants_sync_cmd:32;				// 40
-	int										res_2;									// 44
+	int										topo_idx_updated_lo;					// 44 (lower 32 bits of topo_idx_updated, carried in former res_2)
 	int16_t									res_3;									// 46
 	BOOL									is_activated;							// 47
 	int8_t									segs_num;								// 48
-	int64_t									topo_idx_updated;						// 56
-	struct nvmeibt_serialized_seg_leader_topo		segs[0] __attribute__((aligned(8)));	// 56
+	struct nvmeibt_serialized_seg_leader_topo		segs[0] __attribute__((aligned(8)));	// 48
 } __attribute__((packed, aligned(8)));
 
-// Size of the old praid serialized topo (v0x310), before topo_idx_updated was added.
-// The old struct had segs[0] at offset 48 (after segs_num at 47), with aligned(8) having no effect since packed.
-// Used for backward compatibility during hot upgrade when parsing wire data from older TOMAs.
-#define NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x310	48
+// topo_idx_updated is split across two non-contiguous int32 fields (former res_1, res_2) so the
+// serialized struct stays at 48 bytes -- wire-compatible with old TOMAs that silently ignore reserved fields.
+static inline int64_t nvmeibt_praid_serialized_get_topo_idx_updated(const struct nvmeibt_praid_serialized_topo *p)
+{
+	return ((int64_t)p->topo_idx_updated_hi << 32) | ((uint32_t)p->topo_idx_updated_lo);
+}
+
+static inline void nvmeibt_praid_serialized_set_topo_idx_updated(struct nvmeibt_praid_serialized_topo *p, int64_t val)
+{
+	p->topo_idx_updated_hi = (int32_t)(val >> 32);
+	p->topo_idx_updated_lo = (int32_t)(val & 0xFFFFFFFF);
+}
 
 static inline int8_t nvmeibt_praid_wire_get_n_segs(const struct nvmeibt_praid_serialized_topo *praid)
 {
