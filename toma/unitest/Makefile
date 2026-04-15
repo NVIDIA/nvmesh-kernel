@@ -90,9 +90,17 @@ LIBS  = -lpthread -lm -ldl
 
 # Note: USE_SANITIZERS makes executable much larger, affects profiling
 USE_SANITIZERS ?= 1
+
+# Note: USE_GCOV enables gcov coverage instrumentation. Disable sanitizers when using coverage.
+# Quick start:
+#   sudo apt install lcov  (or: sudo dnf install lcov)
+#   ./run coverage
+# This builds with gcov, runs tests, and generates:
+#   build/coverage/html/index.html  - browsable HTML report
+#   lcov.info                       - for IDE extensions (e.g. Coverage Gutters in VSCode/Cursor)
 USE_GCOV ?= 0
 ifeq ($(USE_GCOV),1)
-	CFLAGS += --coverage -fprofile-abs-path
+	CFLAGS += --coverage -fprofile-abs-path -fprofile-update=atomic
 	LDFLAGS += --coverage
 	USE_SANITIZERS=0
 endif
