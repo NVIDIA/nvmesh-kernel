@@ -587,6 +587,11 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	int      rv;
 	bool     retry_pending = false;
 
+	_NI(tpv_alloc_work_enter,
+	    "TPV @STR: cdv_alloc_work: free=@LLU wm=@LLU cdv_extents=@LLU",
+	    tpv->tpv_name, alloc->free_tpv_extent_count,
+	    alloc->low_watermark, alloc->cdv_extents_count);
+
 	if (atomic_read(&tpv->state) == TPV_DETACHING)
 		goto out_clear_pending;
 

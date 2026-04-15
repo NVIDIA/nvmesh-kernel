@@ -21,6 +21,7 @@
 #include "nvmeibt_mm_json.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_topology.h"
+#include "nvmeibt_cdv_alloc.h"
 /*
  * The protocol with MGMT is described in:
  * https://nvidia-my.sharepoint.com/:w:/r/personal/tleibo_nvidia_com/_layouts/15/doc2.aspx?sourcedoc=%7B42ddc038-38b6-493c-a722-cd3c63c48d06%7D&action=edit&wdPid=79c0c0e&cid=59845700-e917-4431-a94a-eab1034bff32
@@ -1156,18 +1157,40 @@ struct generic_CMD_params_ctx {
 	int								blockSize;
 	int								metadataSize;
 	struct nvmeibt_urn_uuid			dbUUID;
-	struct resend_report_disk_ctx	disks_to_report[NVMEIBT_MAX_N_DISKS_PER_NODE];
-	int								n_disks_to_report;
-	struct send_praid_report_ctx	praids_to_report[NVMEIBT_MAX_N_PRAIDS];
-	int								n_praids_to_report;
-	int								encryptionCommandIndex;
-	int								slot;
-	int								keySize;
-	char							passphrase[PASSPHRASE_MAX_LEN];
-	char							newPassphrase[PASSPHRASE_MAX_LEN];
-	struct nvmeibt_ascii_uuid		native_serial;
-	int								nsid;
-	char							native_nguid[32];
+	union {
+		struct report_disks_t {
+			struct resend_report_disk_ctx	arr[NVMEIBT_MAX_N_DISKS_PER_NODE];
+			int								num;
+		} report_disks;
+		struct report_praids_t {
+			struct send_praid_report_ctx	arr[128 + 0 *NVMEIBT_MAX_N_PRAIDS];		// Dont allow this struct to be huge. If mgmt wants more than N praids in report, Toma will send at most N and later magmt can request the remaining praids
+			int								num;
+		} report_praids;
+		struct encrypt_cmd_t {
+			int								commandIndex;
+			int								slot;
+			int								keySize;
+			char							passphrase[   PASSPHRASE_MAX_LEN];
+			char							newPassphrase[PASSPHRASE_MAX_LEN];
+		} enc;
+		struct format_disk_cmd_t {
+			struct nvmeibt_ascii_uuid		ldisk_id;
+			char							formatType[32];
+			struct nvmeibt_ascii_uuid		native_serial;
+			int								nsid;
+			int								formatRequestCounter;
+			char							native_nguid[32];
+			int								blockSize;
+			int								metadataSize;
+			unsigned int					vendor;
+		} fmt;
+		struct cdv_free_all_t {
+			char							cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+			char							tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+			uint32_t						allocator_size_gb;
+			uint32_t						cdv_extent_size_mb;
+		} cdv_free_all;
+	};
 };
 
 static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params)
@@ -1312,6 +1335,59 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 						N_Ef(meiyzx5, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
 					}
 				}
+			} else if (!strcmp(payload_kv->key, "tomaToken")) {
+				CMD_params->tomaToken = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "diskID")) {
+				nvmeibt_strlcpy(CMD_params->fmt.ldisk_id.str, payload_kv->value->str, sizeof(CMD_params->fmt.ldisk_id.str));
+			} else if (!strcmp(payload_kv->key, "uuid")) {
+				nvmeibt_strlcpy(CMD_params->generic_uuid, payload_kv->value->str, sizeof(CMD_params->generic_uuid));
+			} else if (!strcmp(payload_kv->key, "vendor")) {
+				CMD_params->fmt.vendor = payload_kv->value->num;	// Such as 0x144d
+			} else if (!strcmp(payload_kv->key, "formatRequestCounter")) {
+				CMD_params->fmt.formatRequestCounter = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "blockSize")) {
+				CMD_params->fmt.blockSize = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "metadataSize")) {
+				CMD_params->fmt.metadataSize = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "dbUUID")) {
+				nvmeibt_strlcpy(CMD_params->dbUUID.str, payload_kv->value->str, sizeof(CMD_params->dbUUID.str));
+			} else if (!strcmp(payload_kv->key, "formatType")) {
+				nvmeibt_strlcpy(CMD_params->fmt.formatType, payload_kv->value->str, sizeof(CMD_params->fmt.formatType));
+			} else if (!strcmp(payload_kv->key, "volumeID")) {			// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "volumeName")) {		// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "volumeUUID")) {
+				nvmeibt_urn_uuid_to_union_uuid(&CMD_params->volumeUUID,(struct nvmeibt_urn_uuid *)(payload_kv->value->str));
+			} else if (!strcmp(payload_kv->key, "reservationMode")) {	// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "reservationVersion")) {
+				CMD_params->reservationVersion = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "encryptionCommandIndex")) {
+				CMD_params->enc.commandIndex = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "slot") || !strcmp(payload_kv->key, "currentSlot")) {
+				CMD_params->enc.slot = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "keySize")) {
+				CMD_params->enc.keySize = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "passphrase") || !strcmp(payload_kv->key, "currentPassphrase")) {
+				nvmeibt_strlcpy(CMD_params->enc.passphrase, payload_kv->value->str, sizeof(CMD_params->enc.passphrase));
+			} else if (!strcmp(payload_kv->key, "newPassphrase")) {
+				nvmeibt_strlcpy(CMD_params->enc.newPassphrase, payload_kv->value->str, sizeof(CMD_params->enc.newPassphrase));
+			} else if (!strcmp(payload_kv->key, "bootTime")) {
+				CMD_params->bootTime = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "serial")) {
+				nvmeibt_strlcpy(CMD_params->fmt.native_serial.str, payload_kv->value->str, sizeof(CMD_params->fmt.native_serial.str));
+			} else if (!strcmp(payload_kv->key, "nsid")) {
+				CMD_params->fmt.nsid = payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "nguid")) {
+				nvmeibt_strlcpy(CMD_params->fmt.native_nguid, payload_kv->value->str, sizeof(CMD_params->fmt.native_nguid));
+			} else if (!strcmp(payload_kv->key, "cdvUUID")) {
+				nvmeibt_strlcpy(CMD_params->cdv_free_all.cdv_uuid, payload_kv->value->str, sizeof(CMD_params->cdv_free_all.cdv_uuid));
+			} else if (!strcmp(payload_kv->key, "tpvUUID")) {
+				nvmeibt_strlcpy(CMD_params->cdv_free_all.tpv_uuid, payload_kv->value->str, sizeof(CMD_params->cdv_free_all.tpv_uuid));
+			} else if (!strcmp(payload_kv->key, "allocatorSizeGB")) {
+				CMD_params->cdv_free_all.allocator_size_gb = (uint32_t)payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "cdvExtentSizeMB")) {
+				CMD_params->cdv_free_all.cdv_extent_size_mb = (uint32_t)payload_kv->value->num;
+			} else {
+				N_Tf(__AUTOID__, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
 			break;	// Do we need to break after parsing the payload? Probably meaningless
 		}
@@ -2652,6 +2728,25 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 			struct send_praid_report_ctx	*prd = &(CMD_params->praids_to_report[i]);
 			N_Ef(stamvuk, "uuid=@STR lastKnownVersion_major=@INT lastKnownVersion_minor=@INT lastKnownVersion_raft_term=@LU",
 				 prd->praid_uuid, prd->lastKnownVersion_major, prd->lastKnownVersion_minor, prd->lastKnownVersion_raft_term);
+		}
+	} else if (strcmp(messageType_params->messageType, "cdvAllocatorFreeAll") == 0) {
+		const struct cdv_free_all_t *cfa = &CMD_params->cdv_free_all;
+
+		N_If(cdv_free_all_cmd,
+		     "CDV: cdvAllocatorFreeAll cdv=@STR tpv=@STR allocator_size_gb=@UINT cdv_extent_size_mb=@UINT",
+		     cfa->cdv_uuid, cfa->tpv_uuid, cfa->allocator_size_gb, cfa->cdv_extent_size_mb);
+
+		if (cfa->cdv_uuid[0] == '\0' || cfa->tpv_uuid[0] == '\0') {
+			N_Ef(cdv_free_all_cmd_bad,
+			     "CDV: cdvAllocatorFreeAll missing cdv_uuid or tpv_uuid; ignoring");
+		} else if (cfa->allocator_size_gb == 0 || cfa->cdv_extent_size_mb == 0) {
+			N_Ef(cdv_free_all_cmd_bad_geo,
+			     "CDV: cdvAllocatorFreeAll cdv=@STR invalid geometry allocator_size_gb=@UINT cdv_extent_size_mb=@UINT; ignoring",
+			     cfa->cdv_uuid, cfa->allocator_size_gb, cfa->cdv_extent_size_mb);
+		} else {
+			nvmeibt_cdv_alloc_free_all_for_tpv(cfa->cdv_uuid, cfa->tpv_uuid,
+							   cfa->allocator_size_gb,
+							   cfa->cdv_extent_size_mb);
 		}
 	} else if (strcmp(messageType_params->messageType, "--- shutdown_me ---") == 0) {
 		N_Ef(p53ksmnz753bh, "******************** Use handle_update_state_shutdown() in the commands consumer");

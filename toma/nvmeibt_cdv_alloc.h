@@ -281,6 +281,33 @@ struct nvmeibt_registrant_ctx;
 void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx *reg_ctx);
 
 /*
+ * nvmeibt_cdv_alloc_free_all_for_tpv — release all CDV extents owned by a TPV
+ * and zero the flat-L1 tree extent (CDV_extent[0]).
+ *
+ * Called from the Kafka CDVAllocatorFreeAll handler when a TPV is deleted.
+ * The function:
+ *   1. Finds (or creates) the per-CDV allocator; scans on-disk state if not yet
+ *      loaded (handles TOMA-restart-before-handler race).
+ *   2. Iterates the in-memory extent list; for each extent owned by @tpv_uuid:
+ *      writes a free ondisk record, removes from the in-memory list.
+ *   3. Rewrites the allocator header.
+ *   4. Zeroes CDV_extent[0] (the client flat-L1 tree) at byte offset
+ *      @allocator_size_gb × 1 GiB, size @cdv_extent_size_mb × 1 MiB.
+ *      This prevents a subsequent TPV from inheriting stale virtual→physical
+ *      mappings left by the deleted TPV.
+ *
+ * Returns 0 on success.  On disk-resolve failure returns a negative errno.
+ * Individual extent-record write failures are logged but do not abort the
+ * remaining extents or the L1-zeroing step.
+ *
+ * Must be called from TOMA's single main thread (or with the topology lock held).
+ */
+int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
+					const char *tpv_uuid,
+					uint32_t    allocator_size_gb,
+					uint32_t    cdv_extent_size_mb);
+
+/*
  * nvmeibt_cdv_alloc_startup_scan — log in-memory state.
  *
  * Iterates all CDV allocators, logs per-CDV statistics, and emits

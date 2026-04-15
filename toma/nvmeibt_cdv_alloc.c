@@ -998,6 +998,107 @@ void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 	(*printf_fn)(printf_ctx, "\t%llu CDV(s) total\n", n_cdvs);
 }
 
+/* ── TPV deletion: free all extents + zero L1 tree ───────────────────────── */
+
+int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
+					const char *tpv_uuid,
+					uint32_t    allocator_size_gb,
+					uint32_t    cdv_extent_size_mb)
+{
+	struct nvmeibt_cdv_alloc        *alloc;
+	struct nvmeibt_cdv_extent_entry *entry;
+	int      fd, pblk_size;
+	uint64_t seg_pbyte_s;
+	uint64_t l1_offset, l1_size, off;
+	uint64_t n_freed = 0;
+	void    *zero_buf;
+	ssize_t  wr;
+	int      rv;
+
+	rv = cdv_resolve_disk_io(cdv_uuid, &fd, &seg_pbyte_s, &pblk_size);
+	if (rv) {
+		N_Ef(cdv_free_all_no_disk,
+		     "CDV-alloc: free_all cdv=@STR tpv=@STR cannot resolve disk rv=@INT",
+		     cdv_uuid, tpv_uuid, rv);
+		return rv;
+	}
+
+	/* ── 1. Find or create the per-CDV allocator; scan if stale ── */
+	alloc = find_or_create_alloc(cdv_uuid);
+	if (!alloc)
+		return -ENOMEM;
+
+	/*
+	 * If the extent list has not been loaded from disk yet (e.g. TOMA
+	 * restarted after extents were allocated), scan now so we can free
+	 * the correct entries.
+	 */
+	if (!alloc->ondisk_loaded)
+		cdv_ondisk_scan(cdv_uuid, alloc);
+
+	/* ── 2. Free in-memory entries + on-disk records for this TPV ── */
+	XDLIST_FOREACH_SAFE(entry, &alloc->extents) {
+		if (strncmp(entry->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0)
+			continue;
+
+		if (cdv_ondisk_write_record(fd, seg_pbyte_s, pblk_size,
+					    entry->extent_index, NULL) < 0)
+			N_Wf(cdv_free_all_rec_err,
+			     "CDV-alloc: free_all cdv=@STR idx=@LLU write_record failed; continuing",
+			     cdv_uuid, entry->extent_index);
+
+		XDLIST_ELEM_DEL(&alloc->extents, entry);
+		alloc->n_allocated--;
+		NNVMEIBT_BM_FREE(cdv_free_all_entry, entry);
+		n_freed++;
+	}
+
+	/* ── 3. Rewrite header to reflect updated n_allocated ── */
+	if (n_freed > 0)
+		cdv_ondisk_write_header(fd, seg_pbyte_s, pblk_size, alloc);
+
+	/* Check whether the capacity warning flag can be cleared. */
+	cdv_maybe_warn_capacity(alloc);
+
+	N_If(cdv_free_all_done,
+	     "CDV-alloc: free_all cdv=@STR tpv=@STR freed=@LLU remaining=@LLU",
+	     cdv_uuid, tpv_uuid, n_freed, alloc->n_allocated);
+
+	/* ── 4. Zero CDV_extent[0] (flat-L1 tree written by the client) ── */
+	l1_offset = seg_pbyte_s +
+		    (uint64_t)allocator_size_gb * (1024ULL * 1024ULL * 1024ULL);
+	l1_size   = (uint64_t)cdv_extent_size_mb * (1024ULL * 1024ULL);
+
+	zero_buf = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_free_all_zero_alloc,
+					       PAGE_SIZE, PAGE_SIZE);
+	if (!zero_buf) {
+		N_Ef(cdv_free_all_zero_oom,
+		     "CDV-alloc: free_all cdv=@STR tpv=@STR zero-buf OOM; L1 tree NOT zeroed",
+		     cdv_uuid, tpv_uuid);
+		return -ENOMEM;
+	}
+
+	for (off = 0; off < l1_size; off += PAGE_SIZE) {
+		wr = NNVMEIBT_PWRITE(cdv_free_all_zero_wr, fd, zero_buf, PAGE_SIZE,
+				     l1_offset + off, seg_pbyte_s);
+		if (wr < 0) {
+			N_Ef(cdv_free_all_zero_err,
+			     "CDV-alloc: free_all cdv=@STR zero L1 at off=@LLU failed; stopping",
+			     cdv_uuid, off);
+			NNVMEIBT_BM_FREE(cdv_free_all_zero_free, zero_buf);
+			return -EIO;
+		}
+	}
+
+	NNVMEIBT_BM_FREE(cdv_free_all_zero_free, zero_buf);
+
+	N_If(cdv_free_all_l1_zeroed,
+	     "CDV-alloc: free_all cdv=@STR tpv=@STR L1 tree zeroed @LLU bytes at @LLX",
+	     cdv_uuid, tpv_uuid, l1_size, l1_offset - seg_pbyte_s);
+
+	return 0;
+}
+
 /* ── Incoming-message handler ────────────────────────────────────────────── */
 
 /*
