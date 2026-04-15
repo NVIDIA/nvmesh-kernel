@@ -173,8 +173,9 @@ static int cdv_ondisk_write_header(int fd,
  *
  * Reads the header, validates magic/CRC, then reads extent records one by one.
  * Called lazily on the first ALLOC for a CDV after TOMA restart.
- * Returns 0 on success, negative on I/O error.  A missing/invalid header
- * (fresh CDV) is treated as empty — not an error.
+ * Returns 0 on success, negative on I/O error.  A missing header (fresh CDV,
+ * magic mismatch) is treated as empty — not an error.  A read failure or CRC
+ * mismatch returns -EIO without setting ondisk_loaded, so callers will retry.
  */
 static int cdv_ondisk_scan(const char *cdv_uuid,
 			   struct nvmeibt_cdv_alloc *alloc)
@@ -211,10 +212,9 @@ static int cdv_ondisk_scan(const char *cdv_uuid,
 	if (NNVMEIBT_PREAD(cdv_scan_hdr_rd, fd, hdr, CDV_ONDISK_BLOCK_SIZE,
 			   0ULL, 1) < 0) {
 		N_Wf(cdv_scan_hdr_err,
-		     "CDV-alloc: scan cdv=@STR header read failed; treating as fresh",
+		     "CDV-alloc: scan cdv=@STR header read failed; will retry",
 		     cdv_uuid);
-		alloc->ondisk_loaded = true;
-		rv = 0;
+		rv = -EIO;
 		goto out;
 	}
 
@@ -232,10 +232,9 @@ static int cdv_ondisk_scan(const char *cdv_uuid,
 			offsetof(struct cdv_alloc_ondisk_header, crc32));
 		if (hdr->crc32 != expected_crc) {
 			N_Wf(cdv_scan_hdr_crc,
-			     "CDV-alloc: scan cdv=@STR header CRC mismatch; treating as fresh",
-			     cdv_uuid);
-			alloc->ondisk_loaded = true;
-			rv = 0;
+			     "CDV-alloc: scan cdv=@STR header CRC mismatch (got=@X want=@X); will retry",
+			     cdv_uuid, hdr->crc32, expected_crc);
+			rv = -EIO;
 			goto out;
 		}
 	}
@@ -257,9 +256,10 @@ static int cdv_ondisk_scan(const char *cdv_uuid,
 		if (NNVMEIBT_PREAD(cdv_scan_rec_rd, fd, rec, CDV_ONDISK_BLOCK_SIZE,
 				   off, 1) < 0) {
 			N_Wf(cdv_scan_rec_err,
-			     "CDV-alloc: scan cdv=@STR read failed at idx=@LLU; stopping",
+			     "CDV-alloc: scan cdv=@STR read failed at idx=@LLU; aborting scan, will retry",
 			     cdv_uuid, i);
-			break;
+			rv = -EIO;
+			goto out;
 		}
 
 		if (!(rec->flags & CDV_ONDISK_RECORD_FLAG_ALLOCATED))
