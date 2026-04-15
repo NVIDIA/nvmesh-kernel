@@ -65,6 +65,8 @@ managementCMPID="/var/run/nvmesh/managementCM.pid"
 managementAgentPID="/var/run/nvmesh/managementAgent.pid"
 monitorPID="$pidPath/monitor.pid"
 tomaPID="$pidPath/toma.pid"
+# Must match nvmeibt_toma.c: TOMA_DIR_RUN_NVMESH "/toma.lock" (default TOMA_ROOT_DIR is /).
+tomaLockFile="/var/run/nvmesh/toma.lock"
 tomaCorePath="/var/opt/nvmesh"
 toma=nvmeibt_toma
 tomaReleasePath="$TARGET_RUN_DIR/toma/bin/release"
@@ -589,18 +591,48 @@ stop_toma() {
 	echo "Stopping NVMesh Toma: "
 	check_root
 
-	if [ -r "$tomaPID" ] ; then
-		echo "Signaling SIGTERM to TOMA"
-		PID=`cat $tomaPID`
-		if [ "$PID" -gt 0 ]; then
-			kill -s SIGTERM $PID
-			# waiting for Toma to be killed
-			while process_up $PID toma 2>/dev/null; do
-				sleep 1
-				echo "Waiting for Toma to stop, PID: $PID ..."
-			done
+	local deadline=$(( $(date +%s) + ${TOMA_STOP_TIMEOUT_SEC:-300} ))
+	local PID=""
+	if [ -r "$tomaPID" ]; then
+		PID=$(cat "$tomaPID")
+	fi
+
+	if [ -n "$PID" ] && [ "$PID" -gt 0 ]; then
+		echo "Signaling SIGTERM to TOMA (PID $PID)"
+		kill -s SIGTERM "$PID" 2>/dev/null || true
+	fi
+
+	while [ "$(date +%s)" -lt "$deadline" ]; do
+		local proc_running=false
+		if [ -n "$PID" ] && [ "$PID" -gt 0 ] && process_up "$PID" toma 2>/dev/null; then
+			proc_running=true
 		fi
-		rm $tomaPID
+		local lock_held=false
+		if [ -f "$tomaLockFile" ]; then
+			lock_held=true
+		fi
+		if ! $proc_running && ! $lock_held; then
+			break
+		fi
+		if $proc_running; then
+			echo "Waiting for Toma to stop, PID: $PID ..."
+		elif $lock_held; then
+			echo "Waiting for Toma lock file to be removed ($tomaLockFile) ..."
+		fi
+		sleep 1
+	done
+
+	if [ -n "$PID" ] && [ "$PID" -gt 0 ] && process_up "$PID" toma 2>/dev/null; then
+		echo "ERROR: TOMA did not exit within ${TOMA_STOP_TIMEOUT_SEC:-300}s"
+		return 1
+	fi
+	if [ -f "$tomaLockFile" ]; then
+		echo "ERROR: Toma lock file still present: $tomaLockFile"
+		return 1
+	fi
+
+	if [ -f "$tomaPID" ]; then
+		rm -f "$tomaPID"
 	fi
 }
 
@@ -663,7 +695,7 @@ case "$1" in
 	stop_trace_daemon
 	;;
   *)
-	echo $"Usage: $0 {start|stop|restart|force-reload|status}"
+	echo $"Usage: $0 {start|stop|restart|force-reload|status|start-toma|stop-toma|restart-toma|start-trace|stop-trace}"
 	exit 2
 esac
 RETVAL=$?

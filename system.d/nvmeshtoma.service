@@ -9,8 +9,17 @@ After=network.target openibd.service nvmeshtarget.service
 
 [Service]
 ExecStart=/opt/nvmesh/target-repo/services/nvmeshtarget start-toma --systemd
+# stop_toma sends SIGTERM and waits for the process and /var/run/nvmesh/toma.lock (see init.d/nvmeshtarget).
+ExecStop=/opt/nvmesh/target-repo/services/nvmeshtarget stop-toma --systemd
+# stop_toma already SIGTERMs the main PID and waits up to TimeoutStopSec for
+# both the process and the lock file. KillMode=mixed keeps systemd's SIGKILL
+# safety net for genuine hangs without re-signalling a healthy stop.
+KillMode=mixed
 PIDFile=/var/run/nvmesh/nvmeshtarget/toma.pid
 Type=forking
+# Default systemd start timeout (~90s) is often too short on slow VMs; align with nvmeshtarget (300s).
+TimeoutStartSec=300
+TimeoutStopSec=300
 
 [Install]
 WantedBy=multi-user.target
