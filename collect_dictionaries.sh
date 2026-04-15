@@ -34,16 +34,18 @@ else
 	echo "PET_MODULE is set to $PET_MODULE"
 fi
 
-if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ]; then
+# We may not always be able to install the python version we want or poetry or
+# the dependencies. The infra team prefers to manage the lifecycle of Python,
+# Poetry and dependencies separately and skip the PET dictionary build if
+# poetry is not available, rather than fall back to installing a specific
+# poetry version.
+export PATH="${PATH}:${HOME}/.local/bin"
+if ! command -v poetry >/dev/null 2>&1; then
+	echo "poetry not found, skip PET dictionary build"
+fi
+
+if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ] && command -v poetry >/dev/null 2>&1; then
 	PET_DICT="${PET_DIR}/dict.${COMMIT_ID#0x}.json"
-	# Install Poetry via pip from PyPI (default index) when missing. Pin matches poetry.lock generator.
-	PET_PYTHON="python3"
-	export PATH="${PATH}:${HOME}/.local/bin"
-	if ! command -v poetry >/dev/null 2>&1; then
-		echo "poetry not found, installing with pip (PyPI)..."
-		# Install poetry 1.8.3 to accommodate Python 3.9 on older kernels.
-		"${PET_PYTHON}" -m pip install --user "poetry==1.8.3"
-	fi
 
 	# Verify required packages with poetry.
 	start=$SECONDS
