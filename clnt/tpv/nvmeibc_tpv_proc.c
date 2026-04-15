@@ -11,8 +11,10 @@
  *   status      — geometry, state, CDV.allocator identity and generation
  *   allocator   — live pool counters (cdv extents, free slots, watermark,
  *                 pending returns)
- *   extent_map  — full xarray dump: virtual index → physical offset in CDV,
- *                 owning CDV_extent index
+ *   tpv_extent_map  — full xarray dump: virtual index → physical offset in CDV,
+ *                     owning CDV_extent index
+ *   cdv_extent_map  — per-allocated CDV_extent: sequence number → CDV extent index
+ *                     and how many TPV_extent slots within it are currently in use
  *   stats       — allocation/free counts and CDV round-trip timing (writable
  *                 to reset counters)
  *
@@ -159,7 +161,7 @@ static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
 	return count;
 }
 
-/* ── extent_map fill ────────────────────────────────────────────────────── */
+/* ── tpv_extent_map fill ────────────────────────────────────────────────── */
 
 /*
  * Dumps every mapped virtual extent from the xarray.  Uses xa_for_each under
@@ -169,7 +171,7 @@ static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
  * Format per line:
  *   virt_idx  phys_offset_hex  cdv_extent_index
  */
-static ssize_t tpv_proc_extent_map_fill(void *arg, char *buf, size_t len)
+static ssize_t tpv_proc_tpv_extent_map_fill(void *arg, char *buf, size_t len)
 {
 	struct nvmeibc_tpv           *tpv   = arg;
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
@@ -201,6 +203,49 @@ static ssize_t tpv_proc_extent_map_fill(void *arg, char *buf, size_t len)
 	if (n == 0)
 		BUF_ADD("(empty)\n");
 
+#undef BUF_ADD
+	return count;
+}
+
+/* ── cdv_extent_map fill ────────────────────────────────────────────────── */
+
+/*
+ * Lists every CDV_extent currently allocated to this TPV from the
+ * cdv_extent_list.  Acquired under alloc->lock (the list is short —
+ * typically O(tens) of entries — so the brief hold is acceptable).
+ *
+ * Format per line:
+ *   seq ==> cdv_extent_idx  (allocated_slots in use)
+ */
+static ssize_t tpv_proc_cdv_extent_map_fill(void *arg, char *buf, size_t len)
+{
+	struct nvmeibc_tpv           *tpv   = arg;
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	struct nvmeibc_cdv_extent_ref *ref;
+	u64 seq = 0;
+	ssize_t count = 0;
+
+#define BUF_ADD(...) count += scnprintf(buf + count, len - count, __VA_ARGS__)
+
+	BUF_ADD("%-6s  ==>  %-16s  %s\n", "seq", "cdv_extent_idx", "in_use_slots");
+
+	spin_lock(&alloc->lock);
+	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
+		if (count + 80 >= (ssize_t)len) {
+			spin_unlock(&alloc->lock);
+			BUF_ADD("... (truncated at %llu entries; buffer too small)\n", seq);
+			goto out;
+		}
+		BUF_ADD("%-6llu  ==>  %-16llu  %llu\n",
+			seq, ref->extent_index, ref->allocated_count);
+		seq++;
+	}
+	spin_unlock(&alloc->lock);
+
+	if (seq == 0)
+		BUF_ADD("(empty)\n");
+
+out:
 #undef BUF_ADD
 	return count;
 }
@@ -285,8 +330,10 @@ void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv)
 		"status", tpv->proc_dir, tpv_proc_status_fill, NULL, tpv);
 	tpv->proc_allocator = nvmeib_public_proc_create(
 		"allocator", tpv->proc_dir, tpv_proc_allocator_fill, NULL, tpv);
-	tpv->proc_extent_map = nvmeib_public_proc_create(
-		"extent_map", tpv->proc_dir, tpv_proc_extent_map_fill, NULL, tpv);
+	tpv->proc_tpv_extent_map = nvmeib_public_proc_create(
+		"tpv_extent_map", tpv->proc_dir, tpv_proc_tpv_extent_map_fill, NULL, tpv);
+	tpv->proc_cdv_extent_map = nvmeib_public_proc_create(
+		"cdv_extent_map", tpv->proc_dir, tpv_proc_cdv_extent_map_fill, NULL, tpv);
 	tpv->proc_stats = nvmeib_public_proc_create(
 		"stats", tpv->proc_dir, tpv_proc_stats_fill, tpv_proc_stats_reset, tpv);
 	tpv->proc_selftest = nvmeib_public_proc_create(
@@ -303,7 +350,8 @@ void nvmeibc_tpv_proc_deregister(struct nvmeibc_tpv *tpv)
 
 	nvmeib_public_proc_remove(tpv->proc_selftest);
 	nvmeib_public_proc_remove(tpv->proc_stats);
-	nvmeib_public_proc_remove(tpv->proc_extent_map);
+	nvmeib_public_proc_remove(tpv->proc_cdv_extent_map);
+	nvmeib_public_proc_remove(tpv->proc_tpv_extent_map);
 	nvmeib_public_proc_remove(tpv->proc_allocator);
 	nvmeib_public_proc_remove(tpv->proc_status);
 

@@ -187,7 +187,8 @@ struct nvmeibc_tpv {
 	struct proc_dir_entry                *proc_dir;
 	struct nvmeib_public_procfs_ent      *proc_status;
 	struct nvmeib_public_procfs_ent      *proc_allocator;
-	struct nvmeib_public_procfs_ent      *proc_extent_map;
+	struct nvmeib_public_procfs_ent      *proc_tpv_extent_map;
+	struct nvmeib_public_procfs_ent      *proc_cdv_extent_map;
 	struct nvmeib_public_procfs_ent      *proc_stats;
 	struct nvmeib_public_procfs_ent      *proc_selftest;
 };
