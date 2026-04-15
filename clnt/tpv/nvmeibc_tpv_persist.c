@@ -353,6 +353,11 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			list_add_tail(&ref->node, &alloc->cdv_extent_list);
 			alloc->cdv_extents_count++;
 
+			_NT(tpv_load_cdv_ext,
+			    "TPV: @STR: load_state CDV_extent[@LLU] allocated_count=@LLU free=@LLU",
+			    tpv->tpv_name, le->extent_index,
+			    ref->allocated_count, le->n_slots - ref->allocated_count);
+
 			/* Add unmapped slots to free pool. */
 			for (s = 0; s < le->n_slots; s++) {
 				struct nvmeibc_tpv_free_slot *fs;

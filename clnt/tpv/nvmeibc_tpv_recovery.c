@@ -243,15 +243,20 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 		return 0;
 	}
 
-	_ND(tpv_recovery_list_ok,
+	_NT(tpv_recovery_list_ok,
 	    "TPV: @STR: TOMA reports @LLU data CDV_extents; tree has @LLU",
 	    tpv->tpv_name, toma_count, alloc->cdv_extents_count);
 
 	/* ── 3. Cross-reference and adopt orphans ───────────────────────────── */
 	for (i = 0; i < toma_count; i++) {
 		u64 eidx = toma_indices[i];
+		bool known = tpv_recovery_is_known(alloc, eidx);
 
-		if (tpv_recovery_is_known(alloc, eidx))
+		_NT(tpv_recovery_check_ext,
+		    "TPV: @STR: recovery TOMA extent[@LLU] known=@INT",
+		    tpv->tpv_name, eidx, (int)known);
+
+		if (known)
 			continue;
 
 		/*

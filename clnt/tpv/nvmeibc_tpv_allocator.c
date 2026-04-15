@@ -467,6 +467,34 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 	u64 s;
 	int rv;
 
+	_NT(tpv_cdv_alloc_ok_enter,
+	    "TPV: @STR: tpv_on_cdv_alloc_ok extent_index=@LLU cdv_extents_count=@LLU free_slots=@LLU",
+	    tpv->tpv_name, extent_index, alloc->cdv_extents_count,
+	    alloc->free_tpv_extent_count);
+
+	/*
+	 * Guard against duplicate CDV_extent index.  After a TOMA restart
+	 * where TOMA's persisted state lost track of some extents, TOMA may
+	 * re-allocate an index that the client already holds from load_state.
+	 * Adding duplicate slots would cause two virtual extents to map to
+	 * the same physical location — silent data corruption.
+	 */
+	spin_lock(&alloc->lock);
+	{
+		struct nvmeibc_cdv_extent_ref *existing;
+
+		list_for_each_entry(existing, &alloc->cdv_extent_list, node) {
+			if (existing->extent_index == extent_index) {
+				spin_unlock(&alloc->lock);
+				_NE(tpv_cdv_ext_dup,
+				    "TPV: @STR: CDV_extent[@LLU] already in allocator (allocated_count=@LLU); ignoring duplicate ALLOC_OK",
+				    tpv->tpv_name, extent_index, existing->allocated_count);
+				return 0;
+			}
+		}
+	}
+	spin_unlock(&alloc->lock);
+
 	n_slots = tpv_slots_per_cdv_extent(alloc);
 
 	/*
@@ -614,8 +642,9 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		req.total_data_extents = data_bytes / ((u64)alloc->cdv_extent_size_mb << 20);
 	}
 
-	_ND(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU total_extents=@LLU",
-	    tpv->tpv_name, toma_id, client_gen, req.req_id, req.total_data_extents);
+	_NT(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU total_extents=@LLU free=@LLU wm=@LLU cdv_extents=@LLU",
+	    tpv->tpv_name, toma_id, client_gen, req.req_id, req.total_data_extents,
+	    alloc->free_tpv_extent_count, alloc->low_watermark, alloc->cdv_extents_count);
 
 	memset(&resp, 0, sizeof(resp));
 	t_start = ktime_get();
@@ -627,6 +656,9 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		    tpv->tpv_name, rv);
 		goto out_clear_pending;
 	}
+
+	_NT(tpv_cdv_alloc_resp, "TPV: @STR: CDV_ALLOC_EXTENT resp status=@UINT extent_index=@LLU resp_gen=@LLU",
+	    tpv->tpv_name, resp.status, resp.extent_index, resp.allocator_generation);
 
 	switch ((enum nvmeibc_cdv_alloc_status)resp.status) {
 	case NVMEIBC_CDV_ALLOC_OK:
