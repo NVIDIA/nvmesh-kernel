@@ -43,6 +43,7 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	u32 tpv_extent_size_kb;
 	u32 cdv_extent_size_mb;
 	u64 allocator_size_gb;
+	bool sync_flush;
 
 	/* Locate the parent CDV by the UUID encoded in conf->mdvUUID. */
 	if (!conf->mdvUUID[0]) {
@@ -68,6 +69,11 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	cdv_extent_size_mb  = (u32)conf->dataBlocks;
 	allocator_size_gb   = (u64)(unsigned int)conf->parityBlocks;
 
+	/* sourceUUID is repurposed for TPVs: "sync_flush" → WAL-ordered
+	 * L1 metadata writes; empty → deferred background flush.       */
+	sync_flush = (strncmp(conf->sourceUUID, "sync_flush",
+			      sizeof(conf->sourceUUID)) == 0);
+
 	if (!virtual_size_bytes || !tpv_extent_size_kb ||
 	    !cdv_extent_size_mb || !allocator_size_gb) {
 		_NE(tpv_setup_bad_params,
@@ -79,7 +85,8 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 
 	tpv = nvmeibc_tpv_attach(cdv, conf->name, conf->uuid,
 				 virtual_size_bytes, tpv_extent_size_kb,
-				 cdv_extent_size_mb, allocator_size_gb);
+				 cdv_extent_size_mb, allocator_size_gb,
+				 sync_flush);
 	if (!tpv) {
 		_NE(tpv_setup_attach_failed,
 		    "TPV @STR: nvmeibc_tpv_attach() failed", conf->name);

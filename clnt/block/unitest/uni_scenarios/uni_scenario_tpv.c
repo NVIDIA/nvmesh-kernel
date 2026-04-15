@@ -71,7 +71,8 @@ static int tpv_test_setup(struct tpv_test_ctx *ctx)
 		TPV_SIMU_VIRTUAL_MB * 1024ULL * 1024ULL,	/* virtual_size_bytes */
 		(u32)TPV_SIMU_TPV_EXTENT_KB,
 		(u32)TPV_SIMU_CDV_EXTENT_MB,
-		(u64)TPV_SIMU_ALLOC_GB);
+		(u64)TPV_SIMU_ALLOC_GB,
+		false);		/* sync_flush — disabled for simulator */
 	if (!ctx->tpv) {
 		pr_err("TPV_TEST: nvmeibc_tpv_attach failed\n");
 		tpv_cdv_vol_destroy(ctx->cdv);
@@ -289,7 +290,8 @@ TEST_FUNC int unitest_tpv_persist(
 		TPV_SIMU_VIRTUAL_MB * 1024ULL * 1024ULL,
 		(u32)TPV_SIMU_TPV_EXTENT_KB,
 		(u32)TPV_SIMU_CDV_EXTENT_MB,
-		(u64)TPV_SIMU_ALLOC_GB);
+		(u64)TPV_SIMU_ALLOC_GB,
+		false);		/* sync_flush — disabled for simulator */
 	TPV_CHECK(ctx.tpv != NULL, "re-attach failed");
 	if (!ctx.tpv) {
 		rv = -1;

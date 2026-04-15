@@ -437,6 +437,35 @@ void nvmeibc_tpv_persist_work_fn(struct work_struct *work)
 		spin_lock(&tpv->persist_lock);
 		tpv->dirty = true;
 		spin_unlock(&tpv->persist_lock);
+
+		/*
+		 * In sync_flush mode, bios are parked waiting for this flush.
+		 * Since the flush failed the L1 entries are NOT durable — fail
+		 * the parked bios so the upper layer retries or reports error.
+		 */
+		if (tpv->sync_flush) {
+			struct bio_list  failed;
+			struct bio      *bio;
+			unsigned long    flags;
+
+			bio_list_init(&failed);
+			spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+			bio_list_merge(&failed, &tpv->pending_l1_flush_bios);
+			bio_list_init(&tpv->pending_l1_flush_bios);
+			spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+
+			while ((bio = bio_list_pop(&failed)) != NULL)
+				bio_endio(bio, -EIO);
+		}
+	} else if (tpv->sync_flush) {
+		/*
+		 * Flush succeeded — L1 entries are durable.  Forward every
+		 * bio that was parked waiting for this flush.  Each bio's
+		 * virtual extent is already in the xarray, so re-dispatch
+		 * through tpv_handle_one_bio takes the mapped-IO fast path
+		 * and submits the data bio to the CDV.
+		 */
+		nvmeibc_tpv_forward_l1_flush_bios(tpv);
 	}
 }
 EXPORT_SYMBOL(nvmeibc_tpv_persist_work_fn);

@@ -232,7 +232,24 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		/*
 		 * Freshly allocated entry — not yet visible to concurrent
 		 * erasers, so direct access is safe without RCU.
+		 *
+		 * sync_flush mode: park the bio until persist_work has
+		 * flushed the new L1 entry to CDV_extent[0].  persist_work
+		 * was already scheduled by alloc_extent (dirty → true).
+		 * The parked bio is re-dispatched by
+		 * nvmeibc_tpv_forward_l1_flush_bios() after flush succeeds;
+		 * at that point the extent_map lookup finds the mapping and
+		 * the bio takes the normal mapped-IO path below.
 		 */
+		if (tpv->sync_flush) {
+			unsigned long sflags;
+
+			spin_lock_irqsave(&tpv->pending_bio_lock, sflags);
+			bio_list_add(&tpv->pending_l1_flush_bios, bio);
+			spin_unlock_irqrestore(&tpv->pending_bio_lock, sflags);
+			return 0;
+		}
+
 		nvmeibc_tpv_cdv_submit_bio(tpv, bio,
 					   entry->phys_offset + intra_offset);
 		return 0;
@@ -323,3 +340,31 @@ void nvmeibc_tpv_retry_pending_bios(struct nvmeibc_tpv *tpv)
 		tpv_handle_one_bio(tpv, bio);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_retry_pending_bios);
+
+/* ── nvmeibc_tpv_forward_l1_flush_bios ─────────────────────────────────── */
+
+/*
+ * Drain bios parked on pending_l1_flush_bios after a successful L1 flush.
+ * Each bio already has its virtual extent mapped in the xarray — the
+ * re-dispatch through tpv_handle_one_bio() hits the "mapped" path and
+ * forwards the bio to the CDV at the physical offset recorded earlier.
+ *
+ * Called from persist_work context (process context, may sleep).
+ */
+void nvmeibc_tpv_forward_l1_flush_bios(struct nvmeibc_tpv *tpv)
+{
+	struct bio_list  local;
+	struct bio      *bio;
+	unsigned long    flags;
+
+	bio_list_init(&local);
+
+	spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+	bio_list_merge(&local, &tpv->pending_l1_flush_bios);
+	bio_list_init(&tpv->pending_l1_flush_bios);
+	spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+
+	while ((bio = bio_list_pop(&local)) != NULL)
+		tpv_handle_one_bio(tpv, bio);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_forward_l1_flush_bios);

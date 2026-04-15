@@ -390,7 +390,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					u64 virtual_size_bytes,
 					u32 tpv_extent_size_kb,
 					u32 cdv_extent_size_mb,
-					u64 allocator_size_gb)
+					u64 allocator_size_gb,
+					bool sync_flush)
 {
 	struct nvmeibc_tpv *tpv;
 	int rv;
@@ -494,7 +495,9 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 
 	bio_list_init(&tpv->pending_bios);
+	bio_list_init(&tpv->pending_l1_flush_bios);
 	spin_lock_init(&tpv->pending_bio_lock);
+	tpv->sync_flush = sync_flush;
 
 	/* ── 3a. Initialise allocator ───────────────────────────────────── */
 	nvmeibc_tpv_allocator_init(&tpv->allocator, tpv_extent_size_kb,
@@ -544,13 +547,14 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	nvmeibc_tpv_proc_register(tpv);
 
 	_NI(tpv_attached,
-	    "TPV: @STR (uuid=@STR) attached vsize=@LLU MB tpv_ext=@UINT KB cdv_ext=@UINT MB alloc=@LLU GB wmark=@LLU",
+	    "TPV: @STR (uuid=@STR) attached vsize=@LLU MB tpv_ext=@UINT KB cdv_ext=@UINT MB alloc=@LLU GB wmark=@LLU sync_flush=@INT",
 	    tpv_name, tpv_uuid,
 	    virtual_size_bytes >> 20,
 	    tpv_extent_size_kb,
 	    cdv_extent_size_mb,
 	    allocator_size_gb,
-	    tpv->allocator.low_watermark);
+	    tpv->allocator.low_watermark,
+	    (int)tpv->sync_flush);
 
 	return tpv;
 
@@ -610,6 +614,8 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 		spin_lock_irqsave(&tpv->pending_bio_lock, flags);
 		bio_list_merge(&pending, &tpv->pending_bios);
 		bio_list_init(&tpv->pending_bios);
+		bio_list_merge(&pending, &tpv->pending_l1_flush_bios);
+		bio_list_init(&tpv->pending_l1_flush_bios);
 		spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
 
 		while ((bio = bio_list_pop(&pending)) != NULL)

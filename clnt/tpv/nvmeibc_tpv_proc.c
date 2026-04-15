@@ -112,6 +112,7 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("uuid:                %s\n",  tpv->tpv_uuid);
 	BUF_ADD("state:               %s\n",  tpv_state_str(atomic_read(&tpv->state)));
 	BUF_ADD("state_loaded:        %s\n",  READ_ONCE(tpv->state_loaded) ? "yes" : "no");
+	BUF_ADD("sync_flush:          %s\n",  tpv->sync_flush ? "yes" : "no");
 	BUF_ADD("virtual_size_mb:     %llu\n", tpv->virtual_size >> 20);
 	BUF_ADD("tpv_extent_size_kb:  %u\n",  alloc->tpv_extent_size_kb);
 	BUF_ADD("cdv_extent_size_mb:  %u\n",  alloc->cdv_extent_size_mb);

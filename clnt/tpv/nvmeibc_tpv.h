@@ -167,6 +167,23 @@ struct nvmeibc_tpv {
 	spinlock_t                    pending_bio_lock;
 
 	/*
+	 * Synchronous L1 flush mode.  When true, data bios for freshly-
+	 * allocated extents are parked on pending_l1_flush_bios until the
+	 * L1 tree is flushed to CDV_extent[0].  When false, the legacy
+	 * deferred-flush path is used (persist_work fires asynchronously).
+	 * Set at attach time from the sourceUUID CM field and immutable
+	 * afterwards.
+	 */
+	bool                          sync_flush;
+
+	/*
+	 * Bios parked waiting for L1 flush (sync_flush mode only).
+	 * Protected by pending_bio_lock.  Drained by persist_work after
+	 * a successful flush_state via nvmeibc_tpv_forward_l1_flush_bios().
+	 */
+	struct bio_list               pending_l1_flush_bios;
+
+	/*
 	 * Deferred load of allocator state from CDV_extent[0].
 	 * Scheduled at attach; retries on I/O failure (CDV not ready).
 	 * state_loaded is set under pending_bio_lock; readers use
@@ -233,6 +250,12 @@ void nvmeibc_tpv_io_exit(void);
  */
 void nvmeibc_tpv_retry_pending_bios(struct nvmeibc_tpv *tpv);
 
+/*
+ * Forward bios parked on pending_l1_flush_bios after a successful L1 flush.
+ * Called from persist_work context (process context, may sleep).
+ */
+void nvmeibc_tpv_forward_l1_flush_bios(struct nvmeibc_tpv *tpv);
+
 /* ── Public API (implemented in nvmeibc_tpv.c) ────────────────────────── */
 
 /*
@@ -246,7 +269,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					u64 virtual_size_bytes,
 					u32 tpv_extent_size_kb,
 					u32 cdv_extent_size_mb,
-					u64 allocator_size_gb);
+					u64 allocator_size_gb,
+					bool sync_flush);
 
 void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv);
 
