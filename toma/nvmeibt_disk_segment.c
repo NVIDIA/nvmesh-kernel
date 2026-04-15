@@ -462,8 +462,6 @@ enum nvmeibt_add_rv nvmeibt_disk_segment_leader_upd_from_peer_applied(struct nvm
 	struct nvmeibt_disk						*its_disk;
 	int										SEG_UUID_8;
 
-	TODO(dumper);
-
 	input_peer_topo.active_seg_flags = seg_active_topo->active_seg_flags;
 	disk_segment = nvmeibt_disk_segment_get_disk_segment_by_id(&seg_active_topo->uuid);
 	if (!disk_segment) {

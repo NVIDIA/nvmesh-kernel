@@ -204,25 +204,25 @@ struct nvmeibt_active_seg_flags{
 	unsigned int did_any_client_report_about_problems : 1;			// 1,	Replacement for an evicted segment
 	unsigned int is_drive_write_error : 1;							// 2,	Reflects the error as reported from the drive
 	unsigned int reserved : 29;										// 3-31,
-} ;
+};
 
 struct nvmeibt_serialized_seg_active_topo {
-	char									eyecatcher[4];
-	int										res_1;
-	union nvmeib_uuid						uuid;
-    unsigned long long						active_seg_ser_ver;
-	int										active_praid_version_major;
-	int										active_praid_version_minor;
-	union {
+	char									eyecatcher[4];				//  4
+	uint32_t								res_1;						//  8
+	union nvmeib_uuid						uuid;						// 24
+	unsigned long long						active_seg_ser_ver;			// 32
+	int										active_praid_version_major;	// 36
+	int										active_praid_version_minor;	// 40
+	union {																// 44
 		struct nvmeibt_active_seg_flags		active_seg_flags;
 		int									active_seg_flags_int;
 	};
-	enum NVMEIBT_SEGMENT_DIRTY_BITS_STATE	dirty_bits_state;
-	enum NVMEIBT_MEM_TBL_INIT_MODE			dirty_bits_init_mode;
-	enum NVMEIBT_MEM_TBL_INIT_MODE			stale_locks_init_mode;
-    short									res_2;
-    short									res_3;
+	enum NVMEIBT_SEGMENT_DIRTY_BITS_STATE	dirty_bits_state;			// 48
+	enum NVMEIBT_MEM_TBL_INIT_MODE			dirty_bits_init_mode;		// 52
+	enum NVMEIBT_MEM_TBL_INIT_MODE			stale_locks_init_mode;		// 56
+	uint32_t								res_2;						// 60[b]
 } __attribute__((packed));
+_Static_assert(sizeof(struct nvmeibt_serialized_seg_active_topo) == 60, "Do not change the size of this struct without proper NDU support");
 
 #define NVMEIBT_DISK_SEGMENT_DUMP_ACTIVE_TOPO(name, _topo) N_Tf(name, 													\
 	"\n@STR seg=@UUID_8 active_praid_ver=@X.@X ser_ver=@X flags=@X "													\

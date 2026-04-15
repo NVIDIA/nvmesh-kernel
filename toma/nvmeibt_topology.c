@@ -1132,6 +1132,17 @@ void nvmeibt_topology_leader_serialize_baseline_topo_to_wire(void)
 	nvmeibt_topology_mark_update_csv_of_config_and_topo_required();
 }
 
+static bool __are_seg_active_topo_equal(const struct nvmeibt_serialized_seg_active_topo *s1, const struct nvmeibt_serialized_seg_active_topo *s2)
+{	// Note: Other fields deliberatly do not participate in comparison
+	return ( ARE_UUID_EQ(&s1->uuid, &s2->uuid) &&
+			(s1->active_praid_version_major == s2->active_praid_version_major) &&
+			(s1->active_praid_version_minor == s2->active_praid_version_minor) &&
+			(s1->active_seg_flags_int       == s2->active_seg_flags_int) &&
+			(s1->dirty_bits_state           == s2->dirty_bits_state) &&
+			(s1->dirty_bits_init_mode       == s2->dirty_bits_init_mode) &&
+			(s1->stale_locks_init_mode      == s2->stale_locks_init_mode));
+}
+
 int nvmeibt_topology_serialize_active_topology(void)
 {
 	int												rv = 0;
@@ -1223,9 +1234,8 @@ int nvmeibt_topology_serialize_active_topology(void)
 				seg_wire->active_seg_flags.is_drive_write_error |= (disk_segment->is_drive_write_error | disk->is_drive_write_error);
 				seg_wire->dirty_bits_init_mode = active_seg_topo_ctx->dirty_bits_init_mode;
 				seg_wire->stale_locks_init_mode = active_seg_topo_ctx->stale_locks_init_mode;
-				seg_wire->active_seg_ser_ver = 0; // for comparison
 
-				if (memcmp(seg_wire, &seg_active->prev_serialized_topo, sizeof(*seg_wire))) {
+				if (!__are_seg_active_topo_equal(seg_wire, &seg_active->prev_serialized_topo)) {
 					seg_active->prev_serialized_topo = *seg_wire;
 					active_seg_topo_ctx->active_seg_ser_ver++;
 				}
