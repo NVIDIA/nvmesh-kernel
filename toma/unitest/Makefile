@@ -199,11 +199,6 @@ TEST_STOCK_DISK_IMAGE_NAME = disk_stock.img
 TEST_STOCK_DISK_IMAGE_OUTPUT = $(TESTDATA_BUILD_DIR)/$(TEST_STOCK_DISK_IMAGE_NAME)
 TEST_STOCK_DISK_IMAGE_INPUT = $(TEST_STOCK_DISK_IMAGE_NAME).tgz
 
-# Test execution output locations
-TEST_OUTPUT_DIR = out
-TEST_OUTPUT_FILE = $(TEST_OUTPUT_DIR)/test.out
-TEST_LOG_FILE = $(TEST_OUTPUT_DIR)/test.log
-
 # ********** Define Rules for building *********
 define print_compilation_info
 	@printf "===========================================\n"
@@ -363,7 +358,6 @@ define clean_prev_run_all
 	rm -f ./_root/etc/nvmesh/tls/*.[ct][rx]_;
 	rm -f ./_root/var/opt/nvmesh/toma/toma_persistence_*;
 	rm -rf ./_root/dev/nvme*
-	rm -rf $(TEST_OUTPUT_DIR)
 	$(call clean_old_bin_logs)
 endef
 clean:
@@ -396,21 +390,6 @@ CPAGER := $(SSDA)/tools/traces_post_processor/cpager
 .PHONY: build_cpager
 build_cpager:
 	$(MAKE) NVMESH_SRC_DIR=$(SSDA) -C $(SSDA)/tools/traces_post_processor
-
-# Requires the cpager binary to be built in order to export logs.
-test: all build_cpager
-	$(call clean_prev_run)
-	mkdir -p $(TEST_OUTPUT_DIR)
-	rm -f $(TEST_OUTPUT_FILE) $(TEST_LOG_FILE) ./_root/var/log/nvmesh/trace_daemon/toma*.binlog* ./_root/var/log/nvmesh/toma_2* ./_root/var/log/nvmesh/tracelist.txt
-	@echo "Running tests..."
-	# Run the test and capture the exit status - we need to do this specially so we can always export the binary traces even after a failed test execution.
-	./$(EXE_NAME) > $(TEST_OUTPUT_FILE) 2>&1; exe_status=$$?; \
-	  [ $$exe_status -eq 0 ] && echo "OK - Tests passed" || echo "ERROR - Tests failed. Exit status: $$exe_status (check $(TEST_OUTPUT_FILE) and $(TEST_LOG_FILE) for details)"; \
-	  ./_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color > $(TEST_LOG_FILE); \
-	  [ $$exe_status -eq 0 ] || exit $$exe_status
-
-test_clean: clean
-	$(MAKE) test
 
 # Prevent the deletion of our tracer intermediate files
 .PRECIOUS: $(patsubst %.o,%.c_gen_events.h,$(OBJECTS)) $(patsubst %.o,%.trace.json,$(OBJECTS)) $(patsubst %.o,%.trace.raw.json,$(OBJECTS)) $(patsubst %.o,%.i,$(OBJECTS))
