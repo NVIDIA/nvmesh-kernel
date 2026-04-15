@@ -90,31 +90,19 @@ LIBS  = -lpthread -lm -ldl
 
 # Note: USE_SANITIZERS makes executable much larger, affects profiling
 USE_SANITIZERS ?= 1
+USE_GCOV ?= 0
+ifeq ($(USE_GCOV),1)
+	CFLAGS += --coverage -fprofile-abs-path
+	LDFLAGS += --coverage
+	USE_SANITIZERS=0
+endif
+
 ifeq ($(USE_SANITIZERS),1)
 	CFLAGS += -fsanitize=leak -fsanitize=address -fsanitize=undefined
 	LDFLAGS += -fsanitize=leak -fsanitize=address -fsanitize=undefined
 # Suppress address sanitizer alignment warnings in gpt_util.c
 	CFLAGS += -fno-sanitize=alignment
 	LDFLAGS += -fno-sanitize=alignment
-endif
-
-# Note: USE_GCOV enables gcov coverage instrumentation. Disable sanitizers when using gcovr.
-# 1. Install:
-#   pip install gcovr
-#   sudo dnf install libxml2-devel libxslt-devel
-# 2. Build:
-#   make clean
-#   make all -j$(nproc) USE_SANITIZERS=0 USE_GCOV=1
-# 3. Run tests:
-#   ./run ci
-# 4. Generate report:
-#   gcovr -r .. --object-directory 99bin/debug/obj --exclude 'unitest/' --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --lcov -o lcov.info
-# 5. View report:
-#   With lcov.info, you may run coverage extension (e.g. Coverage Gutters) in your IDE (e.g. VSCode, Cursor) to get coverage details.
-USE_GCOV ?= 0
-ifeq ($(USE_GCOV),1)
-	CFLAGS += --coverage -fprofile-abs-path
-	LDFLAGS += --coverage
 endif
 
 CXXFLAGS = -std=gnu++20 $(filter-out -std=% -Wstrict-prototypes -Wno-old-style-declaration -Wdeclaration-after-statement, $(CFLAGS))

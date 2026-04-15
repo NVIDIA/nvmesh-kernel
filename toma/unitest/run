@@ -136,9 +136,41 @@ function T_SANDBOX_main_self_reuse_persistency_unit_test() {
 	__abort_ci_on_failure;
 }
 
-
 function T_SANDBOX_main_live_run() {
 	echo_red "Todo: Test, Not supported yet";
+}
+
+function T_SANDBOX_make_code_coverage_report() {
+	if false; then   # Install gcovr
+		pip install gcovr; sudo dnf install libxml2-devel libxslt-devel;
+		sudo apt update; sudo apt install build-essential;
+		sudo apt install pipx; pipx ensurepath; # Here open a new terminal
+		pipx install gcovr;			# To generate code coverage file
+		sudo apt install lcov;		# To view the summery reports
+		sudo apt install wslu;		# View html in WSL
+	fi;
+	if false; then   # Install vscode extension.
+		#Install 'Coverage Gutters'. If running in Windows WSL install it in wsl, not in windows.
+		#Daniel added the following lines to: C:/Users/danielhe/AppData/Roaming/Code/User/settings.json
+			"coverage-gutters.coverageBaseDir": "toma/unitest/",
+			"coverage-gutters.lcovname": "toma/unitest/lcov.info",
+			"coverage-gutters.showGutterCoverage": true,
+			"coverage-gutters.showLineCoverage": true
+	fi;
+
+	__force_rebuild USE_GCOV=1;
+	T_SANDBOX_main_self_unit_test;
+	if true; then   # Generate report for vscode extension and summary view:
+		gcovr -r .. --object-directory 99bin/debug/obj --exclude 'unitest/' --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --lcov -o lcov.info
+		lcov --summary lcov.info;		# Show summary
+		# View 'lcov.info' report in VSCode/Cursor: Press Ctrl+Shift+P, then type: "Coverage Gutters: Watch". Now it will mark covered lines with GREEN color to stop viewing type "Coverage Gutters: Clear Coverage"
+	fi;
+	if true; then   # Generate report for html graphical view:
+		gcovr -r .. --object-directory 99bin/debug/obj --exclude 'unitest/' --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --html --html-details -o coverage.html
+		# No need to call this: genhtml lcov.info -o coverage_html;
+		wslview coverage.html;
+	fi;
+	rm -f *.html, coverage.* *.gcov lcov.info;
 }
 
 # ---------------------------------------------------------------------
