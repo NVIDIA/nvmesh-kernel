@@ -505,8 +505,17 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
 	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
+	INIT_DELAYED_WORK(&tpv->timeout_work, nvmeibc_tpv_timeout_work_fn);
 	tpv->state_loaded = false;
 	atomic_set(&tpv->cdv_alloc_pending, 0);
+
+	/*
+	 * Start with the attach timeout (30 s).  Bios arriving before
+	 * state_loaded will be parked and failed after this timeout if the
+	 * CDV tree never becomes readable.  Upgraded to the normal (long)
+	 * timeout by load_state_work_fn after state_loaded is set.
+	 */
+	tpv->max_retry_jiffies = TPV_IO_TIMEOUT_ATTACH * HZ;
 
 	bio_list_init(&tpv->pending_bios);
 	bio_list_init(&tpv->pending_l1_flush_bios);
@@ -578,6 +587,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 
 err_free_alloc:
 	cancel_delayed_work_sync(&tpv->load_state_work);
+	cancel_delayed_work_sync(&tpv->timeout_work);
 	/* Unregister the block device if blkdev_register already succeeded. */
 	nvmeibc_tpv_blkdev_unregister(tpv);
 	nvmeibc_tpv_allocator_free(&tpv->allocator);
@@ -598,10 +608,20 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	atomic_set(&tpv->state, TPV_DETACHING);
 	nvmeibc_tpv_list_remove(tpv);
 
+	/*
+	 * Shorten the pending-bio timeout so any parked bios are failed
+	 * quickly (10 ms), matching regular volume detach behaviour.
+	 * mod_delayed_work re-arms timeout_work at the new short delay
+	 * if it was pending; otherwise it schedules a new firing.
+	 */
+	tpv->max_retry_jiffies = HZ / 100;
+	mod_delayed_work(system_wq, &tpv->timeout_work, tpv->max_retry_jiffies);
+
 	/* ── 1. Remove from active list and cancel pending work ────────── */
 	cancel_delayed_work_sync(&tpv->load_state_work);
 	cancel_work_sync(&tpv->cdv_alloc_work);
 	cancel_work_sync(&tpv->persist_work);
+	cancel_delayed_work_sync(&tpv->timeout_work);
 
 	/* ── 2. Flush dirty allocator state synchronously ───────────────── */
 	if (tpv->dirty) {

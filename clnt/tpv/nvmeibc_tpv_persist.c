@@ -804,6 +804,22 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 	tpv->state_loaded = true;
 	spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
 
+	/*
+	 * Transition from the attach timeout (30 s) to the normal-operation
+	 * timeout (effectively infinite, or the io_max_retry_secs module param
+	 * shared with regular volumes).  This ensures bios parked after state
+	 * load (CDV extent pool exhaustion) are not subject to the short
+	 * attach timeout.
+	 */
+	{
+		extern unsigned nvmeibc_io_max_retry_secs;
+		unsigned long normal_timeout =
+			(nvmeibc_io_max_retry_secs ? :
+			 (unsigned)TPV_IO_TIMEOUT_NORMAL) * (unsigned long)HZ;
+
+		tpv->max_retry_jiffies = normal_timeout;
+	}
+
 	_NI(tpv_state_loaded, "TPV: @STR: state loaded; draining pending bios",
 	    tpv->tpv_name);
 

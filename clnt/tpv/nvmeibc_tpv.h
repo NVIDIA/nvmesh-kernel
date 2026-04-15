@@ -218,6 +218,22 @@ struct nvmeibc_tpv {
 	spinlock_t                    persist_lock;
 	bool                          dirty;
 
+	/*
+	 * IO timeout for parked bios — mirrors regular volume max_retry_jiffies.
+	 * Set to TPV_IO_TIMEOUT_ATTACH * HZ at attach (30 s), upgraded to
+	 * normal (effectively infinite or io_max_retry_secs) after state_loaded,
+	 * reduced to HZ / 100 (10 ms) at detach for fast drain.
+	 */
+	unsigned long                 max_retry_jiffies;
+
+	/*
+	 * Timeout sweep for pending_bios / pending_l1_flush_bios.
+	 * Scheduled when the first bio is parked; fires after max_retry_jiffies
+	 * to fail all parked bios with -EIO.  Cancelled when bios are drained
+	 * successfully by retry_pending_bios / forward_l1_flush_bios.
+	 */
+	struct delayed_work           timeout_work;
+
 	/* Entry in the per-client active TPV list. */
 	struct list_head              list_node;
 
@@ -274,6 +290,16 @@ struct tpv_l1_header {
 	u64 n_l2_slots_used;		/* number of L2 slots consumed */
 	u8  reserved[16];		/* pad to 64 bytes total */
 };
+
+/* ── IO timeout constants ─────────────────────────────────────────────── */
+
+/*
+ * Defaults mirror IO_TIME_OUT_ATTACH and IO_TIME_OUT_NORMAL from
+ * nvmeibc_block.c.  The normal-operation timeout may be overridden by the
+ * nvmeibc_io_max_retry_secs module parameter (shared with regular volumes).
+ */
+#define TPV_IO_TIMEOUT_ATTACH	30		/* seconds; blocking IO during attach */
+#define TPV_IO_TIMEOUT_NORMAL	(1 << 20)	/* seconds; virtually infinite */
 
 /* ── IO API (implemented in nvmeibc_tpv_io.c) ─────────────────────────── */
 
@@ -391,6 +417,9 @@ int  nvmeibc_tpv_install_data_extent(struct nvmeibc_tpv *tpv, u64 extent_index);
 
 /* Background work handler: flush dirty allocator state to CDV_extent[0]. */
 void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
+
+/* Timeout sweep: fail parked bios that exceeded max_retry_jiffies. */
+void nvmeibc_tpv_timeout_work_fn(struct work_struct *work);
 
 /* Background work handler: load allocator state from CDV_extent[0] + recovery. */
 void nvmeibc_tpv_load_state_work_fn(struct work_struct *work);

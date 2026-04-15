@@ -216,10 +216,17 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 			 * once the CDV allocator work function replenishes the
 			 * pool.  cdv_alloc_work is already scheduled by
 			 * alloc_extent().
+			 *
+			 * Arm the timeout sweep if this is the first parked bio
+			 * so bios don't wait forever when the CDV is full or
+			 * the allocator TOMA is unreachable.
 			 */
 			unsigned long flags;
 
 			spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+			if (bio_list_empty(&tpv->pending_bios))
+				schedule_delayed_work(&tpv->timeout_work,
+						      tpv->max_retry_jiffies);
 			bio_list_add(&tpv->pending_bios, bio);
 			spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
 			return -EAGAIN;
@@ -298,6 +305,9 @@ REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio)
 
 		spin_lock_irqsave(&tpv->pending_bio_lock, flags);
 		if (!tpv->state_loaded) {
+			if (bio_list_empty(&tpv->pending_bios))
+				schedule_delayed_work(&tpv->timeout_work,
+						      tpv->max_retry_jiffies);
 			bio_list_add(&tpv->pending_bios, bio);
 			spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
 			return REQ_RET_ZERO;
@@ -336,6 +346,13 @@ void nvmeibc_tpv_retry_pending_bios(struct nvmeibc_tpv *tpv)
 	bio_list_init(&tpv->pending_bios);
 	spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
 
+	/*
+	 * Cancel the timeout sweep — bios are being processed now.
+	 * If tpv_handle_one_bio re-parks any of them (partial pool refill),
+	 * the parking code re-schedules timeout_work.
+	 */
+	cancel_delayed_work(&tpv->timeout_work);
+
 	while ((bio = bio_list_pop(&local)) != NULL)
 		tpv_handle_one_bio(tpv, bio);
 }
@@ -364,7 +381,51 @@ void nvmeibc_tpv_forward_l1_flush_bios(struct nvmeibc_tpv *tpv)
 	bio_list_init(&tpv->pending_l1_flush_bios);
 	spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
 
+	cancel_delayed_work(&tpv->timeout_work);
+
 	while ((bio = bio_list_pop(&local)) != NULL)
 		tpv_handle_one_bio(tpv, bio);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_forward_l1_flush_bios);
+
+/* ── nvmeibc_tpv_timeout_work_fn — fail parked bios after timeout ─────── */
+
+/*
+ * Fires after max_retry_jiffies from the moment the first bio was parked.
+ * Fails all bios on pending_bios and pending_l1_flush_bios with -EIO.
+ *
+ * The timeout value depends on TPV state:
+ *   - Attaching (state_loaded == false): 30 s  — CDV tree didn't load in time.
+ *   - Attached (normal):        virtually infinite — CDV extent pool exhaustion
+ *                                is transient; pool refill cancels this work.
+ *   - Detaching:                10 ms — fast drain for graceful shutdown.
+ */
+void nvmeibc_tpv_timeout_work_fn(struct work_struct *work)
+{
+	struct nvmeibc_tpv *tpv = container_of(to_delayed_work(work),
+					       struct nvmeibc_tpv, timeout_work);
+	struct bio_list  expired;
+	struct bio      *bio;
+	unsigned long    flags;
+	int              n = 0;
+
+	bio_list_init(&expired);
+
+	spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+	bio_list_merge(&expired, &tpv->pending_bios);
+	bio_list_init(&tpv->pending_bios);
+	bio_list_merge(&expired, &tpv->pending_l1_flush_bios);
+	bio_list_init(&tpv->pending_l1_flush_bios);
+	spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+
+	while ((bio = bio_list_pop(&expired)) != NULL) {
+		bio_endio(bio, -EIO);
+		n++;
+	}
+
+	if (n)
+		_NW(tpv_bio_timeout, "TPV @STR: timed out @INT parked bios after @LLU ms",
+		    tpv->tpv_name, n,
+		    (u64)tpv->max_retry_jiffies * 1000 / HZ);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_timeout_work_fn);

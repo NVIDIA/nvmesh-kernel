@@ -3346,3 +3346,183 @@ For proactive scan (Trigger B, if implemented in the future): iterate ATOM's lis
 | **Orphan cleanup on non-reattach** | Adopt + immediately detach a TPV that management didn't re-send. |
 | **Self-test adaptation** | Extend `nvmeibc_tpv_test.c` with a `tpv_ktest_ndu_roundtrip` that simulates abandon → adopt at the allocator level (mock ATOM orphan/adopt). |
 
+## Part 12 — Graceful IO Rejection and Pending-Bio Timeout
+
+### 12.1 Problem Statement
+
+Regular volumes use `io_max_retry_secs` (a module parameter) to control how long IOs
+are retried before being failed with `-EIO`.  The per-volume `max_retry_jiffies` field
+is set to different values at different lifecycle stages:
+
+| Stage | Timeout | Behaviour |
+|-------|---------|-----------|
+| Attach (before IO enabled) | 30 s | Bios parked in resubmitter; fail after 30 s if topology never comes up |
+| Normal operation | ~∞ (or module param) | Bios retried until disk recovers or timeout expires |
+| Detach | 10 ms | In-flight bios get a tiny grace period, then `-EIO` |
+| NDU upgrade | 0 ms | Immediate fail; ATOM buffers and replays later |
+
+TPV has **none of this**.  `nvmeibc_tpv_make_request` returns `-EIO` immediately when
+`state != TPV_ATTACHED`, and bios parked on `pending_bios` (waiting for CDV\_extent
+allocation) or during `!state_loaded` (waiting for L1/L2 tree load) have **no timeout
+at all** — they can wait indefinitely.
+
+### 12.2 Design
+
+Add `max_retry_jiffies` to `struct nvmeibc_tpv` and a `timeout_work` (delayed\_work)
+that fires when parked bios have waited too long.
+
+#### Timeout values by state
+
+| State | `max_retry_jiffies` | Source |
+|-------|---------------------|--------|
+| Attaching (state\_loaded == false) | `TPV_IO_TIMEOUT_ATTACH * HZ` (30 s) | Matches regular volume attach timeout |
+| Attached (normal operation) | `(nvmeibc_io_max_retry_secs ?: TPV_IO_TIMEOUT_NORMAL) * HZ` | Shares the existing module parameter; defaults to ~∞ |
+| Detaching | `HZ / 100` (10 ms) | Matches regular volume detach drain |
+
+`TPV_IO_TIMEOUT_ATTACH = 30`, `TPV_IO_TIMEOUT_NORMAL = (1 << 20)` — same constants
+as `IO_TIME_OUT_ATTACH` and `IO_TIME_OUT_NORMAL` in `nvmeibc_block.c`.
+
+#### Timeout work lifecycle
+
+1. **Schedule** — whenever a bio is parked on `pending_bios` (either from the
+   `!state_loaded` path or the `-EAGAIN` extent-pool-empty path) and `timeout_work`
+   is not already pending, schedule it with delay = `max_retry_jiffies`.
+2. **Fire** — `nvmeibc_tpv_timeout_work_fn` runs: fail all bios on `pending_bios`
+   and `pending_l1_flush_bios` with `-EIO`.  If the TPV is still in a normal state
+   and new bios get parked afterwards, a new timeout cycle starts.
+3. **Cancel** — when bios are successfully drained (by `retry_pending_bios` or
+   `forward_l1_flush_bios`), cancel `timeout_work`.  If some bios were re-parked
+   (partial pool refill), the parking code re-schedules.
+4. **Detach fast-drain** — `nvmeibc_tpv_detach` sets `max_retry_jiffies = HZ / 100`,
+   then calls `mod_delayed_work` to re-arm `timeout_work` at the new short delay.
+   The timeout fires within 10 ms and fails everything.  `nvmeibc_tpv_detach` then
+   proceeds to `cancel_delayed_work_sync` and fails any stragglers directly.
+
+#### Transition: attach → normal
+
+When `load_state_work_fn` sets `state_loaded = true` in `nvmeibc_tpv_persist.c`, it
+also updates `max_retry_jiffies` to the normal-operation value.  This ensures that
+bios parked after state is loaded (CDV extent pool empty) use the long timeout, not
+the 30-second attach timeout.
+
+### 12.3 Struct Changes
+
+```c
+ struct nvmeibc_tpv {
+     /* ... existing fields ... */
++
++    /*
++     * IO timeout for parked bios — matches regular volume max_retry_jiffies.
++     * Set to TPV_IO_TIMEOUT_ATTACH at attach, upgraded to normal after
++     * state_loaded, reduced to HZ/100 at detach.
++     */
++    unsigned long                 max_retry_jiffies;
++
++    /*
++     * Timeout sweep for pending_bios / pending_l1_flush_bios.
++     * Scheduled when the first bio is parked; fires after max_retry_jiffies
++     * to fail all parked bios with -EIO.  Cancelled when bios are drained
++     * successfully.
++     */
++    struct delayed_work           timeout_work;
+ };
+```
+
+### 12.4 IO Path Changes
+
+#### Parking a bio (`tpv_handle_one_bio`, `-EAGAIN` path)
+
+```c
+ if (rv == -EAGAIN) {
+     unsigned long flags;
+
+     spin_lock_irqsave(&tpv->pending_bio_lock, flags);
++    if (bio_list_empty(&tpv->pending_bios))
++        schedule_delayed_work(&tpv->timeout_work, tpv->max_retry_jiffies);
+     bio_list_add(&tpv->pending_bios, bio);
+     spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+     return -EAGAIN;
+ }
+```
+
+#### Parking a bio (`nvmeibc_tpv_make_request`, `!state_loaded` path)
+
+```c
+ if (!tpv->state_loaded) {
++    if (bio_list_empty(&tpv->pending_bios))
++        schedule_delayed_work(&tpv->timeout_work, tpv->max_retry_jiffies);
+     bio_list_add(&tpv->pending_bios, bio);
+     spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+     return REQ_RET_ZERO;
+ }
+```
+
+#### Draining bios (`retry_pending_bios`, `forward_l1_flush_bios`)
+
+After successfully draining all parked bios, cancel the timeout:
+
+```c
+ void nvmeibc_tpv_retry_pending_bios(struct nvmeibc_tpv *tpv)
+ {
+     /* ... drain loop ... */
++    /* If all bios were dispatched (none re-parked), cancel the timeout.
++     * If some were re-parked by tpv_handle_one_bio, the parking code
++     * already re-scheduled timeout_work. */
++    cancel_delayed_work(&tpv->timeout_work);
+ }
+```
+
+#### Timeout fire
+
+```c
+void nvmeibc_tpv_timeout_work_fn(struct work_struct *work)
+{
+    struct nvmeibc_tpv *tpv = container_of(to_delayed_work(work),
+                                            struct nvmeibc_tpv, timeout_work);
+    struct bio_list  expired;
+    struct bio      *bio;
+    unsigned long    flags;
+
+    bio_list_init(&expired);
+
+    spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+    bio_list_merge(&expired, &tpv->pending_bios);
+    bio_list_init(&tpv->pending_bios);
+    bio_list_merge(&expired, &tpv->pending_l1_flush_bios);
+    bio_list_init(&tpv->pending_l1_flush_bios);
+    spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+
+    while ((bio = bio_list_pop(&expired)) != NULL)
+        bio_endio(bio, -EIO);
+}
+```
+
+### 12.5 Detach Path
+
+```c
+ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
+ {
+     atomic_set(&tpv->state, TPV_DETACHING);
+     nvmeibc_tpv_list_remove(tpv);
+
++    /* Shorten timeout so any parked bios fail within 10 ms. */
++    tpv->max_retry_jiffies = HZ / 100;
++    mod_delayed_work(system_wq, &tpv->timeout_work, tpv->max_retry_jiffies);
+
+     cancel_delayed_work_sync(&tpv->load_state_work);
+     cancel_work_sync(&tpv->cdv_alloc_work);
+     cancel_work_sync(&tpv->persist_work);
++    cancel_delayed_work_sync(&tpv->timeout_work);
+     /* ... flush, unregister, fail remaining bios ... */
+ }
+```
+
+### 12.6 Modified Files
+
+| File | Changes |
+|------|---------|
+| `clnt/tpv/nvmeibc_tpv.h` | Add `max_retry_jiffies`, `timeout_work` fields; declare `nvmeibc_tpv_timeout_work_fn()`. |
+| `clnt/tpv/nvmeibc_tpv.c` | Init `max_retry_jiffies` and `timeout_work` in attach; shorten timeout + mod\_delayed\_work + cancel in detach. |
+| `clnt/tpv/nvmeibc_tpv_io.c` | Schedule `timeout_work` when parking bios; cancel when draining; add `nvmeibc_tpv_timeout_work_fn()`. |
+| `clnt/tpv/nvmeibc_tpv_persist.c` | Update `max_retry_jiffies` to normal value when `state_loaded` is set. |
+
