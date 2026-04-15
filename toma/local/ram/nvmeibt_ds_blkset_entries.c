@@ -170,15 +170,13 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 	// First see if we need to read the dirty_bits from persistency
 	if (seg_topo_ctx->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST) {
 		/* pesistent storage contains valid/clean data: try to restore */
-		if (nvmeibt_ds_metadata_locks_table_restore(seg_active, &is_stale_rebuild_required) == 0) {	/* restore from persistent storage succeeded: all done */
+		if (nvmeibt_ds_metadata_locks_table_restore(seg_active, &is_stale_rebuild_required) == 0)
 			goto _out_success;
-		} else {
-			/* restore from persistent storage failed: fallback (see above) */
-			seg_active->is_last_shutdown_clean = 0;
-			seg_active->is_locktable_on_disk_corrupted = 1;			// Daniel: We can mark worst possible problems in RAM but be causios
-			N_Ef(hji98fe, "seg=@UUID_8 restore failed (@AUTO_ERRNO), fallback to BY_TOPO",nvmeibt_seg_active_UUID_8(seg_active));
-			NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(dhu7875, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
-		}
+		/* restore from persistent storage failed: fallback (see above) */
+		seg_active->is_last_shutdown_clean = 0;
+		seg_active->is_locktable_on_disk_corrupted = 1;			// Daniel: We can mark worst possible problems in RAM but be causios
+		N_Ef(hji98fe, "seg=@UUID_8 restore failed (@AUTO_ERRNO), fallback to BY_TOPO",nvmeibt_seg_active_UUID_8(seg_active));
+		NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(dhu7875, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
 	}
 
 	// Dirty_bits,  (see function comment for side-effects)
@@ -317,25 +315,15 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 			N_Ef(error_ds_metadata_nvmeibt_ds_metadata_init_non_EC_locks_table, "seg=@UUID_8 init modes mismatch", nvmeibt_seg_active_UUID_8(seg_active));
 		}
 
-		if (seg_active->is_last_shutdown_clean) {		// note: this is the value read when the segment was discovered, not the "current" value
-			/* pesistent storage contains valid/clean data: try to restore */
-			if (nvmeibt_ds_metadata_locks_table_restore(seg_active, &is_stale_rebuild_required) == 0) {
-				NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(fhuy7t5, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
-				NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(sj98476, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
-				/* restore from persistent storage succeeded: all done */
-				goto out;
-			}
-			/* restore from persistent storage failed: fallback (see above) */
-			seg_active->is_last_shutdown_clean = 0;
-			seg_active->is_locktable_on_disk_corrupted = 1;			// Daniel: We can mark worst possible problems in RAM but be causios
-			N_Ef(gfdu878, "seg=@UUID_8 restore failed (@AUTO_ERRNO), fallback to turn-on-all",nvmeibt_seg_active_UUID_8(seg_active));
-			NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(fhu8st5, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
-			NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(sm18476, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
-		} else {
-			/* pesistent storage does not contain valid/clean data: fallback */
-			N_Tf(wuu811n, "seg=@UUID_8 last shutdown not clean, fallback to turn-on-all", nvmeibt_seg_active_UUID_8(seg_active));
-		}
-		// Fallback to standard init: in mode FROM_PERSIST the two functions below will force by TOPO for both stale locks and dirty bits.
+		/* pesistent storage contains valid/clean data: try to restore */
+		if (nvmeibt_ds_metadata_locks_table_restore(seg_active, &is_stale_rebuild_required) == 0)
+			goto _out_success;
+		/* restore from persistent storage failed: fallback (see above) */
+		seg_active->is_last_shutdown_clean = 0;
+		seg_active->is_locktable_on_disk_corrupted = 1;			// Daniel: We can mark worst possible problems in RAM but be causios
+		N_Ef(gfdu878, "seg=@UUID_8 restore failed (@AUTO_ERRNO), fallback to BY_TOPO",nvmeibt_seg_active_UUID_8(seg_active));
+		NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(fhu8st5, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
+		NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(sm18476, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO);
 	}
 
 	rv = ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(seg_active, &lock_blkset_entry_init_val.blkset_info);
@@ -357,9 +345,9 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 		for (ii = 0; ii < n_blksets; ii++)
 			mmapped_locks_tbl[ii] = lock_blkset_entry_init_val;
 	}
+_out_success:
 	NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(ryf8xms, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 	NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(u876fr4, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
-
 out:
 	NFOUT;
 	return is_stale_rebuild_required;
