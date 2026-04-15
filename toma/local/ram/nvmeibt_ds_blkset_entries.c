@@ -186,7 +186,6 @@ bool nvmeibt_ds_metadata_init_EC_locks_table(struct nvmeibt_seg_active *seg_acti
 		goto out;
 
 	// Stale_locks are always OFF for EC, nothing to init
-	// Now we are left with BY_TOPO or INIT_DONE, and 'init_val' to use
 	// Write over all the locks in a loop
 	if (1) { // Todo: Move to separate function
 		const uint64_t n_blksets = num_blksets_in_disk_segment(disk_segment);
@@ -258,7 +257,7 @@ static int ds_metadata_prepare_non_EC_stale_locks_init_val(struct nvmeibt_seg_ac
 	case NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO:
 		if (nvmeibt_disk_segment_is_competent_owner(seg_topo_ctx)) {
 			*lock_id_init_val = nvmeib_stale_special_raid1.lock_id;
-			*is_stale_rebuild_required = 1;
+			*is_stale_rebuild_required = true;
 		} else {
 			nvmeibt_register_eliminate_all_active_registrants_and_stales_of_seg_due_to_locks_table_reset(seg_active);
 		}
@@ -274,23 +273,18 @@ static int ds_metadata_prepare_non_EC_stale_locks_init_val(struct nvmeibt_seg_ac
 
 bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_active)
 {
-	struct nvmeibt_disk_segment				*disk_segment;
+	struct nvmeibt_disk_segment				*disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
 	enum NVMEIBT_MEM_TBL_INIT_MODE			dirty_bits_init_mode;
 	enum NVMEIBT_MEM_TBL_INIT_MODE			stale_locks_init_mode;
 	int										rv;
 	bool									is_stale_rebuild_required = 0;
-	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-	union nvmeib_lock_blkset_entry			lock_blkset_entry_init_val = {.all = 0};
+	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
+	union nvmeib_lock_blkset_entry			lock_blkset_entry_init_val = nvmeib_lock_init_value;
 	union nvmeib_lock_blkset_entry			*mmapped_locks_tbl = nvmeibt_seg_active_get_locks_tbl_ptr(seg_active);
-	int8_t									idx_in_praid;
-	uint64_t								n_blksets, ii;
 	bool									is_init_dirty_required;
 	bool									is_init_stale_required;
 
 	NFIN;
-
-	disk_segment = nvmeibt_seg_active_get_disk_segment(seg_active);
-	seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
 	dirty_bits_init_mode = seg_topo_ctx->dirty_bits_init_mode;
 	stale_locks_init_mode = seg_topo_ctx->stale_locks_init_mode;
 
@@ -301,7 +295,6 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 		N_Tf(doo09da, "seg=@UUID_8 is being deleted (so not local)", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
 	}
-
 	if (!mmapped_locks_tbl) {
 		N_Wf(kkii98s, "Disk seg=@UUID_8 locks table is NOT mmapped, disk was probably removed", nvmeibt_seg_active_UUID_8(seg_active));
 		goto out;
@@ -342,11 +335,7 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 			/* pesistent storage does not contain valid/clean data: fallback */
 			N_Tf(wuu811n, "seg=@UUID_8 last shutdown not clean, fallback to turn-on-all", nvmeibt_seg_active_UUID_8(seg_active));
 		}
-
-		/*
-		 * Fallback to standard init: in mode FROM_PERSIST the two functions
-		 * below will force turn-on-all for both stale locks and dirty bits.
-		 */
+		// Fallback to standard init: in mode FROM_PERSIST the two functions below will force by TOPO for both stale locks and dirty bits.
 	}
 
 	rv = ds_metadata_prepare_non_EC_dirty_and_txid_bits_init_val(seg_active, &lock_blkset_entry_init_val.blkset_info);
@@ -361,16 +350,13 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 	rv = 0;
 
 	NTOMA_ASSERT(hq123xc, (is_init_stale_required && is_init_dirty_required), "Init modes mismatch");
-
-	idx_in_praid = nvmeibt_disk_segment_idx_in_praid(disk_segment);
-	n_blksets = num_blksets_in_disk_segment(disk_segment);
-	N_Tf(by65tf3, "seg=@UUID_8 idx_in_praid=@IDX_IN_PRAID locks_tbl=@LOCKS_TBL n_blksets=@UINT64_TX",
-		 nvmeibt_seg_active_UUID_8(seg_active), idx_in_praid, mmapped_locks_tbl, n_blksets);
-
-	for (ii = 0; ii < n_blksets; ii++) {
-		mmapped_locks_tbl[ii] = lock_blkset_entry_init_val;
+	{
+		const int8_t idx_in_praid = nvmeibt_disk_segment_idx_in_praid(disk_segment);
+		uint64_t ii, n_blksets = num_blksets_in_disk_segment(disk_segment);
+		N_Tf(by65tf3, "seg=@UUID_8 idx_in_praid=@IDX_IN_PRAID locks_tbl=@LOCKS_TBL n_blksets=@UINT64_TX",	nvmeibt_seg_active_UUID_8(seg_active), idx_in_praid, mmapped_locks_tbl, n_blksets);
+		for (ii = 0; ii < n_blksets; ii++)
+			mmapped_locks_tbl[ii] = lock_blkset_entry_init_val;
 	}
-
 	NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS_INIT_MODE(ryf8xms, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 	NNVMEIBT_SEG_ACTIVE_SET_STALE_LOCKS_INIT_MODE(u876fr4, seg_active, NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE);
 
