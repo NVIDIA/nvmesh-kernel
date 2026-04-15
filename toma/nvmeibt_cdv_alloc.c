@@ -1558,13 +1558,16 @@ void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 
 	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
 		unsigned int used_pct = 0;
+		const char *cdv_name = alloc->dev_path[0] ?
+			alloc->dev_path + strlen(CDV_DEV_PATH_PREFIX) : "(unknown)";
 
 		if (alloc->total_data_extents > 0)
 			used_pct = (unsigned int)(alloc->n_allocated * 100
 						  / alloc->total_data_extents);
 
 		(*printf_fn)(printf_ctx,
-			     "\t- cdv=%-40s allocator=%-20s gen=%-6llu allocated=%-6llu / %-6llu  (%u%%)%s\n",
+			     "\t- cdv=%-20s [%-40s] allocator=%-20s gen=%-6llu allocated=%-6llu / %-6llu  (%u%%)%s\n",
+			     cdv_name,
 			     alloc->cdv_uuid,
 			     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(unelected)",
 			     alloc->allocator_generation,
@@ -1594,13 +1597,16 @@ void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const c
 	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
 		struct nvmeibt_cdv_extent_entry *entry;
 		unsigned int used_pct = 0;
+		const char *cdv_name = alloc->dev_path[0] ?
+			alloc->dev_path + strlen(CDV_DEV_PATH_PREFIX) : "(unknown)";
 
 		if (alloc->total_data_extents > 0)
 			used_pct = (unsigned int)(alloc->n_allocated * 100
 						  / alloc->total_data_extents);
 
 		(*printf_fn)(printf_ctx,
-			     "\tcdv=%s  allocator=%s  gen=%llu  allocated=%llu/%llu (%u%%)  ondisk_loaded=%s\n",
+			     "\tcdv=%-20s [%s]  allocator=%s  gen=%llu  allocated=%llu/%llu (%u%%)  ondisk_loaded=%s\n",
+			     cdv_name,
 			     alloc->cdv_uuid,
 			     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(unelected)",
 			     alloc->allocator_generation,
