@@ -232,15 +232,24 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 		return 0;
 	}
 
-	/* ── 2. Query TOMA for all data CDV_extents assigned to this TPV ───── */
-	rv = nvmeibc_ib_admin_cdv_list_extents(tpv->cdv_vol, toma_id,
-					       tpv->tpv_uuid,
-					       &toma_indices, &toma_count);
-	if (rv) {
-		_NE(tpv_recovery_list_fail,
-		    "TPV: @STR: CDV_LIST_EXTENTS to @STR failed rv=@INT; orphan check skipped",
-		    tpv->tpv_name, toma_id, rv);
-		return 0;
+	/* ── 2. Get TOMA extent list (prefer cached from load_state) ───────── */
+	if (alloc->toma_extent_list && alloc->toma_extent_count > 0) {
+		toma_indices = alloc->toma_extent_list;
+		toma_count   = alloc->toma_extent_count;
+		/* Transfer ownership: recovery will vfree. */
+		alloc->toma_extent_list  = NULL;
+		alloc->toma_extent_count = 0;
+	} else {
+		rv = nvmeibc_ib_admin_cdv_list_extents(tpv->cdv_vol, toma_id,
+						       tpv->tpv_uuid,
+						       &toma_indices,
+						       &toma_count);
+		if (rv) {
+			_NE(tpv_recovery_list_fail,
+			    "TPV: @STR: CDV_LIST_EXTENTS to @STR failed rv=@INT; orphan check skipped",
+			    tpv->tpv_name, toma_id, rv);
+			return 0;
+		}
 	}
 
 	_NT(tpv_recovery_list_ok,
@@ -250,7 +259,17 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 	/* ── 3. Cross-reference and adopt orphans ───────────────────────────── */
 	for (i = 0; i < toma_count; i++) {
 		u64 eidx = toma_indices[i];
-		bool known = tpv_recovery_is_known(alloc, eidx);
+		bool known;
+
+		/* Skip the tree extent — it is metadata, not a data orphan. */
+		if (eidx == alloc->tree_extent_index) {
+			_NT(tpv_recovery_skip_tree,
+			    "TPV: @STR: skipping tree extent[@LLU]",
+			    tpv->tpv_name, eidx);
+			continue;
+		}
+
+		known = tpv_recovery_is_known(alloc, eidx);
 
 		_NT(tpv_recovery_check_ext,
 		    "TPV: @STR: recovery TOMA extent[@LLU] known=@INT",
@@ -261,7 +280,7 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 
 		/*
 		 * Orphan: TOMA allocated this CDV_extent to us but there are
-		 * no leaves for it in the flat-L1 tree.  Adopt it so its
+		 * no leaves for it in the L1/L2 tree.  Adopt it so its
 		 * physical slots enter the free pool.
 		 */
 		_NI(tpv_recovery_orphan_found,

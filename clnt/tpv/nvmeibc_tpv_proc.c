@@ -122,6 +122,8 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("cdv_extents_allocated: %llu / %llu\n",
 		cdv_extents_allocated, cdv_extents_total);
 	BUF_ADD("free_tpv_slots:      %llu\n", free_tpv_slots);
+	BUF_ADD("tree_extent_index:  %llu\n", alloc->tree_extent_index);
+	BUF_ADD("tree_l2_slots_used: %llu\n", alloc->n_l2_slots_used);
 	BUF_ADD("allocator_toma:      %s\n",  toma_id[0] ? toma_id : "(none)");
 	BUF_ADD("allocator_gen:       %llu\n", gen);
 
@@ -157,6 +159,9 @@ static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("low_watermark:           %llu\n", alloc->low_watermark);
 	BUF_ADD("pending_return_count:    %llu\n", pending);
 	BUF_ADD("cdv_alloc_pending:       %d\n",   atomic_read(&tpv->cdv_alloc_pending));
+	BUF_ADD("tree_extent_index:       %llu\n", alloc->tree_extent_index);
+	BUF_ADD("tree_l2_next_slot:       %llu\n", alloc->tree_l2_next_slot);
+	BUF_ADD("tree_l2_slots_used:      %llu\n", alloc->n_l2_slots_used);
 
 #undef BUF_ADD
 	return count;

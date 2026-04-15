@@ -13,8 +13,9 @@
  * The CDV provides the physical storage; the TPV presents a sparse virtual
  * address space to one exclusive client.  The mapping from virtual TPV_extents
  * to physical locations inside the CDV is managed by the client-local
- * TPV.allocator (this file) and persisted in an L1/L2/L3 tree stored in
- * CDV_extent[0].
+ * TPV.allocator (this file) and persisted in a per-TPV L1/L2 tree stored
+ * in the TPV's own "tree extent" (a CDV_extent whose slots are reserved
+ * for metadata, not data).
  */
 
 #include <linux/xarray.h>		/* struct xarray, xa_store/xa_load */
@@ -121,6 +122,26 @@ struct nvmeibc_tpv_allocator {
 	atomic64_t       stat_cdv_alloc_err;	/* CDV_ALLOC_EXTENT transport send failures */
 	atomic64_t       stat_cdv_free_ok;	/* CDV_FREE_EXTENT sends (successful) */
 	atomic64_t       stat_cdv_alloc_ns;	/* cumulative CDV alloc round-trip time (ns) */
+
+	/*
+	 * Per-TPV L1/L2 tree metadata.
+	 *
+	 * The first CDV_extent allocated from TOMA becomes the "tree extent".
+	 * Slot 0 holds the L1 table; slots 1+ hold L2 tables on demand.
+	 * No data is stored in the tree extent.
+	 */
+	u64              tree_extent_index;	/* CDV_extent holding L1+L2; 0 = none yet */
+	u64              tree_l2_next_slot;	/* next free slot in tree extent for L2 */
+	u64              n_l2_slots_used;	/* L2 slots currently allocated */
+	struct xarray    l1_to_l2_slot;		/* L1_idx -> L2 slot number in tree extent */
+
+	/*
+	 * Cached CDV_LIST_EXTENTS result from load_state.
+	 * Owned by load_state; transferred to recovery to avoid a second
+	 * TOMA round-trip.  vmalloc'd; recovery vfree's it.
+	 */
+	u64             *toma_extent_list;
+	u64              toma_extent_count;
 };
 
 /* ── TPV state enum ────────────────────────────────────────────────────── */
@@ -169,7 +190,7 @@ struct nvmeibc_tpv {
 	/*
 	 * Synchronous L1 flush mode.  When true, data bios for freshly-
 	 * allocated extents are parked on pending_l1_flush_bios until the
-	 * L1 tree is flushed to CDV_extent[0].  When false, the legacy
+	 * L1/L2 tree is flushed to the tree extent.  When false, the
 	 * deferred-flush path is used (persist_work fires asynchronously).
 	 * Set at attach time from the sourceUUID CM field and immutable
 	 * afterwards.
@@ -184,7 +205,7 @@ struct nvmeibc_tpv {
 	struct bio_list               pending_l1_flush_bios;
 
 	/*
-	 * Deferred load of allocator state from CDV_extent[0].
+	 * Deferred load of allocator state from the per-TPV tree extent.
 	 * Scheduled at attach; retries on I/O failure (CDV not ready).
 	 * state_loaded is set under pending_bio_lock; readers use
 	 * double-checked locking (READ_ONCE + re-check under lock).
@@ -192,7 +213,7 @@ struct nvmeibc_tpv {
 	struct delayed_work           load_state_work;
 	bool                          state_loaded;
 
-	/* Deferred persistence of allocator state to CDV_extent[0]. */
+	/* Deferred persistence of allocator state to the per-TPV tree extent. */
 	struct work_struct            persist_work;
 	spinlock_t                    persist_lock;
 	bool                          dirty;
@@ -210,30 +231,49 @@ struct nvmeibc_tpv {
 	struct nvmeib_public_procfs_ent      *proc_selftest;
 };
 
-/* ── L1/L2/L3 tree on-disk entry format (CDV_extent[0]) ───────────────── */
+/* ── L1/L2 tree on-disk entry format (per-TPV tree extent) ─────────────── */
 
 /*
- * Every entry at every level (L1, L2, L2a, L3) is 16 bytes.
+ * Every entry at every level (L1, L2) is 16 bytes.
  * extent_index == TPV_TREE_NULL means the slot is empty / not present.
- * CDV_extent[0] is the permanent L1 root and is never a valid child target,
- * so 0 is safe as the null sentinel.
+ * CDV_extent index 0 is never allocated by TOMA (it is the TOMA allocator
+ * area's own L1), so 0 is a safe null sentinel.
  *
- * Flat-L1 model (current implementation):
- *   CDV_extent[0] is used as a flat array of N = E/16 leaf entries,
- *   indexed directly by virtual extent index V.  Each leaf:
- *     extent_index = data CDV_extent index holding V's data
- *     debug_meta   = slot number within that CDV_extent
- *   phys_offset = A + extent_index×E + debug_meta×T.
- *   Max V = N−1.  For E=64 MB: 4 Mi entries → 256 GiB virtual capacity
- *   (at T=64 KiB per extent).  L2/L3 indirection for larger volumes is
- *   reserved for a future extension.
+ * L1/L2 tree model:
+ *   Each TPV has a private "tree extent" (a CDV_extent whose slots hold
+ *   metadata, not data).  Slot 0 = L1 table, slots 1+ = L2 tables.
+ *
+ *   L1 entries: extent_index = tree_extent_index,
+ *               debug_meta   = slot number within tree extent holding the L2
+ *   L2 leaf entries: extent_index = data CDV_extent index,
+ *                    debug_meta   = slot within that CDV_extent
+ *
+ *   Address translation (2-level):
+ *     L1_idx = V / N_L2;  L2_idx = V % N_L2
+ *     data_idx = L2[L2_idx].extent_index
+ *     slot     = L2[L2_idx].debug_meta
+ *     phys_offset = A + data_idx * E + slot * T
  */
 struct tpv_tree_entry {
 	u64 extent_index;		/* CDV_extent index of child table or data extent */
-	u64 debug_meta;			/* leaf: slot within CDV_extent; intermediate: reserved */
+	u64 debug_meta;			/* L1: slot of L2 in tree extent; L2 leaf: unused */
 };
 
 #define TPV_TREE_NULL  0ULL
+
+/* ── L1 table on-disk header (first 64 bytes of tree extent slot 0) ───── */
+
+#define TPV_L1_MAGIC		0x5450564C31544142ULL	/* "TPVL1TAB" */
+#define TPV_L1_VERSION		1
+
+struct tpv_l1_header {
+	u64 magic;			/* TPV_L1_MAGIC */
+	u64 version;			/* TPV_L1_VERSION */
+	u8  tpv_uuid[16];		/* owning TPV UUID */
+	u64 tree_extent_index;		/* CDV_extent holding this tree */
+	u64 n_l2_slots_used;		/* number of L2 slots consumed */
+	u8  reserved[16];		/* pad to 64 bytes total */
+};
 
 /* ── IO API (implemented in nvmeibc_tpv_io.c) ─────────────────────────── */
 

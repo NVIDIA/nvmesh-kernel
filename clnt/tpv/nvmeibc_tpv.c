@@ -181,6 +181,14 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 	INIT_LIST_HEAD(&alloc->pending_return_list);
 
 	alloc->low_watermark           = nvmeibc_tpv_calc_watermark(tpv_extent_size_kb);
+
+	/* Per-TPV L1/L2 tree tracking — populated by load_state or tpv_on_cdv_alloc_ok. */
+	alloc->tree_extent_index       = 0;
+	alloc->tree_l2_next_slot       = 0;
+	alloc->n_l2_slots_used         = 0;
+	xa_init(&alloc->l1_to_l2_slot);
+	alloc->toma_extent_list        = NULL;
+	alloc->toma_extent_count       = 0;
 }
 
 static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
@@ -211,6 +219,12 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 	nvmeibc_tpv_free_slots_list(&alloc->free_tpv_extents);
 	alloc->free_tpv_extent_count = 0;
 	alloc->cdv_extents_count     = 0;
+
+	/* Per-TPV L1/L2 tree cleanup. */
+	xa_destroy(&alloc->l1_to_l2_slot);
+	vfree(alloc->toma_extent_list);
+	alloc->toma_extent_list  = NULL;
+	alloc->toma_extent_count = 0;
 }
 
 /* ── Block device registration ─────────────────────────────────────────── */
@@ -504,17 +518,21 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 				   virtual_size_bytes, cdv_extent_size_mb,
 				   allocator_size_gb);
 
-	/* ── 3a-check. Verify flat-L1 tree can address all virtual extents. */
+	/* ── 3a-check. Verify 2-level L1/L2 tree can address all virtual extents. */
 	{
-		u64 l1_capacity = ((u64)cdv_extent_size_mb << 20) /
-				  sizeof(struct tpv_tree_entry);
+		u64 T      = (u64)tpv_extent_size_kb << 10;
+		u64 n_l1   = (T - sizeof(struct tpv_l1_header)) /
+			     sizeof(struct tpv_tree_entry);
+		u64 n_l2   = T / sizeof(struct tpv_tree_entry);
+		u64 n_sl   = ((u64)cdv_extent_size_mb << 20) / T;
+		u64 max_ve = n_l1 * n_l2 * n_sl;
 
-		if (tpv->allocator.virtual_extents_total > l1_capacity) {
-			_NE(tpv_l1_capacity_exceeded,
-			    "TPV: @STR: virtual_extents @LLU exceeds flat-L1 capacity @LLU",
+		if (tpv->allocator.virtual_extents_total > max_ve) {
+			_NE(tpv_tree_capacity_exceeded,
+			    "TPV: @STR: virtual_extents @LLU exceeds 2-level tree capacity @LLU",
 			    tpv_name,
 			    tpv->allocator.virtual_extents_total,
-			    l1_capacity);
+			    max_ve);
 			goto err_free_alloc;
 		}
 	}
@@ -522,10 +540,10 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	/*
 	 * ── 3b. Schedule deferred load of allocator state ──────────────
 	 *
-	 * load_state (CDV_extent[0] read), recovery (TOMA orphan check), and
-	 * the initial CDV_extent pre-allocation run in the background via
-	 * load_state_work.  IO arriving before load completes is parked on
-	 * pending_bios and drained once state_loaded is set.
+	 * load_state (read per-TPV tree from CDV), recovery (TOMA orphan
+	 * check), and the initial CDV_extent pre-allocation run in the
+	 * background via load_state_work.  IO arriving before load completes
+	 * is parked on pending_bios and drained once state_loaded is set.
 	 *
 	 * This allows attach to succeed even when the CDV block device is
 	 * temporarily unavailable (transport flap, CDV still attaching).

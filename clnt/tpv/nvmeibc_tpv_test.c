@@ -41,9 +41,10 @@
  *   A = 0 GB   allocator_size_gb = 0  (no metadata region)
  *   E = 1 MB   cdv_extent_size_mb = 1
  *   T = 64 KB  tpv_extent_size_kb = 64
- *   n_slots = E / T = 16  slots per data CDV_extent
- *   n_data  = 4           data CDV_extents (indices 1 .. 4)
- *   CDV buf = 5 MB        L1 at [0, E) + data extents 1..4 at [E, 5E)
+ *   n_slots = E / T = 16  slots per CDV_extent
+ *   tree    = CDV_extent 1  (L1 in slot 0, L2 in slots 1+)
+ *   n_data  = 4             data CDV_extents (indices 2 .. 5)
+ *   CDV buf = 6 MB          index 0 unused + tree ext 1 + data 2..5
  *
  * Locking / synchronisation notes:
  *   • The allocator spinlock (alloc->lock) is always held correctly because
@@ -89,10 +90,12 @@ int  nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 #define TPV_KTEST_ALLOC_GB	0u		/* A: metadata region in GB (none) */
 #define TPV_KTEST_TPV_EXT_KB	64u		/* T: TPV_extent size in KB */
 #define TPV_KTEST_N_SLOTS	((u64)(TPV_KTEST_CDV_EXT_MB) * 1024u / (u64)(TPV_KTEST_TPV_EXT_KB))	/* 16 */
-#define TPV_KTEST_N_DATA_EXTS	4u		/* data CDV_extents: indices 1..4 */
+#define TPV_KTEST_N_DATA_EXTS	4u		/* data CDV_extents: indices 2..5 */
+#define TPV_KTEST_TREE_EXT_IDX	1u		/* tree extent at CDV_extent index 1 */
 #define TPV_KTEST_VIRT_SIZE	((u64)64u << 20)	/* 64 MB virtual volume size */
-/* CDV buffer: L1 at [0, E) + data extents 1..4 at [E, 5E). */
-#define TPV_KTEST_CDV_BUF_SZ	((u64)(TPV_KTEST_N_DATA_EXTS + 1u) * ((u64)(TPV_KTEST_CDV_EXT_MB) << 20))
+/* CDV buffer: index 0 unused (A=0 so no alloc area) + tree ext 1 + data exts 2..5.
+ * Need 6 extent slots in total (indices 0..5).  */
+#define TPV_KTEST_CDV_BUF_SZ	((u64)(TPV_KTEST_N_DATA_EXTS + 2u) * ((u64)(TPV_KTEST_CDV_EXT_MB) << 20))
 
 /* ── Global test context ────────────────────────────────────────────────── */
 
@@ -207,6 +210,39 @@ static int ktest_cdv_free_extent(
 	return 0;
 }
 
+/*
+ * CDV extent list from TOMA: returns g_tc.recovery_extents as a vmalloc'd copy.
+ * Installed as nvmeibc_tpv_test_cdv_list_fn hook during self-tests.
+ */
+extern int (*nvmeibc_tpv_test_cdv_list_fn)(
+	struct nvmeibc_volume *cdv, const char *toma_id,
+	const char *tpv_uuid, u64 **out_indices, u64 *out_count);
+
+static int ktest_cdv_list_extents(
+	struct nvmeibc_volume *cdv,
+	const char            *toma_id,
+	const char            *tpv_uuid,
+	u64                  **out_indices,
+	u64                   *out_count)
+{
+	u64 *copy;
+
+	*out_indices = NULL;
+	*out_count   = 0;
+
+	if (!g_tc.recovery_extents || g_tc.recovery_count == 0)
+		return 0;
+
+	copy = vmalloc(g_tc.recovery_count * sizeof(u64));
+	if (!copy)
+		return -ENOMEM;
+
+	memcpy(copy, g_tc.recovery_extents, g_tc.recovery_count * sizeof(u64));
+	*out_indices = copy;
+	*out_count   = g_tc.recovery_count;
+	return 0;
+}
+
 /* ── Test helper: output accumulator ────────────────────────────────────── */
 
 struct tpv_ktest_output {
@@ -271,6 +307,14 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	INIT_LIST_HEAD(&alloc->pending_return_list);
 	alloc->low_watermark           = 0;	/* disable proactive pre-fetch */
 
+	/* Per-TPV L1/L2 tree tracking. */
+	alloc->tree_extent_index       = 0;
+	alloc->tree_l2_next_slot       = 0;
+	alloc->n_l2_slots_used         = 0;
+	xa_init(&alloc->l1_to_l2_slot);
+	alloc->toma_extent_list        = NULL;
+	alloc->toma_extent_count       = 0;
+
 	spin_lock_init(&tpv->allocator_id_lock);
 	tpv->allocator_toma_id[0] = '\0';	/* empty → cdv_alloc_work bails early */
 	tpv->allocator_generation = 0;
@@ -298,21 +342,40 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 }
 
 /*
- * tpv_ktest_seed_pool — inject n_extents data CDV_extents directly into
+ * tpv_ktest_seed_pool — inject tree extent + n_data_extents into
  * tpv->allocator without going through the TOMA work path.
  *
- * Each extent gets extent_index = 1 .. n_extents and n_slots free slots.
- * Mirrors the work done by tpv_on_cdv_alloc_ok() (static in the allocator).
+ * Tree extent at index TPV_KTEST_TREE_EXT_IDX (all slots reserved).
+ * Data extents at indices TPV_KTEST_TREE_EXT_IDX+1 .. +n_data_extents.
  */
-static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_extents)
+static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 {
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
-	u64 E = (u64)TPV_KTEST_CDV_EXT_MB << 20;	/* bytes per CDV_extent */
-	u64 T = (u64)TPV_KTEST_TPV_EXT_KB << 10;	/* bytes per TPV_extent */
-	u64 A = (u64)TPV_KTEST_ALLOC_GB << 30;		/* metadata region (= 0) */
+	u64 E = (u64)TPV_KTEST_CDV_EXT_MB << 20;
+	u64 T = (u64)TPV_KTEST_TPV_EXT_KB << 10;
+	u64 A = (u64)TPV_KTEST_ALLOC_GB << 30;
 	u64 ei, s;
 
-	for (ei = 1; ei <= n_extents; ei++) {
+	/* Tree extent: all slots reserved for L1/L2 metadata. */
+	{
+		struct nvmeibc_cdv_extent_ref *ref;
+
+		ref = kzalloc(sizeof(*ref), GFP_KERNEL);
+		if (!ref)
+			return -ENOMEM;
+		ref->extent_index    = TPV_KTEST_TREE_EXT_IDX;
+		ref->allocated_count = TPV_KTEST_N_SLOTS;	/* all reserved */
+		INIT_LIST_HEAD(&ref->node);
+		list_add_tail(&ref->node, &alloc->cdv_extent_list);
+		alloc->cdv_extents_count++;
+		alloc->tree_extent_index = TPV_KTEST_TREE_EXT_IDX;
+		alloc->tree_l2_next_slot = 1;	/* slot 0 = L1 */
+		alloc->n_l2_slots_used   = 0;
+	}
+
+	/* Data extents: indices TREE_EXT_IDX+1 .. +n_data_extents. */
+	for (ei = TPV_KTEST_TREE_EXT_IDX + 1;
+	     ei <= TPV_KTEST_TREE_EXT_IDX + n_data_extents; ei++) {
 		struct nvmeibc_cdv_extent_ref *ref;
 
 		ref = kzalloc(sizeof(*ref), GFP_KERNEL);
@@ -388,6 +451,11 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 	/* Free all free_slot entries. */
 	nvmeibc_tpv_free_slots_list(&alloc->free_tpv_extents);
 
+	/* Per-TPV L1/L2 tree cleanup. */
+	xa_destroy(&alloc->l1_to_l2_slot);
+	vfree(alloc->toma_extent_list);
+	alloc->toma_extent_list = NULL;
+
 	kfree(tpv);
 }
 
@@ -426,12 +494,12 @@ static void tpv_ktest_alloc_free(struct tpv_ktest_output *kto)
 
 	/*
 	 * Slots are served FIFO from free_tpv_extents (list_first_entry).
-	 * After seeding extent 1, slot 0 is at the head.
-	 *   phys0 = 0 + 1*1MB + 0*64KB = 1MB
-	 *   phys1 = 0 + 1*1MB + 1*64KB = 1MB + 64KB
+	 * After seeding 1 data extent at index 2, slot 0 is at the head.
+	 *   phys0 = 0 + 2*1MB + 0*64KB = 2MB
+	 *   phys1 = 0 + 2*1MB + 1*64KB = 2MB + 64KB
 	 */
-	expect_phys0 = (u64)1 << 20;
-	expect_phys1 = ((u64)1 << 20) + ((u64)64 << 10);
+	expect_phys0 = (u64)2 << 20;
+	expect_phys1 = ((u64)2 << 20) + ((u64)64 << 10);
 
 	/* First alloc. */
 	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry0);
@@ -501,7 +569,9 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 {
 	struct nvmeibc_tpv *tpv = NULL, *tpv2 = NULL;
 	struct nvmeibc_tpv_extent_entry *e;
-	u64 expect_phys;	/* phys of virt_idx=0, slot 0 of extent 1 */
+	u64 data_ext_idx = TPV_KTEST_TREE_EXT_IDX + 1;	/* = 2 */
+	u64 expect_phys;	/* phys of virt_idx=0, slot 0 of data extent 2 */
+	u64 saved_toma_extents[2];
 	int rc;
 
 	/* The CDV buffer is set up by the caller; zero it to start fresh. */
@@ -518,8 +588,8 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 		goto done;
 	}
 
-	/* Alloc virt_idx=0 → slot 0 of extent 1 → phys = 1 MB. */
-	expect_phys = (u64)1 << 20;
+	/* Alloc virt_idx=0 → slot 0 of data extent 2 → phys = 2 MB. */
+	expect_phys = (u64)data_ext_idx << 20;
 	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &e);
 	if (rc != 0 || !e || e->phys_offset != expect_phys) {
 		KTO_FAIL(kto, "persist", "alloc_extent rc=%d phys=0x%llx",
@@ -529,8 +599,7 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 
 	/*
 	 * Explicitly flush state to the CDV buffer.  Clear dirty first so
-	 * the background persist_work (which may have been armed by
-	 * alloc_extent) does not race with our direct call.
+	 * the background persist_work does not race with our direct call.
 	 */
 	spin_lock(&tpv->persist_lock);
 	tpv->dirty = false;
@@ -547,14 +616,34 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 	tpv_ktest_destroy(tpv);
 	tpv = NULL;
 
-	/* Load state into a fresh TPV — no pool seeding, load_state does it. */
+	/*
+	 * Load state into a fresh TPV — no pool seeding, load_state does it.
+	 * load_state calls CDV_LIST_EXTENTS which uses g_tc.recovery_extents.
+	 * Configure the TOMA stub to report the tree extent + data extent.
+	 */
+	saved_toma_extents[0] = TPV_KTEST_TREE_EXT_IDX;	/* tree */
+	saved_toma_extents[1] = data_ext_idx;			/* data */
+	g_tc.recovery_extents = saved_toma_extents;
+	g_tc.recovery_count   = 2;
+
 	tpv2 = tpv_ktest_create();
 	if (!tpv2) {
 		KTO_FAIL(kto, "persist", "create (phase 2) failed");
+		g_tc.recovery_extents = NULL;
+		g_tc.recovery_count   = 0;
 		return;
 	}
 
+	/* Set a toma_id so load_state's CDV_LIST_EXTENTS call proceeds. */
+	strncpy(tpv2->allocator_toma_id, "ktest-toma",
+		sizeof(tpv2->allocator_toma_id) - 1);
+
 	rc = nvmeibc_tpv_load_state(tpv2);
+
+	/* Restore TOMA stub state regardless of outcome. */
+	g_tc.recovery_extents = NULL;
+	g_tc.recovery_count   = 0;
+
 	if (rc != 0) {
 		KTO_FAIL(kto, "persist", "load_state rc=%d", rc);
 		goto done;
@@ -572,22 +661,32 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 			 e->phys_offset, expect_phys);
 		goto done;
 	}
-	if (e->cdv_extent_index != 1) {
+	if (e->cdv_extent_index != data_ext_idx) {
 		KTO_FAIL(kto, "persist",
-			 "loaded cdv_extent_index %llu != 1",
-			 e->cdv_extent_index);
+			 "loaded cdv_extent_index %llu != %llu",
+			 e->cdv_extent_index, data_ext_idx);
 		goto done;
 	}
 
 	/*
-	 * Verify free pool: slot 0 of extent 1 is used; slots 1..15 are free.
-	 * free_tpv_extent_count should be 15.
+	 * Verify free pool: all n_slots slots of data extent 2 are loaded.
+	 * Slot 0 is used (virt_idx=0); slots 1..15 are free.
+	 * free_tpv_extent_count should be N_SLOTS - 1 = 15.
 	 */
 	if (tpv2->allocator.free_tpv_extent_count != TPV_KTEST_N_SLOTS - 1) {
 		KTO_FAIL(kto, "persist",
 			 "free_tpv_extent_count %llu, want %llu",
 			 tpv2->allocator.free_tpv_extent_count,
 			 TPV_KTEST_N_SLOTS - 1);
+		goto done;
+	}
+
+	/* Verify tree extent was identified. */
+	if (tpv2->allocator.tree_extent_index != TPV_KTEST_TREE_EXT_IDX) {
+		KTO_FAIL(kto, "persist",
+			 "tree_extent_index %llu, want %u",
+			 tpv2->allocator.tree_extent_index,
+			 TPV_KTEST_TREE_EXT_IDX);
 		goto done;
 	}
 
@@ -757,7 +856,7 @@ static void tpv_ktest_recovery(struct tpv_ktest_output *kto)
 	u64 orphan_idx = 1;
 	int rc;
 
-	/* Zero CDV buffer → empty L1 tree → load_state maps nothing. */
+	/* Zero CDV buffer → no L1 magic found → load_state maps nothing. */
 	memset(g_tc.cdv_buf, 0, g_tc.cdv_len);
 
 	/*
@@ -868,6 +967,7 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
 	/* Route CDV IB admin through the test stubs. */
 	nvmeibc_tpv_test_cdv_alloc_fn = ktest_cdv_alloc_extent;
 	nvmeibc_tpv_test_cdv_free_fn  = ktest_cdv_free_extent;
+	nvmeibc_tpv_test_cdv_list_fn  = ktest_cdv_list_extents;
 
 	KTO_ADD(&kto,
 		"TPV kernel self-tests  "
@@ -894,6 +994,7 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
 	nvmeibc_tpv_cdv_test_sync_write_fn = NULL;
 	nvmeibc_tpv_test_cdv_alloc_fn      = NULL;
 	nvmeibc_tpv_test_cdv_free_fn       = NULL;
+	nvmeibc_tpv_test_cdv_list_fn       = NULL;
 
 	vfree(g_tc.cdv_buf);
 	g_tc.cdv_buf = NULL;

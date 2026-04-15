@@ -498,6 +498,33 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 	n_slots = tpv_slots_per_cdv_extent(alloc);
 
 	/*
+	 * If no tree extent yet, this CDV_extent becomes the tree extent.
+	 * Reserve all its slots for L1/L2 metadata; do not add to free pool.
+	 */
+	if (alloc->tree_extent_index == 0) {
+		alloc->tree_extent_index = extent_index;
+		alloc->tree_l2_next_slot = 1;	/* slot 0 = L1 */
+		alloc->n_l2_slots_used   = 0;
+
+		ref = kzalloc(sizeof(*ref), GFP_NOIO);
+		if (!ref)
+			return -ENOMEM;
+		ref->extent_index    = extent_index;
+		ref->allocated_count = n_slots;	/* all reserved for tree */
+		INIT_LIST_HEAD(&ref->node);
+
+		spin_lock(&alloc->lock);
+		list_add_tail(&ref->node, &alloc->cdv_extent_list);
+		alloc->cdv_extents_count++;
+		spin_unlock(&alloc->lock);
+
+		_NI(tpv_tree_extent_set,
+		    "TPV: @STR: CDV_extent[@LLU] is the tree extent (@LLU slots reserved)",
+		    tpv->tpv_name, extent_index, n_slots);
+		return 0;
+	}
+
+	/*
 	 * Install tree leaf and flush before making slots visible.
 	 * Implemented in nvmeibc_tpv_persist.c (step 11d).
 	 */

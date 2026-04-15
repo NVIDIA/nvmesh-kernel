@@ -68,6 +68,11 @@ int (*nvmeibc_tpv_test_cdv_free_fn)(
 	const struct nvmeibc_cdv_free_req *req);
 EXPORT_SYMBOL(nvmeibc_tpv_test_cdv_free_fn);
 
+int (*nvmeibc_tpv_test_cdv_list_fn)(
+	struct nvmeibc_volume *cdv, const char *toma_id,
+	const char *tpv_uuid, u64 **out_indices, u64 *out_count);
+EXPORT_SYMBOL(nvmeibc_tpv_test_cdv_list_fn);
+
 /* ── Pending-request tracking ──────────────────────────────────────────── */
 
 #define CDV_ADMIN_TIMEOUT_SECS 30
@@ -398,6 +403,10 @@ int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 
 	*out_indices = NULL;
 	*out_count   = 0;
+
+	if (unlikely(nvmeibc_tpv_test_cdv_list_fn))
+		return nvmeibc_tpv_test_cdv_list_fn(cdv, toma_id, tpv_uuid,
+						    out_indices, out_count);
 
 	seg = cdv_find_active_segment(cdv);
 	if (!seg)

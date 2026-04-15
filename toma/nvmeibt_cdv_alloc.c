@@ -420,6 +420,9 @@ int nvmeibt_cdv_alloc_remove_extent(const char *cdv_uuid, uint64_t extent_index)
 	return -ENOENT;
 }
 
+static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid);
+static int cdv_ondisk_scan(const char *cdv_uuid, struct nvmeibt_cdv_alloc *alloc);
+
 int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 				    const char  *tpv_uuid,
 				    uint64_t   **out_indices,
@@ -434,8 +437,20 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 	*out_count   = 0;
 
 	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
-	if (!alloc)
-		return 0;   /* no extents from this CDV — not an error */
+	if (!alloc) {
+		/*
+		 * No in-memory allocator.  This happens when the CDV was
+		 * detached and re-attached (e.g. last TPV detached, then a
+		 * TPV re-attached).  Rebuild state from on-disk extent
+		 * records — the same cold-recovery path used at election.
+		 */
+		alloc = find_or_create_alloc(cdv_uuid);
+		if (!alloc)
+			return -ENOMEM;
+	}
+
+	if (!alloc->ondisk_loaded)
+		cdv_ondisk_scan(cdv_uuid, alloc);
 
 	/* Count matches first to size the output array. */
 	XDLIST_FOREACH(entry, &alloc->extents) {
