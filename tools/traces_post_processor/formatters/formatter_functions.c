@@ -88,6 +88,17 @@ int fmt_ndu(char *buf, int len, long arg, int datalen) {
 	return scnprintf(buf, len, "NDU(%d)", (int)arg);
 }
 
+int fmt_kafka_offset(char *buf, int len, long arg, int datalen) {
+	const long topic_offset = (arg & ((1L << 48)-1));	// Split bit field
+	const int topic_change_no = (int)(arg >> 56);
+	(void)datalen;
+	if (arg < 0)
+		return scnprintf(buf, len, "k_offset[%ld]", arg);
+	if (topic_change_no <= 1)			// No topic change so not interesting to print
+		return scnprintf(buf, len, "k_offset[%lu]", topic_offset);
+	return     scnprintf(buf, len, "k_offset[%lu|%u]", topic_offset, topic_change_no);
+}
+
 int fmt_disk_disconnection_status_from_buf(char *buf, int len, long arg, int datalen) {
 	return scnprintf(buf, len, "%s(%d)", nvmeibc_disk_release_reason_str[(int)arg],
 	(int)arg);
