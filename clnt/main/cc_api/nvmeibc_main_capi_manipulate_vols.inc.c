@@ -389,13 +389,14 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 	     __verify_reservation_version_correctness(&msg->volumes[0], volume, p, &resrv_inc_ignored))) { // Verify reservation info, if fails send current volume information
 		res = _calc_reply_on_attach(hdr->name, volume, -1, resrv_inc_ignored, &reply_hdr);
 	} else if ((hdr->type & AUTO_EXTEND_VOLUME) && update_only) {
-		/* TPV grow: management has extended the virtual size.
-		 * TPVs are not tracked in the regular nvmeibc_volume list so
-		 * !found is expected.  Look up the live TPV by UUID and call
-		 * nvmeibc_tpv_grow() to resize the block device in-place.
+		/* TPV grow or re-attach.  TPVs are not tracked in the regular
+		 * nvmeibc_volume list so !found is expected.  Look up the live
+		 * TPV by UUID: if it exists, this is a grow; if not, this is a
+		 * re-attach (TPV was detached and the MCS re-sends with
+		 * update_only because the CDV is still attached).
 		 */
 		const struct nvmeibc_volume_conf *conf = &msg->volumes[0];
-		u64 new_virtual_size_bytes = (u64)conf->blocks << 12;  /* 4 KiB units → bytes */
+		u64 new_virtual_size_bytes = (u64)conf->blocks << 12;
 		struct nvmeibc_tpv *tpv = nvmeibc_tpv_find_by_uuid(hdr->uuid);
 
 		if (tpv && new_virtual_size_bytes) {
@@ -404,14 +405,23 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 			nvmeibc_tpv_grow(tpv, new_virtual_size_bytes);
 			res = NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED;
 			reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
+			nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
+			goto _out;
+		} else if (!tpv) {
+			/* TPV not found — this is a re-attach after detach.
+			 * Fall through to the fresh-attach path below.
+			 */
+			_NI(tpv_reattach_dispatch,
+			    "TPV @STR: not found on update; treating as fresh attach",
+			    hdr->name);
 		} else {
 			_NE(tpv_grow_not_found,
-			    "TPV @STR: grow failed - uuid not found or new_size=@LLU is zero",
+			    "TPV @STR: grow failed - new_size=@LLU is zero",
 			    hdr->name, new_virtual_size_bytes);
 			res = NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED;
+			nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
+			goto _out;
 		}
-		nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
-		goto _out;
 	} else if (update_only && !found) {
 		_NE(t_tsbd05, DMESG_PREFIX("@DEV_NAME") ": not found in full-configuration message, skipping update", hdr->name);
                 nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_FAILED, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 0);
