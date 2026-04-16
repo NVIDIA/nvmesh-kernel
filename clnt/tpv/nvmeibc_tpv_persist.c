@@ -498,16 +498,48 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	if (tpv_is_detaching(tpv))
 		return -ECANCELED;
 
-	/* ── 1. Snapshot TOMA identity ────────────────────────────────── */
+	/* ── 1. Snapshot TOMA identity ──────────────────────────────────
+	 *
+	 * The TPV's allocator_toma_id is seeded once from cdv->cdv_allocator_toma_id
+	 * at attach/adopt time (see nvmeibc_tpv_attach:764-770 and
+	 * nvmeibc_tpv_adopt:493-503).  A CDV_ALLOCATOR_UPDATE push that lands
+	 * while the TPV is not yet in nvmeibc_tpv_active_list populates the CDV
+	 * cache but does not reach the TPV.  Close that race here by re-reading
+	 * the CDV cache whenever the local snapshot is empty.
+	 */
 	spin_lock_irqsave(&tpv->allocator_id_lock, flags);
 	strncpy(toma_id, tpv->allocator_toma_id, sizeof(toma_id) - 1);
 	toma_id[sizeof(toma_id) - 1] = '\0';
 	spin_unlock_irqrestore(&tpv->allocator_id_lock, flags);
 
+	if (toma_id[0] == '\0' && tpv->cdv_vol) {
+		struct nvmeibc_volume *cdv = tpv->cdv_vol;
+		unsigned long vflags;
+		char   cdv_toma[NVMEIB_HOST_NAME_LEN] = {0};
+		u64    cdv_gen = 0;
+
+		spin_lock_irqsave(&cdv->spinlock, vflags);
+		strncpy(cdv_toma, cdv->cdv_allocator_toma_id,
+			sizeof(cdv_toma) - 1);
+		cdv_gen = cdv->cdv_allocator_generation;
+		spin_unlock_irqrestore(&cdv->spinlock, vflags);
+
+		if (cdv_toma[0]) {
+			nvmeibc_tpv_update_allocator_id(tpv, cdv_toma, cdv_gen);
+			strncpy(toma_id, cdv_toma, sizeof(toma_id) - 1);
+			toma_id[sizeof(toma_id) - 1] = '\0';
+			_NI(tpv_load_toma_from_cdv,
+			    "TPV: @STR: picked up allocator toma=@STR gen=@LLU from CDV cache",
+			    tpv->tpv_name, cdv_toma, cdv_gen);
+		}
+	}
+
 	if (toma_id[0] == '\0') {
 		/*
-		 * Allocator TOMA not yet known — can't query CDV_LIST_EXTENTS.
-		 * Return -EAGAIN so load_state_work_fn retries in 1 second.
+		 * Allocator TOMA not yet known on TPV or CDV — can't query
+		 * CDV_LIST_EXTENTS.  Return -EAGAIN so load_state_work_fn
+		 * retries; the CDV cache is updated on each CDV_ALLOCATOR_UPDATE
+		 * push and will be re-read next iteration.
 		 */
 		_NW(tpv_load_no_toma,
 		    "TPV: @STR: no allocator TOMA ID; deferring load_state",
