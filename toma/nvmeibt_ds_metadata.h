@@ -38,7 +38,7 @@
  */
 struct nvmeibt_disk_segment_metadata_hdr {
 	char 						magic_str[DS_METADATA_MAGIC_STR_SIZE];
-	unsigned int				software_version;
+	unsigned int				encoding_ver;					// TOMA_ENCODING_VER when this metadata was written
 	unsigned int 				seg_metadata_version;
 	union nvmeib_uuid 			mgmt_db_uuid;
 	char						__unused[40];					// must be 0 filled

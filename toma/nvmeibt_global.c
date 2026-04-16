@@ -42,7 +42,7 @@ void nvmeibt_global_ctx_alloc(void)
 	if (_global_ctx_ptr)
 		return;
 	_global_ctx_ptr = calloc(1, sizeof(*_global_ctx_ptr));
-	global_ctx.persistent_toma_software_version = TOMA_SW_COMPATIBILITY_VER;
+	global_ctx.persistent_encoding_ver = TOMA_ENCODING_VER;
 	global_ctx.mgmt_DB_uuid = nvmeib_uuid_null_val;
 	global_ctx.block_devices_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw1, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 3), "block_devices_hash", 16, 0);
 	global_ctx.nics_hash_by_uuid = NVMEIB_HASH_CREATE(vhghnw3, (HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 2), "nics_hash", 16, 0);

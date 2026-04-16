@@ -19,9 +19,56 @@
 #define TOMA_LOG_DIR        TOMA_ROOT_DIR "var/log/nvmesh"	// Logs directory
 #define TOMA_BINLOG_DIR     TOMA_LOG_DIR  "/trace_daemon"
 
-#define TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED	0x00000350U		// Introduced in 3.5: First TOMA software version whose followers can merge incremental wire buffers, and support N mirror. NDU supported from 310 and 2.8
-#define TOMA_SW_COMPATIBILITY_VER							0x00000310U		// Current software version, Was defined in 3.1
-#define TOMA_SW_COMPATIBILITY_VER_OLDEST_SUPPORTED			0x00020800U		// Oldest Supported version, oldest encoding 2.8, v2.8->v3.1 transition (sw_ver format change only)
+/*
+ * TOMA Version Architecture
+ * -------------------------
+ * Two version concepts exist, each with a distinct role:
+ *
+ * 1. Software version (sw_ver, TOMA_SW_VER):
+ *    Per-TOMA-binary. Represents the features and decoding capability of
+ *    this TOMA binary. Used ONLY for:
+ *    - Advertising capability to peers (stamped in raft_msg.sw_ver).
+ *    - Per-peer feature gating: receiver stores peer's sw_ver as peer_sw_ver
+ *      on the raft_member, and leader uses it to decide what features to
+ *      enable for that peer (e.g. incremental wire-buf support).
+ *    - A TOMA with higher sw_ver can decode any encoding_ver <= its sw_ver.
+ *    - Bumps only on real feature/semantic changes (not every release).
+ *
+ * 2. Encoding version (encoding_ver, TOMA_ENCODING_VER):
+ *    Per-buffer. Stamped into wire buffers (topo headers, persist_and_wire_buf,
+ *    disk-segment metadata) and persistence files. Represents the wire byte
+ *    layout format — the same for both complete and incremental buffers (the
+ *    byte layout is identical; incremental is a content/feature distinction,
+ *    not a format distinction, and is gated by sw_ver not encoding_ver).
+ *    - Receiver checks: encoding_ver <= my TOMA_SW_VER => decodable.
+ *    - Bumps only when the wire byte layout actually changes.
+ *
+ * 3. guaranteed_sw_ver (persisted in raft_ctx, runtime in raft_ctx):
+ *    Cluster governance: "the leader and a majority of peers are at this
+ *    sw_ver or higher." Ratchets up when 66% of peers report higher sw_ver.
+ *    - Old binaries below guaranteed_sw_ver cannot lead or win elections.
+ *    - Followers at >= guaranteed_sw_ver know their leader can decode at that
+ *      level, so they can safely use that encoding in replies without checking
+ *      the leader's version explicitly.
+ *
+ * Hot-upgrade flow (3.4.0 -> HEAD):
+ *   - HEAD advertises sw_ver=0x350 in raft_msg. 3.4.0 warns but accepts.
+ *   - HEAD stamps encoding_ver=0x310 in complete topo bufs. 3.4.0 accepts.
+ *   - HEAD reads 3.4.0's sw_ver=0x310 from raft_msg, sets peer_sw_ver=0x310,
+ *     sends complete (not incremental) wire bufs to that peer.
+ *   - Once all peers at sw_ver=0x350, leader sends incremental to everyone.
+ *     All bufs still carry encoding_ver=0x310 (same byte layout).
+ */
+#define TOMA_SW_VER                         0x00000350U     // This binary's features & decoding capability. Advertised in raft_msg.sw_ver.
+#define TOMA_SW_VER_MIN_FOR_INCREMENTAL     0x00000350U     // Peer sw_ver must be >= this for leader to send incremental wire bufs (feature gate, not encoding).
+#define TOMA_ENCODING_VER                   0x00000310U     // Wire byte layout version. Stamped in all bufs (complete and incremental alike).
+#define TOMA_ENCODING_VER_OLDEST_SUPPORTED  0x00020800U     // Oldest encoding this binary decodes (v2.8 format).
+
+
+// Note: Neither TOMA_SW_VER nor TOMA_ENCODING_VER bumps every release.
+// Bump TOMA_SW_VER only when a real feature/semantic change needs peer awareness.
+// Bump TOMA_ENCODING_VER only when the wire byte layout actually changes.
+// It is OK for both to stay unchanged across multiple releases if nothing changed.
 
 #define WARN(x...) ({})		// Just in order to compile
 

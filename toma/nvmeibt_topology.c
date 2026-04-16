@@ -65,8 +65,8 @@ static struct nvmeibt_Buf raft_long_msg_test_buf;
 
 void nvmeibt_topology_print_versions(struct nvmeibt_topology_serialized_topo_header *header_ptr)
 {
-	N_Tf(u87er42, "sw_ver(@X<-->@X) TOPO(follower_applied=@INT64_TX follower_committed=@INT64_TX) TOOP_CONFIG(applied=@INT64_TX follower_committed=@INT64_TX)",
-		 TOMA_SW_COMPATIBILITY_VER, header_ptr->sw_ver,
+	N_Tf(u87er42, "encoding_ver(@X<-->@X) TOPO(follower_applied=@INT64_TX follower_committed=@INT64_TX) TOOP_CONFIG(applied=@INT64_TX follower_committed=@INT64_TX)",
+		 TOMA_ENCODING_VER, header_ptr->encoding_ver,
 		 RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_applied), RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_committed),
 		 RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_applied), RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_committed));
 }
@@ -1098,7 +1098,7 @@ static void nvmeibt_topology_leader_serialize_baseline_topo_to_wire_incremental_
 	TODO(Most of the following fields are probably redundant with the TLV. At least topo_len and mgmt_config_version);
 	memset(&serialized_header, 0, sizeof(serialized_header));
 	memcpy(serialized_header.topo_name, nvmeibt_topology_binary_topo_header, NVMEIBT_TOPOLOGY_BIN_NAME_LEN);
-	serialized_header.sw_ver = TOMA_SW_COMPATIBILITY_VER;
+	serialized_header.encoding_ver = TOMA_ENCODING_VER;	// Byte layout is the same for complete and incremental bufs
 	serialized_header.topo_len = topo_len;
 	serialized_header.praids_num = praids_num;
 	serialized_header.res_1 = 0;
@@ -1253,7 +1253,7 @@ int nvmeibt_topology_serialize_active_topology(void)
 	NNVMEIBT_BUF_RESIZE(nu65fq9, serialized_and_wire_topo_buf, topo_len);
 	// Set header fields for trace (to_wire will overwrite and byte-swap)
 	memcpy(header_ptr->topo_name, nvmeibt_topology_binary_active_topo_header, NVMEIBT_TOPOLOGY_BIN_NAME_LEN);
-	header_ptr->sw_ver = TOMA_SW_COMPATIBILITY_VER;
+	header_ptr->encoding_ver = TOMA_ENCODING_VER;
 	header_ptr->topo_len = topo_len;
 	header_ptr->segs_num = n_seg;
 	//

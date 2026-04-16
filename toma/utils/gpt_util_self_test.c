@@ -133,7 +133,7 @@ static void init_segment_control_block_standard(struct nvmeibt_seg_active_metada
 
 	/* Initialize header with production-compatible values */
 	nvmeibt_strlcpy(ctrl->header.magic_str, "Disk Segment Metadata db5a320f-c7f4-4e16-940a-dbc2e97a6494", sizeof(ctrl->header.magic_str));
-	ctrl->header.software_version = 0x00020800;		/* v2.8.0 */
+	ctrl->header.encoding_ver = 0x00020800;		/* v2.8.0 */
 	ctrl->header.seg_metadata_version = 0x00020800;	/* v2.8.0 */
 	ctrl->header.mgmt_db_uuid.ll[0] = 0x1111111111111111ULL;
 	ctrl->header.mgmt_db_uuid.ll[1] = 0x2222222222222222ULL;
@@ -578,7 +578,7 @@ static int SELF_TEST_generate_mock_disk_with_segment_metadata(const char *filepa
 	// Write segment metadata control block for partition 1
 	memset(seg_md_ctrl, 0, sizeof(*seg_md_ctrl));
 	nvmeibt_strlcpy(seg_md_ctrl->header.magic_str, "SEG_METADATA_MAGIC_V1", sizeof(seg_md_ctrl->header.magic_str));
-	seg_md_ctrl->header.software_version = 1;
+	seg_md_ctrl->header.encoding_ver = 1;
 	seg_md_ctrl->header.seg_metadata_version = 1;
 	seg_md_ctrl->disk_segment_uuid = seg_uuid_1;
 	seg_md_ctrl->save_timespec_tv_sec = 1234567890;
@@ -608,7 +608,7 @@ static int SELF_TEST_generate_mock_disk_with_segment_metadata(const char *filepa
 	// Write segment metadata control block for partition 2
 	memset(seg_md_ctrl, 0, sizeof(*seg_md_ctrl));
 	nvmeibt_strlcpy(seg_md_ctrl->header.magic_str, "SEG_METADATA_MAGIC_V1", sizeof(seg_md_ctrl->header.magic_str));
-	seg_md_ctrl->header.software_version = 1;
+	seg_md_ctrl->header.encoding_ver = 1;
 	seg_md_ctrl->header.seg_metadata_version = 1;
 	seg_md_ctrl->disk_segment_uuid = seg_uuid_2;
 	seg_md_ctrl->save_timespec_tv_sec = 9876543210LL;
@@ -3077,7 +3077,7 @@ DEFINE_TEST(binary_backup_restore)
 			/* Write marker to new partition's control block */
 			memset(&new_ctrl, 0, sizeof(new_ctrl));
 			nvmeibt_strlcpy(new_ctrl.header.magic_str, "TEST_MARKER_NEW_SEG_AFTER_BACKUP", sizeof(new_ctrl.header.magic_str));
-			new_ctrl.header.software_version = 0xDEADBEEF;		/* Unique marker */
+			new_ctrl.header.encoding_ver = 0xDEADBEEF;		/* Unique marker */
 			new_ctrl.header.seg_metadata_version = 999;
 			new_ctrl.disk_segment_uuid.ll[0] = 0xCAFEBABE00000000ULL;
 			new_ctrl.disk_segment_uuid.ll[1] = 0xDEADC0DE00000000ULL;
@@ -3156,11 +3156,11 @@ DEFINE_TEST(binary_backup_restore)
 
 	verify_ctrl = (struct nvmeibt_seg_active_metadata_ctrl *)read_buf;
 	if (strcmp(verify_ctrl->header.magic_str, "TEST_MARKER_NEW_SEG_AFTER_BACKUP") != 0 ||
-		verify_ctrl->header.software_version != 0xDEADBEEF ||
+		verify_ctrl->header.encoding_ver != 0xDEADBEEF ||
 		verify_ctrl->header.seg_metadata_version != 999) {
 		NNVMEIBT_BM_FREE(trace_test25_verify_free2, read_buf);
 		TEST_FAIL("New partition physical data corrupted by restore (magic=%s sw_ver=0x%x md_ver=%u)",
-					verify_ctrl->header.magic_str, verify_ctrl->header.software_version, verify_ctrl->header.seg_metadata_version);
+					verify_ctrl->header.magic_str, verify_ctrl->header.encoding_ver, verify_ctrl->header.seg_metadata_version);
 		goto out;
 	}
 

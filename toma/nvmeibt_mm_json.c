@@ -1722,13 +1722,13 @@ int apply_json_topo_hdr(struct mm_json_dict *dict)
 	NFIN;
 	JSON_LOOP_FOR_DICT(kv, dict) {
 		JSON_LOOP_ITERATION_START(bt83kwo, kv->key);
-		JSON_ASSIGN_PLAIN(kjwo2si, "sw_ver", header.sw_ver, kv->value->num);
+		JSON_ASSIGN_PLAIN(kjwo2si, "encoding_ver", header.encoding_ver, kv->value->num);
 		JSON_ASSIGN_PLAIN(zc5s0o2, "topo_len", header.topo_len, kv->value->num);
 		JSON_ASSIGN_PLAIN(hdnvk3k,  "praids_num", header.praids_num, kv->value->num);
 		JSON_LOOP_ITERATION_END(j5wlox3, kv->key);
 	}
-	N_Tf(cvgahew, "topo_hdr sw_ver=@INT64_TD topo_len=@INT64_TD praids_num=@INT64_TD",
-		 header.sw_ver, header.topo_len, header.praids_num);
+	N_Tf(cvgahew, "topo_hdr encoding_ver=@INT64_TD topo_len=@INT64_TD praids_num=@INT64_TD",
+		 header.encoding_ver, header.topo_len, header.praids_num);
 	JSON_ASSIGN_AND_CALL_VALIDATE(9vuwmrd);
 	N_Tf(vgshgwu, "Actually, Nothing to apply in the header. Used for validations");
 	NFOUT;
@@ -1860,7 +1860,7 @@ static int apply_parsed_JSON_tree_to_toma_objects(struct mm_json_elem *root)
 	NFIN;
 	JSON_LOOP_FOR_DICT(kv, dict) {
 		JSON_LOOP_ITERATION_START(hu3baut, kv->key);
-		JSON_ASSIGN_PLAIN(5vsh2w3, "buf_sw_ver", nvmeibt_global_get_global()->persistent_toma_software_version, (int32_t)(kv->value->num));
+		JSON_ASSIGN_PLAIN(5vsh2w3, "buf_encoding_ver", nvmeibt_global_get_global()->persistent_encoding_ver, (int32_t)(kv->value->num));
 		JSON_ASSIGN_PLAIN(6sb30o3, "raft_ctx", raft_ctx_json_tree_root, kv->value);
 		JSON_ASSIGN_PLAIN(msio05o, "tlv_raft_members", tlv_raft_members_json_tree_root, kv->value);
 		JSON_ASSIGN_PLAIN(sjhe040, "raft_members", raft_members_json_tree_root, kv->value);

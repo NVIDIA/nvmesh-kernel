@@ -1898,7 +1898,7 @@ static int export_gpt_to_json(int disk_fd,
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_partition_name\": \"%s\",\n", seg_name);
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_partition_pba_s\": %llu,\n", seg_md_entry->pba_s);
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_partition_pba_e\": %llu,\n", seg_md_entry->pba_e);
-		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_software_version\": %u,\n", seg_md_ctrl->header.software_version);
+		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_software_version\": %u,\n", seg_md_ctrl->header.encoding_ver);
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_seg_metadata_version\": %u,\n", seg_md_ctrl->header.seg_metadata_version);
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_save_timespec_tv_sec\": %lld,\n", (long long)seg_md_ctrl->save_timespec_tv_sec);
 		nvmeibt_Str_sprintf(json_output, "      \"_READONLY_locks_table_pbyte_s\": %llu,\n", seg_md_ctrl->locks_table_pbyte_s);
@@ -3147,7 +3147,7 @@ static int prepare_segment_metadata_from_json(struct nvmeibt_seg_active_metadata
 	prepared_seg_md->n_blksets_scrubbed = (uint64_t)json_get_dict_num(seg_md_json_elem, "_WARNING_n_blksets_scrubbed", current_seg_md->n_blksets_scrubbed);
 
 	/* Preserve readonly fields from current (version-dependent, calculated, or internal state) */
-	prepared_seg_md->header.software_version = current_seg_md->header.software_version;
+	prepared_seg_md->header.encoding_ver = current_seg_md->header.encoding_ver;
 	prepared_seg_md->header.seg_metadata_version = current_seg_md->header.seg_metadata_version;
 	prepared_seg_md->save_timespec_tv_sec = current_seg_md->save_timespec_tv_sec;
 	prepared_seg_md->locks_table_pbyte_s = current_seg_md->locks_table_pbyte_s;

@@ -225,7 +225,7 @@ int64_t nvmeibt_raft_get_incremental_wire_buf_enabled(void)	{ return raft_is_inc
 
 static bool raft_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver)
 {
-	return (peer_sw_ver >= TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED);
+	return (peer_sw_ver >= TOMA_SW_VER_MIN_FOR_INCREMENTAL);
 }
 
 static __kernel_suseconds_t		max_wait_for_non_registrable_seg_nsec = PRAID_LEADER_MAX_NSEC_WAIT_FOR_NON_REGISTRABLE_SEG_TO_APPLY_DEFAULT;
@@ -396,8 +396,8 @@ static enum PERSIST_AND_WIRE_BUF_DIFF compare_persist_and_wire_bufs_tlvs_excl_ra
 	wire_rm1 = b1->raft_members_ctx.tlv_idx;
 	wire_rm2 = b2->raft_members_ctx.tlv_idx;
 	//
-	if ((b1->buf_sw_ver != b2->buf_sw_ver) && (b1->buf_sw_ver != 0))
-		N_Wf(t7781vs, "b1->buf_sw_ver=@SOFTWARE_VERSION != b2->buf_sw_ver=@SOFTWARE_VERSION", LE_SWAP32(b1->buf_sw_ver), LE_SWAP32(b2->buf_sw_ver));
+	if ((b1->buf_encoding_ver != b2->buf_encoding_ver) && (b1->buf_encoding_ver != 0))
+		N_Wf(t7781vs, "b1->buf_encoding_ver=@SOFTWARE_VERSION != b2->buf_encoding_ver=@SOFTWARE_VERSION", LE_SWAP32(b1->buf_encoding_ver), LE_SWAP32(b2->buf_encoding_ver));
 	if (wire_tc1 != wire_tc2 || wire_kmc1 != wire_kmc2 || wire_rm1 != wire_rm2) {
 		rv = PERSIST_AND_WIRE_BUF_DIFF_TOPO_AND_CONFIGS;
 	} else if (wire_t1 != wire_t2) {
@@ -526,7 +526,7 @@ static void init_persist_and_wire_buf(struct nvmeibt_persist_and_wire_buf *buf)
 	buf->raft_members_ctx.tlv_crc = LE_SWAP32(crc32(0, &buf->raft_members_ctx, sizeof(buf->raft_members_ctx)));
 	//
 	persist_and_wire_recalc_total_len(buf);
-	buf->buf_sw_ver = LE_SWAP32(nvmeibt_global_get_global()->persistent_toma_software_version);
+	buf->buf_encoding_ver = LE_SWAP32(TOMA_ENCODING_VER);
 	NFOUT;
 }
 
@@ -630,7 +630,7 @@ struct nvmeibt_persist_and_wire_buf *nvmeibt_raft_generate_persist_and_wire_buf(
 	persist_and_wire_buf_set_raft_mgmt_DB_uuid(dst, mgmt_DB_uuid, 0);
 	persist_and_wire_buf_set_raft_calculated_append_entries_rep_time_ns(dst, calculated_append_entries_rep_time_ns, 0);
 	persist_and_wire_buf_set_raft_calculated_topo_calc_time_ns(dst, calculated_topo_calc_time_ns, 0);
-	persist_and_wire_buf_set_guaranteed_software_version(dst, guaranteed_sw_ver, 0);
+	persist_and_wire_buf_set_guaranteed_sw_ver(dst, guaranteed_sw_ver, 0);
 	persist_and_wire_buf_recalc_raft_ctx_crc_as_needed(dst, 1);
 	persist_and_wire_recalc_total_len(dst);
 	//
@@ -1629,7 +1629,7 @@ static struct nvmeibt_persist_and_wire_buf *realloc_and_upd_follower_persist_and
 	persist_and_wire_recalc_total_len(dst);
 	NNVMEIBT_TOMA_FREE(iqwv3j4, old);	// We allocated a new one and not reused
 out:
-	dst->buf_sw_ver = upd->buf_sw_ver;
+	dst->buf_encoding_ver = upd->buf_encoding_ver;
 	if (!is_raft_ctx_eq) {
 		dst->raft_ctx = upd->raft_ctx;
 	}
@@ -2202,9 +2202,9 @@ BOOL nvmeibt_raft_is_raft_valid(void)
 	return is_valid;
 }
 
-static void verify_persistency_toma_version(int32_t persistent_toma_software_version) {
-	if (persistent_toma_software_version != TOMA_SW_COMPATIBILITY_VER)
-		N_Wf(trace_raft_verify_persistency_toma_version, "Software version mismatch, '@X'!='@X'", persistent_toma_software_version, TOMA_SW_COMPATIBILITY_VER);
+static void verify_persistency_toma_version(int32_t persistent_encoding_ver) {
+	if (persistent_encoding_ver != TOMA_ENCODING_VER)
+		N_Wf(trace_raft_verify_persistency_toma_version, "Encoding version mismatch, '@X'!='@X'", persistent_encoding_ver, TOMA_ENCODING_VER);
 }
 
 static enum nvmeibt_add_rv raft_apply_raft_protocol_params_that_were_read_from_persistence(struct nvmeibt_Str *JSON_output)
@@ -2214,7 +2214,7 @@ static enum nvmeibt_add_rv raft_apply_raft_protocol_params_that_were_read_from_p
 	unsigned long long							persistent_last_rx_append_entries_term;
 	int64_t										persistent_kafka_mgmt_zone_number;
 	union nvmeib_uuid							persistent_mgmt_DB_uuid;
-	int32_t										persistent_toma_software_version;
+	int32_t										persistent_encoding_ver;
 	int64_t										persistent_raft_calculated_append_entries_rep_time_ns;
 	int64_t										persistent_raft_calculated_topo_calc_time_ns;
 	uint32_t									persistent_raft_ctx_crc;
@@ -2226,7 +2226,7 @@ static enum nvmeibt_add_rv raft_apply_raft_protocol_params_that_were_read_from_p
 
 	NFIN;
 	// Read & convert
-	persistent_toma_software_version = LE_SWAP32(buf->buf_sw_ver);
+	persistent_encoding_ver = LE_SWAP32(buf->buf_encoding_ver);
 	persistent_current_term = persist_and_wire_buf_get_current_raft_TERM(buf);
 	persistent_kafka_mgmt_zone_number = persist_and_wire_buf_get_raft_kafka_mgmt_zone_number(buf);
 	persistent_last_rx_append_entries_term = persist_and_wire_buf_get_last_rx_append_entries_raft_TERM(buf);
@@ -2240,7 +2240,7 @@ static enum nvmeibt_add_rv raft_apply_raft_protocol_params_that_were_read_from_p
 	if (JSON_output) {
 		struct nvmeibt_urn_uuid		voted_for_urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&persistent_voted_for_raft_member_uuid);
 		struct nvmeibt_urn_uuid		mgmt_db_urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&persistent_mgmt_DB_uuid);
-		nvmeibt_Str_sprintf(JSON_output, "\"buf_sw_ver\":%d,\n", persistent_toma_software_version);
+		nvmeibt_Str_sprintf(JSON_output, "\"buf_encoding_ver\":%d,\n", persistent_encoding_ver);
 		nvmeibt_Str_sprintf(JSON_output, "\"raft_ctx\":{\"current_term\":%llu, \"last_rx_append_entries_term\":%llu, \"kafka_mgmt_zone_number\":%lld, "
 							"\"voted_for_raft_member_uuid\":\"%s\", \"mgmt_DB_uuid\":\"%s\", \"guaranteed_sw_ver\":%u, "
 							"\"calculated_append_entries_rep_time_ns\":%lld, \"calculated_topo_calc_time_ns\":%lld, \"raft_ctx_crc\":%u}",
@@ -2249,15 +2249,15 @@ static enum nvmeibt_add_rv raft_apply_raft_protocol_params_that_were_read_from_p
 							persistent_raft_calculated_append_entries_rep_time_ns, persistent_raft_calculated_topo_calc_time_ns, persistent_raft_ctx_crc);
 	}
 	//
-	N_Tf(tbsjh3k, "Reading: toma_software_version=@SOFTWARE_VERSION current_term=@RAFT_TERM last_rx_append_entries_term=@RAFT_TERM "
+	N_Tf(tbsjh3k, "Reading: encoding_ver=@SOFTWARE_VERSION current_term=@RAFT_TERM last_rx_append_entries_term=@RAFT_TERM "
 		 "kafka_mgmt_zone_number=@INT64_TD voted_for_raft_member_id=@UUID_LE mgmt_DB_uuid=@UUID_LE "
 		 "calculated_append_entries_rep_time_ns=@INT64_TD calculated_topo_calc_time_ns=@INT64_TD guaranteed_sw_ver=@SOFTWARE_VERSION crc=@X",
-		 persistent_toma_software_version, persistent_current_term, persistent_last_rx_append_entries_term,
+		 persistent_encoding_ver, persistent_current_term, persistent_last_rx_append_entries_term,
 		 persistent_kafka_mgmt_zone_number, &persistent_voted_for_raft_member_uuid, &persistent_mgmt_DB_uuid,
 		 persistent_raft_calculated_append_entries_rep_time_ns, persistent_raft_calculated_topo_calc_time_ns, persistent_guaranteed_sw_ver, persistent_raft_ctx_crc);
 	nvmeibt_global_validate_and_upd_mgmt_DB_uuid(&persistent_mgmt_DB_uuid);
-	verify_persistency_toma_version(persistent_toma_software_version);
-	cur_topo->persistent_toma_software_version = persistent_toma_software_version;
+	verify_persistency_toma_version(persistent_encoding_ver);
+	cur_topo->persistent_encoding_ver = persistent_encoding_ver;
 	my_raft_global.current_term = persistent_current_term;
 	nvmeibt_kafka_new_kafka_mgmt_zone_number_received(persistent_kafka_mgmt_zone_number);
 	my_raft_global.last_rx_append_entries_term = persistent_last_rx_append_entries_term;
@@ -2776,7 +2776,7 @@ static int raft_send_msg_to_peer(
 	total_msg_size = offsetof(typeof(*msg), persist_and_wire_buf) + persist_and_wire_buf_get_total_len(persist_and_wire_buf);
 	msg = NNVMEIBT_BM_CALLOC(6gwuyj3, total_msg_size);
 	// My_raft state
-	msg->software_version = TOMA_SW_COMPATIBILITY_VER;
+	msg->sw_ver = TOMA_SW_VER;		// Advertise binary capability version to peers
 	nvmeibt_strlcpy(msg->git_commit_id, GIT_COMMIT_ID, sizeof(msg->git_commit_id));
 	msg->src_node_id = *raft_get_my_uuid();
 	msg->src_node_idx = 0; /*cur_topo->my_node->idx_in_cur_topo;*/
@@ -2902,9 +2902,9 @@ static int check_peer_eligibility_for_leader(const struct raft_msg *msg, struct 
 				eligibility = 0;
 				break;
 			case IDXS_ARE_EQUAL :
-				eligibility = (msg->software_version < nvmeibt_raft_get_guaranteed_sw_ver()) ? -1 : 0;
+				eligibility = (msg->sw_ver < nvmeibt_raft_get_guaranteed_sw_ver()) ? -1 : 0;
 				N_Tf(u87ubv4, "incoming_ver=@SOFTWARE_VERSION, guaranteed_ver=@SOFTWARE_VERSION, eligibility=@INT",
-					 msg->software_version, nvmeibt_raft_get_guaranteed_sw_ver(), eligibility);
+					 msg->sw_ver, nvmeibt_raft_get_guaranteed_sw_ver(), eligibility);
 				break;
 			default: // Just to shush the stupid compiler
 				eligibility = -1;
@@ -3322,8 +3322,8 @@ static void set_guaranteed_sw_ver(void)
 	int							n_new_ver = 0;
 
 	NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
-		if (peer_member->toma_software_version > my_raft_global.guaranteed_sw_ver) {
-			new_guaranteed_sw_ver = peer_member->toma_software_version;
+		if (peer_member->peer_sw_ver > my_raft_global.guaranteed_sw_ver) {
+			new_guaranteed_sw_ver = peer_member->peer_sw_ver;
 			N_Tf(u87b443, "peer=@STR, has higher SW ver=@SOFTWARE_VERSION", peer_member->hostname, new_guaranteed_sw_ver);
 			n_new_ver++;
 		}
@@ -3376,7 +3376,7 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 	peer_kafka_mgmt_config_offset = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.kafka_mgmt_config_ctx));
 	peer_raft_members_kafka_offset = nvmeibt_tlv_get_idx(&(dst_member->committed_persist_and_wire_buf_hdr.raft_members_ctx));
 	peer_raft_members_seq_no = nvmeibt_tlv_get_seq_no(&(dst_member->committed_persist_and_wire_buf_hdr.raft_members_ctx));
-	is_peer_incremental_wire_buf_supported = raft_is_peer_incremental_wire_buf_supported(dst_member->toma_software_version);
+	is_peer_incremental_wire_buf_supported = raft_is_peer_incremental_wire_buf_supported(dst_member->peer_sw_ver);
 
 	is_topo_incremental = raft_is_incremental_wire_buf_enabled &&
 		is_peer_incremental_wire_buf_supported &&
@@ -3404,7 +3404,7 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 
 	if (raft_is_incremental_wire_buf_enabled && !is_peer_incremental_wire_buf_supported) {
 		N_Df(peer_old_wire_buf, "peer=@STR sw_ver=@SOFTWARE_VERSION needs complete wire buf (min_supported=@SOFTWARE_VERSION)",
-			 dst_member->hostname, dst_member->toma_software_version, TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED);
+			 dst_member->hostname, dst_member->peer_sw_ver, TOMA_SW_VER_MIN_FOR_INCREMENTAL);
 	}
 	if (raft_is_incremental_wire_buf_enabled && !is_configs_and_raft_members_incremental) {
 		N_Df(peer_needs_complete, "Peer needs complete configs: kafka_offset=@INT64_TD (last_delete=@INT64_TD) members_offset=@INT64_TD (last_delete=@INT64_TD)",
@@ -3548,9 +3548,9 @@ static int raft_leader_send_appendentries_to_all_peers(int is_with_raft_log)
 	is_with_raft_log &= is_raft_state_mature_and_ready_for_distribution();
 	// Recalc the topology if needed, and the prev topo was applied
 	if (is_with_raft_log && is_prev_topo_committed) {
-		if (TOMA_SW_COMPATIBILITY_VER < nvmeibt_raft_get_guaranteed_sw_ver()) {
+		if (TOMA_SW_VER < nvmeibt_raft_get_guaranteed_sw_ver()) {
 			N_Tf(h4shek3, "SW ver=@SOFTWARE_VERSION is old, must be ver=@SOFTWARE_VERSION",
-				 TOMA_SW_COMPATIBILITY_VER, nvmeibt_raft_get_guaranteed_sw_ver());
+				 TOMA_SW_VER, nvmeibt_raft_get_guaranteed_sw_ver());
 			raft_convert_to_follower(NULL, NULL);
 			// I want to be a leader in the case of emergency only, so set a long election timeout
 			my_raft_global.next_election_time = nvmeibt_global_get_cur_event_start_time();
@@ -3830,7 +3830,7 @@ static int leader_process_peer_msg_data(const struct raft_msg *msg, struct nvmei
 	}
 	// Upd the remote committed indices
 	src_member->committed_persist_and_wire_buf_hdr.raft_ctx = msg->persist_and_wire_buf.raft_ctx;
-	src_member->committed_persist_and_wire_buf_hdr.buf_sw_ver = msg->persist_and_wire_buf.buf_sw_ver;
+	src_member->committed_persist_and_wire_buf_hdr.buf_encoding_ver = msg->persist_and_wire_buf.buf_encoding_ver;
 	if (compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(&(src_member->committed_persist_and_wire_buf_hdr), &(msg->persist_and_wire_buf)) != PERSIST_AND_WIRE_BUF_DIFF_EQUAL) {
 		raft_leader_update_committed_values_of_a_peer(src_member, &(msg->persist_and_wire_buf));
 	}
@@ -3872,7 +3872,7 @@ static enum RAFT_FOLLOWER_REP_RV raft_follower_persist_due_to_incoming_msg_as_ne
 		(RAFT_COMMIT_LIFECYCLE_VAL(current_raft_TERM, follower_submitted) != (int64_t)persist_and_wire_buf_get_current_raft_TERM(to_commit_buf));
 	persist_and_wire_buf_comparison_result = compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(&(msg->persist_and_wire_buf), to_commit_buf);
 	is_msg_data_persist_required = (msg->is_with_raft_log && (persist_and_wire_buf_comparison_result != PERSIST_AND_WIRE_BUF_DIFF_EQUAL)) ||
-		(msg->persist_and_wire_buf.buf_sw_ver != to_commit_buf->buf_sw_ver) ||
+		(msg->persist_and_wire_buf.buf_encoding_ver != to_commit_buf->buf_encoding_ver) ||
 		(RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_submitted) != nvmeibt_tlv_get_idx(&(to_commit_buf->topo_ctx))) ||
 		(RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_submitted) != nvmeibt_tlv_get_idx(&(to_commit_buf->topo_config_ctx))) ||
 		(RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, follower_submitted) != nvmeibt_tlv_get_idx(&(to_commit_buf->kafka_mgmt_config_ctx))) ||
@@ -4241,8 +4241,8 @@ static BOOL is_incoming_msg_valid(struct nvmeibt_big_msg *big_msg,
 	NFIN;
 	// WARNINGS
 	// Warn if a different software version
-	if (msg->software_version != TOMA_SW_COMPATIBILITY_VER) {
-		N_Wf(huu876y, "software version mismatch @SOFTWARE_VERSION!=@SOFTWARE_VERSION", msg->software_version, TOMA_SW_COMPATIBILITY_VER);
+	if (msg->sw_ver != TOMA_SW_VER) {
+		N_Wf(huu876y, "sw_ver mismatch @SOFTWARE_VERSION!=@SOFTWARE_VERSION", msg->sw_ver, TOMA_SW_VER);
 	}
 	if (strncmp(msg->git_commit_id, GIT_COMMIT_ID, sizeof(msg->git_commit_id))) {
 		static struct timespec	prev_printout_timespec = TIMESPEC_ZERO;
@@ -4309,7 +4309,7 @@ static int dispatch_raft_msg(struct raft_msg *msg, struct nvmeibt_node *src_node
 	NFIN;
 
 	if (src_member) {
-		src_member->toma_software_version = msg->software_version;
+		src_member->peer_sw_ver = msg->sw_ver;
 		if (src_member->is_ignored) {
 			N_Tf(hu8723n, "raft_member=@STR is ignored", nvmeibt_raft_member_name(src_member));
 			goto out;
@@ -4523,7 +4523,7 @@ void convert_raft_msg_header_le_be(struct raft_msg *msg)
 {
 	{ _Static_assert(sizeof(struct raft_msg) == 384, "Struct mm_segment_conf was changed without updating the packing function!"); }
 
-	SWAP32_STR_FIELD(msg, software_version);
+	SWAP32_STR_FIELD(msg, sw_ver);
 	// git_commit_id is a string. No need to touck
 	SWAP32_STR_BITFIELD(msg, msg_type);
 	SWAP_UUID_STR_FIELD(msg, src_node_id);

@@ -615,18 +615,20 @@ out:
 	return rv;	// 0 if parsed the binary data OK
 }
 
-static bool __is_compatible_version(uint32_t sw_ver)
+// Check if a received encoding version is decodable by this binary.
+// Accept: TOMA_ENCODING_VER, TOMA_ENCODING_VER_OLDEST_SUPPORTED, or (TOMA_ENCODING_VER .. TOMA_SW_VER].
+static bool __is_decodable_encoding_ver(uint32_t encoding_ver)
 {
-	if (sw_ver == TOMA_SW_COMPATIBILITY_VER)
+	if (encoding_ver == TOMA_ENCODING_VER)
 		return true;
-	if (sw_ver == TOMA_SW_COMPATIBILITY_VER_OLDEST_SUPPORTED) {		// Allow backward compatible versions during hot upgrade
-		N_Tf(qnbvd68, "Received topo from older TOMA sw_ver=@HEX08, current=@HEX08", sw_ver, TOMA_SW_COMPATIBILITY_VER);
+	if (encoding_ver == TOMA_ENCODING_VER_OLDEST_SUPPORTED) {		// v2.8 backward compat
+		N_Tf(qnbvd68, "Received topo from older TOMA encoding_ver=@HEX08, current=@HEX08", encoding_ver, TOMA_ENCODING_VER);
 		return true;
-	} else if (sw_ver <= TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED) {		// Allow Forward compatible versions during hot upgrade
-		N_Tf(qnbvd69, "Received topo from newer TOMA sw_ver=@HEX08, current=@HEX08", sw_ver, TOMA_SW_COMPATIBILITY_VER);
+	} else if (encoding_ver > TOMA_ENCODING_VER && encoding_ver <= TOMA_SW_VER) {	// Forward compat: newer encoding up to our binary capability
+		N_Tf(qnbvd69, "Received topo with higher encoding_ver=@HEX08 (current=@HEX08, max_decodable=@HEX08)", encoding_ver, TOMA_ENCODING_VER, TOMA_SW_VER);
 		return true;
 	}
-	N_Ef(qnbvd67, "Unknown structs version=@HEX08", sw_ver);
+	N_Ef(qnbvd67, "Unknown encoding version=@HEX08 (max decodable=@HEX08)", encoding_ver, TOMA_SW_VER);
 	return false;
 }
 
@@ -653,7 +655,7 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		header = (struct nvmeibt_topology_serialized_topo_header *)(serialized_topo_buf.data_buf);
 
 		// sanity check
-		if (!__is_compatible_version(header->sw_ver))
+		if (!__is_decodable_encoding_ver(header->encoding_ver))
 			goto out;
 		if (header->topo_len != (unsigned int)wire_data_len) {
 			N_Ef(ry78uwq, "Corrupted global topo: actual len=@X header->len=@X", wire_data_len, header->topo_len);
@@ -699,7 +701,7 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		header_ptr = (struct nvmeibt_active_topo_header *)(tmp_active_serialized_and_wire_topo_buf.data_buf);
 		nvmeibt_topology_convert_follower_header_le_be(header_ptr);
 		// sanity check
-		if (!__is_compatible_version(header_ptr->sw_ver))
+		if (!__is_decodable_encoding_ver(header_ptr->encoding_ver))
 			goto out;
 		calc_len = header_ptr->segs_num * sizeof(struct nvmeibt_serialized_seg_active_topo) + sizeof(*header_ptr);
 		if ((header_ptr->topo_len != calc_len) || ((unsigned int)wire_data_len != calc_len)) {

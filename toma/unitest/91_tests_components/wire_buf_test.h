@@ -124,7 +124,7 @@ struct section_merge_test_ctx {
 	X(all_sections_incremental_full_merge,			"All sections incremental full merge",		"Incoming all-incremental wire buf merges all sections into complete follower state") \
 	X(first_update_with_raft_log,        "First update with raft log",        "old=NULL, raft_log=true => full memcpy of upd") \
 	X(first_update_without_raft_log,     "First update without raft log",     "old=NULL, raft_log=false => only raft_ctx copied") \
-	X(equal_bufs_only_raft_ctx_updated,  "Equal bufs updates raft_ctx only",  "All idx match => dst==old, raft_ctx+sw_ver updated") \
+	X(equal_bufs_only_raft_ctx_updated,  "Equal bufs updates raft_ctx only",  "All idx match => dst==old, raft_ctx+encoding_ver updated") \
 	X(no_raft_log_keeps_old,             "No raft log keeps old",             "is_with_raft_log=false => dst==old regardless of idx diff") \
 	X(topo_only_same_size_inplace,       "Topo-only same size in-place",      "Only topo idx differs, same size => in-place merge") \
 	X(topo_only_diff_size_realloc,       "Topo-only diff size realloc",       "Only topo idx differs, different size => full alloc") \

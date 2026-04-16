@@ -69,7 +69,7 @@ struct nvmeibt_raft_member {
 	int64_t									raft_members_seq_no_updated;				// The kafka seq_no in which this member was added
 	int										n_disks_leader;
 	struct mm_raft_member_conf				this_member_leader_serialized_wire_buf;
-	unsigned int							toma_software_version;
+	unsigned int							peer_sw_ver;								// Last sw_ver from this peer's raft_msg; drives per-peer feature gating (e.g. incremental wire buf support)
 	bool									is_me;
 	//
 	struct timespec							last_received_voted_for_me_timespec;
@@ -196,7 +196,7 @@ struct nvmeibt_raft_ctx {
 	struct nvmeib_hash_table	*raft_members_hash_by_uuid;
 	int						n_raft_members;
 	int						n_raft_active_members;
-	uint32_t				guaranteed_sw_ver;
+	uint32_t				guaranteed_sw_ver;		// Cluster governance: leader+majority at this sw_ver. Old binaries cannot lead.
 //	struct nvmeibt_Buf		serialized_members;
 	struct timespec			leader_first_APPEND_ENTRIES_with_cur_committed_and_applied_topo_timespec;
 };

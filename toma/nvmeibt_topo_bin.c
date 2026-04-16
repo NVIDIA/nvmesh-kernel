@@ -112,7 +112,7 @@ void nvmeibt_praid_convert_topo_le_be(const struct nvmeibt_praid_serialized_topo
 void nvmeibt_topology_print_topo_header(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, struct nvmeibt_topology_serialized_topo_header *header_ptr)
 {
 	(*printf_fn)(printf_ctx, "ver=0x%x len=%u n_praid=%d\n",
-				 header_ptr->sw_ver, header_ptr->topo_len, header_ptr->praids_num);
+				 header_ptr->encoding_ver, header_ptr->topo_len, header_ptr->praids_num);
 }
 
 void nvmeibt_topology_print(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, const struct nvmeibt_Buf *wire_topo_buf, bool check_max_len)
@@ -172,7 +172,7 @@ void nvmeibt_topology_follower_print(int (*printf_fn)(void *ctx, const char *fmt
 	if (nvmeibt_topology_is_active_bin_topo(serialized_topo_ptr)) {
 
 		header_ptr = (struct nvmeibt_active_topo_header *)serialized_topo_ptr;
-		(*printf_fn)(printf_ctx, "ver=%x len=%u n_seg=%d\n", header_ptr->sw_ver, header_ptr->topo_len, header_ptr->segs_num);
+		(*printf_fn)(printf_ctx, "ver=%x len=%u n_seg=%d\n", header_ptr->encoding_ver, header_ptr->topo_len, header_ptr->segs_num);
 
 		if (header_ptr->segs_num > TOPOLOGY_MAX_SEGS_TO_PRINT) {
 			(*printf_fn)(printf_ctx, "Topology is too long\n");
@@ -194,7 +194,7 @@ void nvmeibt_topology_follower_print(int (*printf_fn)(void *ctx, const char *fmt
 void nvmeibt_topology_convert_header_le_be(const struct nvmeibt_topology_serialized_topo_header *src_ptr, struct nvmeibt_topology_serialized_topo_header *dst_ptr)
 {
 	memcpy(dst_ptr, src_ptr, NVMEIBT_TOPOLOGY_BIN_NAME_LEN);
-	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, sw_ver);
+	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, encoding_ver);
 	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, topo_len);
 	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, praids_num);
 	dst_ptr->res_1 = 0;
@@ -206,15 +206,15 @@ void serialize_topo_hdr_to_JSON(struct nvmeibt_topology_serialized_topo_header *
 	if (!JSON_output) {
 		goto out;
 	}
-	nvmeibt_Str_sprintf(JSON_output, "\n\"FULL_TOPO\":{\n\"topo_hdr\":{\"sw_ver\":%u, \"topo_len\":%u, \"praids_num\":%d},\n"
+	nvmeibt_Str_sprintf(JSON_output, "\n\"FULL_TOPO\":{\n\"topo_hdr\":{\"encoding_ver\":%u, \"topo_len\":%u, \"praids_num\":%d},\n"
 						"\"praids\":[%s",
-						hdr->sw_ver, hdr->topo_len, hdr->praids_num, (hdr->praids_num <= 0 ? "]" : ""));
+						hdr->encoding_ver, hdr->topo_len, hdr->praids_num, (hdr->praids_num <= 0 ? "]" : ""));
 out:;
 }
 
 void nvmeibt_topology_convert_follower_header_le_be(struct nvmeibt_active_topo_header *header_ptr)
 {
-	SWAP32_STR_FIELD(header_ptr, sw_ver);
+	SWAP32_STR_FIELD(header_ptr, encoding_ver);
 	SWAP32_STR_FIELD(header_ptr, topo_len);
 	SWAP32_STR_FIELD(header_ptr, segs_num);
 }
@@ -357,7 +357,7 @@ void nvmeibt_act_topo_builder_to_wire(const struct nvmeibt_act_topo_builder *b)
 
 	// Write header in host byte order
 	memcpy(header_ptr->topo_name, nvmeibt_topology_binary_active_topo_header, sizeof(header_ptr->topo_name));
-	header_ptr->sw_ver = TOMA_SW_COMPATIBILITY_VER;
+	header_ptr->encoding_ver = TOMA_ENCODING_VER;
 	header_ptr->topo_len = (unsigned int)b->topo_len;
 	header_ptr->segs_num = b->n_segs;
 	header_ptr->res = 0;

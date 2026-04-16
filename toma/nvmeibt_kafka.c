@@ -1854,7 +1854,7 @@ void send_keepalive_msgs_as_needed(void)
 							KAFKA_PRODUCER_MSG_HEADER_VAR("keepalive", 2),
 							nvmeibt_follower_keep_alive_secs, kafka_mgmt_zone_number,
 							nvmeibt_leader_host_name(), nvmeibt_global_get_startup_timestamp_msec(),
-							TOMA_SW_COMPATIBILITY_VER >> 16, TOMA_SW_COMPATIBILITY_VER & 0xFFFF, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT);
+							TOMA_SW_VER >> 16, TOMA_SW_VER & 0xFFFF, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT);
 		rebuild_stats_to_json(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "}}");
 		N_Tf(jsghw7b, "Sending follower keep_alive to management, seconds from last update=@LLD msg=@STR", now.tv_sec - last_follower_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));

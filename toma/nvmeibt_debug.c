@@ -102,8 +102,8 @@ void nvmeibt_debug_init_tracer_sections(void)
 
 static bool __is_unsupported_version(uint32_t sw_ver, bool should_abort)
 {
-	if (sw_ver > TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED) {
-		N_WTf(hj3a05n, "SW_VER mismatch too high @X > (max=@X, cur=@X)", sw_ver, TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED, TOMA_SW_COMPATIBILITY_VER);
+	if (sw_ver > TOMA_SW_VER) {
+		N_WTf(hj3a05n, "SW_VER mismatch too high @X > (max=@X)", sw_ver, TOMA_SW_VER);
 		if (should_abort)
 			nvmeibt_abort(ES_FATAL);
 		return true;
@@ -140,7 +140,7 @@ void read_rpc_config_from_persist(bool is_initial_read)
 	}
 
 	try_to_read_sw_ver(config, &sw_ver);
-	if (sw_ver == 0) {				// Support for old config files without version (TOMA_SW_COMPATIBILITY_VER_OLDEST_SUPPORTED)
+	if (sw_ver == 0) {				// Support for old config files without version (TOMA_ENCODING_VER_OLDEST_SUPPORTED)
 		goto continue_reading;
 	} else if (__is_unsupported_version(sw_ver, is_initial_read)) {
 		goto out;
@@ -248,7 +248,7 @@ void update_traces(void) {
 	}
 
 	try_to_read_sw_ver(config, &sw_ver);
-	if (sw_ver == 0) {				// Support for old config files without version (TOMA_SW_COMPATIBILITY_VER_OLDEST_SUPPORTED)
+	if (sw_ver == 0) {				// Support for old config files without version (TOMA_ENCODING_VER_OLDEST_SUPPORTED)
 		goto continue_reading;
 	} else if (__is_unsupported_version(sw_ver, is_initial_read)) {
 		goto out;
@@ -477,7 +477,7 @@ int nvmeibt_debug_config_params_parse(char *line, int *n_matches)
 void nvmeibt_debug_config_params_print(struct nvmeibt_Str *s, bool print_values, bool print_defaults)
 {
 	int i;
-	nvmeibt_Str_sprintf(s, "%s=%x\n", TOMA_SW_VER_STRING, TOMA_SW_COMPATIBILITY_VER);
+	nvmeibt_Str_sprintf(s, "%s=%x\n", TOMA_SW_VER_STRING, TOMA_SW_VER);
 	for (i=0; i<ARRAY_SIZE(oper_params); i++) {
 		struct oper_param_t *param = &oper_params[i];
 

@@ -118,7 +118,7 @@ struct target_drive {
 
 struct nvmeibt_topology_serialized_topo_header {
     char								topo_name[NVMEIBT_TOPOLOGY_BIN_NAME_LEN];
-    unsigned int						sw_ver;
+    unsigned int						encoding_ver;		// Byte layout version of this topo buffer
     unsigned int						topo_len;
 	int64_t								UNUSED_was_topo_config_kafka_offset;
     int									praids_num;
@@ -128,7 +128,7 @@ struct nvmeibt_topology_serialized_topo_header {
 
 struct nvmeibt_active_topo_header {
     char								topo_name[NVMEIBT_TOPOLOGY_BIN_NAME_LEN];
-    unsigned int						sw_ver;
+    unsigned int						encoding_ver;		// Byte layout version of this active topo buffer
     unsigned int						topo_len;
     int									segs_num;
 	int									res;

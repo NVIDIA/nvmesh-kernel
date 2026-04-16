@@ -34,7 +34,7 @@ enum PERSISTENCY_SECTION_TYPE {
 			(stc_ptr)->active_praid_version_minor,				\
 			(stc_ptr)->hostname,								\
 			(stc_ptr)->save_timespec_tv_sec,					\
-			(stc_ptr)->header.software_version,					\
+			(stc_ptr)->header.encoding_ver,						\
 			(stc_ptr)->header.seg_metadata_version,				\
 			(stc_ptr)->metadata_pbyte_s,						\
 			(stc_ptr)->locks_table_pbyte_s,						\
@@ -268,7 +268,7 @@ int nvmeibt_seg_active_fill_metadata_ctrl_header(struct nvmeibt_seg_active_metad
 	header = &(metadata_ctrl->header);
 	memset(header, 0, sizeof(*header));
 	nvmeibt_strlcpy(header->magic_str, DS_METADATA_MAGIC_STR, sizeof(header->magic_str));
-	header->software_version = TOMA_SW_COMPATIBILITY_VER;
+	header->encoding_ver = TOMA_ENCODING_VER;
 	header->seg_metadata_version = TOMA_METADATA_VERSION_v2_8_0;
 	header->mgmt_db_uuid = *nvmeibt_global_get_mgmt_DB_uuid();
 out:
@@ -385,8 +385,8 @@ int nvmeibt_ds_metadata_validate_and_upgrade_persistent_metadata_as_needed(struc
 			goto out;
 		}
 	}
-	if (header->software_version != TOMA_SW_COMPATIBILITY_VER) {
-		N_IMf(bhduke8, "seg=@UUID_LE TOMA_SW_COMPATIBILITY_VER=@UINT expected @UINT", seg_uuid, header->software_version, TOMA_SW_COMPATIBILITY_VER);
+	if (header->encoding_ver != TOMA_ENCODING_VER) {
+		N_IMf(bhduke8, "seg=@UUID_LE TOMA_ENCODING_VER=@UINT expected @UINT", seg_uuid, header->encoding_ver, TOMA_ENCODING_VER);
 	}
 	//
 	mgmt_db_uuid_union = *nvmeibt_global_get_mgmt_DB_uuid();

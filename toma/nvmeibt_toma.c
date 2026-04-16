@@ -1785,8 +1785,8 @@ void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn
 			"*******************************************************************************\n",
 			nvmeibt_get_my_hostname(), time_str);
 
-		(*printf_fn)(printf_ctx, "TOMA BUILD\n\t- %s, %s, %s, commit-id=%s branch=%s sw_compatibility_ver=%x, client_proto_version=%x\n",
-			MOD_STR, __DATE__, __TIME__, GIT_COMMIT_ID, GIT_BRANCH, TOMA_SW_COMPATIBILITY_VER, NVMEIBT_CLIENT_PROTO_VERSION);
+		(*printf_fn)(printf_ctx, "TOMA BUILD\n\t- %s, %s, %s, commit-id=%s branch=%s sw_ver=%x, client_proto_version=%x\n",
+			MOD_STR, __DATE__, __TIME__, GIT_COMMIT_ID, GIT_BRANCH, TOMA_SW_VER, NVMEIBT_CLIENT_PROTO_VERSION);
 	}
 
 	if (nvmeibt_global_get_global()) {		// Protect against early call too print before topology is initialized
@@ -2260,9 +2260,9 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 		  "now='@STR' Starting TOMA (@STR), compiled @STR, @STR",
 		  cur_time_t_str_no_newline, MOD_STR, __DATE__, __TIME__);
 	N_IMf(trace_1_toma_nvmeibt_toma_init,
-		  "commit-id=@STR branch=@STR build=@STR buildNumber=@STR sw_compatibility_ver=@X "
+		  "commit-id=@STR branch=@STR build=@STR buildNumber=@STR sw_ver=@X "
 		  "client_proto_version=@X dictionary_checksum=@X",
-		  GIT_COMMIT_ID, GIT_BRANCH, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT, TOMA_SW_COMPATIBILITY_VER,
+		  GIT_COMMIT_ID, GIT_BRANCH, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT, TOMA_SW_VER,
 		  NVMEIBT_CLIENT_PROTO_VERSION, (unsigned int)NVMEIB_DICTIONARY_CKSUM);
 	{
 		int i;

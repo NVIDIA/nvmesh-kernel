@@ -34,7 +34,7 @@ enum raft_pause_mode_enm {
 typedef XDLIST_DECLARE(, struct target_drive, target_drives_link) target_drives_spec_t;
 
 struct nvmeibt_topology {
-	int32_t								persistent_toma_software_version;	// As read from persistency
+	int32_t								persistent_encoding_ver;			// As read from persistency (buf_encoding_ver)
 	int				 					mgmt_config_version;
 	unsigned long long 					leader_config_version;
 	int64_t							 	garbage_collected_applied_topo_config_idx;

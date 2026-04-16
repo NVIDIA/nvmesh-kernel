@@ -52,7 +52,7 @@ struct raft_persistency {
 	union nvmeib_uuid				voted_for_raft_member_uuid;					// 40
 	union nvmeib_uuid				mgmt_DB_uuid;								// 56
 	uint32_t						raft_ctx_crc;								// 60
-	uint32_t						guaranteed_sw_ver;							// 64
+	uint32_t						guaranteed_sw_ver;							// 64	// Cluster governance: leader+majority are at this sw_ver. Old binaries below this cannot lead.
 	int64_t							raft_calculated_leader_append_entries_rep_time_ns;	// 72
 	int64_t							raft_calculated_leader_topo_calc_time_ns;	// 80
 	int64_t							reserved2;									// 88
@@ -128,7 +128,7 @@ static inline int32_t nvmeibt_tlv_get_CRC(const struct nvmeibt_wire_type_len_val
 }
 
 struct nvmeibt_persist_and_wire_buf {
-	int32_t												buf_sw_ver;					// 4
+	int32_t												buf_encoding_ver;			// 4	// TOMA_ENCODING_VER: byte layout version of this buffer's content
 	int													persist_and_wire_total_len;	// 8
 	struct raft_persistency								raft_ctx;					// 96
 	struct nvmeibt_wire_type_len_value					topo_ctx;					// 128
@@ -210,11 +210,6 @@ static inline void persist_and_wire_buf_set_raft_mgmt_DB_uuid(struct nvmeibt_per
 	persist_and_wire_buf_recalc_raft_ctx_crc_as_needed(buf, is_recalc_crc);
 }
 
-static inline uint32_t persist_and_wire_buf_get_struct_version(const struct nvmeibt_persist_and_wire_buf *buf)
-{
-	return LE_SWAP32(buf ? buf->buf_sw_ver : -1);
-}
-
 static inline int64_t persist_and_wire_buf_get_raft_calculated_leader_append_entries_rep_time_ns(const struct nvmeibt_persist_and_wire_buf *buf)
 {
 	return (buf ? LE_SWAP64(buf->raft_ctx.raft_calculated_leader_append_entries_rep_time_ns) : 0);
@@ -242,7 +237,7 @@ static inline uint32_t persist_and_wire_buf_get_raft_guaranteed_sw_ver(const str
 	return (buf ? LE_SWAP32(buf->raft_ctx.guaranteed_sw_ver) : 0);
 }
 
-static inline void persist_and_wire_buf_set_guaranteed_software_version(struct nvmeibt_persist_and_wire_buf *buf, uint32_t sw_ver, bool is_recalc_crc)
+static inline void persist_and_wire_buf_set_guaranteed_sw_ver(struct nvmeibt_persist_and_wire_buf *buf, uint32_t sw_ver, bool is_recalc_crc)
 {
 	buf->raft_ctx.guaranteed_sw_ver = LE_SWAP32(sw_ver);
 	persist_and_wire_buf_recalc_raft_ctx_crc_as_needed(buf, is_recalc_crc);

@@ -83,7 +83,7 @@ static int craft_topo_buf(char *buf, int buf_size,
 	memset(buf, 0, data_len);
 	header = (struct nvmeibt_topology_serialized_topo_header *)buf;
 	memcpy(header->topo_name, TOPO_HDR_NAME, NVMEIBT_TOPOLOGY_BIN_NAME_LEN);
-	header->sw_ver = LE_SWAP32(TOMA_SW_COMPATIBILITY_VER);
+	header->encoding_ver = LE_SWAP32(TOMA_ENCODING_VER);
 	header->topo_len = LE_SWAP32(data_len);
 	header->praids_num = LE_SWAP32(n_praids);
 
@@ -2628,7 +2628,7 @@ DEFINE_TEST(selection_old_peer_version_forces_complete)
 	(void)_ctx;
 
 	is_incremental_allowed = TEST_is_configs_incremental_allowed_for_peer_sw_ver(
-		TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED - 1,
+		TOMA_SW_VER_MIN_FOR_INCREMENTAL - 1,
 		/* peer */    98, 49, 49, 19, 50,
 		/* leader */  100, 50, 50, 20,
 		/* deletes */ 0, 0);
@@ -2646,7 +2646,7 @@ DEFINE_TEST(selection_supported_peer_version_allows_incremental)
 	(void)_ctx;
 
 	is_incremental_allowed = TEST_is_configs_incremental_allowed_for_peer_sw_ver(
-		TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED,
+		TOMA_SW_VER_MIN_FOR_INCREMENTAL,
 		/* peer */    98, 49, 49, 19, 50,
 		/* leader */  100, 50, 50, 20,
 		/* deletes */ 0, 0);
@@ -3388,7 +3388,7 @@ DEFINE_TEST(first_update_without_raft_log)
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_config_ctx), 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->kafka_mgmt_config_ctx), 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->raft_members_ctx), 0);
-	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
+	TEST_ASSERT_EQ(dst->buf_encoding_ver, upd->buf_encoding_ver);
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test2_dst, dst);
@@ -3414,7 +3414,7 @@ DEFINE_TEST(equal_bufs_only_raft_ctx_updated)
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
 	TEST_ASSERT_TRUE(dst == old);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 5LL);
-	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
+	TEST_ASSERT_EQ(dst->buf_encoding_ver, upd->buf_encoding_ver);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 100);
 	rv = 0;
 out:
@@ -3485,7 +3485,7 @@ DEFINE_TEST(topo_only_same_size_inplace)
 	TEST_ASSERT_TRUE(tc_data_out != NULL);
 	TEST_ASSERT_MEM_EQ(tc_data_out, tc, 50);
 	persist_and_wire_buf_validate_len(dst);
-	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
+	TEST_ASSERT_EQ(dst->buf_encoding_ver, upd->buf_encoding_ver);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 3LL);
 	rv = 0;
 out:
@@ -3529,7 +3529,7 @@ DEFINE_TEST(topo_only_diff_size_realloc)
 	TEST_ASSERT_MEM_EQ(tc_data_out, tc, 50);
 	TEST_ASSERT_EQ(persist_and_wire_buf_get_total_len(dst), (int)sizeof(*dst) + 200 + 50 + 30 + 40);
 	persist_and_wire_buf_validate_len(dst);
-	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
+	TEST_ASSERT_EQ(dst->buf_encoding_ver, upd->buf_encoding_ver);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 3LL);
 	rv = 0;
 out:
@@ -3582,7 +3582,7 @@ DEFINE_TEST(full_alloc_topo_and_configs)
 	TEST_ASSERT_MEM_EQ(kmc_data_out, kmc, 30);
 	TEST_ASSERT_EQ(persist_and_wire_buf_get_total_len(dst), (int)sizeof(*dst) + 120 + 60 + 30 + 40);
 	persist_and_wire_buf_validate_len(dst);
-	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
+	TEST_ASSERT_EQ(dst->buf_encoding_ver, upd->buf_encoding_ver);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 5LL);
 	rv = 0;
 out:
@@ -3615,7 +3615,7 @@ DEFINE_TEST(error_in_pass1_keeps_old)
 	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
 	TEST_ASSERT_TRUE(dst == old);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 8LL);
-	TEST_ASSERT_EQ(dst->buf_sw_ver, upd->buf_sw_ver);
+	TEST_ASSERT_EQ(dst->buf_encoding_ver, upd->buf_encoding_ver);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 10LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 100);
 	persist_and_wire_buf_validate_len(dst);
