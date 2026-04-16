@@ -14,6 +14,7 @@
 struct peer_toma_simu *peer_toma_simu_create(struct sb_node_conf *node) {
 	struct peer_toma_simu *peer = calloc(1, sizeof(*peer));
 	peer->node = node;
+	peer->does_support_incremental_topo = (node->uuid&0x1);		// 1 Toma In old sw version, another one in new
 	return peer;
 }
 

@@ -1025,6 +1025,7 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 		struct nvmeibt_big_msg *msg = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*msg) + req->msg_len + req->data_len);
 		struct raft_msg *out_r_msg = (typeof(out_r_msg))msg->data;
 		const uint32_t my_uuid = LE_SWAP32((uint32_t)in_r_msg->dst_node_id.ll[0]);
+		struct peer_toma_simu *peer = sys->cfg.nodes[my_uuid & 0xF].peer;
 		BUG_ON(rq->n_msgs >= (int)ARRAY_SIZE(rq->msg_q) || (req->msg_type != NVMEIBT_IB_PROTOCOL_SIGNATURE_RAFT));
 		msg->msg_type = req->msg_type;
 		msg->data_len = (req->msg_len + req->data_len);		// Reply has the same length/payload as request
@@ -1034,6 +1035,7 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 		out_r_msg->dst_node_id =  in_r_msg->src_node_id;
 		out_r_msg->src_node_idx = in_r_msg->dst_node_idx;
 		out_r_msg->dst_node_idx = in_r_msg->src_node_idx;
+		out_r_msg->persist_and_wire_buf.buf_sw_ver = LE_SWAP32(peer->does_support_incremental_topo ? TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED : TOMA_SW_COMPATIBILITY_VER);
 		switch (in_msg_type) {
 			case RAFT_MSG_REQ_VOTE:
 				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_REQ_VOTE_REP);
@@ -1041,7 +1043,6 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 				ln->n_total_msmgs_sent.vote_rep++;
 				break;
 			case RAFT_MSG_APPEND_ENTRIES: {
-				struct peer_toma_simu *peer = sys->cfg.nodes[my_uuid & 0xF].peer;
 				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_APPEND_ENTRIES_REP);
 				out_r_msg->is_vote_granted = true;			// Relevant for Node which joins already existing quorum with leader
 				if (peer->ignore_append_entries) {
