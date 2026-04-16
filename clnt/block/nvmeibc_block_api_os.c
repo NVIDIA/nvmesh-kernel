@@ -8,6 +8,7 @@
 #include "nvmeibc_block_common.h"
 #include "nvmeibc_block.h"		/* external API of the block */
 #include "nvmeibc_block_api_os.h"
+#include "nvmeibc_nvmeiba_kapi.h"
 #include "nvmeib_json.h"
 #include "nvmeib_io_stats.h"
 #include "nvmeib_utils.h"
@@ -241,10 +242,10 @@ int block_api_os_get(struct nvmeibc_os_api *os, const char *owner_name)
 		reason = "Cannot get()";		// Probably user played manually with /dev/... directory
 		goto _critical_error;
 	}
-#ifndef FMODE_EXCL
-	if (nvmeiba_atom_open(bdev->bd_disk, owner_name) != 0) {
+#if KS_HAS_BLKMODE
+	if (nvmeiba_kapi.atom_open(bdev->bd_disk, owner_name) != 0) {
 #else // KS_HAS_BLKMODE
-	if (nvmeiba_atom_open(bdev, owner_name) != 0) {
+	if (nvmeiba_kapi.atom_open(bdev, owner_name) != 0) {
 #endif // KS_HAS_BLKMODE
 		reason = "Cannot open()";
 		goto _critical_error;
@@ -306,7 +307,7 @@ void block_api_os_put(struct nvmeibc_os_api *os)
 	}
 	disk = bdev->bd_disk;           // atom->disk may already be NULL
 	os->unsafe_self_ref.bdev_during_detach = NULL;// Will do -1 on bdev below. Ptr is unsafe
-	nvmeiba_atom_close(disk);
+	nvmeiba_kapi.atom_close(disk);
 	os = NULL;					// BEWARE: os_api object might be freed now.
 #if KS_HAS_BDEV_FILE_OPEN_BY_PATH
 		bdev_fput(bdev_file);
@@ -643,7 +644,7 @@ static REQ_RET nvmeibc_b_req_reject_no_q(struct bio *bio);
 
 static void __nvmeibc_os_api_layer_destroy(struct nvmeibc_os_apis_container *c)
 {
-	nvmeiba_os_do_on_nvmeibc_down();			// Disconenct from nvmeiba
+	nvmeiba_kapi.os_do_on_nvmeibc_down();			// Disconenct from nvmeiba
 	nvmeibc_driver_version_unreg(&c->drv_ver);		// Todo: Share this with ATOM
 	// disk_id_allocator_init(&c->dia);			// Todo: Here, verify that bitmap is empty if none of the volumes were abandoned
 	kfree(c);
@@ -681,7 +682,7 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 		goto _out;
 	}
 	nvmeibc_cinst_get_blok_p(c) = p;
-	H = nvmeiba_os_do_on_nvmeibc_up();			// Connect to nvmeiba
+	H = nvmeiba_kapi.os_do_on_nvmeibc_up();			// Connect to nvmeiba
 	nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_io);
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
 	#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
@@ -701,7 +702,7 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 	} else {
 		disk_id_allocator_init(&c->dia);	// Occupy the minors of atoms in nvmeiba
 		if (H.n_orphan_osapi > 0)
-			nvmeiba_os_api_exec_for_each_atom(c->drv_ver.dir_lsblk, __probe_my_atoms_from_nvmeiba, c);
+			nvmeiba_kapi.os_api_exec_for_each_atom(c->drv_ver.dir_lsblk, __probe_my_atoms_from_nvmeiba, c);
 	}
 _out:
 	return c;
@@ -887,7 +888,7 @@ static void __end_bio_common(struct gendisk *disk, struct bio *bio, int rv){
 	const struct nvmeiba_atom_os_api *atom = &block_api_os_get_os(bio)->atom;
 
 	reqq_data_end_io(q);
-	if (unlikely((rv) && nvmeiba_os_api_is_queue_orphan(atom))) {
+	if (unlikely((rv) && nvmeiba_kapi.os_api_is_queue_orphan(atom))) {
 		CALL_SUBMIT_BIO_FN(q, disk, bio);		// Last chance to save bio from error by upgrading to new nvmeibc
 	} else {
 		bio_endio(bio, rv);
@@ -1037,10 +1038,10 @@ void block_api_os_stop_accepting_kernel_io(struct nvmeibc_os_api *os, u32 reason
 				__set_make_req_to_reject(atom);
 			}
 #else
-			nvmeiba_os_api_set_detaching(atom);
+			nvmeiba_kapi.os_api_set_detaching(atom);
 #endif
 		} else {
-			nvmeiba_os_api_orphan_abandon(atom);
+			nvmeiba_kapi.os_api_orphan_abandon(atom);
 		}
 		wmb();	// make sure all cores see this ASAP
 	}
@@ -1162,7 +1163,7 @@ void block_api_os_drain_io(struct nvmeibc_os_api *os)
 		ASSERT_ATOM_STATUS(atom, nvmeiba_status_live);
 		WARN(!__is_nvmeibc_bdev_destroying(NULL, CALL_BIO_Q_CONTEXT(atom)), "nvmeibc bug\n");	// Wrong draining sequence. First call block_api_os_stop_accepting_kernel_io(), then drain the rest
 		rv = nvmeiba_atom_drain_io(atom);
-		is_abandoning = nvmeiba_os_api_is_queue_orphan(atom);
+		is_abandoning = nvmeiba_kapi.os_api_is_queue_orphan(atom);
 		_NT(trace_1_api_os_block_api_os_drain_io, "@DEV_NAME: Draining ios=@RV. q=@QUEUE", atom->dev_name, rv, atom->queue);
 	}
 	if (is_abandoning) {
@@ -1570,7 +1571,7 @@ void block_api_os_destroy(struct nvmeibc_os_api *os)
 	os = NULL; 					// Dont use 'OS' anymore. It does not exist, and might kfree thorugh atom destructor asyncronously!
 
 	if (!can_other_threads_open_atom)	{	// Free atom inline. LKJ: Replace the condition and destructor to ref_put()
-		nvmeiba_os_api_destructor(atom); /* Kernel does not use us. No unsafe detach */
+		nvmeiba_kapi.os_api_destructor(atom); /* Kernel does not use us. No unsafe detach */
 		atom = NULL;		 /* Both were kfree(), dont use them */
 	} else if (atom->status != nvmeiba_status_orphan) {
 		atom = NULL; /* Destructor, is auto called upon last close() on atom. os/atom, might already be kfree() */
@@ -1835,7 +1836,7 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 
 	p->io_st_sum= RO_proc_open("iostats"    ,      p, iostats_to_non_json         , os);
 	p->j_io_st  = RO_proc_open("iostats.json",     p, iostats_detailed_to_json , os);
-	p->opens    = RO_proc_open("client_processes", p, nvmeiba_atom_users_to_string, os);
+	p->opens    = RO_proc_open("client_processes", p, nvmeiba_kapi.atom_users_to_string, os);
 	p->throttle = RO_proc_open("io_throttle",      p, io_throttle_to_string    , os->dev);
 	p->io_status = RO_proc_open("io_status"  ,     p, io_status_to_string      , os->dev);
 	p->status   = RO_proc_open("status"     ,      p, cb.dev_status_to_txt     , os->dev);
@@ -1920,7 +1921,7 @@ static struct nvmeibc_os_api *__kzalloc_os_api(void)
 
 static struct nvmeibc_os_api *__get_mem_for_os_api(const char* dev_dir, const char* dev_name)
 {
-	struct nvmeiba_atom_os_api *orphan = nvmeiba_os_api_orphan_adopt(dev_dir, dev_name);
+	struct nvmeiba_atom_os_api *orphan = nvmeiba_kapi.os_api_orphan_adopt(dev_dir, dev_name);
 	struct nvmeibc_os_api *os = NULL;
 	BUILD_BUG_ON(&((struct nvmeibc_os_api *)0)->atom != NULL); 			// Incorrect inheritance
 	BUILD_BUG_ON(sizeof(os->atom.dev_name) != NVMEIBC_BD_NAME_LEN); 	// Incorrect inheritance
@@ -1951,7 +1952,7 @@ static void nvmeibc_atom_constructor(struct nvmeiba_atom_os_api *atom, const cha
 	__atom_set_self_parent(atom);
 	atom->status = nvmeiba_status_hidden;	// Atom is hidden until registration with OS
 	atom->attach_jiff = jiffies;
-	nvmeiba_os_api_constructor(atom);
+	nvmeiba_kapi.os_api_constructor(atom);
 }
 
 static void __set_dev_and_uuid(struct nvmeibc_os_api *os, void* dev, const char* dev_uuid, const struct nvmeibc_os_apis_container *c)
@@ -1985,7 +1986,7 @@ struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk
 			   Require detach + reattach instead, or we risk using the wrong reservation state. */
 			_NT(t_baoc_01, "@DEV_NAME: Failing attach on adopted recovery-only atom. Detach and reattach required", dev_name);
 			os->atom.status = nvmeiba_status_live;		// We mistakenly adopted the atom, so abandon it again. Sorry bro...
-			nvmeiba_os_api_orphan_abandon(&os->atom);
+			nvmeiba_kapi.os_api_orphan_abandon(&os->atom);
 			__set_atom_status_orphan(&os->atom);
 			rv = -EACCES;
 			os = NULL;
@@ -2013,7 +2014,7 @@ _out:
 
 ssize_t block_api_os_dump_users(struct nvmeibc_os_api *os, char *buf, size_t len)
 {
-	return nvmeiba_atom_users_to_string(&os->atom, buf, len);
+	return nvmeiba_kapi.atom_users_to_string(&os->atom, buf, len);
 }
 
 void block_api_os_clear_io_stats(struct nvmeibc_os_api *os, const int which)
@@ -2069,5 +2070,6 @@ void block_api_os_change_size(struct nvmeibc_block_device *dev, bool force_reval
 		_NT(t_06_api_os_resize, "@DEV_NAME: resized to @SZ[blks]", dev->name, dev->size);
 	}
 }
+
 
 /*************************** Riders on Top of Carriers ***********************/

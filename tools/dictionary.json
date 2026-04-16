@@ -20330,5 +20330,11 @@
 	    "size": 64,
 	    "type": "u64",
 	    "fmt": "%llu"
+    },
+    "@SYMBOL_NAME": {
+	    "size": "string",
+	    "type": "string",
+	    "fmt": "%s",
+        "dmesg_fmt": "%s"
     }
 }

@@ -311,7 +311,7 @@ void nvmeiba_os_api_exec_for_each_atom(const char* dev_dir, void (*fn)(const str
 	}
 	spin_unlock_irqrestore(&A->lock, flags);
 }
-EXPORT_SYMBOL(nvmeiba_os_api_exec_for_each_atom);
+EXPORT_SYMBOL_GPL(nvmeiba_os_api_exec_for_each_atom);
 
 struct nvmeiba_atom_os_api *nvmeiba_os_apis_adopt_by(const char* dev_dir, const char *dev_name)
 {
@@ -366,7 +366,7 @@ struct nvmeiba_to_c_handover nvmeiba_os_do_on_nvmeibc_up(void)
 		_NI_to_user(t_04_atom, "Successful hot upgrade handshake between modules nvmeiba and nvmeibc. Internal information {%u/%u/%d}", H.n_orphan_osapi, n.osapi, n.nvmeibc);   //. Error code: 0
 	return H;
 }
-EXPORT_SYMBOL(nvmeiba_os_do_on_nvmeibc_up);
+EXPORT_SYMBOL_GPL(nvmeiba_os_do_on_nvmeibc_up);
 
 void nvmeiba_os_do_on_nvmeibc_down(void)
 {
@@ -392,7 +392,7 @@ void nvmeiba_os_do_on_nvmeibc_down(void)
 	spin_unlock_irqrestore(&A->lock, flags);
 	_NI_to_user(t_06_atom, "nvmeibc instance successfully disconnected from nvmeiba module. %d instances remaining\n", A->n.nvmeibc);   //. Error code: 0
 }
-EXPORT_SYMBOL(nvmeiba_os_do_on_nvmeibc_down);
+EXPORT_SYMBOL_GPL(nvmeiba_os_do_on_nvmeibc_down);
 
 void nvmeiba_os_apis_set_default_pops(const struct block_device_operations **fops)
 {

@@ -129,6 +129,19 @@ static void nvmeiba_bdev_close(struct gendisk *disk, BLK_MODE_T mode, pid_t pgid
 	__dec_ref_and_destroy_if_needed(atom, disk, mode, pgid);
 }
 
+void nvmeiba_atom_part_add(struct nvmeiba_atom_os_api *atom)
+{
+	const int counter = atomic_inc_return(&atom->users.n_opens);
+	_NT(t_0g_atom, "%s: add_sub to atm=%p opens=%d\n", atom->dev_name, atom, counter);
+}
+EXPORT_SYMBOL_GPL(nvmeiba_atom_part_add);
+
+void nvmeiba_atom_part_del(struct nvmeiba_atom_os_api *atom)
+{
+	__dec_ref_and_destroy_if_needed(atom, NULL, FMODE_LSEEK, 0);
+}
+EXPORT_SYMBOL_GPL(nvmeiba_atom_part_del);
+
 /* Remove leaking client process information.*/
 static void __clean_leaking_users(struct nvmeiba_atom_os_api *atom)
 {
@@ -208,13 +221,13 @@ int nvmeiba_atom_open(struct BLK_MODE_OPEN_OBJ_T *obj, const char *name)
 {
 	return nvmeiba_bdev_open(BLK_MODE_GENDISK(obj), SELF_REF_MODE, SELF_REF_PID, name);
 }
-EXPORT_SYMBOL(nvmeiba_atom_open);
+EXPORT_SYMBOL_GPL(nvmeiba_atom_open);
 
 void nvmeiba_atom_close(struct gendisk *disk)
 {
 	nvmeiba_bdev_close(disk, SELF_REF_MODE, SELF_REF_PID);
 }
-EXPORT_SYMBOL(nvmeiba_atom_close);
+EXPORT_SYMBOL_GPL(nvmeiba_atom_close);
 
 /************************ External API for ATOM *******************************/
 /* format all client processes as output for procfs file */
@@ -242,7 +255,7 @@ ssize_t nvmeiba_atom_users_to_string(void *_atom, char *buf, size_t len)
 	return count;
 #undef BUF_ADD
 }
-EXPORT_SYMBOL(nvmeiba_atom_users_to_string);
+EXPORT_SYMBOL_GPL(nvmeiba_atom_users_to_string);
 
 char *nvmeiba_atom_get_string_status(const struct nvmeiba_atom_os_api *a)
 {
@@ -262,7 +275,7 @@ void nvmeiba_os_api_constructor(struct nvmeiba_atom_os_api *atom)
 #endif
 	nvmeiba_os_apis_add(atom);
 }
-EXPORT_SYMBOL(nvmeiba_os_api_constructor);
+EXPORT_SYMBOL_GPL(nvmeiba_os_api_constructor);
 
 void nvmeiba_os_api_destructor(struct nvmeiba_atom_os_api *atom)
 {
@@ -276,7 +289,7 @@ void nvmeiba_os_api_destructor(struct nvmeiba_atom_os_api *atom)
 	}
 	kfree(atom);
 }
-EXPORT_SYMBOL(nvmeiba_os_api_destructor);
+EXPORT_SYMBOL_GPL(nvmeiba_os_api_destructor);
 
 #if KS_REQUEST_QUEUE_HAS_REQUEST_FN
 static REQ_RET nvmeiba_b_req_push(struct request_queue *q, struct bio *bio)
@@ -313,7 +326,7 @@ bool nvmeiba_os_api_is_queue_orphan(const struct nvmeiba_atom_os_api *atom)
 	return (atom->disk->fops->submit_bio == nvmeiba_b_req_push);
 #endif
 }
-EXPORT_SYMBOL(nvmeiba_os_api_is_queue_orphan);
+EXPORT_SYMBOL_GPL(nvmeiba_os_api_is_queue_orphan);
 
 int nvmeiba_os_api_orphan_abandon(struct nvmeiba_atom_os_api *atom)
 {
@@ -326,14 +339,14 @@ int nvmeiba_os_api_orphan_abandon(struct nvmeiba_atom_os_api *atom)
 	nvmeiba_os_apis_abandon_by(atom);
 	return 0;
 }
-EXPORT_SYMBOL(nvmeiba_os_api_orphan_abandon);
+EXPORT_SYMBOL_GPL(nvmeiba_os_api_orphan_abandon);
 
 struct nvmeiba_atom_os_api *nvmeiba_os_api_orphan_adopt(const char* dev_dir, const char *dev_name)
 {
 	struct nvmeiba_atom_os_api *orphan = nvmeiba_os_apis_adopt_by(dev_dir, dev_name);
 	return orphan;
 }
-EXPORT_SYMBOL(nvmeiba_os_api_orphan_adopt);
+EXPORT_SYMBOL_GPL(nvmeiba_os_api_orphan_adopt);
 
 #if KS_REQUEST_QUEUE_HAS_REQUEST_FN
 static REQ_RET nvmeiba_b_req_reject(struct request_queue *q, struct bio *bio)
@@ -358,4 +371,4 @@ int nvmeiba_os_api_set_detaching(struct nvmeiba_atom_os_api *atom)
 #endif
 	return 0;
 }
-EXPORT_SYMBOL(nvmeiba_os_api_set_detaching);
+EXPORT_SYMBOL_GPL(nvmeiba_os_api_set_detaching);

@@ -23,6 +23,7 @@
 #include "nvmeib_msgloop.h"
 #include "nvmeibc_volume.h"					// Todo: Remove
 #include "atom/nvmeiba_nvmesh_api.h"
+#include "block/nvmeibc_nvmeiba_kapi.h"
 #include "main/utils/nvmeibc_main_block_gen_work_sched.h"
 #include "nvmeib_public.h"
 #include "management_utils_common/nvmeibc_management_capi_parse_conf.h"
@@ -1869,7 +1870,7 @@ static int __count_detaching_atoms(void)
 {
 	int n_detaching_volumes = 0;
 
-	nvmeiba_os_api_exec_for_each_atom(NULL, __on_atom_detaching_increment_counter, (void *)&n_detaching_volumes);
+	nvmeiba_kapi.os_api_exec_for_each_atom(NULL, __on_atom_detaching_increment_counter, (void *)&n_detaching_volumes);
 
 	return n_detaching_volumes;
 }
