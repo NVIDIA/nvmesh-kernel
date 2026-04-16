@@ -946,10 +946,17 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	 */
 
 	/*
-	 * nvmeiba_os_api_destructor removes the atom from ATOM's global list
-	 * and kfree's the atom (== tpv, since atom is embedded at offset 0).
+	 * ATOM lifecycle: del_gendisk (in blkdev_unregister above) sets
+	 * atom->disk = NULL.  When the last open handle closes, ATOM's
+	 * __dec_ref_and_destroy_if_needed() sees (n_opens == 0 && disk == NULL)
+	 * and calls nvmeiba_os_api_destructor(), which removes the atom from
+	 * the global list and kfree's it (== tpv, since atom is at offset 0).
+	 *
+	 * If no handles are currently open, nobody will trigger that path,
+	 * so we must call the destructor ourselves.
 	 */
-	nvmeiba_os_api_destructor(&tpv->atom);
+	if (atomic_read(&tpv->atom.users.n_opens) == 0)
+		nvmeiba_os_api_destructor(&tpv->atom);
 }
 
 /* ── nvmeibc_tpv_grow ───────────────────────────────────────────────────
