@@ -1832,6 +1832,36 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 
 	first_alloc = (alloc == NULL);
 
+	/*
+	 * No in-memory allocator for this CDV — could be a genuinely new CDV
+	 * or a TOMA restart where elect() hasn't run yet.  Create the alloc
+	 * entry, dispatch a scan to load any pre-existing on-disk records,
+	 * and defer the allocation until the scan completes.  This matches
+	 * the elect() recovery path and prevents double-allocation of
+	 * extent indices that are already allocated on disk.
+	 *
+	 * The client receives WRONG_GEN and retries.  The scan's "fresh CDV"
+	 * heuristic handles new CDVs: first scan finds no header → retries
+	 * once → sets ondisk_loaded=true.  Typically completes within two
+	 * heartbeat cycles.
+	 */
+	if (first_alloc) {
+		alloc = find_or_create_alloc(cdv_uuid);
+		if (!alloc) {
+			resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+			goto send;
+		}
+		if (alloc->total_data_extents == 0 && req->total_data_extents > 0)
+			alloc->total_data_extents = req->total_data_extents;
+		cdv_ondisk_scan_async(cdv_uuid, alloc);
+		N_Wf(cdv_alloc_first_scan,
+		     "CDV-alloc: first ALLOC cdv=@STR; created alloc + scan dispatched, returning WRONG_GEN",
+		     cdv_uuid);
+		resp.status = NVMEIBT_CDV_ALLOC_WRONG_GEN;
+		resp.allocator_generation = alloc->allocator_generation;
+		goto send;
+	}
+
 	/* Ensure per-CDV I/O WQ exists for async persistence.
 	 * Best-effort: writes are fire-and-forget, so failure is non-fatal.
 	 */
@@ -1845,7 +1875,9 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	 * the allocator has been elected but it's a different node, reject
 	 * with WRONG_GEN so the client re-syncs from the CDV topology push.
 	 */
-	if (!first_alloc && alloc->allocator_toma_id[0] &&
+	/* first_alloc is always false here — handled above with early return. */
+
+	if (alloc->allocator_toma_id[0] &&
 	    strncmp(alloc->allocator_toma_id, nvmeibt_get_my_hostname(),
 		    NVMEIBT_CDV_HOSTNAME_LEN) != 0) {
 		N_Wf(cdv_alloc_not_allocator,
@@ -1857,21 +1889,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	}
 
 	/* ── Generation check ────────────────────────────────────────────────── */
-	if (first_alloc && req->client_generation != 0) {
-		/*
-		 * No allocator for this CDV yet (RAFT has not assigned one, or
-		 * state was lost).  Client carries a stale non-zero generation.
-		 * Return WRONG_GEN with 0; client will re-sync when RAFT
-		 * distributes the current generation.
-		 */
-		N_Wf(cdv_alloc_wrong_gen_new,
-		     "CDV: ALLOC no state cdv=@STR client_gen=@LLU => WRONG_GEN",
-		     cdv_uuid, req->client_generation);
-		resp.status = NVMEIBT_CDV_ALLOC_WRONG_GEN;
-		resp.allocator_generation = 0;
-		goto send;
-	}
-	if (!first_alloc && req->client_generation != alloc->allocator_generation) {
+	if (req->client_generation != alloc->allocator_generation) {
 		N_If(cdv_alloc_wrong_gen,
 		     "CDV: ALLOC WRONG_GEN cdv=@STR client=@LLU toma=@LLU",
 		     cdv_uuid, req->client_generation, alloc->allocator_generation);
@@ -1881,19 +1899,12 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	}
 
 	/* ── Capacity info ───────────────────────────────────────────────────── */
-	if (first_alloc && req->total_data_extents == 0) {
-		N_Ef(cdv_alloc_no_cap,
-		     "CDV: ALLOC cdv=@STR total_data_extents=0 on first alloc; refusing",
-		     cdv_uuid);
-		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
-		goto send;
-	}
 
 	/* Refresh cached capacity after a TOMA restart (stored value is 0). */
-	if (!first_alloc && alloc->total_data_extents == 0 && req->total_data_extents > 0)
+	if (alloc->total_data_extents == 0 && req->total_data_extents > 0)
 		alloc->total_data_extents = req->total_data_extents;
 
-	total = first_alloc ? req->total_data_extents : alloc->total_data_extents;
+	total = alloc->total_data_extents;
 
 	if (total == 0) {
 		/* alloc exists but capacity unknown; client sent 0 too */
@@ -1905,7 +1916,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	}
 
 	/* ── CDV-full check ─────────────────────────────────────────────────── */
-	if (!first_alloc && alloc->n_allocated >= total) {
+	if (alloc->n_allocated >= total) {
 		N_Wf(cdv_alloc_full,
 		     "CDV: ALLOC cdv=@STR FULL allocated=@LLU total=@LLU",
 		     cdv_uuid, alloc->n_allocated, total);
@@ -1921,25 +1932,20 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	 * Extent indices are 1-based: extent 0 is the allocator area,
 	 * data extents are numbered 1 .. total_data_extents.
 	 */
-	if (first_alloc) {
-		candidate = 1;
-		found     = true;
-	} else {
-		candidate = 0;
-		found     = false;
-		for (i = 1; i <= total; i++) {
-			occupied = false;
-			XDLIST_FOREACH(entry, &alloc->extents) {
-				if (entry->extent_index == i) {
-					occupied = true;
-					break;
-				}
-			}
-			if (!occupied) {
-				candidate = i;
-				found = true;
+	candidate = 0;
+	found     = false;
+	for (i = 1; i <= total; i++) {
+		occupied = false;
+		XDLIST_FOREACH(entry, &alloc->extents) {
+			if (entry->extent_index == i) {
+				occupied = true;
 				break;
 			}
+		}
+		if (!occupied) {
+			candidate = i;
+			found = true;
+			break;
 		}
 	}
 
@@ -1962,36 +1968,8 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	/*
-	 * Re-look up alloc: if this was the first allocation, cdv_alloc_insert
-	 * just created the struct and added it to the hash.
-	 */
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
-
-	/* Populate cached capacity on freshly created allocator. */
-	if (alloc && alloc->total_data_extents == 0)
-		alloc->total_data_extents = req->total_data_extents;
-
-	/*
-	 * On first-ever allocation (alloc just created by cdv_alloc_insert),
-	 * dispatch a best-effort async scan to recover any pre-existing
-	 * on-disk extent records from a previous TOMA lifetime, then set
-	 * ondisk_loaded=true so subsequent requests proceed immediately.
-	 *
-	 * The scan is dispatched BEFORE setting ondisk_loaded so it passes
-	 * the (ondisk_loaded==false) guard in cdv_ondisk_scan_async().
-	 * If the scan succeeds, old records are added via add_extent
-	 * (which deduplicates).  If it fails (new CDV, device not ready),
-	 * the failure is harmless — ondisk_loaded is already true, and
-	 * the system proceeds with the in-memory state from live ALLOCs.
-	 */
-	if (alloc && first_alloc) {
-		cdv_ondisk_scan_async(cdv_uuid, alloc);
-		alloc->ondisk_loaded = true;
-	}
-
 	resp.extent_index         = candidate;
-	resp.allocator_generation = alloc ? alloc->allocator_generation : 0;
+	resp.allocator_generation = alloc->allocator_generation;
 	resp.status               = NVMEIBT_CDV_ALLOC_OK;
 
 	/* Check if this allocation pushed the CDV above the warning watermark. */
