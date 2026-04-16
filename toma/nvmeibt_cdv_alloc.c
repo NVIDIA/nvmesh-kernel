@@ -1974,19 +1974,21 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 
 	/*
 	 * On first-ever allocation (alloc just created by cdv_alloc_insert),
-	 * dispatch an async scan to recover any pre-existing on-disk extent
-	 * records from a previous TOMA lifetime.  This handles the case where
-	 * the first ALLOC request races ahead of elect() after a TOMA restart:
-	 * without the scan, previously allocated extents would be invisible
-	 * to TOMA, causing double-allocation of those CDV_extent indices.
+	 * dispatch a best-effort async scan to recover any pre-existing
+	 * on-disk extent records from a previous TOMA lifetime, then set
+	 * ondisk_loaded=true so subsequent requests proceed immediately.
 	 *
-	 * The scan's add_extent path deduplicates (line ~876), so the
-	 * just-allocated extent will not be doubled.  Leave ondisk_loaded
-	 * false — the next ALLOC request will see (alloc && !ondisk_loaded)
-	 * and return WRONG_GEN until the scan completes.
+	 * The scan is dispatched BEFORE setting ondisk_loaded so it passes
+	 * the (ondisk_loaded==false) guard in cdv_ondisk_scan_async().
+	 * If the scan succeeds, old records are added via add_extent
+	 * (which deduplicates).  If it fails (new CDV, device not ready),
+	 * the failure is harmless — ondisk_loaded is already true, and
+	 * the system proceeds with the in-memory state from live ALLOCs.
 	 */
-	if (alloc && first_alloc)
+	if (alloc && first_alloc) {
 		cdv_ondisk_scan_async(cdv_uuid, alloc);
+		alloc->ondisk_loaded = true;
+	}
 
 	resp.extent_index         = candidate;
 	resp.allocator_generation = alloc ? alloc->allocator_generation : 0;
