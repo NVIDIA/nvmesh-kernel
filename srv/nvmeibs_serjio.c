@@ -551,7 +551,27 @@ struct nvme_op_rsrc
 	struct nvmeibs_serjio_op_rsrc_stats op_rsrc_stats;
 
 	nvme_callback_t *serjio_cb;
+
+	/* Journal bulk read/zero: consecutive entries per NVMe command (1 = single-entry) */
+	unsigned jrnl_batch_nents;
+
+	/* rd_jrange / read_jrnl: aggregate defer-zero bitmap slice (bulk journal read path) */
+	unsigned long *jrnl_bulk_defer_zero_bmp;
 };
+
+/*
+ * Journal bulk pool embeds nvme_op_rsrc plus scratch metadata for bulk callbacks
+ * (avoids large on-stack union jblock_md[NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY]).
+ */
+struct jrnl_bulk_nvme_op_rsrc {
+	struct nvme_op_rsrc op;
+	union jblock_md jmdc_scratch[NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY];
+};
+
+static inline union jblock_md *jrnl_bulk_jmdc_scratch(struct nvme_op_rsrc *r)
+{
+	return container_of(r, struct jrnl_bulk_nvme_op_rsrc, op)->jmdc_scratch;
+}
 
 struct nvme_op_rsrc_pool {
 	struct nvme_op_rsrc pool[NUM_OF_NVME_OP_RSRC];
@@ -753,6 +773,22 @@ struct nvmeibs_serjio_disk_private_data {
 	/* Pool for NVME Ops */
 	struct nvme_op_rsrc_pool nvme_op_rsrc_pool;
 
+	/*
+	 * Journal bulk I/O pool: enough resources that every MDTS-sized chunk of the
+	 * worst-case range (max entries × largest binje) can be in flight at once.
+	 */
+	struct jrnl_bulk_pool {
+		struct jrnl_bulk_nvme_op_rsrc *pool;
+		unsigned n_rsrc;
+		size_t max_io_bytes;
+		struct list_head free_list;
+		spinlock_t lock;
+		struct completion free_comp;
+		unsigned n_free;
+		unsigned n_waiters;
+	} jrnl_bulk_pool;
+	bool jrnl_bulk_inited;
+
 	/* IO WQ */
 	struct workq_struct *io_wq;
 	int io_wq_pid;
@@ -873,6 +909,19 @@ struct run_iowq_workqe {
 static int run_on_io_wq(struct nvmeibs_serjio_disk_private_data *serjio_pd, io_wq_fn_type fn,
 						void *param, bool wait_complete, bool can_sleep, enum nvmeibs_serjio_work_type work_type);
 
+static int init_jrnl_bulk_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd);
+static void free_jrnl_bulk_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd);
+static struct nvme_op_rsrc *get_free_jrnl_bulk_rsrc_sync(
+	struct nvmeibs_serjio_disk_private_data *serjio_pd, int max_attempts, bool can_schedule);
+static void return_jrnl_bulk_nvme_op_rsrc(struct nvme_op_rsrc *r);
+static void read_jmdc_entry_cb(void *arg, int status, u32 result);
+static int read_jrnl_entry(struct jrange_entry *jrng, unsigned entry_idx, atomic_t *read_ctr,
+			   struct completion *read_comp, nvme_callback_t read_cb, void *cb_param);
+static int read_jrnl_entries_run(struct jrange_entry *jrng, unsigned start_ent, unsigned n_ent,
+				 atomic_t *ctr, struct completion *comp,
+				 nvme_callback_t read_cb, void *cb_param,
+				 unsigned long *defer_zero_bmp);
+
 static struct nvme_op_rsrc *get_free_nvme_op_rsrc_sync(
 	struct nvmeibs_serjio_disk_private_data *serjio_pd, int max_attempts, bool can_schedule);
 static void set_nvme_op_rsrc_md(struct nvme_op_rsrc *rsrc, const void *md, size_t md_sz);
@@ -905,7 +954,8 @@ static struct jrange_entry* get_jrange_entry_for_uuid(
 static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				   nvme_callback_t read_cb, void *cb_param, struct jrange_entry *jrng,
 				   unsigned long read_ent_state_mask, unsigned long *read_ent_bmp,
-				   atomic_t *ctr, struct completion *comp);
+				   atomic_t *ctr, struct completion *comp,
+				   unsigned long *defer_zero_bmp);
 
 static void clr_seg_tree_hash(struct nvmeibs_serjio_disk_private_data *serjio_pd);
 
@@ -1419,6 +1469,8 @@ static void free_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd
 	struct nvmeibs_disk_info *di = serjio_pd->di;
 	struct device *dev;
 
+	free_jrnl_bulk_nvme_op_rsrc(serjio_pd);
+
 	_NDs(trace_serjio_free_nvme_op_rsrc, serjio_pd, "Freeing nvme_op_rsrc");
 	dev = di ? nvmeibs_disk_info_get_nvme_dma_device(di) : NULL;
 	for (i = 0; i < NUM_OF_NVME_OP_RSRC; i++) {
@@ -1641,6 +1693,7 @@ static int init_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd)
 		rsrc->range_idx = -1;
 		rsrc->binje_shift = ilog2(NVMEIB_EC_JOURNAL_DEFAULT_BLOCKS_PER_ENTRY);
 		rsrc->entry = -1;
+		rsrc->jrnl_batch_nents = 1;
 		rsrc->status = 0;
 		rsrc->nvme_req.disk_info = serjio_pd->di;
 		reset_nvme_op_rsrc_len_md(rsrc);
@@ -1653,6 +1706,13 @@ static int init_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd)
 		list_add_tail(&rsrc->link, &nvme_op_rsrc_pool->free_list);
 		nvme_op_rsrc_pool->n_free++;
 	}
+	if (!rv) {
+		int brv = init_jrnl_bulk_nvme_op_rsrc(serjio_pd);
+		if (brv)
+			_NEs(error_serjio_init_jrnl_bulk_nvme_op_rsrc_alloc, serjio_pd,
+			     "Failed to init journal bulk IO pool (@RV); falling back to per-entry journal IO",
+			     brv);
+	}
 	goto out;
 
 free_pages:
@@ -1660,6 +1720,275 @@ free_pages:
 
 out:
 	return rv;
+}
+
+/* One data page per bulk rsrc, dma-mapped once, duplicated in every PRP slot — journal data is discarded */
+static void free_one_jrnl_bulk_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd,
+					    struct nvme_op_rsrc *r)
+{
+	struct device *dev = serjio_pd->di ? nvmeibs_disk_info_get_nvme_dma_device(serjio_pd->di) : NULL;
+	unsigned j;
+	dma_addr_t data_dma = 0;
+
+	NFIN;
+	if (r->nvme_phys_virt)
+		data_dma = r->nvme_phys_virt[0];
+	if (dev && r->nvme_phys_virt) {
+		for (j = r->n_data_pgs; j < r->n_pages; j++)
+			dma_unmap_page(dev, r->nvme_phys_virt[j], PAGE_SIZE, DMA_BIDIRECTIONAL);
+		dma_free_coherent(dev, r->nvme_phys_size, r->nvme_phys_virt, r->nvme_phys_dma);
+		r->nvme_phys_virt = NULL;
+	}
+	if (dev && data_dma)
+		dma_unmap_page(dev, data_dma, PAGE_SIZE, DMA_BIDIRECTIONAL);
+	kfree(r->sgl);
+	r->sgl = NULL;
+	if (r->pages) {
+		for (j = 0; j < r->n_data_pgs; j++)
+			if (r->pages[j])
+				put_page(r->pages[j]);
+		for (j = r->n_data_pgs; j < r->n_pages; j++)
+			if (r->pages[j])
+				__free_page(r->pages[j]);
+		kfree(r->pages);
+		r->pages = NULL;
+	}
+	NFOUT;
+}
+
+static int init_one_jrnl_bulk_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd,
+					   struct nvme_op_rsrc *r, unsigned n_data_pgs, unsigned n_md_pgs,
+					   struct device *dev)
+{
+	struct nvmeibs_disk_info *di = serjio_pd->di;
+	struct page *data_pg = NULL;
+	dma_addr_t data_dma = 0;
+	unsigned j;
+	int rv = -ENOMEM;
+
+	NFIN;
+	memset(r, 0, sizeof(*r));
+
+	r->pages = kcalloc(n_data_pgs + n_md_pgs, sizeof(struct page *), GFP_KERNEL);
+	if (!r->pages)
+		goto out;
+
+	data_pg = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	if (!data_pg)
+		goto free_pages_arr;
+
+	data_dma = dma_map_page(dev, data_pg, 0, PAGE_SIZE, DMA_BIDIRECTIONAL);
+	if (dma_mapping_error(dev, data_dma))
+		goto free_data_pg;
+
+	for (j = 0; j < n_data_pgs; j++) {
+		r->pages[j] = data_pg;
+		if (j)
+			get_page(data_pg);
+	}
+
+	r->sgl = kcalloc(n_data_pgs + n_md_pgs, sizeof(struct scatterlist), GFP_KERNEL);
+	if (!r->sgl)
+		goto unmap_data;
+
+	sg_init_table(r->sgl, n_data_pgs + n_md_pgs);
+	for (j = 0; j < n_data_pgs; j++)
+		sg_set_page(&r->sgl[j], data_pg, PAGE_SIZE, 0);
+
+	for (j = n_data_pgs; j < n_data_pgs + n_md_pgs; j++) {
+		r->pages[j] = alloc_page(GFP_KERNEL | __GFP_ZERO);
+		if (!r->pages[j])
+			goto free_md_partial;
+		sg_set_page(&r->sgl[j], r->pages[j], PAGE_SIZE, 0);
+	}
+
+	r->nvme_phys_size = sizeof(*r->nvme_phys_virt) * (n_data_pgs + n_md_pgs);
+	r->nvme_phys_virt = dma_alloc_coherent(dev, r->nvme_phys_size, &r->nvme_phys_dma, GFP_KERNEL);
+	if (!r->nvme_phys_virt)
+		goto free_md_partial;
+
+	for (j = 0; j < n_data_pgs; j++)
+		r->nvme_phys_virt[j] = data_dma;
+	for (j = n_data_pgs; j < n_data_pgs + n_md_pgs; j++) {
+		r->nvme_phys_virt[j] = dma_map_page(dev, r->pages[j], 0, PAGE_SIZE, DMA_BIDIRECTIONAL);
+		if (dma_mapping_error(dev, r->nvme_phys_virt[j]))
+			goto free_prpl_map;
+	}
+
+	r->n_data_pgs = n_data_pgs;
+	r->n_md_pgs = n_md_pgs;
+	r->n_pages = n_data_pgs + n_md_pgs;
+	r->nvme_req.buf_addrs = r->nvme_phys_virt;
+	r->nvme_req.prpl_phys = r->nvme_phys_dma;
+	r->nvme_req.mtdt_dma_ptr = r->nvme_phys_virt[n_data_pgs];
+	r->nvme_req.use_sg = false;
+	r->serjio_pd = serjio_pd;
+	r->range_idx = -1;
+	r->entry = -1;
+	r->binje_shift = ilog2(NVMEIB_EC_JOURNAL_DEFAULT_BLOCKS_PER_ENTRY);
+	r->jrnl_batch_nents = 1;
+	r->nvme_req.disk_info = di;
+	reset_nvme_op_rsrc_len_md(r);
+	atomic_set(&r->state, NVME_OP_FREE);
+#if defined(SERJIO_NVME_OP_RSRC_STATE_CALL_STACK) && (!defined(BLKDEV_SIMULATOR) || !BLKDEV_SIMULATOR)
+	r->state_chng_stack_trace.max_entries = NVME_OP_RSRC_MAX_STACK_TRACE;
+	r->state_chng_stack_trace.entries = r->state_chng_trace_ents;
+	r->state_chng_stack_trace.skip = 1;
+#endif
+	rv = 0;
+	goto out;
+
+free_prpl_map:
+	while (j > n_data_pgs) {
+		j--;
+		dma_unmap_page(dev, r->nvme_phys_virt[j], PAGE_SIZE, DMA_BIDIRECTIONAL);
+	}
+	dma_free_coherent(dev, r->nvme_phys_size, r->nvme_phys_virt, r->nvme_phys_dma);
+	r->nvme_phys_virt = NULL;
+free_md_partial:
+	for (j = n_data_pgs; j < n_data_pgs + n_md_pgs; j++)
+		if (r->pages[j])
+			__free_page(r->pages[j]);
+unmap_data:
+	dma_unmap_page(dev, data_dma, PAGE_SIZE, DMA_BIDIRECTIONAL);
+	for (j = 0; j < n_data_pgs; j++)
+		if (r->pages[j])
+			put_page(r->pages[j]);
+	goto free_pages_arr;
+free_data_pg:
+	__free_page(data_pg);
+free_pages_arr:
+	kfree(r->pages);
+	r->pages = NULL;
+	kfree(r->sgl);
+	r->sgl = NULL;
+out:
+	NFOUT;
+	return rv;
+}
+
+static void free_jrnl_bulk_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd)
+{
+	struct jrnl_bulk_pool *p = &serjio_pd->jrnl_bulk_pool;
+	unsigned i;
+
+	NFIN;
+	if (!serjio_pd->jrnl_bulk_inited)
+		goto out;
+	if (p->pool) {
+		for (i = 0; i < p->n_rsrc; i++)
+			free_one_jrnl_bulk_nvme_op_rsrc(serjio_pd, &p->pool[i].op);
+		kfree(p->pool);
+		p->pool = NULL;
+	}
+	memset(p, 0, sizeof(*p));
+	serjio_pd->jrnl_bulk_inited = false;
+out:
+	NFOUT;
+}
+
+static int init_jrnl_bulk_nvme_op_rsrc(struct nvmeibs_serjio_disk_private_data *serjio_pd)
+{
+	struct nvmeibs_disk_info *di = serjio_pd->di;
+	struct jrnl_bulk_pool *p = &serjio_pd->jrnl_bulk_pool;
+	struct device *dev;
+	size_t max_io, max_ent_bytes;
+	unsigned max_ents_per_io, n_rsrc, n_data_pgs, md_sz_max, n_md_pgs, i;
+	int rv = 0;
+
+	NFIN;
+	memset(p, 0, sizeof(*p));
+	serjio_pd->jrnl_bulk_inited = false;
+	if (!di || nvmeibs_disk_info_has_mtdt_extd(di))
+		goto out;
+
+	max_io = (size_t)di->max_request_size * (size_t)di->block_size;
+	if (!max_io)
+		goto out;
+
+	max_ent_bytes = JOURNAL_ENTS_TO_BYTES(di, ilog2(NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY), 1);
+	max_ents_per_io = (unsigned)(max_io / max_ent_bytes);
+	BUG_ON(max_ents_per_io < 1);
+	n_rsrc = DIV_ROUND_UP(NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE, max_ents_per_io);
+
+	n_data_pgs = DIV_ROUND_UP(max_io, PAGE_SIZE);
+	md_sz_max = NVMEIB_D2MD_LEN(max_io, nvmeibs_disk_info_get_block_shift(di),
+				    nvmeibs_disk_info_get_md_size(di));
+	n_md_pgs = DIV_ROUND_UP(md_sz_max, PAGE_SIZE);
+	dev = nvmeibs_disk_info_get_nvme_dma_device(di);
+
+	p->pool = kcalloc(n_rsrc, sizeof(struct jrnl_bulk_nvme_op_rsrc), GFP_KERNEL);
+	if (!p->pool) {
+		rv = -ENOMEM;
+		goto out;
+	}
+	p->n_rsrc = n_rsrc;
+	p->max_io_bytes = max_io;
+
+	INIT_LIST_HEAD(&p->free_list);
+	spin_lock_init(&p->lock);
+	init_completion(&p->free_comp);
+
+	for (i = 0; i < n_rsrc; i++) {
+		if (init_one_jrnl_bulk_nvme_op_rsrc(serjio_pd, &p->pool[i].op, n_data_pgs, n_md_pgs, dev)) {
+			while (i != 0) {
+				i--;
+				free_one_jrnl_bulk_nvme_op_rsrc(serjio_pd, &p->pool[i].op);
+			}
+			kfree(p->pool);
+			p->pool = NULL;
+			rv = -ENOMEM;
+			goto out;
+		}
+		INIT_LIST_HEAD(&p->pool[i].op.link);
+		list_add_tail(&p->pool[i].op.link, &p->free_list);
+		p->n_free++;
+	}
+
+	serjio_pd->jrnl_bulk_inited = true;
+out:
+	NFOUT;
+	return rv;
+}
+
+static struct nvme_op_rsrc *get_free_jrnl_bulk_rsrc_sync(
+	struct nvmeibs_serjio_disk_private_data *serjio_pd, int max_attempts, bool can_schedule)
+{
+	struct jrnl_bulk_pool *jp = &serjio_pd->jrnl_bulk_pool;
+	struct nvme_op_rsrc *rsrc = NULL;
+	unsigned long flags;
+	int i = 0;
+
+	NFIN;
+	spin_lock_irqsave(&jp->lock, flags);
+	while (!(rsrc = list_first_entry_or_null(&jp->free_list, struct nvme_op_rsrc, link))) {
+		if (can_schedule)
+			jp->n_waiters++;
+		spin_unlock_irqrestore(&jp->lock, flags);
+		if (!can_schedule && i++ >= max_attempts)
+			goto out;
+		if (can_schedule)
+			wait_for_completion_interruptible(&jp->free_comp);
+		else
+			cpu_relax();
+		spin_lock_irqsave(&jp->lock, flags);
+		if (can_schedule) {
+			if (--jp->n_waiters == 0)
+				nvmeib_reinit_completion(&jp->free_comp);
+		}
+		if (IS_SERJIO_DYING(serjio_pd)) {
+			spin_unlock_irqrestore(&jp->lock, flags);
+			goto out;
+		}
+	}
+	list_del_init(&rsrc->link);
+	jp->n_free--;
+	WARN_ON(jp->n_free > jp->n_rsrc);
+	spin_unlock_irqrestore(&jp->lock, flags);
+
+out:
+	NFOUT;
+	return rsrc;
 }
 
 /* Calc Journal Ranges according to Journal and SERJIO DB offset and size */
@@ -3522,6 +3851,7 @@ static void return_nvme_op_rsrc_sync(struct nvmeibs_serjio_disk_private_data *se
 	op_rsrc->range_idx = -1;
 	op_rsrc->binje_shift = ilog2(NVMEIB_EC_JOURNAL_DEFAULT_BLOCKS_PER_ENTRY);
 	op_rsrc->entry = -1;
+	op_rsrc->jrnl_batch_nents = 1;
 	op_rsrc->status = 0;
 	op_rsrc->comp = NULL;
 	op_rsrc->comp_ctr = NULL;
@@ -3884,6 +4214,126 @@ static void zero_journal_range_cb(void *arg, int status, u32 result)
 	return_nvme_op_rsrc_sync(op_rsrc->serjio_pd, op_rsrc, NVME_OP_CB);
 }
 
+static void zero_journal_batch_cb(void *arg, int status, u32 result)
+{
+	struct nvme_op_rsrc *op_rsrc = arg;
+	struct nvmeibs_serjio_disk_private_data *serjio_pd = op_rsrc->serjio_pd;
+	int range_idx = op_rsrc->range_idx;
+	int binje_shift = op_rsrc->binje_shift;
+	unsigned start = op_rsrc->entry;
+	unsigned n = op_rsrc->jrnl_batch_nents;
+	struct jrange_entry *jrange_entry = &serjio_pd->jranges_alloc_tbl.ranges[range_idx];
+	enum nvmeibs_serjio_jentry_state prev_jentry_state, zero_ok_state =
+		(enum nvmeibs_serjio_jentry_state)(uintptr_t)op_rsrc->param;
+	unsigned i;
+
+	(void)result;
+	NFIN;
+	nvme_op_rsrc_chng_state(op_rsrc, NVME_OP_POSTED, NVME_OP_CB);
+	if (status) {
+		for (i = 0; i < n; i++) {
+			union jblock_md *jmdc_e = get_jmdc_entry(jrange_entry, start + i);
+
+			nvmeib_shared_set_jentry_md_invalid_special(jmdc_e, 1 << binje_shift);
+			prev_jentry_state = JENTRY_STATE_CHNG(jrange_entry, start + i, JENTRY_IO_ERR, false,
+							       JENTRY_STATE_CHNG_REASON_ZERO_FAIL);
+			(void)prev_jentry_state;
+		}
+	} else {
+		for (i = 0; i < n; i++) {
+			union jblock_md *jmdc_e = get_jmdc_entry(jrange_entry, start + i);
+
+			nvmeib_shared_set_jentry_md_unused(jmdc_e, 1 << binje_shift);
+			prev_jentry_state = JENTRY_STATE_CHNG(jrange_entry, start + i, zero_ok_state, false,
+							      JENTRY_STATE_CHNG_REASON_ZERO_OK);
+			_NDs(zero_journal_batch_cb_d1, serjio_pd, "Journal Range @INT N @BINJE Entry @INT @SERJIO_STATE => @SERJIO_STATE",
+				range_idx, binje_shift, start + i, prev_jentry_state, zero_ok_state);
+		}
+	}
+	op_rsrc->status = status;
+	if (op_rsrc->comp) {
+		if (!op_rsrc->comp_ctr || atomic_dec_return(op_rsrc->comp_ctr) == 0)
+			complete(op_rsrc->comp);
+	}
+	return_jrnl_bulk_nvme_op_rsrc(op_rsrc);
+	NFOUT;
+}
+
+static int zero_journal_bulk_submit(struct jrange_entry *jrng, unsigned start_ent, unsigned n_ent,
+				    atomic_t *comp_ctr, struct completion *comp,
+				    const char *dbg_str, size_t dbg_len,
+				    bool can_schedule_pool)
+{
+	struct nvmeibs_serjio_disk_private_data *serjio_pd = jrng->serjio_pd;
+	struct nvme_op_rsrc *r;
+	union jblock_md *jmd_unused;
+	size_t data_len, md_sz_one, sw_md_total;
+	u8 *md_base;
+	unsigned i;
+	int rv = 0;
+
+	NFIN;
+	data_len = JOURNAL_ENTS_TO_BYTES(serjio_pd->di, jrng->binje_shift, n_ent);
+
+	if (!(r = get_free_jrnl_bulk_rsrc_sync(serjio_pd, NUM_GET_NVME_RSRC_ATTEMPTS, can_schedule_pool))) {
+		rv = -ENOMEM;
+		goto out;
+	}
+
+	jmd_unused = jrnl_bulk_jmdc_scratch(r);
+	md_sz_one = nvmeib_shared_set_jentry_md_unused(jmd_unused, 1 << jrng->binje_shift);
+	sw_md_total = NVMEIB_D2MD_LEN(data_len, NVMEIB_EC_JOURNAL_SECTOR_SHIFT, nvmeibs_disk_info_get_md_size(serjio_pd->di));
+	BUG_ON(sw_md_total != n_ent * md_sz_one);
+
+	/*
+	 * Only touch SG entry 0: init_one_jrnl_bulk_nvme_op_rsrc allocates a single
+	 * physical data page and aliases it into all r->n_data_pgs SGL/PRP slots
+	 * (journal data is discarded on read/zero, so duplicating the page is fine).
+	 * Iterating across all n_data_pgs SG entries would map back to the same
+	 * physical page and the second entry's zero pass would clobber dbg_str
+	 * written by the first. The device sees the aliased PRP list and reads the
+	 * same physical page for every sector, so writing it once via SG entry 0 is
+	 * sufficient. Both callers cap dbg_len < PAGE_SIZE.
+	 *
+	 * Skip the MD pages here (indices [n_data_pgs, n_pages)) — the unused-entry
+	 * pattern is populated into the MD page below.
+	 */
+	if (dbg_str && dbg_len)
+		sg_copy_from_buffer(r->sgl, 1, dbg_str, dbg_len);
+	sg_zero_buffer(r->sgl, 1, PAGE_SIZE, dbg_len);
+
+	md_base = page_address(r->pages[r->n_data_pgs]);
+	for (i = 0; i < n_ent; i++)
+		memcpy(md_base + i * md_sz_one, jmd_unused, md_sz_one);
+
+	r->range_idx = jrng->range_idx;
+	r->entry = start_ent;
+	r->jrnl_batch_nents = n_ent;
+	r->binje_shift = jrng->binje_shift;
+	r->comp = comp;
+	r->comp_ctr = comp_ctr;
+	if (comp_ctr)
+		atomic_inc(comp_ctr);
+
+	/*
+	 * init_nvme_op_rsrc_io assigns rsrc->param = cb_param. zero_journal_batch_cb reads
+	 * param as zero_ok_state; it must be JENTRY_FREE, not NULL (which casts to JENTRY_UNKNOWN).
+	 */
+	init_nvme_op_rsrc_io(r, serjio_pd, nvme_cmd_write, false,
+			     JOURNAL_RANGE_ENT_TO_NVMEIBC_SECT(serjio_pd, r->range_idx, start_ent),
+			     data_len, zero_journal_batch_cb, (void *)(uintptr_t)JENTRY_FREE, md_base,
+			     sw_md_total);
+
+	rv = submit_nvme_op_rsrc_to_disk(r, NVME_OP_FREE);
+	if (rv) {
+		if (comp_ctr)
+			atomic_dec(comp_ctr);
+		return_jrnl_bulk_nvme_op_rsrc(r);
+	}
+out:
+	NFOUT;
+	return rv;
+}
 
 static int zero_journal_range(struct jrange_entry *jrng, atomic_t *comp_ctr,
 							  struct completion *comp)
@@ -3935,14 +4385,31 @@ static int zero_journal_range(struct jrange_entry *jrng, atomic_t *comp_ctr,
 		}
 		goto out;
 	} else {
-		/* TBD: Update PRPL to write the same data to multiple entries */
-		for (i = 0; i < jrng->n_ents; i++) {
-			zje_len = scnprintf(zje_buf, PAGE_SIZE, "%s - rng: %u entry: %d", __func__, jrng->range_idx, i);
-			rv = zero_journal_entry(serjio_pd, jrng, i, comp_ctr, comp, 
-				NULL, NULL,
-				zje_buf, zje_len);
-			if (rv)
-				goto out;
+		unsigned max_ents, pos, chunk;
+
+		max_ents = serjio_pd->jrnl_bulk_inited ?
+			(unsigned)(serjio_pd->jrnl_bulk_pool.max_io_bytes /
+				JOURNAL_ENTS_TO_BYTES(serjio_pd->di, jrng->binje_shift, 1)) : 1;
+		BUG_ON(max_ents < 1);
+		for (pos = 0; pos < jrng->n_ents; pos += chunk) {
+			chunk = min(max_ents, jrng->n_ents - pos);
+			if (serjio_pd->jrnl_bulk_inited && chunk > 1) {
+				zje_len = scnprintf(zje_buf, PAGE_SIZE,
+						    "%s - rng: %u start_ent: %u end_ent: %u",
+						    __func__, jrng->range_idx, pos, pos + chunk - 1);
+				rv = zero_journal_bulk_submit(jrng, pos, chunk, comp_ctr, comp,
+							      zje_buf, (size_t)zje_len, true);
+				if (!rv)
+					continue;
+			}
+			for (i = pos; i < pos + chunk && i < jrng->n_ents; i++) {
+				zje_len = scnprintf(zje_buf, PAGE_SIZE, "%s - rng: %u entry: %d", __func__, jrng->range_idx, i);
+				rv = zero_journal_entry(serjio_pd, jrng, i, comp_ctr, comp,
+					NULL, NULL,
+					zje_buf, zje_len);
+				if (rv)
+					goto out;
+			}
 		}
 	}
 
@@ -4052,7 +4519,7 @@ static int chk_wait_ret_cln_disk_rng(struct jrange_entry *jrng)
 	/* Sync all entries that we were waiting to return */
 	down_read(&serjio_pd->gpt_rwsem);
 	if ((rv = rd_jrange(serjio_pd, sync_ent_cb, NULL, jrng,
-		JENTRY_WAIT_RET_MASK, NULL, NULL, NULL)) < 0) {
+		JENTRY_WAIT_RET_MASK, NULL, NULL, NULL, NULL)) < 0) {
 		up_read(&serjio_pd->gpt_rwsem);
 		goto out;
 	}
@@ -4768,6 +5235,278 @@ out:
 	return valid_j2d;
 }
 
+static void return_jrnl_bulk_nvme_op_rsrc(struct nvme_op_rsrc *r)
+{
+	struct nvmeibs_serjio_disk_private_data *serjio_pd = r->serjio_pd;
+	struct jrnl_bulk_pool *jp = &serjio_pd->jrnl_bulk_pool;
+	unsigned long flags;
+
+	NFIN;
+	INIT_LIST_HEAD(&r->link);
+	r->range_idx = -1;
+	r->entry = -1;
+	r->binje_shift = ilog2(NVMEIB_EC_JOURNAL_DEFAULT_BLOCKS_PER_ENTRY);
+	r->jrnl_batch_nents = 1;
+	r->jrnl_bulk_defer_zero_bmp = NULL;
+	r->comp = NULL;
+	r->comp_ctr = NULL;
+	r->param = NULL;
+	r->status = 0;
+	reset_nvme_op_rsrc_len_md(r);
+	atomic_set(&r->state, NVME_OP_FREE);
+	spin_lock_irqsave(&jp->lock, flags);
+	list_add_tail(&r->link, &jp->free_list);
+	jp->n_free++;
+	if (jp->n_waiters > 0)
+		complete(&jp->free_comp);
+	spin_unlock_irqrestore(&jp->lock, flags);
+	WARN_ON_ONCE(jp->n_free > jp->n_rsrc);
+	NFOUT;
+}
+
+/*
+ * Apply journal metadata already in @jmdc_entry (after a successful NVMe read).
+ * @zero_io_rsrc_opt: journal read buffer used for single-entry zero path; NULL allocates
+ * a pool rsrc when a zero is needed (bulk journal read), unless @defer_zero_bmp is set.
+ * @defer_zero_bmp: if non-NULL (bulk read path only), entries that need disk zero are marked
+ * here; rd_jrnl merges into a per-range slice and issues zero_journal_bulk_submit after all bulk
+ * reads complete; no per-entry nvme op allocation.
+ * Returns 0 on success, 1 if async zero was submitted on @zero_io_rsrc_opt or an allocated rsrc,
+ * or a negative errno.
+ */
+static int read_jmdc_entry_from_buffer(
+	struct nvmeibs_serjio_disk_private_data *serjio_pd,
+	struct jrange_entry *jrange_entry,
+	unsigned entry_idx,
+	union jblock_md *jmdc_entry,
+	struct nvme_op_rsrc *zero_io_rsrc_opt,
+	unsigned long *defer_zero_bmp)
+{
+	struct nvme_op_rsrc *zr = zero_io_rsrc_opt;
+	bool zr_alloc = false;
+	enum nvmeibs_serjio_jentry_state prev_jentry_state, next_jentry_state;
+	int zje_len;
+	int rv = 0;
+
+	NFIN;
+	if (!nvmeib_is_jmd_unused_entry(jmdc_entry)) {
+		u64 j2d_start = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
+		u64 j2d_end = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
+		int chain_err = NVMEIB_JENTRY_CHAIN_OK;
+
+		if (jrange_entry->status == JRANGE_FREE ||
+		    jrange_entry->status == JRANGE_QUARANTINED ||
+		    jrange_entry->status == JRANGE_DB_ZERO ||
+		    (CLEAN_ENTRIES_WITH_INVALID_J2D &&
+		     (nvmeib_is_jmd_trim_val(jmdc_entry) ||
+		      (chain_err = nvmeibs_serjio_jmd_decode_j2d_chain(jmdc_entry, 1 << jrange_entry->binje_shift,
+								       &j2d_start, &j2d_end)) != NVMEIB_JENTRY_CHAIN_OK ||
+		      !is_j2d_in_valid_segment(serjio_pd, j2d_start, j2d_end, NULL, NULL)))) {
+			_NDs(trace_1_serjio_read_jmdc_entry_cb, serjio_pd, "J2D: [@J2D_START,@J2D_END] in Journal Range @JRNL_RNG_IDX N @BINJE Entry @JRNL_RNG_ENT_IDX not valid at @PTR. Chain Error @ERROR_STR Chain Error Block @IDX",
+				j2d_start, j2d_end, 1 << jrange_entry->binje_shift, jrange_entry->range_idx, entry_idx, jmdc_entry,
+				nvmeib_shared_jentry_md_chain_err_str(chain_err), nvmeib_shared_jentry_md_chain_err_block_idx(chain_err));
+			if (defer_zero_bmp) {
+				set_bit(entry_idx, defer_zero_bmp);
+				goto out;
+			}
+			if (!zr) {
+				/* Only read_jmdc_batch_cb passes NULL; NVMe completion context — no sleeping. */
+				zr = get_free_nvme_op_rsrc_sync(serjio_pd, NUM_GET_NVME_RSRC_ATTEMPTS, false);
+				if (!zr) {
+					rv = -ENOMEM;
+					goto out;
+				}
+				zr->range_idx = jrange_entry->range_idx;
+				zr->binje_shift = jrange_entry->binje_shift;
+				zr->entry = entry_idx;
+				zr_alloc = true;
+			}
+			zje_len = scnprintf(page_address(zr->pages[0]), PAGE_SIZE,
+					"%s - rng: %u entry: %u status: %s j2d_start: %llu j2d_end: %llu not in valid seg\n", __func__,
+					jrange_entry->range_idx, entry_idx,
+					nvmeib_shared_serjio_jrange_status_to_str(jrange_entry->status), j2d_start, j2d_end);
+			/*
+			 * submit_nvme_op_rsrc_to_disk expects current nvme_op state: pool rsrc is FREE;
+			 * read_jmdc_entry_cb passes its read op_rsrc (already NVME_OP_CB after read completes).
+			 */
+			if (zero_journal_entry_from_cb(zr, NULL, NULL,
+						       zr_alloc ? NVME_OP_FREE : NVME_OP_CB,
+						       NULL, (size_t)zje_len) < 0) {
+				if (zr_alloc)
+					return_nvme_op_rsrc_sync(serjio_pd, zr, NVME_OP_ERROR);
+				rv = -EIO;
+				goto out;
+			}
+			rv = 1;
+			goto out;
+		}
+	}
+
+	if (set_jmdc_entry_data(jrange_entry, entry_idx, jmdc_entry)) {
+		_NEs(error_1_serjio_read_jmdc_entry_cb, serjio_pd, "Failed to set jmdc entry");
+		rv = -EIO;
+		goto out;
+	}
+
+	if (nvmeib_is_jmd_unused_entry(jmdc_entry))
+		next_jentry_state = JENTRY_FREE;
+	else
+		next_jentry_state = JENTRY_SYNCED;
+
+	prev_jentry_state = JENTRY_STATE_CHNG(jrange_entry, entry_idx, next_jentry_state, false,
+					      JENTRY_STATE_CHNG_REASON_READ_FREE);
+
+	SERJIO_BUG_ON(prev_jentry_state != JENTRY_UNKNOWN && prev_jentry_state != JENTRY_FREE,
+			bug_2_read_jmdc_entry_cb_inv_jentry_state, serjio_pd,
+			"Entry @JRNL_RNG_ENT_IDX of Range @JRNL_RNG_IDX was "
+			"in unexpected state @JENTRY_STATE",
+			entry_idx, jrange_entry->range_idx, prev_jentry_state);
+
+out:
+	NFOUT;
+	return rv;
+}
+
+static void read_jmdc_batch_cb(void *arg, int status, u32 result)
+{
+	struct nvme_op_rsrc *op_rsrc = arg;
+	struct nvmeibs_serjio_disk_private_data *serjio_pd = op_rsrc->serjio_pd;
+	struct jrange_entry *jrange_entry = &serjio_pd->jranges_alloc_tbl.ranges[op_rsrc->range_idx];
+	unsigned start_ent = op_rsrc->entry;
+	unsigned n = op_rsrc->jrnl_batch_nents;
+	int binje_shift = op_rsrc->binje_shift;
+	size_t sw_md = sizeof(union jblock_md) << binje_shift;
+	u8 *md_base = page_address(op_rsrc->pages[op_rsrc->n_data_pgs]);
+	union jblock_md *jmdc_entry = jrnl_bulk_jmdc_scratch(op_rsrc);
+	unsigned long *run_defer_bmp = op_rsrc->jrnl_bulk_defer_zero_bmp;
+	unsigned i;
+	int pr;
+
+	(void)result;
+	NFIN;
+	nvme_op_rsrc_chng_state(op_rsrc, NVME_OP_POSTED, NVME_OP_CB);
+	if (status != 0) {
+		_NEs(error_serjio_read_jmdc_batch_cb, serjio_pd, "Error (@STATUS) reading journal entry", status);
+		for (i = 0; i < n; i++) {
+			nvmeib_shared_set_jentry_md_invalid_special(jmdc_entry, 1 << binje_shift);
+			set_jmdc_entry_data(jrange_entry, start_ent + i, jmdc_entry);
+			JENTRY_STATE_CHNG(jrange_entry, start_ent + i, JENTRY_IO_ERR, false,
+					  JENTRY_STATE_CHNG_REASON_READ_FAIL);
+		}
+		goto complete;
+	}
+
+	/*
+	 * run_defer_bmp is a per-range slice shared by all bulk reads issued for this
+	 * range; multiple completions may run concurrently. Use the atomic set_bit()
+	 * inside read_jmdc_entry_from_buffer rather than aggregating into a local
+	 * bitmap and OR-ing back, which is not atomic on per-long boundaries.
+	 */
+	for (i = 0; i < n; i++) {
+		memcpy(jmdc_entry, md_base + i * sw_md, sw_md);
+		pr = read_jmdc_entry_from_buffer(serjio_pd, jrange_entry, start_ent + i, jmdc_entry,
+						NULL, run_defer_bmp);
+		if (pr < 0)
+			break;
+	}
+
+complete:
+	if (op_rsrc->comp) {
+		if (!op_rsrc->comp_ctr || atomic_dec_return(op_rsrc->comp_ctr) == 0)
+			complete(op_rsrc->comp);
+	}
+	return_jrnl_bulk_nvme_op_rsrc(op_rsrc);
+	NFOUT;
+}
+
+static int read_jrnl_bulk_submit(struct jrange_entry *jrng, unsigned start_ent, unsigned n_ent,
+				 atomic_t *read_ctr, struct completion *read_comp,
+				 nvme_callback_t read_cb, void *cb_param,
+				 unsigned long *defer_zero_bmp)
+{
+	struct nvmeibs_serjio_disk_private_data *serjio_pd = jrng->serjio_pd;
+	struct nvme_op_rsrc *r;
+	size_t data_len;
+	int rv = 0;
+
+	NFIN;
+	(void)read_cb;
+	(void)cb_param;
+	if (read_cb != read_jmdc_entry_cb || n_ent < 2) {
+		rv = -EINVAL;
+		goto out;
+	}
+
+	if (!(r = get_free_jrnl_bulk_rsrc_sync(serjio_pd, NUM_GET_NVME_RSRC_ATTEMPTS, true))) {
+		rv = -ENOMEM;
+		goto out;
+	}
+
+	r->range_idx = jrng->range_idx;
+	r->entry = start_ent;
+	r->jrnl_batch_nents = n_ent;
+	r->binje_shift = jrng->binje_shift;
+	r->comp = read_comp;
+	r->comp_ctr = read_ctr;
+	r->jrnl_bulk_defer_zero_bmp = defer_zero_bmp;
+	if (read_ctr)
+		atomic_inc(read_ctr);
+
+	data_len = JOURNAL_ENTS_TO_BYTES(serjio_pd->di, jrng->binje_shift, n_ent);
+	init_nvme_op_rsrc_io(r, serjio_pd, nvme_cmd_read, false,
+			     JOURNAL_RANGE_ENT_TO_NVMEIBC_SECT(serjio_pd, r->range_idx, start_ent),
+			     data_len, read_jmdc_batch_cb, NULL, NULL, 0);
+
+	rv = submit_nvme_op_rsrc_to_disk(r, NVME_OP_FREE);
+	if (rv) {
+		if (read_ctr)
+			atomic_dec(read_ctr);
+		r->jrnl_bulk_defer_zero_bmp = NULL;
+		return_jrnl_bulk_nvme_op_rsrc(r);
+	}
+out:
+	NFOUT;
+	return rv;
+}
+
+static int read_jrnl_entries_run(struct jrange_entry *jrng, unsigned start_ent, unsigned n_ent,
+				 atomic_t *ctr, struct completion *comp,
+				 nvme_callback_t read_cb, void *cb_param,
+				 unsigned long *defer_zero_bmp)
+{
+	struct nvmeibs_serjio_disk_private_data *serjio_pd = jrng->serjio_pd;
+	unsigned max_ents, chunk, pos;
+	int rv = 0;
+
+	NFIN;
+	if (n_ent == 0)
+		goto out;
+
+	if (!serjio_pd->jrnl_bulk_inited || read_cb != read_jmdc_entry_cb || n_ent == 1) {
+		for (pos = 0; pos < n_ent; pos++) {
+			rv = read_jrnl_entry(jrng, start_ent + pos, ctr, comp, read_cb, cb_param);
+			if (rv)
+				goto out;
+		}
+		goto out;
+	}
+
+	max_ents = (unsigned)(serjio_pd->jrnl_bulk_pool.max_io_bytes /
+			      JOURNAL_ENTS_TO_BYTES(serjio_pd->di, jrng->binje_shift, 1));
+	BUG_ON(max_ents < 1);
+
+	for (pos = 0; pos < n_ent; pos += chunk) {
+		chunk = min(max_ents, n_ent - pos);
+		rv = read_jrnl_bulk_submit(jrng, start_ent + pos, chunk, ctr, comp, read_cb, cb_param,
+					   defer_zero_bmp);
+		if (rv)
+			goto out;
+	}
+out:
+	NFOUT;
+	return rv;
+}
+
 static void read_jmdc_entry_cb(void *arg, int status, u32 result)
 {
 	struct nvme_op_rsrc *op_rsrc = arg;
@@ -4777,8 +5516,8 @@ static void read_jmdc_entry_cb(void *arg, int status, u32 result)
 	int entry_idx = op_rsrc->entry;
 	struct jrange_entry *jrange_entry = &serjio_pd->jranges_alloc_tbl.ranges[range_idx];
 	union jblock_md jmdc_entry[NVMEIB_EC_JOURNAL_MAX_BLOCKS_PER_ENTRY] = {};
-	enum nvmeibs_serjio_jentry_state prev_jentry_state, next_jentry_state;
-	int zje_len;
+	enum nvmeibs_serjio_jentry_state prev_jentry_state;
+	int pr;
 
 	(void)result;
 	NFIN;
@@ -4802,63 +5541,12 @@ static void read_jmdc_entry_cb(void *arg, int status, u32 result)
 	_NDs(trace_serjio_read_jmdc_entry_cb, serjio_pd, "Read Journal Metadata @RAW for Range @JRNL_RNG_IDX N @BINJE Entry @JRNL_RNG_ENT_IDX (Disk LBA: @DISK_BLOCK)",
 		 jmdc_entry[0].raw, range_idx, binje_shift, entry_idx, (long unsigned)op_rsrc->nvme_req.disk_block);
 
-	/* Check to see if j2d is valid by looking at the journaled data segment partitions */
-	if (!nvmeib_is_jmd_unused_entry(jmdc_entry)) {
-		/* Journal Entry is non-empty -
-		* If it is part of a free range or does not point to a valid segment,
-		* then zero it.
-		*/
-		u64 j2d_start = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
-		u64 j2d_end = NVMEIB_EC_INVALID_BLOCKSET_SLBA;
-		int chain_err = NVMEIB_JENTRY_CHAIN_OK;
-		if (jrange_entry->status == JRANGE_FREE ||
-			jrange_entry->status == JRANGE_QUARANTINED ||
-			jrange_entry->status == JRANGE_DB_ZERO ||
-			(CLEAN_ENTRIES_WITH_INVALID_J2D &&
-					(
-							nvmeib_is_jmd_trim_val(jmdc_entry) ||
-							(chain_err = nvmeibs_serjio_jmd_decode_j2d_chain(jmdc_entry, 1 << binje_shift, &j2d_start, &j2d_end)) != NVMEIB_JENTRY_CHAIN_OK ||
-							!is_j2d_in_valid_segment(serjio_pd, j2d_start, j2d_end, NULL, NULL))
-					)
-			) 
-		{
-			/* J2D not valid - clear on disk and move to free state */
-			_NDs(trace_1_serjio_read_jmdc_entry_cb, serjio_pd, "J2D: [@J2D_START,@J2D_END] in Journal Range @JRNL_RNG_IDX N @BINJE Entry @JRNL_RNG_ENT_IDX not valid at @PTR. Chain Error @ERROR_STR Chain Error Block @IDX",
-				j2d_start, j2d_end, 1 << binje_shift, range_idx, entry_idx, jmdc_entry,
-				nvmeib_shared_jentry_md_chain_err_str(chain_err), nvmeib_shared_jentry_md_chain_err_block_idx(chain_err));
-			zje_len = scnprintf(page_address(op_rsrc->pages[0]), PAGE_SIZE,
-					"%s - rng: %u entry: %u status: %s j2d_start: %llu j2d_end: %llu not in valid seg\n", __func__,
-					range_idx, entry_idx, nvmeib_shared_serjio_jrange_status_to_str(jrange_entry->status), j2d_start, j2d_end);
-			if (zero_journal_entry_from_cb(op_rsrc, NULL, NULL,
-				NVME_OP_CB, NULL, (size_t)zje_len) < 0)
-			{
-				goto return_op_rsrc;
-			} else {
-				goto out;
-			}
-		}
-	}
-
-	/* Copy metadata read from the journal to RAM */
-	if (set_jmdc_entry_data(jrange_entry, entry_idx, jmdc_entry)) {
-		_NEs(error_1_serjio_read_jmdc_entry_cb, serjio_pd, "Failed to set jmdc entry");
+	pr = read_jmdc_entry_from_buffer(serjio_pd, jrange_entry, entry_idx, jmdc_entry, op_rsrc,
+					 NULL);
+	if (pr == 1)
+		goto out;
+	if (pr < 0)
 		goto return_op_rsrc;
-	}
-
-	/* Set state from unknown to dirty or free */
-	if (nvmeib_is_jmd_unused_entry(jmdc_entry))
-		next_jentry_state = JENTRY_FREE;
-	else
-		next_jentry_state = JENTRY_SYNCED;
-
-	prev_jentry_state = JENTRY_STATE_CHNG(jrange_entry, entry_idx, next_jentry_state, false,
-					      JENTRY_STATE_CHNG_REASON_READ_FREE);
-
-	SERJIO_BUG_ON(prev_jentry_state != JENTRY_UNKNOWN && prev_jentry_state != JENTRY_FREE,
-			bug_2_read_jmdc_entry_cb_inv_jentry_state, serjio_pd,
-			"Entry @JRNL_RNG_ENT_IDX of Range @JRNL_RNG_IDX was "
-			"in unexpected state @JENTRY_STATE",
-			entry_idx, range_idx, prev_jentry_state);
 
 return_op_rsrc:
 	/* This will also signal the completion that the io thread is waiting for */
@@ -6228,10 +6916,67 @@ out:
 	return rv;
 }
 
+/*
+ * Issue bulk journal zeros for entry indices marked in @defer_zero_bmp (this range only;
+ * indices are 0 .. n_ents-1). Called after all bulk reads for the surrounding rd_jrnl / rd_jrange
+ * have completed.
+ */
+static int rd_jrange_submit_deferred_bulk_zeros(struct nvmeibs_serjio_disk_private_data *serjio_pd,
+						struct jrange_entry *jrng, unsigned long *defer_zero_bmp,
+						atomic_t *ctr, struct completion *comp)
+{
+	unsigned max_z, run_start, run_len, zpos, zchunk, e;
+	unsigned ent_end = jrng->n_ents;
+	int rv = 0;
+	char dbg_buf[256];
+	int dbg_len;
+
+	NFIN;
+	if (!serjio_pd->jrnl_bulk_inited || !defer_zero_bmp)
+		goto out;
+	if (bitmap_empty(defer_zero_bmp, ent_end))
+		goto out;
+
+	max_z = (unsigned)(serjio_pd->jrnl_bulk_pool.max_io_bytes /
+			   JOURNAL_ENTS_TO_BYTES(serjio_pd->di, jrng->binje_shift, 1));
+	BUG_ON(max_z < 1);
+
+	e = find_next_bit(defer_zero_bmp, ent_end, 0);
+	while (e < ent_end) {
+		run_start = e;
+		e++;
+		while (e < ent_end && test_bit(e, defer_zero_bmp))
+			e++;
+		run_len = e - run_start;
+		for (zpos = 0; zpos < run_len; zpos += zchunk) {
+			zchunk = min(max_z, run_len - zpos);
+			dbg_len = scnprintf(dbg_buf, sizeof(dbg_buf),
+					    "%s - rng: %u start_ent: %u end_ent: %u",
+					    __func__, jrng->range_idx, run_start + zpos,
+					    run_start + zpos + zchunk - 1);
+			rv = zero_journal_bulk_submit(jrng, run_start + zpos, zchunk, ctr, comp,
+						      dbg_buf, (size_t)dbg_len, true);
+			if (rv)
+				break;
+		}
+		if (rv)
+			break;
+		e = find_next_bit(defer_zero_bmp, ent_end, e);
+	}
+	if (rv)
+		_NEs(error_serjio_read_jmdc_batch_cb_zero, serjio_pd,
+		     "Bulk zero after journal read failed (@RV) range @JRNL_RNG_IDX", rv,
+		     jrng->range_idx);
+out:
+	NFOUT;
+	return rv;
+}
+
 static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				   nvme_callback_t read_cb, void *cb_param, struct jrange_entry *jrng,
 				   unsigned long read_ent_state_mask, unsigned long *read_ent_bmp,
-				   atomic_t *ctr, struct completion *comp)
+				   atomic_t *ctr, struct completion *comp,
+				   unsigned long *defer_zero_bmp)
 {
 	enum nvmeibs_serjio_jentry_state cur_jentry_state;
 	unsigned entry;
@@ -6299,12 +7044,19 @@ static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 		 "Reading Range @JRNL_RNG_IDX Entries: "
 		NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE_TRACE,
 		jrng->range_idx, rd_ents_bmp);
-	for_each_set_bit(entry, rd_ents_bmp, jrng->n_ents) {
-		if ((rv = read_jrnl_entry(jrng, entry, ctr, comp, read_cb, cb_param))) {
+	entry = -1;
+	while ((entry = find_next_bit(rd_ents_bmp, jrng->n_ents, entry + 1)) < jrng->n_ents) {
+		unsigned run = 1;
+
+		while (entry + run < jrng->n_ents && test_bit(entry + run, rd_ents_bmp))
+			run++;
+		if ((rv = read_jrnl_entries_run(jrng, entry, run, ctr, comp, read_cb, cb_param,
+						defer_zero_bmp))) {
 			_NEs(error_serjio_rd_jrange, serjio_pd, "Error (@RV) reading Journal Range: @JRNL_RNG_IDX Entry: @JRNL_RNG_ENT_IDX",
 				rv, jrng->range_idx, entry);
 			goto out;
 		}
+		entry += run - 1;
 	}
 out:
 	if (comp == &int_comp && atomic_dec_return(ctr) > 0)
@@ -6320,12 +7072,41 @@ static int rd_jrnl(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 {
 	struct jranges_allocation_table *jranges_alloc_tbl = &serjio_pd->jranges_alloc_tbl;
 	int i, rv = 0;
+	int zrv;
 	atomic_t read_ctr = ATOMIC_INIT(1);
 	DECLARE_COMPLETION_ONSTACK(read_comp);
 	unsigned long start_jiffies = jiffies;
+	unsigned long *defer_zero_all = NULL;
+	unsigned int nr = jranges_alloc_tbl->num_ranges;
+	size_t defer_nbits;
+	/*
+	 * Round per-range bitmap size up to whole longs so per-range slices stay
+	 * long-aligned: NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE is not guaranteed
+	 * to be a multiple of BITS_PER_LONG. Slicing by BITS_TO_LONGS(total_bits)
+	 * would let later ranges' slices share an unsigned long with the previous
+	 * range, breaking atomic set_bit() boundaries.
+	 */
+	const unsigned int longs_per_range = BITS_TO_LONGS(NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE);
+	size_t total_longs;
+
+	NFIN;
+	if (nr > 0 && serjio_pd->jrnl_bulk_inited) {
+		defer_nbits = nr * NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE;
+		total_longs = (size_t)nr * longs_per_range;
+		defer_zero_all = kcalloc(total_longs, sizeof(unsigned long), GFP_KERNEL);
+		if (!defer_zero_all) {
+			rv = -ENOMEM;
+			goto out;
+		}
+		bitmap_zero(defer_zero_all, defer_nbits);
+	}
 
 	for (i = 0; i < (int)jranges_alloc_tbl->num_ranges; i++) {
 		struct jrange_entry *jrange_entry = &jranges_alloc_tbl->ranges[i];
+		unsigned long *defer_slice = defer_zero_all
+			? defer_zero_all + i * longs_per_range
+			: NULL;
+
 		if (!serjio_state_cmp(serjio_pd, check_state)) {
 			rv = -ECANCELED;
 			goto wait_comp;
@@ -6346,7 +7127,7 @@ static int rd_jrnl(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				jrange_entry->status, jrange_entry->range_idx);
 		if (read_free_rng || (jrange_entry->status != JRANGE_FREE && jrange_entry->status != JRANGE_QUARANTINED)) {
 			if ((rv = rd_jrange(serjio_pd, read_cb, cb_param, jrange_entry,
-				read_ent_state_mask, NULL, &read_ctr, &read_comp))) {
+				read_ent_state_mask, NULL, &read_ctr, &read_comp, defer_slice))) {
 				goto wait_comp;
 			}
 		}
@@ -6356,8 +7137,29 @@ wait_comp:
 	if (atomic_dec_return(&read_ctr) > 0)
 		wait_for_completion(&read_comp);
 
+	if (!rv && defer_zero_all && serjio_pd->jrnl_bulk_inited) {
+		nvmeib_reinit_completion(&read_comp);
+		atomic_set(&read_ctr, 1);
+		for (i = 0; i < (int)nr; i++) {
+			struct jrange_entry *je = &jranges_alloc_tbl->ranges[i];
+			unsigned long *slice = defer_zero_all + i * longs_per_range;
+
+			if ((zrv = rd_jrange_submit_deferred_bulk_zeros(serjio_pd, je, slice,
+								      &read_ctr, &read_comp))) {
+				rv = zrv;
+				break;
+			}
+		}
+		if (atomic_dec_return(&read_ctr) > 0)
+			wait_for_completion(&read_comp);
+	}
+
+	kfree(defer_zero_all);
+
 	_NTs(trace_serjio_rd_jrnl, serjio_pd, "Took @DIFF_JIFFIES jiffies (@DIFF_JIFFIES ms) to read journal",
 		jiffies - start_jiffies, (jiffies - start_jiffies) * 1000 / HZ);
+out:
+	NFOUT;
 	return rv;
 }
 
@@ -7007,7 +7809,7 @@ unlock_and_read:
 
 	/* Sync all remaining UNKNOWN entries */
 	rd_jrange(serjio_pd, sync_ent_cb, NULL, jrange, JENTRY_UNKNOWN_MASK,
-			  NULL, NULL, NULL);
+			  NULL, NULL, NULL, NULL);
 
 	//and now we will find that some unknown entries are free and need to move them to taken once again
 	//but we don't held the lock, is it still valid?
