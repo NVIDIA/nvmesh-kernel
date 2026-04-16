@@ -3530,3 +3530,391 @@ void nvmeibc_tpv_timeout_work_fn(struct work_struct *work)
 | `clnt/tpv/nvmeibc_tpv_io.c` | Schedule `timeout_work` when parking bios; cancel when draining; add `nvmeibc_tpv_timeout_work_fn()`. |
 | `clnt/tpv/nvmeibc_tpv_persist.c` | Update `max_retry_jiffies` to normal value when `state_loaded` is set. |
 
+---
+
+## 13. NVMesh-CLI CDV/TPV Support
+
+### 13.1 Overview
+
+CDV and TPV are exposed as top-level CLI groups (`nvmesh cdv` and `nvmesh tpv`), matching the separate GUI sections. They are `volumeClass`-discriminated sub-types of `Volume`, sharing the `/volumes` REST route.
+
+**Files to modify:**
+
+| File | Change |
+|------|--------|
+| `nvmesh-infra/xlro/core/entities/volume.py` | Add `CDVConfig`, `TPVConfig`, extend `Volume`, add `CDV`/`TPV` entity subclasses |
+| `nvmesh-infra/xlro/core/entities/rest.yaml` | Add `CDV` and `TPV` entity blocks to version "15" |
+| `nvmesh-infra/xlro/tools/cli/rest_click.py` | Extend `waitable` tuple with `'cdv'` and `'tpv'` |
+| `nvmesh-infra/xlro/tools/cli/rest_custom.py` | Add `CDVGroup` and `TPVGroup` |
+| `nvmesh-infra/xlro/tools/cli/current.api` | Append CDV/TPV golden-file entries |
+| `nvmesh-infra/xlro/tools/cli/current.display` | Append CDV/TPV golden-file entries |
+
+### 13.2 SDK Layer (`volume.py`)
+
+Add after `EncryptionObj` (~line 70):
+
+```python
+class CDVConfig(SdkObject):
+    cdvExtentSizeMB : int    # power-of-2: 64–65536 MB
+    allocatorSizeGB : int    # default 1
+    maxTPVs         : int    # default 512
+
+class TPVConfig(SdkObject):
+    cdvId           : str    # required; parent CDV name/_id
+    tpvExtentSizeKB : int    # power-of-2: 64–65536 KB
+    virtualSizeGB   : float  # required; current virtual size
+    # maxVirtualSizeGB removed — no longer part of the data model
+```
+
+Note: `SdkObject` field names must use the exact camelCase the server expects (`cdvId`, `tpvExtentSizeKB`, `virtualSizeGB`) — nested fields bypass the `rest2infra` mapping.
+
+Add to `Volume` body after `metadata` (~line 501):
+
+```python
+volumeClass : str                    = PropertySpec(str)
+cdvConfig   : Optional[CDVConfig]    = PropertySpec(CDVConfig)
+tpvConfig   : Optional[TPVConfig]    = PropertySpec(TPVConfig)
+tpvCount    : int                    = PropertySpec(int, readonly=True)
+```
+
+Add `CDV` and `TPV` subclasses after the `Volume` class:
+
+```python
+@sdk_entity(sourcetypes=[SourceTypes.LOCAL, SourceTypes.MANAGEMENT])
+class CDV(Volume):
+    """Capacity Data Volume — a Volume with volumeClass='CDV'."""
+
+    @classmethod
+    def _get_filter(cls, mgmt=None, **kwargs):
+        return [MongoObj('volumeClass', 'CDV')] + super()._get_filter(mgmt, **kwargs)
+
+
+@sdk_entity(sourcetypes=[SourceTypes.LOCAL, SourceTypes.MANAGEMENT])
+class TPV(Volume):
+    """Thin-Provisioned Volume — a Volume with volumeClass='TPV'."""
+
+    @classmethod
+    def _get_filter(cls, mgmt=None, **kwargs):
+        return [MongoObj('volumeClass', 'TPV')] + super()._get_filter(mgmt, **kwargs)
+```
+
+`MongoObj` is already imported at line 49. Overriding `_get_filter` ensures every `_sdk_get` call (show, dicts_by_name, delete pre-fetch) is automatically restricted to the correct `volumeClass`.
+
+### 13.3 Entity Metadata (`rest.yaml`)
+
+Add inside the version `"15"` `entities:` block.
+
+**CDV:**
+
+```yaml
+CDV:
+  route: volumes
+  dbkey: name
+  rest2infra:
+    <<: *volume_r2i
+  # All standard volume params are mutable on a CDV.
+  # cdvConfig (cdvExtentSizeMB, allocatorSizeGB, maxTPVs) is immutable post-creation
+  # and therefore lives only under ops.create.params, not here.
+  params: *volume_params
+  display:
+    - name
+    - description
+    - health
+    - status
+    - action
+    - capacity
+    - tpvCount
+    - cdvConfig
+  ops:
+    rebuild:
+      help: Rebuild a CDV
+      route: rebuildVolumes
+      style: keys
+      payload: "{{entities}}"
+    delete:
+      confirm: |
+        WARNING: Deleting a CDV also removes its backing allocation. This is irreversible.
+        Are you sure you want to continue?
+      payload: "[{% for e in entities %}{ '_id': '{{e.name}}', 'uuid': '{{e.uuid}}'}, {% endfor %}]"
+      wait:
+        <<: *wait_for_vol_delete
+    create:
+      wait:
+        prop_name: 'status'
+        values: ['online', 'offline', 'degraded']
+        is_matching: true
+      params:
+        - cdvConfig          # recurses into CDVConfig → --cdv-config-* options; create-only
+        - RAIDlevel
+        - stripeWidth
+        - stripeSize
+        - numberOfMirrors
+        - dataBlocks
+        - parityBlocks
+        - protectionLevel
+        - ignoreNodeSeparation
+```
+
+**TPV:**
+
+```yaml
+TPV:
+  route: volumes
+  dbkey: name
+  rest2infra:
+    <<: *volume_r2i
+  # Only name and description are mutable post-creation; tpvConfig is immutable
+  # and therefore lives only under ops.create.params.
+  params:
+    - name
+    - description
+  display:
+    - name
+    - description
+    - health
+    - status
+    - action
+    - tpvConfig
+  ops:
+    delete:
+      confirm: |
+        WARNING: You are about to delete a Thin-Provisioned Volume.
+        Are you sure you want to continue?
+      route: tpv/delete
+      style: entities
+      payload: "[{% for e in entities %}{'_id': '{{e.name}}'}, {% endfor %}]"
+      wait:
+        <<: *wait_for_vol_delete
+    extend:
+      help: Extend the virtual size of a TPV
+      route: tpv/extend
+      style: one
+      opts:
+        newSizeGb:
+          type: float
+          required: true
+      payload: "{'tpvId': '{{entities[0].name}}', 'newSizeGB': {{new_size_gb}}}"
+    create:
+      wait:
+        prop_name: 'status'
+        values: ['online', 'offline', 'degraded', 'unavailable']
+        is_matching: true
+      params:
+        - tpvConfig          # recurses into TPVConfig → --tpv-config-* options; create-only
+```
+
+Design notes:
+- CDV uses `*volume_params` as its base, making all standard volume fields updatable. `cdvConfig` is deliberately excluded from `params` (create-only).
+- TPV base `params` is minimal (name + description only). `tpvConfig` is create-only.
+- TPV `delete` uses `route: tpv/delete` so `_delete_many → do_operation('delete')` POSTs to `/volumes/tpv/delete` automatically.
+- CDV `rebuild` follows the same pattern as Volume rebuild (`route: rebuildVolumes`, `style: keys`).
+- TPV `extend` is a standard op with `style: one`.
+- TPV `update` is handled in Python (§13.5) because it must go to `/volumes/tpv/update`, not `/volumes/update`.
+
+### 13.4 `rest_click.py` — Extend `waitable`
+
+At line ~485, extend the tuple so CDV and TPV get auto-generated `wait` commands:
+
+```python
+# Before:
+waitable = ('client', 'target', 'drive', 'volume')
+# After:
+waitable = ('client', 'target', 'drive', 'volume', 'cdv', 'tpv')
+```
+
+### 13.5 Custom CLI Behavior (`rest_custom.py`)
+
+Append at the end of the file:
+
+```python
+class CDVGroup(RestGroup):
+    logger = logging.getLogger('CDVGroup')
+
+    def _process_kwargs(self, rest_ctx, kwargs):
+        processed = super()._process_kwargs(rest_ctx, kwargs)
+        if click.get_current_context().command.name == 'create':
+            processed['volumeClass'] = 'CDV'
+        return processed
+
+
+class TPVGroup(RestGroup):
+    logger = logging.getLogger('TPVGroup')
+
+    def _process_kwargs(self, rest_ctx, kwargs):
+        processed = super()._process_kwargs(rest_ctx, kwargs)
+        if click.get_current_context().command.name == 'create':
+            processed['volumeClass'] = 'TPV'
+        return processed
+
+    @rest_callback
+    def do_create(self, **kwargs):
+        ctx = click.get_current_context()
+        if ctx.command.name == 'update':
+            # TPV update must POST to /volumes/tpv/update, not /volumes/update.
+            # Both 'create' and 'update' share do_create as callback
+            # (set by RestGroup.set_update_create()), so we intercept here.
+            _, rest_ctx = get_rest_context(ctx)
+            obj = ctx.obj
+            prop_values = self._process_kwargs(obj, kwargs)
+            keyprop = rest_ctx.rest_info.rest2infra.get(
+                rest_ctx.rest_info.dbkey, rest_ctx.rest_info.dbkey)
+            names = prop_values.pop(keyprop, [])
+            payload = [{'_id': n, **{k: v for k, v in prop_values.items()
+                                     if k == 'description'}}
+                       for n in names]
+            err, out = obj.entity._makePost(obj.manager, ['tpv', 'update'], payload)
+            if err:
+                raise Exception(f'TPV update failed: {err}')
+            response = True
+            for r in (out or []):
+                if r.get('success'):
+                    success_msg(f'[{r.get("_id", "")}] success')
+                else:
+                    response = False
+                    failure_msg(self.format_failure(r))
+            return out if response else False
+        return super().do_create(**kwargs)
+```
+
+### 13.6 `current.api` Additions
+
+Append after the last `[API 8]` line (using `[API 15]` since CDV/TPV are version-15 features):
+
+```
+[API 15] cdv count
+[API 15] cdv create
+[API 15] cdv create capacity SIZE ? (None)
+[API 15] cdv create cdv-config-allocator-size-gb INT ? (None)
+[API 15] cdv create cdv-config-cdv-extent-size-mb INT ? (None)
+[API 15] cdv create cdv-config-max-tpvs INT ? (None)
+[API 15] cdv create cli-property STRING ? ... (None)
+[API 15] cdv create cli-template STRING ? (None)
+[API 15] cdv create data-blocks INT ? (None)
+[API 15] cdv create description STRING ? (None)
+[API 15] cdv create drive-classes ID/NAME ? ... (None)
+[API 15] cdv create ignore-node-separation ? (None)
+[API 15] cdv create limit-by-disks STRING ? ... ([])
+[API 15] cdv create limit-by-nodes STRING ? ... ([])
+[API 15] cdv create name STRING (None)
+[API 15] cdv create number-of-mirrors INT ? (None)
+[API 15] cdv create parity-blocks INT ? (None)
+[API 15] cdv create protection-level ECSEPARATIONTYPE ? (None)
+[API 15] cdv create raid-level RAIDLEVEL ? (None)
+[API 15] cdv create relative-rebuild-priority INT ? (None)
+[API 15] cdv create stripe-size INT ? (None)
+[API 15] cdv create stripe-width INT ? (None)
+[API 15] cdv create target-classes ID/NAME ? ... (None)
+[API 15] cdv create timeout INT ? (60)
+[API 15] cdv create wait ? (False)
+[API 15] cdv delete
+[API 15] cdv delete name STRING ... (None)
+[API 15] cdv delete timeout INT ? (60)
+[API 15] cdv delete wait ? (False)
+[API 15] cdv delete yes ? (False)
+[API 15] cdv show
+[API 15] cdv show fields STRING ? (None)
+[API 15] cdv show limit INT ? (None)
+[API 15] cdv show name STRING ? ... (None)
+[API 15] cdv show output-format tabular|rows|json|list ? (None)
+[API 15] cdv show skip INT ? (0)
+[API 15] cdv rebuild
+[API 15] cdv rebuild name STRING ... (None)
+[API 15] cdv update
+[API 15] cdv update capacity SIZE ? (None)
+[API 15] cdv update cli-property STRING ? ... (None)
+[API 15] cdv update cli-template STRING ? (None)
+[API 15] cdv update crc-enabled ? (None)
+[API 15] cdv update description STRING ? (None)
+[API 15] cdv update drive-classes ID/NAME ? ... (None)
+[API 15] cdv update enabled-nvmf-clients STRING ? ... (None)
+[API 15] cdv update is-read-only ? (None)
+[API 15] cdv update limit-by-disks STRING ? ... (None)
+[API 15] cdv update limit-by-nodes STRING ? ... (None)
+[API 15] cdv update mdv-spec-disk-classes ID/NAME ? ... (None)
+[API 15] cdv update mdv-spec-limit-by-disks ID/NAME ? ... (None)
+[API 15] cdv update mdv-spec-limit-by-nodes ID/NAME ? ... (None)
+[API 15] cdv update mdv-spec-server-classes ID/NAME ? ... (None)
+[API 15] cdv update mdv-spec-vpg ID/NAME ? (None)
+[API 15] cdv update name STRING (None)
+[API 15] cdv update nvmf-enabled ? (None)
+[API 15] cdv update relative-rebuild-priority INT ? (None)
+[API 15] cdv update target-classes ID/NAME ? ... (None)
+[API 15] cdv update volume-security-group ID/NAME ? ... (None)
+[API 15] cdv wait
+[API 15] cdv wait boolean ? (False)
+[API 15] cdv wait missing STRING ? (None)
+[API 15] cdv wait name STRING ... (None)
+[API 15] cdv wait poll INT ? (1)
+[API 15] cdv wait property STRING (None)
+[API 15] cdv wait timeout INT ? (20)
+[API 15] cdv wait value STRING ... (None)
+[API 15] tpv count
+[API 15] tpv create
+[API 15] tpv create cli-property STRING ? ... (None)
+[API 15] tpv create cli-template STRING ? (None)
+[API 15] tpv create description STRING ? (None)
+[API 15] tpv create name STRING (None)
+[API 15] tpv create timeout INT ? (60)
+[API 15] tpv create tpv-config-cdv-id STRING ? (None)
+[API 15] tpv create tpv-config-tpv-extent-size-kb INT ? (None)
+[API 15] tpv create tpv-config-virtual-size-gb FLOAT ? (None)
+[API 15] tpv create wait ? (False)
+[API 15] tpv delete
+[API 15] tpv delete name STRING ... (None)
+[API 15] tpv delete timeout INT ? (60)
+[API 15] tpv delete wait ? (False)
+[API 15] tpv delete yes ? (False)
+[API 15] tpv extend
+[API 15] tpv extend name STRING ... (None)
+[API 15] tpv extend new-size-gb FLOAT (None)
+[API 15] tpv show
+[API 15] tpv show fields STRING ? (None)
+[API 15] tpv show limit INT ? (None)
+[API 15] tpv show name STRING ? ... (None)
+[API 15] tpv show output-format tabular|rows|json|list ? (None)
+[API 15] tpv show skip INT ? (0)
+[API 15] tpv update
+[API 15] tpv update cli-property STRING ? ... (None)
+[API 15] tpv update cli-template STRING ? (None)
+[API 15] tpv update description STRING ? (None)
+[API 15] tpv update name STRING (None)
+[API 15] tpv wait
+[API 15] tpv wait boolean ? (False)
+[API 15] tpv wait missing STRING ? (None)
+[API 15] tpv wait name STRING ... (None)
+[API 15] tpv wait poll INT ? (1)
+[API 15] tpv wait property STRING (None)
+[API 15] tpv wait timeout INT ? (20)
+[API 15] tpv wait value STRING ... (None)
+```
+
+### 13.7 `current.display` Additions
+
+Append:
+
+```
+15:CDV:action
+15:CDV:capacity
+15:CDV:cdvConfig
+15:CDV:description
+15:CDV:health
+15:CDV:name
+15:CDV:status
+15:CDV:tpvCount
+15:TPV:action
+15:TPV:description
+15:TPV:health
+15:TPV:name
+15:TPV:status
+15:TPV:tpvConfig
+```
+
+### 13.8 Known Pitfalls
+
+- **YAML anchor scope**: `*volume_r2i` and `*wait_for_vol_delete` are file-scoped anchors (not version-scoped), so they are safely reachable from version "15".
+- **`SdkObject` field names**: `TPVConfig` fields must use the exact camelCase the server expects (`cdvId`, `tpvExtentSizeKB`, `virtualSizeGB`) — nested fields bypass `rest2infra` mapping.
+- **`volumeClass` passthrough**: `volumeClass` has no `rest2infra` entry, so `infra2rest.get('volumeClass', 'volumeClass')` returns `'volumeClass'` — exactly what the server expects.
+- **TPV create required fields**: Server validates `tpvConfig.cdvId` and `tpvConfig.virtualSizeGB` are present. Server error messages will surface if omitted; consider adding a `default_templates.yaml` entry.
+- **CDV create required**: Server requires `capacity` and `cdvConfig.cdvExtentSizeMB`. Consider a template entry.
+- **`_get_filter` prepend order**: `[MongoObj('volumeClass', ...)] + super()._get_filter(...)` — the volumeClass filter comes first; the server ANDs all filter objects, so order doesn't affect correctness.
+
