@@ -1973,22 +1973,20 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		alloc->total_data_extents = req->total_data_extents;
 
 	/*
-	 * Mark ondisk_loaded on first-ever allocation.
+	 * On first-ever allocation (alloc just created by cdv_alloc_insert),
+	 * dispatch an async scan to recover any pre-existing on-disk extent
+	 * records from a previous TOMA lifetime.  This handles the case where
+	 * the first ALLOC request races ahead of elect() after a TOMA restart:
+	 * without the scan, previously allocated extents would be invisible
+	 * to TOMA, causing double-allocation of those CDV_extent indices.
 	 *
-	 * cdv_alloc_insert() creates the alloc struct with ondisk_loaded=false.
-	 * Without this, the next ALLOC request would see (alloc && !ondisk_loaded)
-	 * and dispatch cdv_ondisk_scan_async(), which would re-read the just-written on-disk
-	 * record for extent[0] and call cdv_alloc_insert() again — doubling
-	 * n_allocated.  With a small CDV (1–2 data extents) that pushes
-	 * n_allocated >= total_data_extents and causes a false CDV_FULL.
-	 *
-	 * Setting ondisk_loaded=true here is safe: in-memory state was built from
-	 * live ALLOC requests and is authoritative; no disk scan is needed.
-	 * The scan path (ondisk_loaded=false on entry) is reserved for the
-	 * post-restart case where alloc exists but extent list was not yet rebuilt.
+	 * The scan's add_extent path deduplicates (line ~876), so the
+	 * just-allocated extent will not be doubled.  Leave ondisk_loaded
+	 * false — the next ALLOC request will see (alloc && !ondisk_loaded)
+	 * and return WRONG_GEN until the scan completes.
 	 */
 	if (alloc && first_alloc)
-		alloc->ondisk_loaded = true;
+		cdv_ondisk_scan_async(cdv_uuid, alloc);
 
 	resp.extent_index         = candidate;
 	resp.allocator_generation = alloc ? alloc->allocator_generation : 0;
