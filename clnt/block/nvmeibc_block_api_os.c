@@ -7,6 +7,7 @@
 #include "nvmeibc_block_common.h"
 #include "nvmeibc_block.h"		/* external API of the block */
 #include "nvmeibc_block_api_os.h"
+#include "nvmeibc_nvmeiba_kapi.h"
 #include "nvmeib_json.h"
 #include "nvmeib_io_stats.h"
 #include "nvmeib_utils.h"
@@ -240,9 +241,9 @@ int block_api_os_get(struct nvmeibc_os_api *os, const char *owner_name)
 		goto _critical_error;
 	}
 #if KS_HAS_BLKMODE
-	if (nvmeiba_atom_open(bdev->bd_disk, owner_name) != 0) {
+	if (nvmeiba_kapi.atom_open(bdev->bd_disk, owner_name) != 0) {
 #else // KS_HAS_BLKMODE
-	if (nvmeiba_atom_open(bdev, owner_name) != 0) {
+	if (nvmeiba_kapi.atom_open(bdev, owner_name) != 0) {
 #endif // KS_HAS_BLKMODE
 		reason = "Cannot open()";
 		goto _critical_error;
@@ -304,7 +305,7 @@ void block_api_os_put(struct nvmeibc_os_api *os)
 	}
 	disk = bdev->bd_disk;           // atom->disk may already be NULL
 	os->unsafe_self_ref.bdev_during_detach = NULL;// Will do -1 on bdev below. Ptr is unsafe
-	nvmeiba_atom_close(disk);
+	nvmeiba_kapi.atom_close(disk);
 	os = NULL;					// BEWARE: os_api object might be freed now.
 #if KS_HAS_BDEV_FILE_OPEN_BY_PATH
 		bdev_fput(bdev_file);
@@ -642,7 +643,7 @@ static REQ_RET nvmeibc_b_req_reject_no_q(struct bio *bio);
 
 static void __nvmeibc_os_api_layer_destroy(struct nvmeibc_os_apis_container *c)
 {
-	nvmeiba_os_do_on_nvmeibc_down();			// Disconenct from nvmeiba
+	nvmeiba_kapi.os_do_on_nvmeibc_down();			// Disconenct from nvmeiba
 	nvmeibc_driver_version_unreg(&c->drv_ver);		// Todo: Share this with ATOM
 	// disk_id_allocator_init(&c->dia);			// Todo: Here, verify that bitmap is empty if none of the volumes were abandoned
 	kfree(c);
@@ -680,7 +681,7 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 		goto _out;
 	}
 	nvmeibc_cinst_get_blok_p(c) = p;
-	H = nvmeiba_os_do_on_nvmeibc_up();			// Connect to nvmeiba
+	H = nvmeiba_kapi.os_do_on_nvmeibc_up();			// Connect to nvmeiba
 	nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_io);
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
 	#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
@@ -700,7 +701,7 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 	} else {
 		disk_id_allocator_init(&c->dia);	// Occupy the minors of atoms in nvmeiba
 		if (H.n_orphan_osapi > 0)
-			nvmeiba_os_api_exec_for_each_atom(c->drv_ver.dir_lsblk, __probe_my_atoms_from_nvmeiba, c);
+			nvmeiba_kapi.os_api_exec_for_each_atom(c->drv_ver.dir_lsblk, __probe_my_atoms_from_nvmeiba, c);
 	}
 _out:
 	return c;
@@ -898,7 +899,7 @@ static void __end_bio_common(struct gendisk *disk, struct bio *bio, int rv){
 	const struct nvmeiba_atom_os_api *atom = &block_api_os_get_os(bio)->atom;
 
 	reqq_data_end_io(q);
-	if (unlikely((rv) && nvmeiba_os_api_is_queue_orphan(atom))) {
+	if (unlikely((rv) && nvmeiba_kapi.os_api_is_queue_orphan(atom))) {
 		CALL_SUBMIT_BIO_FN(q, disk, bio);		// Last chance to save bio from error by upgrading to new nvmeibc
 	} else {
 		bio_endio(bio, rv);
@@ -937,7 +938,7 @@ static void __end_rider_to_carrier_bio(struct bio *bio, ulong start_time, int rv
 	struct request_queue *q = atom->queue;
 	(void)start_time;
 	reqq_data_end_io(q);
-	if (unlikely((rv) && nvmeiba_os_api_is_queue_orphan(atom))) {
+	if (unlikely((rv) && nvmeiba_kapi.os_api_is_queue_orphan(atom))) {
 		CALL_SUBMIT_BIO_FN(q, atom->disk, bio);		// Last chance to save bio from error by upgrading to new nvmeibc
 	} else {
 		extern void rider_bio_endio(struct bio *bio, int rv);	// Carrier responds with this function
@@ -1076,10 +1077,10 @@ void block_api_os_stop_accepting_kernel_io(struct nvmeibc_os_api *os, u32 reason
 				__exec_for_carrier_and_sub_vols(atom, __set_make_req_to_reject);
 			}
 #else
-			__exec_for_carrier_and_sub_vols(atom, nvmeiba_os_api_set_detaching);
+			__exec_for_carrier_and_sub_vols(atom, nvmeiba_kapi.os_api_set_detaching);
 #endif
 		} else {	// If carrier, abandones queue for itself and all sub volumes
-			__exec_for_carrier_and_sub_vols(atom, nvmeiba_os_api_orphan_abandon);
+			__exec_for_carrier_and_sub_vols(atom, nvmeiba_kapi.os_api_orphan_abandon);
 		}
 		wmb();	// make sure all cores see this ASAP
 	}
@@ -1216,7 +1217,7 @@ void block_api_os_drain_io(struct nvmeibc_os_api *os)
 		ASSERT_ATOM_STATUS(atom, nvmeiba_status_live);
 		WARN(!__is_nvmeibc_bdev_destroying(NULL, CALL_BIO_Q_CONTEXT(atom)), "nvmeibc bug\n");	// Wrong draining sequence. First call block_api_os_stop_accepting_kernel_io(), then drain the rest
 		rv = __exec_for_carrier_and_sub_vols(atom, nvmeiba_atom_drain_io);
-		is_abandoning = nvmeiba_os_api_is_queue_orphan(atom);
+		is_abandoning = nvmeiba_kapi.os_api_is_queue_orphan(atom);
 		_NT(trace_1_api_os_block_api_os_drain_io, "@DEV_NAME: Draining ios=@RV. q=@QUEUE", atom->dev_name, rv, atom->queue);
 	}
 	if (is_abandoning) {
@@ -1703,7 +1704,7 @@ void block_api_os_destroy(struct nvmeibc_os_api *os)
 	os = NULL; 					// Dont use 'OS' anymore. It does not exist, and might kfree thorugh atom destructor asyncronously!
 
 	if (!can_other_threads_open_atom)	{	// Free atom inline. LKJ: Replace the condition and destructor to ref_put()
-		nvmeiba_os_api_destructor(atom); /* Kernel does not use us. No unsafe detach */
+		nvmeiba_kapi.os_api_destructor(atom); /* Kernel does not use us. No unsafe detach */
 		atom = NULL;		 /* Both were kfree(), dont use them */
 	} else if (atom->status == nvmeiba_status_orphan) {
 		/* Dont call __exec_for_carrier_and_sub_vols(atom,destructor). Each atom holds resources for future adoption or will free itelf on adoption error */
@@ -1868,7 +1869,7 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 
 	p->io_st_sum= RO_proc_open("iostats"    ,      p, iostats_to_non_json         , os);
 	p->j_io_st  = RO_proc_open("iostats.json",     p, iostats_detailed_to_json , os);
-	p->opens    = RO_proc_open("client_processes", p, nvmeiba_atom_users_to_string, os);
+	p->opens    = RO_proc_open("client_processes", p, nvmeiba_kapi.atom_users_to_string, os);
 	p->throttle = RO_proc_open("io_throttle",      p, io_throttle_to_string    , os->dev);
 	p->status   = RO_proc_open("status"     ,      p, cb.dev_status_to_txt     , os->dev);
 	p->stalocks = RO_proc_open("recov_stats",      p, cb.dev_recovs_to_txt     , os->dev);
@@ -1939,7 +1940,7 @@ static struct nvmeibc_os_api *__kzalloc_os_api(void)
 
 static struct nvmeibc_os_api *__get_mem_for_os_api(const char* dev_dir, const char* dev_name)
 {
-	struct nvmeiba_atom_os_api *orphan = nvmeiba_os_api_orphan_adopt(dev_dir, dev_name);
+	struct nvmeiba_atom_os_api *orphan = nvmeiba_kapi.os_api_orphan_adopt(dev_dir, dev_name);
 	struct nvmeibc_os_api *os = NULL;
 	BUILD_BUG_ON(&((struct nvmeibc_os_api *)0)->atom != NULL); 			// Incorrect inheritance
 	BUILD_BUG_ON(sizeof(os->atom.dev_name) != NVMEIBC_BD_NAME_LEN); 	// Incorrect inheritance
@@ -1970,7 +1971,7 @@ static void nvmeibc_atom_constructor(struct nvmeiba_atom_os_api *atom, const cha
 	__atom_set_self_parent(atom);
 	atom->status = nvmeiba_status_hidden;	// Atom is hidden until registration with OS
 	atom->attach_jiff = jiffies;
-	nvmeiba_os_api_constructor(atom);
+	nvmeiba_kapi.os_api_constructor(atom);
 }
 
 static void __set_dev_and_uuid(struct nvmeibc_os_api *os, void* dev, const char* dev_uuid, const struct nvmeibc_os_apis_container *c)
@@ -2017,7 +2018,7 @@ struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk
 			   but hidden attach happened before regular attach. Fail hidden attach, or else we risk DI due to wron reservation version */
 			_NT(t_baoc_01, "@DEV_NAME: Failing hidden attach. Volume during upgrade! Reabandoning", dev_name);
 			os->atom.status = nvmeiba_status_live;		// We mistakenly adopted the atom, so abandon it again. Sorry bro...
-			nvmeiba_os_api_orphan_abandon(&os->atom);	// Note: No need to call '__exec_for_carrier_and_sub_vols' because we havent adopted the sub volumes yet
+			nvmeiba_kapi.os_api_orphan_abandon(&os->atom);	// Note: No need to call '__exec_for_carrier_and_sub_vols' because we havent adopted the sub volumes yet
 			__set_atom_status_orphan(&os->atom);
 			rv = -EACCES;
 			os = NULL;
@@ -2046,7 +2047,7 @@ _out:
 
 ssize_t block_api_os_dump_users(struct nvmeibc_os_api *os, char *buf, size_t len)
 {
-	return nvmeiba_atom_users_to_string(&os->atom, buf, len);
+	return nvmeiba_kapi.atom_users_to_string(&os->atom, buf, len);
 }
 
 void block_api_os_clear_io_stats(struct nvmeibc_os_api *os, const int which)
@@ -2182,7 +2183,7 @@ static int nvmeibc_atom_part_add(struct nvmeiba_atom_os_api *atom, struct nvmeib
 	//car->sub.flags.is_sub_auto_resize |= f.is_sub_auto_resize;	// True if at least one of them is auto resizable. Todo add this line when upon removing nickname this flag is updated
 	atom->sub.parent = car;
 	list_add_tail(&atom->sub.part_list, &car->sub.part_list);
-	nvmeiba_atom_part_add(car);
+	nvmeiba_kapi.atom_part_add(car);
 _out:
 	return rv;
 }
@@ -2195,7 +2196,7 @@ static void nvmeibc_atom_part_del(struct nvmeiba_atom_os_api *atom)
 		if (car && (car != atom)) {
 			list_del(&atom->sub.part_list);     // Delete form carrier so take lock on carrier
 			__atom_set_self_parent(atom);
-			nvmeiba_atom_part_del(car);
+			nvmeiba_kapi.atom_part_del(car);
 		} else {}								// Cleanup of failed constructor: Rare case when creation of sub volume failed before it could connect to carrier
 	}
 }
@@ -2375,7 +2376,7 @@ void block_api_os_carrier_ref_add(struct nvmeibc_os_api *car, const struct nvmei
 	struct nvmeibc_os_api_self_ref *ref = &car->unsafe_self_ref;
 	__verify_on_main_wq_osapi(car);
 	_NT(t_q0_capios, "@DEV_NAME: mounting carrier @DEV_NAME", rider->atom.dev_name, car->atom.dev_name);
-	nvmeiba_atom_part_add(&car->atom);	// Same refcount mechanism as sub-vols/aliases/partitions. As if rider creates an alias for carrier, thus holding a reference
+	nvmeiba_kapi.atom_part_add(&car->atom);	// Same refcount mechanism as sub-vols/aliases/partitions. As if rider creates an alias for carrier, thus holding a reference
 	WARN(ref->bdev_during_detach != NULL, "nvmeibc flow error\n");		// Detach could not be started because carrier will be used
 }
 
@@ -2385,6 +2386,6 @@ void block_api_os_carrier_ref_del(struct nvmeibc_os_api *car, const struct nvmei
 	__verify_on_main_wq_osapi(car);
 	_NT(t_q1_capios, "@DEV_NAME: umounting carrier @DEV_NAME", rider->atom.dev_name, car->atom.dev_name);
 	WARN(ref->bdev_during_detach != NULL, "nvmeibc flow error\n");		// Detach could not be started because carrier is in use
-	nvmeiba_atom_part_del(&car->atom);
+	nvmeiba_kapi.atom_part_del(&car->atom);
 }
 

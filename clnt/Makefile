@@ -55,6 +55,7 @@ nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	nvmeibc_memmgr_metrics.o nvmeibc_common.o \
 	module/instance/nvmeibc_cinst.o \
 	block/nvmeibc_topology.o \
+	block/nvmeibc_nvmeiba_kapi.o \
 	block/nvmeibc_block_api_os.o \
 	block/nvmeibc_block_api_conf.o \
 	block/nvmeibc_block_api_nvmeshioctl.o \

@@ -25,6 +25,7 @@
 #include "core/nvmeibc_core_common.h"
 #include "nvmeib_ib_driver.h"
 #include "management_utils_common/nvmeibc_management_capi_parse_conf.h"
+#include "block/nvmeibc_nvmeiba_kapi.h"
 #include "nvmeibc_ib_nordda_channel.h"
 #include "nvmeibc_locks_channel.h"
 /* Must be last to override module_{init/exit} */
@@ -39,6 +40,13 @@
 MODULE_AUTHOR("NVIDIA CORPORATION");
 MODULE_DESCRIPTION("NVMe block device over Infiniband");
 MODULE_LICENSE("GPL and additional rights");
+/*
+ * Do not use MODULE_SOFTDEP("pre: nvmeiba"): modprobe -r nvmeibc can consult
+ * softdeps and attempt to remove nvmeiba while nvmeibc still holds __symbol_get
+ * refs from nvmeibc_nvmeiba_kapi_init(), yielding "Module nvmeiba is in use".
+ * Load order: request_module("nvmeiba") in nvmeibc_nvmeiba_kapi_init().
+ * Unload order: scripts (e.g. nvmeshclient) must remove nvmeibc before nvmeiba.
+ */
 
 #define PROCFS_VOLUMES_STR "volumes"
 #define PROCFS_DISKS_STR "disks"
@@ -1077,6 +1085,7 @@ static void __nvmeibc_exit(void)
 #if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR != 1)
 	nvmesh_memmgr_metrics_free_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 #endif
+	nvmeibc_nvmeiba_kapi_fini();
 	NFOUT;
 }
 
@@ -1100,6 +1109,10 @@ static int __init nvmeibc_init(void) /* Constructor */
 	BUILD_BUG_ON(sizeof(struct nvmeibc_login_request) > NVMEIB_MAX_CM_REQ_PAYLOAD_SIZE);
 	_NI(trace_1_nvmeibc_init, DMESG_MOD_PREFIX ": Load --> Version: commit_id=@COMMIT_ID_LONG, ports=@PORTS, guids=@GUIDS", (ulong)COMMIT_ID, nvmeibc_filter_ports, nvmeibc_filter_guids);
 	main_module_single_instance_globals_init();
+	if (nvmeibc_nvmeiba_kapi_init()) {
+		_NE(nvmeibc_init_nvmeiba_kapi, "Failed to resolve nvmeiba symbols");
+		goto err;
+	}
 	nvmeib_set_debug_level(nvmeib_debug_level);
 	nvmeib_public_set_debug_level(nvmeib_debug_level);
 
