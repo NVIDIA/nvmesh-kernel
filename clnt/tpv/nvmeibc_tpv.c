@@ -607,8 +607,17 @@ again:
 					    tpv->tpv_name, rv);
 			}
 
-			/* Step 5: Orphan the atom — ATOM buffers new BIOs. */
+			/* Step 5: Orphan the atom — ATOM buffers new BIOs.
+			 * nvmeiba_os_api_orphan_abandon() swaps the fops and
+			 * increments orphan counters but does NOT set the
+			 * status field; the caller must transition it to
+			 * nvmeiba_status_orphan (matches the regular volume
+			 * __set_atom_status_orphan pattern).  Without this,
+			 * nvmeiba_os_do_on_nvmeibc_down hits WARN 1007 because
+			 * the atom is still marked nvmeiba_status_live.
+			 */
 			nvmeiba_os_api_orphan_abandon(&tpv->atom);
+			tpv->atom.status = nvmeiba_status_orphan;
 
 			/*
 			 * Step 6: Drain in-flight IOs.  After orphan_abandon,
