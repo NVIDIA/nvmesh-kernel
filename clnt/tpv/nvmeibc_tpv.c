@@ -324,6 +324,22 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	atom->queue = queue;
 	atom->alloc_size = sizeof(struct nvmeibc_tpv);
 
+	/*
+	 * Initialise ATOM internal fields that kzalloc left zeroed.
+	 * The regular volume path does this in __get_mem_for_os_api()
+	 * (nvmeibc_block_api_os.c:2114-2125); we must replicate it here
+	 * because nvmeiba_os_api_constructor() does not do it.
+	 */
+	spin_lock_init(&atom->disk_lock);
+	atomic_set(&atom->gendisk_status, 1);
+	INIT_LIST_HEAD(&atom->users.pids);
+	spin_lock_init(&atom->users.lock);
+	spin_lock_init(&atom->pender.lock);
+	bio_list_init(&atom->pender.bio_list);
+	INIT_LIST_HEAD(&atom->sub.part_list);
+	atom->sub.parent = atom;	/* self-referencing for non-sub atoms */
+	atom->attach_jiff = jiffies;
+
 	nvmeibc_tpv_init_live_fops(&tpv->tpv_live_fops);
 #if KS_REQUEST_QUEUE_HAS_REQUEST_FN
 	/* Old kernels: make_request_fn is already set above. */
@@ -391,7 +407,8 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	add_disk(disk);
 #endif
 
-	set_capacity(disk, capacity);	/* OS may start sending IO now */
+	atomic_set(&atom->gendisk_status, 3);	/* gendisk added, IO possible */
+	set_capacity(disk, capacity);		/* OS may start sending IO now */
 
 	/* ── 4. Register with ATOM (adds to global atom list) ──────────── */
 	nvmeiba_os_api_constructor(atom);
