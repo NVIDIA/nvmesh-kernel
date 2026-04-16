@@ -374,9 +374,38 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	if (e->is_fresh) {
+		/*
+		 * The scan found no valid CDV header (magic mismatch).  This is
+		 * expected for a genuinely new CDV that has never had an extent
+		 * allocated.  However, during a simultaneous client+TOMA restart
+		 * the CDV NVMesh block device may not be fully online yet, causing
+		 * the pread to return zeros — making an existing CDV look "fresh".
+		 *
+		 * Heuristic: if the first scan after (re)creating the allocator
+		 * reports "fresh", we don't know whether the CDV is truly new or
+		 * was unreadable.  Close the cached fd (it may point to a
+		 * not-yet-connected NVMesh device) and leave ondisk_loaded=false
+		 * to force a retry.  On the second consecutive "fresh" result,
+		 * accept it — the CDV is genuinely new.
+		 */
+		if (!alloc->scan_fresh_seen_once) {
+			alloc->scan_fresh_seen_once = true;
+			/* Close cached fd so the retry reopens the (hopefully now
+			 * online) NVMesh device with a fresh file descriptor.
+			 */
+			if (alloc->cdv_fd >= 0) {
+				NNVMEIBT_CLOSE(cdv_scan_fin_fresh_retry_close, alloc->cdv_fd);
+				alloc->cdv_fd = -1;
+			}
+			N_Wf(cdv_scan_fin_fresh_retry,
+			     "CDV-alloc: scan finalize cdv=@STR scan says fresh (first attempt); "
+			     "will retry once to rule out CDV-not-yet-online race",
+			     e->cdv_uuid);
+			goto out;
+		}
 		alloc->ondisk_loaded = true;
 		N_If(cdv_scan_fin_fresh,
-		     "CDV-alloc: scan finalize cdv=@STR fresh CDV (no header)",
+		     "CDV-alloc: scan finalize cdv=@STR fresh CDV (no header, confirmed on retry)",
 		     e->cdv_uuid);
 		goto out;
 	}
@@ -387,6 +416,24 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 	if (alloc->allocator_generation == 0 && e->allocator_generation > 0)
 		alloc->allocator_generation = e->allocator_generation;
+
+	/*
+	 * Sanity check: if the scan found a valid header but 0 extent records,
+	 * yet we already have in-memory extents (from a prior TOMA lifetime),
+	 * the CDV was likely still reconnecting during the scan and returned
+	 * stale/zero data for the per-extent region.  Reject and retry.
+	 */
+	if (e->n_results == 0 && alloc->n_allocated > 0) {
+		if (alloc->cdv_fd >= 0) {
+			NNVMEIBT_CLOSE(cdv_scan_fin_zero_retry_close, alloc->cdv_fd);
+			alloc->cdv_fd = -1;
+		}
+		N_Wf(cdv_scan_fin_zero_suspect,
+		     "CDV-alloc: scan finalize cdv=@STR scan found 0 extents on-disk but @LLU in-memory; "
+		     "CDV likely not fully online yet - will retry on next request",
+		     e->cdv_uuid, alloc->n_allocated);
+		goto out;
+	}
 
 	/* Apply extent entries — add_extent deduplicates. */
 	for (i = 0; i < e->n_results; i++) {
@@ -401,6 +448,7 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	alloc->ondisk_loaded = true;
+	alloc->scan_fresh_seen_once = false;  /* successful load; reset for future re-scans */
 	N_If(cdv_scan_fin_done,
 	     "CDV-alloc: scan finalize cdv=@STR loaded @LLU extents",
 	     e->cdv_uuid, n_loaded);

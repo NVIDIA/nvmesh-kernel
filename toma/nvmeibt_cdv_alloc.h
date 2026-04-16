@@ -130,6 +130,9 @@ struct nvmeibt_cdv_alloc {
 	bool     capacity_warning_sent;	/* true after CDVCapacityWarning sent; cleared on hysteresis */
 	bool     ondisk_loaded;		/* true after CDV allocator region has been scanned */
 	bool     scan_in_progress;	/* true while async scan WQ entry is in flight */
+	bool     scan_fresh_seen_once;	/* true after first scan returned "fresh" (no magic);
+					 * forces one retry to guard against CDV-not-yet-online
+					 * during simultaneous client+TOMA restart */
 	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread */
 	char     dev_path[80];		/* /dev/nvmesh/<name>; resolved on main thread */
 	struct nvmeibt_wq *io_wq;	/* per-CDV I/O work queue (scan + writes) */
