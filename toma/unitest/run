@@ -115,6 +115,7 @@ function T_SANDBOX_wire_buf_test() {
 	__abort_ci_on_failure;
 }
 
+#/******************************* Code Coverage *******************************/
 COVERAGE_DIR="./build/coverage";
 function __lcov_ignore_errors() {
 	# lcov 1.x supports: gcov,source,graph
@@ -140,6 +141,7 @@ function __genhtml_ignore_errors() {
 function T_SANDBOX_coverage() {
 	if ! command -v lcov &>/dev/null || ! command -v genhtml &>/dev/null; then
 		echo_red "Error: lcov and genhtml are required. Install via: sudo apt install lcov (or dnf install lcov)";
+		# sudo apt install wslu;		# Optionally: View html in WSL
 		exit 1;
 	fi
 	local lcov_errs; lcov_errs=$(__lcov_ignore_errors);
@@ -147,44 +149,25 @@ function T_SANDBOX_coverage() {
 	local branch_rc="lcov_branch_coverage=1";
 
 	echo_title "Coverage: clean build with instrumentation";
-	export USE_SANITIZERS=0 USE_GCOV=1;
-	__force_rebuild;
+	__force_rebuild USE_GCOV=1;
 
 	echo_title "Coverage: running CI test suite";
 	__run_ci_suite || true;		# Don't abort coverage on test failure
 
-	echo_title "Coverage: generating report";
+	echo_title "Coverage: generating report: ${COVERAGE_DIR}";
 	mkdir -p ${COVERAGE_DIR};
 
 	# Capture raw coverage from entire build tree (production .gcno files are in 99bin/debug/, test ones in 99bin/debug/obj/)
-	lcov --capture \
-		--directory 99bin \
-		--output-file ${COVERAGE_DIR}/coverage_raw.lcov \
-		--rc ${branch_rc} \
-		--ignore-errors ${lcov_errs} \
-		--quiet;
+	local flags="--rc ${branch_rc} --ignore-errors ${lcov_errs} --quiet";
+	local cmd="lcov --capture --directory 99bin --output-file ${COVERAGE_DIR}/coverage_raw.lcov ${flags}";	__run_cmd "${cmd}";
 
 	# Filter: keep only toma/ production code (exclude unitest, autogen, tools, common, etc.)
-	lcov --extract ${COVERAGE_DIR}/coverage_raw.lcov \
-		'*/toma/*.c' '*/toma/*.h' \
-		--output-file ${COVERAGE_DIR}/coverage_toma.lcov \
-		--rc ${branch_rc} \
-		--ignore-errors ${lcov_errs} \
-		--quiet;
-	lcov --remove ${COVERAGE_DIR}/coverage_toma.lcov \
-		'*/unitest/*' '*/autogen/*' '*/99bin/*' \
-		--output-file ${COVERAGE_DIR}/coverage.lcov \
-		--rc ${branch_rc} \
-		--ignore-errors ${lcov_errs} \
-		--quiet;
+	cmd="lcov --extract ${COVERAGE_DIR}/coverage_raw.lcov '*/toma/*.c' '*/toma/*.h'               --output-file ${COVERAGE_DIR}/coverage_toma.lcov ${flags}"; __run_cmd "${cmd}";
+	cmd="lcov --remove ${COVERAGE_DIR}/coverage_toma.lcov '*/unitest/*' '*/autogen/*' '*/99bin/*' --output-file ${COVERAGE_DIR}/coverage.lcov      ${flags}"; __run_cmd "${cmd}";
 	rm -f ${COVERAGE_DIR}/coverage_raw.lcov ${COVERAGE_DIR}/coverage_toma.lcov;
 
 	# Generate HTML report
-	genhtml ${COVERAGE_DIR}/coverage.lcov \
-		--output-directory ${COVERAGE_DIR}/html \
-		--rc ${branch_rc} \
-		--ignore-errors ${genhtml_errs} \
-		--quiet;
+	cmd="genhtml ${COVERAGE_DIR}/coverage.lcov --output-directory ${COVERAGE_DIR}/html --rc ${branch_rc} --ignore-errors ${genhtml_errs} --quiet";  __run_cmd "${cmd}";
 
 	# Copy lcov.info for IDE integration (Coverage Gutters etc.)
 	cp ${COVERAGE_DIR}/coverage.lcov lcov.info;
@@ -193,9 +176,23 @@ function T_SANDBOX_coverage() {
 	echo "-----------------------------------------------";
 	lcov --summary ${COVERAGE_DIR}/coverage.lcov --rc ${branch_rc} 2>&1 | grep -E "lines|functions|branches";
 	echo "-----------------------------------------------";
-	echo_green "HTML report: ${COVERAGE_DIR}/html/index.html";
+	local report_html="${COVERAGE_DIR}/html/index.html";
+	echo_green "HTML report: ${report_html}";			#wslview ${report_html}
 	echo_green "IDE lcov:    lcov.info";
+
+	if false; then   # Install vscode extension. Install 'Coverage Gutters'. If running in Windows WSL install it in wsl, not in windows.
+		#Daniel added the following lines to: C:/Users/danielhe/AppData/Roaming/Code/User/settings.json
+			"coverage-gutters.coverageBaseDir": "toma/unitest/",
+			"coverage-gutters.lcovname": "toma/unitest/lcov.info",
+			"coverage-gutters.showGutterCoverage": true,
+			"coverage-gutters.showLineCoverage": true
+		# View 'lcov.info' report in VSCode/Cursor: Press Ctrl+Shift+P, then type: "Coverage Gutters: Watch". Now it will mark covered lines with GREEN color to stop viewing type "Coverage Gutters: Clear Coverage"
+	fi;
+	if false; then   # Cleanup
+		rm -rf ${COVERAGE_DIR} lcov.info;
+	fi;
 }
+#/******************************* Code Coverage *******************************/
 
 TOMA_TXT_LOGS="z.txt";
 TOMA_RPC_CONFIG="_root/opt/nvmesh/common-repo/tools/toma_rpc.config";
@@ -220,39 +217,6 @@ function T_SANDBOX_main_self_reuse_persistency_unit_test() {
 
 function T_SANDBOX_main_live_run() {
 	echo_red "Todo: Test, Not supported yet";
-}
-
-function T_SANDBOX_make_code_coverage_report() {
-	if false; then   # Install gcovr
-		pip install gcovr; sudo dnf install libxml2-devel libxslt-devel;
-		sudo apt update; sudo apt install build-essential;
-		sudo apt install pipx; pipx ensurepath; # Here open a new terminal
-		pipx install gcovr;			# To generate code coverage file
-		sudo apt install lcov;		# To view the summery reports
-		sudo apt install wslu;		# View html in WSL
-	fi;
-	if false; then   # Install vscode extension.
-		#Install 'Coverage Gutters'. If running in Windows WSL install it in wsl, not in windows.
-		#Daniel added the following lines to: C:/Users/danielhe/AppData/Roaming/Code/User/settings.json
-			"coverage-gutters.coverageBaseDir": "toma/unitest/",
-			"coverage-gutters.lcovname": "toma/unitest/lcov.info",
-			"coverage-gutters.showGutterCoverage": true,
-			"coverage-gutters.showLineCoverage": true
-	fi;
-
-	__force_rebuild USE_GCOV=1;
-	T_SANDBOX_main_self_unit_test;
-	if true; then   # Generate report for vscode extension and summary view:
-		gcovr -r .. --object-directory 99bin/debug/obj --exclude 'unitest/' --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --lcov -o lcov.info
-		lcov --summary lcov.info;		# Show summary
-		# View 'lcov.info' report in VSCode/Cursor: Press Ctrl+Shift+P, then type: "Coverage Gutters: Watch". Now it will mark covered lines with GREEN color to stop viewing type "Coverage Gutters: Clear Coverage"
-	fi;
-	if true; then   # Generate report for html graphical view:
-		gcovr -r .. --object-directory 99bin/debug/obj --exclude 'unitest/' --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --html --html-details -o coverage.html
-		# No need to call this: genhtml lcov.info -o coverage_html;
-		wslview coverage.html;
-	fi;
-	rm -f *.html, coverage.* *.gcov lcov.info;
 }
 
 # CI test suite — used by both 'ci' and 'coverage' commands.
