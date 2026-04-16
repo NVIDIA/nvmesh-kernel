@@ -367,8 +367,23 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	if (e->rv < 0) {
+		/*
+		 * The scan worker failed (pread returned 0 bytes or I/O error).
+		 * This commonly happens when the CDV NVMesh block device is not
+		 * yet fully online — the device node exists but returns no data.
+		 *
+		 * Close the cached fd so the next scan attempt reopens the
+		 * device (it may have come online since the fd was first opened).
+		 * Leave ondisk_loaded=false — the next client request will
+		 * trigger another scan attempt.  Do NOT accept as fresh: the
+		 * CDV may have existing data that would be lost.
+		 */
+		if (alloc->cdv_fd >= 0) {
+			NNVMEIBT_CLOSE(cdv_scan_fin_err_close, alloc->cdv_fd);
+			alloc->cdv_fd = -1;
+		}
 		N_Wf(cdv_scan_fin_err,
-		     "CDV-alloc: scan finalize cdv=@STR worker failed rv=@INT; will retry on next request",
+		     "CDV-alloc: scan finalize cdv=@STR worker failed rv=@INT; closed fd, will retry",
 		     e->cdv_uuid, e->rv);
 		goto out;
 	}
