@@ -30,7 +30,7 @@
 	(NVMEIBC_MAGIC_AREA_ATOMIC_SIZE_BYTES /                                    \
 	 sizeof(union t_core_magic_area_cell))
 
-#define CORE_DBGDI_WR_MAX_MIRROR 2
+#define CORE_DBGDI_WR_MAX_MIRROR 3
 
 struct t_core_dbgdi_magic_area {
 	union t_core_magic_area_cell a[NVMEIBC_CORE_DBG_DI_POSION_AREA_ARR_SIZE];

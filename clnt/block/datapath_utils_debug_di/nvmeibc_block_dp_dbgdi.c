@@ -146,7 +146,7 @@ static void t_db_who_cmd_fill(struct t_db_who_cmd *s,
 static void t_db_who_cmd_core_cell(struct t_core_dbgdi *s, const struct nvmeibc_block_command *c) {
 	const struct nvmeibc_raid1 *r1 = nvmeibc_disk_segment_get_praid(c->ds);
 	const bool is_mirrored = !nvmeibc_raid_is_ec(r1) && !nvmeibc_raid_is_jbod(r1);
-	const int cell = is_mirrored ? c->ds->toma_reg->seg % 2 : 0;
+	const int cell = is_mirrored ? c->ds->toma_reg->seg % CORE_DBGDI_WR_MAX_MIRROR : 0;
 	strncpy(s->wr[cell].disk_name, c->ds->disk->ops.get_name(c->ds->disk), sizeof(s->wr[cell].disk_name));
 }
 
