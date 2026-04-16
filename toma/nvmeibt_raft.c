@@ -3433,7 +3433,8 @@ static int raft_leader_send_appendentries_to_a_peer(struct nvmeibt_raft_member *
 		break;
 	case PERSIST_AND_WIRE_BUF_DIFF_TOPO_ONLY:
 		// Only topo changed
-		NTOMA_ASSERT(topo_only_assert, !raft_is_incremental_wire_buf_enabled || is_configs_and_raft_members_incremental, "TOPO_ONLY with incremental enabled but configs not eligible for incremental!");
+		// When incremental is enabled but peer is old (doesn't support it), configs won't be incremental — that's OK, peer gets complete bufs.
+		NTOMA_ASSERT(topo_only_assert, !raft_is_incremental_wire_buf_enabled || !is_peer_incremental_wire_buf_supported || is_configs_and_raft_members_incremental, "TOPO_ONLY with incremental enabled but configs not eligible for incremental!");
 		if (is_topo_incremental) {
 			send_persist_and_wire_buf = my_raft_global.leader_to_commit_persist_and_wire_buf_with_conf_incremental;
 		} else {
