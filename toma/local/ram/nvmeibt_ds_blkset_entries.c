@@ -337,7 +337,7 @@ bool nvmeibt_ds_metadata_init_non_EC_locks_table(struct nvmeibt_seg_active *seg_
 	is_init_stale_required = rv;
 	rv = 0;
 
-	NTOMA_ASSERT(hq123xc, (is_init_stale_required ^ is_init_dirty_required), "Init modes mismatch");
+	NTOMA_ASSERT(hq123xc, (is_init_stale_required ^ is_init_dirty_required) == 0, "Init modes mismatch");
 	{
 		const int8_t idx_in_praid = nvmeibt_disk_segment_idx_in_praid(disk_segment);
 		uint64_t ii, n_blksets = num_blksets_in_disk_segment(disk_segment);
