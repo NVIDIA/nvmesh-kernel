@@ -90,12 +90,13 @@ int  nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 #define TPV_KTEST_ALLOC_GB	0u		/* A: metadata region in GB (none) */
 #define TPV_KTEST_TPV_EXT_KB	64u		/* T: TPV_extent size in KB */
 #define TPV_KTEST_N_SLOTS	((u64)(TPV_KTEST_CDV_EXT_MB) * 1024u / (u64)(TPV_KTEST_TPV_EXT_KB))	/* 16 */
-#define TPV_KTEST_N_DATA_EXTS	4u		/* data CDV_extents: indices 2..5 */
-#define TPV_KTEST_TREE_EXT_IDX	1u		/* tree extent at CDV_extent index 1 */
+#define TPV_KTEST_N_DATA_EXTS	4u		/* data CDV_extents: 1-based indices 2..5 */
+#define TPV_KTEST_TREE_EXT_IDX	1u		/* tree extent at 1-based index 1 */
 #define TPV_KTEST_VIRT_SIZE	((u64)64u << 20)	/* 64 MB virtual volume size */
-/* CDV buffer: index 0 unused (A=0 so no alloc area) + tree ext 1 + data exts 2..5.
- * Need 6 extent slots in total (indices 0..5).  */
-#define TPV_KTEST_CDV_BUF_SZ	((u64)(TPV_KTEST_N_DATA_EXTS + 2u) * ((u64)(TPV_KTEST_CDV_EXT_MB) << 20))
+/* CDV buffer: tree extent 1 at offset 0 + data extents 2..5.
+ * 1-based indices 1..5, A=0 so extent 1 starts at byte 0.
+ * Need 5 extent slots total. */
+#define TPV_KTEST_CDV_BUF_SZ	((u64)(TPV_KTEST_N_DATA_EXTS + 1u) * ((u64)(TPV_KTEST_CDV_EXT_MB) << 20))
 
 /* ── Global test context ────────────────────────────────────────────────── */
 
@@ -393,7 +394,7 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 			fs = kzalloc(sizeof(*fs), GFP_KERNEL);
 			if (!fs)
 				return -ENOMEM;
-			fs->phys_offset      = A + ei * E + s * T;
+			fs->phys_offset      = A + (ei - 1) * E + s * T;
 			fs->cdv_extent_index = ei;
 			INIT_LIST_HEAD(&fs->node);
 			list_add_tail(&fs->node, &alloc->free_tpv_extents);
@@ -495,11 +496,12 @@ static void tpv_ktest_alloc_free(struct tpv_ktest_output *kto)
 	/*
 	 * Slots are served FIFO from free_tpv_extents (list_first_entry).
 	 * After seeding 1 data extent at index 2, slot 0 is at the head.
-	 *   phys0 = 0 + 2*1MB + 0*64KB = 2MB
-	 *   phys1 = 0 + 2*1MB + 1*64KB = 2MB + 64KB
+	 * Extent indices are 1-based: extent 2 is at A + (2-1)*E = 1 MB.
+	 *   phys0 = 0 + 1*1MB + 0*64KB = 1MB
+	 *   phys1 = 0 + 1*1MB + 1*64KB = 1MB + 64KB
 	 */
-	expect_phys0 = (u64)2 << 20;
-	expect_phys1 = ((u64)2 << 20) + ((u64)64 << 10);
+	expect_phys0 = (u64)1 << 20;
+	expect_phys1 = ((u64)1 << 20) + ((u64)64 << 10);
 
 	/* First alloc. */
 	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry0);
@@ -588,8 +590,8 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 		goto done;
 	}
 
-	/* Alloc virt_idx=0 → slot 0 of data extent 2 → phys = 2 MB. */
-	expect_phys = (u64)data_ext_idx << 20;
+	/* Alloc virt_idx=0 → slot 0 of data extent 2 → phys = A + (2-1)*E = 1 MB. */
+	expect_phys = (u64)(data_ext_idx - 1) << 20;
 	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &e);
 	if (rc != 0 || !e || e->phys_offset != expect_phys) {
 		KTO_FAIL(kto, "persist", "alloc_extent rc=%d phys=0x%llx",

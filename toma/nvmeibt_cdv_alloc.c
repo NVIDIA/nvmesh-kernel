@@ -122,15 +122,15 @@ static int cdv_worker_open_fd(struct nvmeibt_cdv_alloc *alloc)
 /*
  * cdv_ondisk_record_offset — byte offset within the CDV for extent_index's record.
  *
- * Layout at the start of the CDV:
- *   Offset 0:                      Header (4 KiB)
- *   Offset CDV_ONDISK_BLOCK_SIZE:  Record for extent_index 0
- *   Offset 2 * CDV_ONDISK_BLOCK_SIZE: Record for extent_index 1
+ * Extent indices are 1-based (extent 0 is the allocator area itself):
+ *   Offset 0:                            Header (4 KiB)
+ *   Offset 1 * CDV_ONDISK_BLOCK_SIZE:    Record for extent 1
+ *   Offset 2 * CDV_ONDISK_BLOCK_SIZE:    Record for extent 2
  *   ...
  */
 static inline uint64_t cdv_ondisk_record_offset(uint64_t extent_index)
 {
-	return (uint64_t)CDV_ONDISK_BLOCK_SIZE * (1 + extent_index);
+	return (uint64_t)CDV_ONDISK_BLOCK_SIZE * extent_index;
 }
 
 /* Note: the old synchronous cdv_ondisk_write_record() and cdv_ondisk_write_header()
@@ -265,7 +265,7 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 		goto done;
 	}
 
-	for (i = 1; i < total; i++) {
+	for (i = 1; i <= total; i++) {
 		uint64_t off = cdv_ondisk_record_offset(i);
 		uint32_t expected_crc;
 
@@ -1418,11 +1418,10 @@ static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
 	struct nvmeibt_Str *json;
 	unsigned int used_pct;
 
-	if (alloc->total_data_extents <= 1)
-		return;   /* capacity unknown or only the reserved L1 extent */
+	if (alloc->total_data_extents == 0)
+		return;   /* capacity unknown */
 
-	/* Usable extents exclude index 0 (reserved for client L1 tree). */
-	used_pct = (unsigned int)(alloc->n_allocated * 100 / (alloc->total_data_extents - 1));
+	used_pct = (unsigned int)(alloc->n_allocated * 100 / alloc->total_data_extents);
 
 	if (used_pct < NVMEIBT_CDV_WARN_CLEAR_PCT) {
 		/* Usage safely below hysteresis threshold — reset flag. */
@@ -1698,9 +1697,8 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	 * data (L1/L2 tables in the CDV data region) will be zeroed by the
 	 * NEEDS_ZEROING → background-zero path before the extent is reused.
 	 *
-	 * No additional zeroing is needed here.  The old flat-L1 code zeroed
-	 * CDV_extent[0] (the shared L1), which is no longer applicable —
-	 * each TPV has its own tree extent.
+	 * No additional zeroing is needed here — each TPV has its own
+	 * tree extent that is zeroed when the TPV is deleted.
 	 */
 
 	return 0;
@@ -1733,7 +1731,7 @@ static int cdv_send_response(struct nvmeibt_registrant_ctx *reg_ctx,
  * Algorithm:
  *   1. Look up (or note absence of) the per-CDV allocator.
  *   2. Check allocator_generation against client's client_generation.
- *   3. Find the first unallocated extent index in [0, total_data_extents).
+ *   3. Find the first unallocated extent index in [1, total_data_extents].
  *   4. Record via cdv_alloc_insert() and persist atomically.
  *   5. On persist failure, undo the in-memory insert and return ERROR.
  */
@@ -1858,11 +1856,11 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	/* ── CDV-full check (extent 0 reserved for L1 tree) ─────────────────── */
-	if (!first_alloc && alloc->n_allocated >= total - 1) {
+	/* ── CDV-full check ─────────────────────────────────────────────────── */
+	if (!first_alloc && alloc->n_allocated >= total) {
 		N_Wf(cdv_alloc_full,
-		     "CDV: ALLOC cdv=@STR FULL allocated=@LLU usable=@LLU",
-		     cdv_uuid, alloc->n_allocated, total - 1);
+		     "CDV: ALLOC cdv=@STR FULL allocated=@LLU total=@LLU",
+		     cdv_uuid, alloc->n_allocated, total);
 		cdv_maybe_warn_capacity(alloc);   /* ensure Kafka event reaches management */
 		resp.status = NVMEIBT_CDV_ALLOC_CDV_FULL;
 		resp.allocator_generation = alloc->allocator_generation;
@@ -1872,9 +1870,8 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	/*
 	 * ── Find first free extent index ────────────────────────────────────
 	 *
-	 * CDV_extent[0] is reserved for the client-side L1 metadata tree
-	 * (tpv_tree_entry array persisted by nvmeibc_tpv_flush_state).
-	 * Data extents start at index 1.
+	 * Extent indices are 1-based: extent 0 is the allocator area,
+	 * data extents are numbered 1 .. total_data_extents.
 	 */
 	if (first_alloc) {
 		candidate = 1;
@@ -1882,7 +1879,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	} else {
 		candidate = 0;
 		found     = false;
-		for (i = 1; i < total; i++) {
+		for (i = 1; i <= total; i++) {
 			occupied = false;
 			XDLIST_FOREACH(entry, &alloc->extents) {
 				if (entry->extent_index == i) {

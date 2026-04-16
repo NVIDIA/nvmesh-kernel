@@ -407,13 +407,13 @@ int  nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv);
 /* Install a newly allocated data CDV_extent into the L1 tree (no-op in flat-L1 model). */
 int  nvmeibc_tpv_install_data_extent(struct nvmeibc_tpv *tpv, u64 extent_index);
 
-/* Background work handler: flush dirty allocator state to CDV_extent[0]. */
+/* Background work handler: flush dirty allocator state to the tree extent. */
 void nvmeibc_tpv_persist_work_fn(struct work_struct *work);
 
 /* Timeout sweep: fail parked bios that exceeded max_retry_jiffies. */
 void nvmeibc_tpv_timeout_work_fn(struct work_struct *work);
 
-/* Background work handler: load allocator state from CDV_extent[0] + recovery. */
+/* Background work handler: load allocator state from the tree extent + recovery. */
 void nvmeibc_tpv_load_state_work_fn(struct work_struct *work);
 
 /* ── Recovery API (implemented in nvmeibc_tpv_recovery.c) ─────────────── */

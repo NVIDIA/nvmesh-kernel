@@ -241,7 +241,7 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		 * erasers, so direct access is safe without RCU.
 		 *
 		 * sync_flush mode: park the bio until persist_work has
-		 * flushed the new L1 entry to CDV_extent[0].  persist_work
+		 * flushed the new L1 entry to the tree extent.  persist_work
 		 * was already scheduled by alloc_extent (dirty → true).
 		 * The parked bio is re-dispatched by
 		 * nvmeibc_tpv_forward_l1_flush_bios() after flush succeeds;
@@ -309,7 +309,7 @@ REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio)
 	}
 
 	/*
-	 * Allocator state may still be loading from CDV_extent[0] in the
+	 * Allocator state may still be loading from the tree extent in the
 	 * background.  Park the bio until load_state_work completes.
 	 *
 	 * Double-checked locking: READ_ONCE avoids the lock in steady state

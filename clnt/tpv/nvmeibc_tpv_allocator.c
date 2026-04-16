@@ -66,12 +66,15 @@ static inline u64 tpv_slots_per_cdv_extent(const struct nvmeibc_tpv_allocator *a
 	return tpv_cdv_extent_bytes(a) / tpv_extent_bytes(a);
 }
 
-/* Physical CDV byte offset of slot s within data CDV_extent[extent_index]. */
+/*
+ * Physical CDV byte offset of slot s within data extent extent_index.
+ * Extent indices are 1-based: extent 1 starts at byte offset A.
+ */
 static inline u64 tpv_slot_phys_offset(const struct nvmeibc_tpv_allocator *a,
 					u64 extent_index, u64 slot)
 {
 	return tpv_alloc_area_bytes(a) +
-	       extent_index * tpv_cdv_extent_bytes(a) +
+	       (extent_index - 1) * tpv_cdv_extent_bytes(a) +
 	       slot * tpv_extent_bytes(a);
 }
 
@@ -95,7 +98,7 @@ extern int nvmeibc_ib_admin_cdv_free_extent(
 
 /*
  * nvmeibc_tpv_install_data_extent() — install a newly allocated data
- * CDV_extent into the L2/L3 mapping tree (CDV_extent[0]) and flush the
+ * CDV_extent into the L2/L3 mapping tree (tree extent) and flush the
  * modified pages to the CDV.  Called before slots are added to the free list
  * to maintain crash-consistency: if the client crashes after the tree write,
  * re-attach will re-populate free_tpv_extents from the tree; if it crashes

@@ -9,18 +9,18 @@
  * A Thin-Provisioned Volume (TPV) presents a sparse virtual address space
  * to a single exclusive client.  Physical storage is provided by a hidden
  * Carrier Direct Volume (CDV).  The mapping is maintained by the client-local
- * TPV.allocator (nvmeibc_tpv_allocator.c) and persisted in CDV_extent[0]
+ * TPV.allocator (nvmeibc_tpv_allocator.c) and persisted in the per-TPV tree extent
  * (nvmeibc_tpv_persist.c).
  *
  * Attach flow (§3.8):
  *   1. Assert CDV is present in the volumes list.
  *   2. Allocate and initialise struct nvmeibc_tpv.
- *   3. Schedule deferred load_state_work (CDV_extent[0] read + recovery).
+ *   3. Schedule deferred load_state_work (tree extent read + recovery).
  *   4. Register gendisk.  IO arriving before load completes is parked on
  *      pending_bios and drained once state_loaded is set by the worker.
  *
  * Background load_state_work (nvmeibc_tpv_persist.c):
- *   a. Load allocator state from CDV_extent[0] (nvmeibc_tpv_load_state).
+ *   a. Load allocator state from the per-TPV tree extent (nvmeibc_tpv_load_state).
  *      Retries on failure (CDV not ready, transport error) every 1 second.
  *   b. Run recovery (nvmeibc_tpv_recovery) — always, regardless of tree state.
  *   c. Set state_loaded; drain pending_bios.
@@ -28,7 +28,7 @@
  *
  * Detach flow (§3.8):
  *   1. Quiesce IO (freeze queue).
- *   2. Flush dirty allocator state to CDV_extent[0] (nvmeibc_tpv_flush_state).
+ *   2. Flush dirty allocator state to the tree extent (nvmeibc_tpv_flush_state).
  *   3. Unregister gendisk.
  *   4. Free allocator (xarray + extent lists).
  *   5. Notify management via MCS.
@@ -53,6 +53,11 @@ bool tp_verify_l1_l2_extent_ownership;
 module_param(tp_verify_l1_l2_extent_ownership, bool, 0644);
 MODULE_PARM_DESC(tp_verify_l1_l2_extent_ownership,
 		 "Verify L1/L2 tree entries reference owned CDV extents during load_state");
+
+unsigned int tpv_cdv_retry_msecs = 100;
+module_param(tpv_cdv_retry_msecs, uint, 0644);
+MODULE_PARM_DESC(tpv_cdv_retry_msecs,
+		 "Retry delay in milliseconds for TPV CDV operations (load_state, etc.)");
 
 /* ── Forward declarations for sibling implementation files ────────────── */
 

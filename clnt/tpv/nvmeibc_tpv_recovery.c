@@ -8,8 +8,8 @@
  *
  * Background
  * ──────────
- * The flat-L1 tree in CDV_extent[0] records only virtual extents that have
- * been mapped AND flushed.  TOMA's cdv_extent_md records every CDV_extent
+ * The L1/L2 tree in the per-TPV tree extent records only virtual extents
+ * that have been mapped AND flushed.  TOMA's cdv_extent_md records every CDV_extent
  * allocated to a TPV regardless of whether any virtual extent has been
  * mapped within it.  A crash between CDV_ALLOC_OK and the first flush that
  * writes a leaf for a slot in the new CDV_extent therefore leaves an

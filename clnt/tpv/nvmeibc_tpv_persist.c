@@ -61,6 +61,9 @@ extern int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 /* Module param: enable L1/L2 ownership sanity checks during load_state. */
 extern bool tp_verify_l1_l2_extent_ownership;
 
+/* Module param: retry delay in milliseconds for CDV operations. */
+extern unsigned int tpv_cdv_retry_msecs;
+
 /*
  * Bail early from load_state / flush_state when the TPV is being detached.
  * Without this, sync_read/sync_write can block indefinitely waiting for a
@@ -106,30 +109,33 @@ static inline u64 persist_n_l2(const struct nvmeibc_tpv_allocator *a)
 	return persist_slot_bytes(a) / sizeof(struct tpv_tree_entry);
 }
 
-/* CDV byte offset of slot @slot within CDV_extent @extent_index. */
+/*
+ * CDV byte offset of slot @slot within extent @extent_index.
+ * Extent indices are 1-based: extent 1 starts at byte offset A.
+ */
 static inline u64 persist_tree_slot_offset(const struct nvmeibc_tpv_allocator *a,
 					   u64 extent_index, u64 slot)
 {
 	return persist_alloc_bytes(a) +
-	       extent_index * persist_extent_bytes(a) +
+	       (extent_index - 1) * persist_extent_bytes(a) +
 	       slot * persist_slot_bytes(a);
 }
 
-/* Reconstruct phys_offset from CDV_extent index and slot. */
+/* Reconstruct phys_offset from 1-based CDV extent index and slot. */
 static inline u64 persist_phys_of(const struct nvmeibc_tpv_allocator *a,
 				   u64 cdv_extent_index, u64 slot)
 {
 	return persist_alloc_bytes(a) +
-	       cdv_extent_index * persist_extent_bytes(a) +
+	       (cdv_extent_index - 1) * persist_extent_bytes(a) +
 	       slot * persist_slot_bytes(a);
 }
 
-/* Reconstruct slot number from phys_offset and CDV_extent index. */
+/* Reconstruct slot number from phys_offset and 1-based CDV extent index. */
 static inline u64 persist_slot_of(const struct nvmeibc_tpv_allocator *a,
 				   u64 phys_offset, u64 cdv_extent_index)
 {
 	u64 base = persist_alloc_bytes(a) +
-		   cdv_extent_index * persist_extent_bytes(a);
+		   (cdv_extent_index - 1) * persist_extent_bytes(a);
 	return (phys_offset - base) / persist_slot_bytes(a);
 }
 
@@ -540,29 +546,44 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 
 	/* ── 3. Find tree extent (scan TOMA list for L1 magic) ────────── */
 	{
-		struct tpv_l1_header probe;
+		/*
+		 * Read a full page for the probe — the L1 header is only 64 bytes
+		 * but the CDV block device may have a 4096-byte sector size.  A
+		 * sub-sector bio is rejected as "wrong IO" by the block layer
+		 * and triggers a rider retry storm.
+		 */
+		void *probe_buf = (void *)__get_free_page(GFP_NOIO);
+
+		if (!probe_buf) {
+			rv = -ENOMEM;
+			goto out_free;
+		}
 
 		for (i = 0; i < toma_count; i++) {
+			struct tpv_l1_header *probe;
 			u64 off = persist_tree_slot_offset(alloc,
 							   toma_indices[i], 0);
 
 			if (tpv_is_detaching(tpv)) {
 				rv = -ECANCELED;
+				free_page((unsigned long)probe_buf);
 				goto out_free;
 			}
-			rv = nvmeibc_tpv_cdv_sync_read(tpv, off, &probe,
-						       sizeof(probe));
+			rv = nvmeibc_tpv_cdv_sync_read(tpv, off, probe_buf,
+							PAGE_SIZE);
 			if (rv)
 				continue;
 
-			if (probe.magic == TPV_L1_MAGIC &&
-			    memcmp(probe.tpv_uuid, tpv->tpv_uuid,
-				   min_t(size_t, sizeof(probe.tpv_uuid),
+			probe = (struct tpv_l1_header *)probe_buf;
+			if (probe->magic == TPV_L1_MAGIC &&
+			    memcmp(probe->tpv_uuid, tpv->tpv_uuid,
+				   min_t(size_t, sizeof(probe->tpv_uuid),
 					 sizeof(tpv->tpv_uuid))) == 0) {
 				tree_ei = toma_indices[i];
 				break;
 			}
 		}
+		free_page((unsigned long)probe_buf);
 	}
 
 	if (tree_ei == 0) {
@@ -866,8 +887,6 @@ EXPORT_SYMBOL(nvmeibc_tpv_persist_work_fn);
  * Background worker: load allocator state from the per-TPV tree extent,
  * run recovery, then open the IO gates by setting state_loaded.
  */
-#define TPV_LOAD_STATE_RETRY_DELAY	HZ	/* 1 second */
-
 void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 {
 	struct nvmeibc_tpv *tpv = container_of(work, struct nvmeibc_tpv,
@@ -881,10 +900,10 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 	rv = nvmeibc_tpv_load_state(tpv);
 	if (rv) {
 		_NW(tpv_load_state_retry,
-		    "TPV: @STR: load_state failed rv=@INT; retrying in 1s",
-		    tpv->tpv_name, rv);
+		    "TPV: @STR: load_state failed rv=@INT; retrying in @UINT ms",
+		    tpv->tpv_name, rv, tpv_cdv_retry_msecs);
 		schedule_delayed_work(&tpv->load_state_work,
-				      TPV_LOAD_STATE_RETRY_DELAY);
+				      msecs_to_jiffies(tpv_cdv_retry_msecs));
 		return;
 	}
 
