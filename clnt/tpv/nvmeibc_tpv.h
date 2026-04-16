@@ -21,6 +21,7 @@
 #include <linux/xarray.h>		/* struct xarray, xa_store/xa_load */
 #include "common/nvmeib.h"		/* NVMEIBC_BD_UUID_LEN, NVMEIB_HOST_NAME_LEN */
 #include "common_public/nvmeib_public_procfs.h"	/* nvmeib_public_procfs_ent, proc_fill_t */
+#include "clnt/atom/nvmeiba_nvmesh_api.h"	/* nvmeiba_atom_os_api, nvmeiba_status_* */
 
 /* Forward declarations — full definitions live outside this header. */
 struct nvmeibc_volume;
@@ -151,16 +152,15 @@ enum nvmeibc_tpv_state {
 	TPV_ATTACHING  = 0,
 	TPV_ATTACHED   = 1,
 	TPV_DETACHING  = 2,
+	TPV_ORPHAN     = 3,	/* NDU: nvmeibc gone, ATOM buffering BIOs */
 };
 
 /* ── Per-TPV instance ──────────────────────────────────────────────────── */
 
 struct nvmeibc_tpv {
+	struct nvmeiba_atom_os_api    atom;		/* MUST be first for container_of */
 	struct nvmeibc_volume        *cdv_vol;		/* parent CDV volume pointer */
 	struct nvmeibc_tpv_allocator  allocator;
-
-	struct gendisk               *disk;		/* virtual gendisk visible to user space */
-	struct request_queue         *queue;		/* IO queue pointing to tpv_make_request */
 
 	char                          tpv_uuid[NVMEIBC_BD_UUID_LEN];
 	char                          tpv_name[NVMEIBC_BD_NAME_LEN];	/* human-readable name */
@@ -247,7 +247,26 @@ struct nvmeibc_tpv {
 	struct nvmeib_public_procfs_ent      *proc_cdv_extent_map;
 	struct nvmeib_public_procfs_ent      *proc_stats;
 	struct nvmeib_public_procfs_ent      *proc_selftest;
+
+	/*
+	 * Per-TPV copy of fops, kept in kzalloc'd memory so it survives NDU.
+	 * .owner = nvmeiba module, .open/.close = nvmeiba handlers,
+	 * .submit_bio = nvmeibc_tpv_submit_bio_wrapper (set at adopt/attach).
+	 */
+	struct block_device_operations tpv_live_fops;
+
+	/*
+	 * In-flight IO counter for NDU drain.  Incremented on
+	 * nvmeibc_tpv_make_request entry, decremented after CDV hand-off.
+	 * Abandon waits for this to reach zero before orphaning the atom.
+	 */
+	atomic_t                      io_inflight;
 };
+
+/* ── ATOM disk/queue accessors ─────────────────────────────────────────── */
+
+#define tpv_disk(tpv)   ((tpv)->atom.disk)
+#define tpv_queue(tpv)  ((tpv)->atom.queue)
 
 /* ── L1/L2 tree on-disk entry format (per-TPV tree extent) ─────────────── */
 
@@ -343,6 +362,13 @@ struct nvmeibc_tpv *nvmeibc_tpv_find_by_uuid(const char *uuid);
  * Must be called BEFORE the CDVs of the same instance are detached.
  */
 void nvmeibc_tpv_detach_all_for_inst(const struct nvmeibc_cinst_params_main *cinst);
+
+/*
+ * NDU abandon: orphan every active TPV whose parent CDV belongs to @cinst.
+ * Flushes dirty state, cancels workers, and hands the TPV atom to ATOM's
+ * orphan-buffering mode.  Must be called BEFORE CDV abandon.
+ */
+void nvmeibc_tpv_abandon_all_for_inst(const struct nvmeibc_cinst_params_main *cinst);
 
 /*
  * Update the CDV.allocator TOMA identity after a topology push.

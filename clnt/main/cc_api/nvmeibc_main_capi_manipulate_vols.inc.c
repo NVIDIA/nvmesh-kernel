@@ -594,9 +594,13 @@ static void __detach_all_volumes_of_inst_work(struct workqe_struct *_w)
 	struct nvmeibc_volume *volume, *tvolume;
 	nvmeibc_assert_on_main_wq(w->p);
 
-	/* Detach TPVs first (synchronous, no multi_completion needed) so their
-	 * cdv_vol pointers are still valid when we detach the CDVs below. */
-	nvmeibc_tpv_detach_all_for_inst(w->p);
+	/* TPVs must be handled before CDVs — TPV flush issues IO to CDV.
+	 * On upgrade: orphan (ATOM buffers BIOs, block device stays in /dev/).
+	 * On shutdown: full detach (block device removed). */
+	if (w->is_upgrade)
+		nvmeibc_tpv_abandon_all_for_inst(w->p);
+	else
+		nvmeibc_tpv_detach_all_for_inst(w->p);
 
 	nvmeibc_multi_completion_add_aux_jobs(&w->on_finish, num_devs);
 	_NI(i_01_main_davw, "Instance @STR, Starting to detach all: @INT volumes", w->p->proc_dir_root_name, num_devs);

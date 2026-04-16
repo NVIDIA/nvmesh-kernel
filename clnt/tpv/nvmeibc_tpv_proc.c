@@ -69,6 +69,7 @@ static const char *tpv_state_str(int state)
 	case TPV_ATTACHING:  return "attaching";
 	case TPV_ATTACHED:   return "attached";
 	case TPV_DETACHING:  return "detaching";
+	case TPV_ORPHAN:     return "orphan";
 	default:             return "unknown";
 	}
 }

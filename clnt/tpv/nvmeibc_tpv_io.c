@@ -309,6 +309,14 @@ REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio)
 	}
 
 	/*
+	 * Track in-flight IOs for NDU drain.  Incremented here, decremented
+	 * after the bio is handed off to the CDV (or completed inline for
+	 * zero-fill reads and DISCARDs).  The abandon sequence waits for
+	 * this counter to reach zero before orphaning the atom.
+	 */
+	atomic_inc(&tpv->io_inflight);
+
+	/*
 	 * Allocator state may still be loading from the tree extent in the
 	 * background.  Park the bio until load_state_work completes.
 	 *
@@ -327,12 +335,14 @@ REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio)
 						      tpv->max_retry_jiffies);
 			bio_list_add(&tpv->pending_bios, bio);
 			spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+			atomic_dec(&tpv->io_inflight);
 			return REQ_RET_ZERO;
 		}
 		spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
 	}
 
 	tpv_handle_one_bio(tpv, bio);
+	atomic_dec(&tpv->io_inflight);
 	return REQ_RET_ZERO;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_make_request);

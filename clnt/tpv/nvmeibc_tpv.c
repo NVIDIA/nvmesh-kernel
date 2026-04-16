@@ -59,6 +59,13 @@ module_param(tpv_cdv_retry_msecs, uint, 0644);
 MODULE_PARM_DESC(tpv_cdv_retry_msecs,
 		 "Retry delay in milliseconds for TPV CDV operations (load_state, etc.)");
 
+/*
+ * ATOM handover fops pointer — set by nvmeibc_os_api_layer_init() in
+ * nvmeibc_block_api_os.c.  Contains nvmeiba's .owner, .open, .release
+ * handlers.  Used to populate tpv_live_fops at fresh attach and NDU adopt.
+ */
+extern const struct block_device_operations *nvmeibc_atom_handover_fops;
+
 /* ── Forward declarations for sibling implementation files ────────────── */
 
 /* nvmeibc_tpv_io.c */
@@ -73,20 +80,31 @@ extern REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio
  * NVMesh make_request implementations.
  */
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
-static REQ_RET nvmeibc_tpv_submit_bio_wrapper(struct bio *bio)
+/* Forward declaration — satisfies -Wmissing-prototypes. */
+REQ_RET nvmeibc_tpv_submit_bio_wrapper(struct bio *bio);
+
+REQ_RET nvmeibc_tpv_submit_bio_wrapper(struct bio *bio)
 {
 	struct nvmeibc_tpv *tpv = bio_gendisk(bio)->private_data;
 
-	return nvmeibc_tpv_make_request(tpv->queue, bio);
+	return nvmeibc_tpv_make_request(tpv_queue(tpv), bio);
 }
 #endif
 
-static const struct block_device_operations nvmeibc_tpv_fops = {
-	.owner     = THIS_MODULE,
+/*
+ * Populate a tpv_live_fops struct with ATOM's .owner/.open/.release and
+ * nvmeibc's .submit_bio.  Used at fresh attach and NDU adopt (step A6).
+ */
+static void nvmeibc_tpv_init_live_fops(struct block_device_operations *fops)
+{
+	memset(fops, 0, sizeof(*fops));
+	fops->owner   = nvmeibc_atom_handover_fops->owner;
+	fops->open    = nvmeibc_atom_handover_fops->open;
+	fops->release = nvmeibc_atom_handover_fops->release;
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
-	.submit_bio = nvmeibc_tpv_submit_bio_wrapper,
+	fops->submit_bio = nvmeibc_tpv_submit_bio_wrapper;
 #endif
-};
+}
 
 /* ── Module-level active-TPV list ──────────────────────────────────────
  *
@@ -256,6 +274,7 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 
 static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 {
+	struct nvmeiba_atom_os_api *atom = &tpv->atom;
 	struct gendisk       *disk  = NULL;
 	struct request_queue *queue = NULL;
 	sector_t              capacity;
@@ -263,7 +282,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 
 	capacity = tpv->virtual_size >> KERNEL_SECTOR_SHIFT;
 
-	/* ── Allocate disk and queue (kernel-version-aware) ─────────────── */
+	/* ── 1. Allocate disk and queue (kernel-version-aware) ─────────── */
 #if KS_HAS_BLK_ALLOC_DISK
 #  if KS_BLK_ALLOC_DISK_2PARAMS
 	disk = blk_alloc_disk(NULL, NUMA_NO_NODE);
@@ -300,24 +319,30 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	disk->queue = queue;
 #endif	/* KS_HAS_BLK_ALLOC_DISK */
 
-	/* ── Configure disk ─────────────────────────────────────────────── */
-	/*
-	 * Use extended devt (blkext) for dynamic major assignment.
-	 * major=0 + minors=0 + GENHD_FL_EXT_DEVT is the required combination;
-	 * major=0 with minors>0 is invalid and causes add_disk() to return
-	 * -EINVAL.  This mirrors what nvmeibc_block_api_os.c does when
-	 * nvmeibc_use_block_external_major is true.
-	 */
+	/* ── 2. Wire ATOM and populate tpv_live_fops ───────────────────── */
+	atom->disk  = disk;
+	atom->queue = queue;
+	atom->alloc_size = sizeof(struct nvmeibc_tpv);
+
+	nvmeibc_tpv_init_live_fops(&tpv->tpv_live_fops);
+#if KS_REQUEST_QUEUE_HAS_REQUEST_FN
+	/* Old kernels: make_request_fn is already set above. */
+#endif
+
+	/* ── 3. Configure disk ─────────────────────────────────────────── */
 	disk->major       = 0;
 	disk->first_minor = 0;
 	disk->minors      = 0;
 	disk->flags      |= GENHD_FL_EXT_DEVT;
-	disk->fops        = &nvmeibc_tpv_fops;
+	disk->fops        = &tpv->tpv_live_fops;
 	disk->private_data = tpv;
 	queue->queuedata   = tpv;
 
 	snprintf(disk->disk_name, DISK_NAME_LEN, "%s/%.30s",
 		 NVMEIBC_TPV_DISK_PREFIX, tpv->tpv_name);
+
+	strncpy(atom->dev_name, tpv->tpv_name, sizeof(atom->dev_name) - 1);
+	atom->dev_name[sizeof(atom->dev_name) - 1] = '\0';
 
 	/*
 	 * Block size must match the CDV (4 KiB) so that every bio forwarded
@@ -368,8 +393,10 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 
 	set_capacity(disk, capacity);	/* OS may start sending IO now */
 
-	tpv->disk  = disk;
-	tpv->queue = queue;
+	/* ── 4. Register with ATOM (adds to global atom list) ──────────── */
+	nvmeiba_os_api_constructor(atom);
+	atom->status = nvmeiba_status_live;
+
 	return 0;
 
 #if KS_ADD_DISK_INT_RV
@@ -388,27 +415,215 @@ err_put_disk:
 
 static void nvmeibc_tpv_blkdev_unregister(struct nvmeibc_tpv *tpv)
 {
-	if (!tpv->disk)
+	struct nvmeiba_atom_os_api *atom = &tpv->atom;
+
+	if (!tpv_disk(tpv))
 		return;
 
 	/*
 	 * del_gendisk marks the device as going away and prevents new
 	 * references.  On kernels >=5.15 it also drains in-flight IO.
 	 */
-	del_gendisk(tpv->disk);
+	del_gendisk(tpv_disk(tpv));
 
 #if KS_HAS_BLK_CLEANUP_DISK
 	/* blk_cleanup_disk does put_disk + queue cleanup */
-	blk_cleanup_disk(tpv->disk);
+	blk_cleanup_disk(tpv_disk(tpv));
 #else
-	put_disk(tpv->disk);
+	put_disk(tpv_disk(tpv));
 #  if !KS_HAS_BLK_ALLOC_DISK
-	blk_cleanup_queue(tpv->queue);
+	blk_cleanup_queue(tpv_queue(tpv));
 #  endif
 #endif
 
-	tpv->disk  = NULL;
-	tpv->queue = NULL;
+	atom->disk  = NULL;
+	atom->queue = NULL;
+}
+
+/* ── nvmeibc_tpv_adopt — reconnect an orphaned TPV after NDU ───────────
+ *
+ * Steps A1–A14 from the design (§11.6).  Called from nvmeibc_tpv_attach()
+ * when an ATOM orphan is found by name.  The allocator state (xarray,
+ * free lists, CDV extent refs) all survive in memory; we only need to
+ * reconnect the CDV, reinitialise work-struct function pointers (which
+ * pointed to the old module text), and redirect BIOs back to our
+ * make_request.
+ */
+static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
+					      struct nvmeibc_volume *cdv,
+					      const char *tpv_uuid,
+					      bool sync_flush)
+{
+	unsigned long flags;
+
+	/* A1. Sanity: verify UUID matches. */
+	if (strncmp(tpv->tpv_uuid, tpv_uuid, NVMEIBC_BD_UUID_LEN) != 0) {
+		_NE(tpv_adopt_uuid_mismatch,
+		    "TPV: orphan @STR UUID mismatch: expected @STR got @STR",
+		    tpv->tpv_name, tpv_uuid, tpv->tpv_uuid);
+		return NULL;
+	}
+
+	/* A2. Reconnect to the (now-adopted) CDV volume object. */
+	tpv->cdv_vol = cdv;
+
+	/* A3. Re-initialise work structs with new module's function pointers. */
+	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
+	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
+	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
+	INIT_DELAYED_WORK(&tpv->timeout_work, nvmeibc_tpv_timeout_work_fn);
+
+	/* A4. Refresh allocator identity from CDV cache. */
+	{
+		unsigned long vflags;
+
+		spin_lock_irqsave(&cdv->spinlock, vflags);
+		strncpy(tpv->allocator_toma_id, cdv->cdv_allocator_toma_id,
+			sizeof(tpv->allocator_toma_id) - 1);
+		tpv->allocator_toma_id[sizeof(tpv->allocator_toma_id) - 1] = '\0';
+		tpv->allocator_generation = cdv->cdv_allocator_generation;
+		spin_unlock_irqrestore(&cdv->spinlock, vflags);
+	}
+
+	/* A5. Reconnect queue context. */
+	tpv_queue(tpv)->queuedata = tpv;
+
+	/* A6. Populate tpv_live_fops with new module's function pointers. */
+	nvmeibc_tpv_init_live_fops(&tpv->tpv_live_fops);
+#if KS_REQUEST_QUEUE_HAS_REQUEST_FN
+	tpv_queue(tpv)->make_request_fn = nvmeibc_tpv_make_request;
+#endif
+
+	/*
+	 * A7. Atomically redirect new BIOs from ATOM's buffer to our
+	 * make_request.  The pender.lock serialises with nvmeiba_b_req_push
+	 * so no BIO is lost between redirect and drain.
+	 */
+	spin_lock_irqsave(&tpv->atom.pender.lock, flags);
+	tpv_disk(tpv)->fops = &tpv->tpv_live_fops;
+	wmb();
+	spin_unlock_irqrestore(&tpv->atom.pender.lock, flags);
+
+	/* A8. Drain ATOM pending list (BIOs that arrived during NDU window). */
+	{
+		struct bio *bio;
+
+		while ((bio = bio_list_pop(&tpv->atom.pender.bio_list)) != NULL) {
+			tpv->atom.pender.n_bios--;
+			nvmeibc_tpv_make_request(tpv_queue(tpv), bio);
+		}
+	}
+
+	/* A9. Retry TPV pending bios (parked before abandon). */
+	nvmeibc_tpv_retry_pending_bios(tpv);
+
+	/* A10. Re-add to module-local active list. */
+	nvmeibc_tpv_list_add(tpv);
+
+	/* A11. Re-create /proc entries. */
+	nvmeibc_tpv_proc_register(tpv);
+
+	/* A12. Resume normal operation. */
+	atomic_set(&tpv->io_inflight, 0);
+	atomic_set(&tpv->state, TPV_ATTACHED);
+	tpv->atom.status = nvmeiba_status_live;
+
+	/* A13. Kick background CDV extent pre-fetch if pool is low. */
+	if (tpv->allocator.free_tpv_extent_count < tpv->allocator.low_watermark) {
+		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+			schedule_work(&tpv->cdv_alloc_work);
+	}
+
+	/* A14. Optionally reconcile state — schedule load_state for recovery. */
+	if (tpv->dirty) {
+		_NW(tpv_adopt_dirty,
+		    "TPV: @STR adopted with dirty state; scheduling recovery",
+		    tpv->tpv_name);
+		schedule_delayed_work(&tpv->load_state_work, 0);
+	}
+
+	_NI(tpv_adopted,
+	    "TPV: @STR (uuid=@STR) adopted after NDU; allocator toma=@STR gen=@LLU",
+	    tpv->tpv_name, tpv->tpv_uuid,
+	    tpv->allocator_toma_id, tpv->allocator_generation);
+
+	return tpv;
+}
+
+/* ── nvmeibc_tpv_abandon_all_for_inst — NDU abandon all TPVs ──────────
+ *
+ * Called from __detach_all_volumes_of_inst_work() when w->is_upgrade is
+ * true.  For each active TPV belonging to @cinst, flush dirty state,
+ * cancel workers, orphan the ATOM, and mark as TPV_ORPHAN.
+ *
+ * Must be called BEFORE CDV abandon (TPV flush issues IO to CDV).
+ */
+void nvmeibc_tpv_abandon_all_for_inst(const struct nvmeibc_cinst_params_main *cinst)
+{
+	struct nvmeibc_tpv *tpv;
+	unsigned long flags;
+
+again:
+	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
+	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
+		if (tpv->cdv_vol && tpv->cdv_vol->p == cinst) {
+			spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+
+			_NI(tpv_ndu_abandon, "TPV: @STR abandoning for NDU",
+			    tpv->tpv_name);
+
+			/* Step 1: Cancel background CDV_extent requests. */
+			cancel_work_sync(&tpv->cdv_alloc_work);
+
+			/* Step 2: Cancel persist work before flush. */
+			cancel_work_sync(&tpv->persist_work);
+
+			/* Step 3: Cancel deferred state loader. */
+			cancel_delayed_work_sync(&tpv->load_state_work);
+
+			/* Step 4: Flush dirty allocator state to CDV. */
+			if (tpv->dirty) {
+				int rv = nvmeibc_tpv_flush_state(tpv);
+				if (rv)
+					_NW(tpv_ndu_flush_fail,
+					    "TPV: @STR flush_state failed during NDU abandon rv=@INT; recovery will reconcile on adopt",
+					    tpv->tpv_name, rv);
+			}
+
+			/* Step 5: Orphan the atom — ATOM buffers new BIOs. */
+			nvmeiba_os_api_orphan_abandon(&tpv->atom);
+
+			/*
+			 * Step 6: Drain in-flight IOs.  After orphan_abandon,
+			 * no new BIOs enter nvmeibc_tpv_make_request (they go
+			 * to ATOM's buffer).  Wait for currently-executing
+			 * make_request calls to finish.
+			 */
+			while (atomic_read(&tpv->io_inflight))
+				msleep(1);
+
+			/* Step 7: Disconnect nvmeibc context. */
+			tpv_queue(tpv)->queuedata = NULL;
+
+			/* Step 8: CDV will be abandoned separately. */
+			tpv->cdv_vol = NULL;
+
+			/* Step 9: Remove from module-local active list. */
+			nvmeibc_tpv_list_remove(tpv);
+
+			/* Step 10: Remove /proc entries (they belong to nvmeibc). */
+			nvmeibc_tpv_proc_deregister(tpv);
+
+			/* Step 11: Mark as orphaned. */
+			atomic_set(&tpv->state, TPV_ORPHAN);
+
+			_NI(tpv_ndu_abandoned, "TPV: @STR orphaned for NDU",
+			    tpv->tpv_name);
+
+			goto again;
+		}
+	}
+	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
 }
 
 /* ── nvmeibc_tpv_attach ─────────────────────────────────────────────────
@@ -433,7 +648,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		    !tpv_extent_size_kb))
 		return NULL;
 
-	/* ── 0. Idempotency: return existing TPV if already attached ─────
+	/* ── 0a. Idempotency: return existing TPV if already attached ────
 	 *
 	 * Management may re-send an attach command (e.g. after a keepalive
 	 * gap or status-reporting race).  If the TPV is already in the
@@ -458,6 +673,25 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 				existing->cdv_vol = cdv;
 			}
 			return existing;
+		}
+	}
+
+	/* ── 0b. NDU orphan: check ATOM for an orphaned TPV with matching name */
+	{
+		char dev_name[DISK_NAME_LEN];
+		struct nvmeiba_atom_os_api *orphan_atom;
+
+		snprintf(dev_name, sizeof(dev_name), "%.30s", tpv_name);
+		orphan_atom = nvmeiba_os_api_orphan_adopt(NVMEIBC_TPV_DISK_PREFIX,
+							  dev_name);
+		if (orphan_atom) {
+			struct nvmeibc_tpv *orphan_tpv = container_of(orphan_atom,
+								      struct nvmeibc_tpv, atom);
+			_NI(tpv_ndu_orphan_found,
+			    "TPV: @STR found NDU orphan atom; adopting",
+			    tpv_name);
+			return nvmeibc_tpv_adopt(orphan_tpv, cdv, tpv_uuid,
+						 sync_flush);
 		}
 	}
 
@@ -527,6 +761,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	INIT_DELAYED_WORK(&tpv->timeout_work, nvmeibc_tpv_timeout_work_fn);
 	tpv->state_loaded = false;
 	atomic_set(&tpv->cdv_alloc_pending, 0);
+	atomic_set(&tpv->io_inflight, 0);
 
 	/*
 	 * Start with the attach timeout.  When io_max_retry_secs is 0
@@ -693,7 +928,11 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	 * the same completion path as regular volumes.
 	 */
 
-	kfree(tpv);
+	/*
+	 * nvmeiba_os_api_destructor removes the atom from ATOM's global list
+	 * and kfree's the atom (== tpv, since atom is embedded at offset 0).
+	 */
+	nvmeiba_os_api_destructor(&tpv->atom);
 }
 
 /* ── nvmeibc_tpv_grow ───────────────────────────────────────────────────
@@ -717,8 +956,8 @@ void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes)
 	tpv->allocator.virtual_extents_total  = new_total_extents;
 	spin_unlock(&tpv->allocator.lock);
 
-	if (tpv->disk)
-		set_capacity(tpv->disk,
+	if (tpv_disk(tpv))
+		set_capacity(tpv_disk(tpv),
 			     new_virtual_size_bytes >> KERNEL_SECTOR_SHIFT);
 
 	_NI(tpv_grown, "TPV: @STR grown to @LLU MB (@LLU virtual extents)",

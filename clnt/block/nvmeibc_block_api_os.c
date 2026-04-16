@@ -21,6 +21,14 @@
 #	include <linux/part_stat.h>
 #endif
 
+/*
+ * ATOM handover fops pointer — stored at module init by nvmeibc_os_api_layer_init()
+ * and used by TPV NDU adoption to populate tpv_live_fops with nvmeiba's .owner,
+ * .open, .release handlers.
+ */
+const struct block_device_operations *nvmeibc_atom_handover_fops;
+EXPORT_SYMBOL(nvmeibc_atom_handover_fops);
+
 /* Note: The params below have to be translated to units of 512[b]*/
 #define to_kenrel_sects(l) ((l)*(LOCKSET_SLICES << KERNEL_SECTOR_TO_SECTOR_SHIFT))
 
@@ -704,6 +712,7 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 	}
 	nvmeibc_cinst_get_blok_p(c) = p;
 	H = nvmeiba_os_do_on_nvmeibc_up();			// Connect to nvmeiba
+	nvmeibc_atom_handover_fops = H.fops;			// Store for TPV NDU adoption
 	nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_io);
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
 	#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
