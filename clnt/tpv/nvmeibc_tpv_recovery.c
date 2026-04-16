@@ -62,8 +62,8 @@
  * nvmeibc_ib_admin_cdv_list_extents — query TOMA for the set of data
  * CDV_extents whose cdv_extent_md is DATA / tpv_uuid.
  *
- * On success, *out_indices is set to a vmalloc'd array of *out_count u64
- * extent indices; the caller must vfree(*out_indices).  On failure,
+ * On success, *out_indices is set to a kvmalloc'd array of *out_count u64
+ * extent indices; the caller must kvfree(*out_indices).  On failure,
  * *out_indices is NULL and *out_count is 0.
  *
  * Returns 0 on success, negative errno on failure.
@@ -298,7 +298,7 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 		n_orphans++;
 	}
 
-	vfree(toma_indices);
+	kvfree(toma_indices);
 
 	/* ── 4. Summary ─────────────────────────────────────────────────────── */
 	if (n_orphans > 0)

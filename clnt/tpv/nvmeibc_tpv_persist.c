@@ -540,7 +540,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		_NI(tpv_load_fresh,
 		    "TPV: @STR: TOMA reports 0 extents; fresh TPV",
 		    tpv->tpv_name);
-		vfree(toma_indices);
+		kvfree(toma_indices);
 		return 0;
 	}
 
@@ -822,7 +822,7 @@ out_free:
 	persist_free_le_list(&le_list);
 	vfree(l2);
 	vfree(l1_buf);
-	vfree(toma_indices);
+	kvfree(toma_indices);
 	return rv;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_load_state);

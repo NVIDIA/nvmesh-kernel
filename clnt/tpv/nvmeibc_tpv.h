@@ -140,7 +140,7 @@ struct nvmeibc_tpv_allocator {
 	/*
 	 * Cached CDV_LIST_EXTENTS result from load_state.
 	 * Owned by load_state; transferred to recovery to avoid a second
-	 * TOMA round-trip.  vmalloc'd; recovery vfree's it.
+	 * TOMA round-trip.  kvmalloc'd; callers must use kvfree().
 	 */
 	u64             *toma_extent_list;
 	u64              toma_extent_count;

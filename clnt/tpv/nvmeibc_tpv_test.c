@@ -454,7 +454,7 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 
 	/* Per-TPV L1/L2 tree cleanup. */
 	xa_destroy(&alloc->l1_to_l2_slot);
-	vfree(alloc->toma_extent_list);
+	kvfree(alloc->toma_extent_list);
 	alloc->toma_extent_list = NULL;
 
 	kfree(tpv);
