@@ -1525,16 +1525,21 @@ void dp_cmds_fiber_execute_1_blockset_state_machine(struct operation *o, const b
 		dp_transition_to_locked_cmds_sm(o->locks, 0);
 	}
 
-	while (!cmds->all_cmds_sm_done) {
-		BLKCMP_IO_ASYNC_AWAIT(dp_cmds_done_stage_overcome_failure(cmds, 0));
-		if (cmds->use_read_fail_fix_blockset)
+	/* Trim (use_stages == false): dp_transition_to_locked_cmds_sm already
+	 * dispatched all commands via dp_cmds_execute_stageless_trim_cmds and
+	 * awaited their completion. Skip the staged command loop. */
+	if (cmds->use_stages) {
+		while (!cmds->all_cmds_sm_done) {
 			BLKCMP_IO_ASYNC_AWAIT(dp_cmds_done_stage_overcome_failure(cmds, 0));
-		dp_cmds_next_stage_execute(cmds, 0);
-		while (cmds->should_check_view_lock) {	// May need to retry it due to lock taken / sync-stale / etc ...
-			cmds->should_check_view_lock = 0;
-			BLKCMP_IO_ASYNC_AWAIT(dp_locks_view_lock_sm(dp_cmds_get_pigbck_comp_dc(cmds->iocmd), nvmeibc_d_rdma_comp_tag_make()));
-		}
-	};
+			if (cmds->use_read_fail_fix_blockset)
+				BLKCMP_IO_ASYNC_AWAIT(dp_cmds_done_stage_overcome_failure(cmds, 0));
+			dp_cmds_next_stage_execute(cmds, 0);
+			while (cmds->should_check_view_lock) {	// May need to retry it due to lock taken / sync-stale / etc ...
+				cmds->should_check_view_lock = 0;
+				BLKCMP_IO_ASYNC_AWAIT(dp_locks_view_lock_sm(dp_cmds_get_pigbck_comp_dc(cmds->iocmd), nvmeibc_d_rdma_comp_tag_make()));
+			}
+		};
+	}
 	if (acquired_locks) {
 		nvmeibc_atomic_sub(LARGE_DEBUG_VALUE, &o->locks->n_uncompleted_locks);
 		BLKCMP_IO_ASYNC_AWAIT(dp_transition_to_unlocked_blockset_sm(cmds, 0, 0));

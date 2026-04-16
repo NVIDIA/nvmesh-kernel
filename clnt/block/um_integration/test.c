@@ -376,7 +376,7 @@ void run_biorw_unitest(void) {
 		bio->bi_rw = REQ_DISCARD;
 		my_io.gen_params.op = NVMEIB_BLOCK_IO_OP_DISCARD;
 		nvmesh_dp_lib_do_rwt_op(&my_io);
-		BUG_ON(my_io.out.error != -EPERM);
+		BUG_ON(my_io.out.error != 0);
 		BUG_ON(num_allocs != get_num_memory_allocs());
 
 		nvmesh_dp_lib_do_trim_op(&my_io);

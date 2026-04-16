@@ -904,10 +904,7 @@ void nvmesh_dp_lib_do_rwt_op(struct lib_call_api_io* io) {
 	}
 	BUG_ON(!__is_io(sw));		// Sanity
 	BUG_ON(__get_bio_op(NULL, io->io_params.bio) != io->gen_params.op);		// Sanity
-	if (io->gen_params.op == NVMEIB_BLOCK_IO_OP_DISCARD)
-		rv = -EPERM;
-	if (rv == 0)
-		rv = execute_bio(io->io_params.bio, jiffies);
+	rv = execute_bio(io->io_params.bio, jiffies);
 	if (rv < 0) {
 		struct bio_part bp = {.bio = io->io_params.bio};
 		mark_not_started(io);
