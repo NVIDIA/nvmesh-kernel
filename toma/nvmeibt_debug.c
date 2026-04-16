@@ -100,6 +100,17 @@ void nvmeibt_debug_init_tracer_sections(void)
 	}
 }
 
+static bool __is_unsupported_version(uint32_t sw_ver, bool should_abort)
+{
+	if (sw_ver > TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED) {
+		N_WTf(hj3a05n, "SW_VER mismatch too high @X > (max=@X, cur=@X)", sw_ver, TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED, TOMA_SW_COMPATIBILITY_VER);
+		if (should_abort)
+			nvmeibt_abort(ES_FATAL);
+		return true;
+	}
+	return false;
+}
+
 void read_rpc_config_from_persist(bool is_initial_read)
 {
 	char						config[1024];
@@ -129,23 +140,10 @@ void read_rpc_config_from_persist(bool is_initial_read)
 	}
 
 	try_to_read_sw_ver(config, &sw_ver);
-	if (sw_ver == 0) {
-#if 0 /* for future versions */
-		N_WTf(hs2n85n, "SW_VER not found");
-		if (is_initial_read)
-			nvmeibt_abort(ES_FATAL);
-		else
-			goto out;
-#else
+	if (sw_ver == 0) {				// Support for old config files without version (TOMA_SW_COMPATIBILITY_VER_OLDEST_SUPPORTED)
 		goto continue_reading;
-#endif
-	} else if (sw_ver != TOMA_SW_COMPATIBILITY_VER) {
-		N_WTf(hj3a05n, "SW_VER mismatch @X != @X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
-		if (is_initial_read) {
-			nvmeibt_abort(ES_FATAL);
-		} else {
-			goto out;
-		}
+	} else if (__is_unsupported_version(sw_ver, is_initial_read)) {
+		goto out;
 	}
 
 	nvmeibt_disk_flow_params_reset_models_before_new_scan();
@@ -250,23 +248,10 @@ void update_traces(void) {
 	}
 
 	try_to_read_sw_ver(config, &sw_ver);
-	if (sw_ver == 0) {
-#if 0 /* for future versions */
-		N_WTf(hs6785n, "SW_VER not found");
-		if (is_initial_read)
-			nvmeibt_abort(ES_FATAL);
-		else
-			goto out;
-#else
+	if (sw_ver == 0) {				// Support for old config files without version (TOMA_SW_COMPATIBILITY_VER_OLDEST_SUPPORTED)
 		goto continue_reading;
-#endif
-	} else if (sw_ver != TOMA_SW_COMPATIBILITY_VER) {
-		N_WTf(hj3835n, "SW_VER mismatch @X!=@X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
-		if (is_initial_read) {
-			nvmeibt_abort(ES_FATAL);
-		} else {
-			goto out;
-		}
+	} else if (__is_unsupported_version(sw_ver, is_initial_read)) {
+		goto out;
 	}
 
 	while (fgets(config, sizeof(config), f)) {

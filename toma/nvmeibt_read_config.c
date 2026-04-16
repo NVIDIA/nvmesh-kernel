@@ -615,6 +615,21 @@ out:
 	return rv;	// 0 if parsed the binary data OK
 }
 
+static bool __is_compatible_version(uint32_t sw_ver)
+{
+	if (sw_ver == TOMA_SW_COMPATIBILITY_VER)
+		return true;
+	if (sw_ver == TOMA_SW_COMPATIBILITY_VER_OLDEST_SUPPORTED) {		// Allow backward compatible versions during hot upgrade
+		N_Tf(qnbvd68, "Received topo from older TOMA sw_ver=@HEX08, current=@HEX08", sw_ver, TOMA_SW_COMPATIBILITY_VER);
+		return true;
+	} else if (sw_ver <= TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED) {		// Allow Forward compatible versions during hot upgrade
+		N_Tf(qnbvd69, "Received topo from newer TOMA sw_ver=@HEX08, current=@HEX08", sw_ver, TOMA_SW_COMPATIBILITY_VER);
+		return true;
+	}
+	N_Ef(qnbvd67, "Unknown structs version=@HEX08", sw_ver);
+	return false;
+}
+
 static int parse_bin_topo_buf(const char *wire_data_ptr,
 							   int wire_data_len,
 							   unsigned long long serialization_version,
@@ -638,21 +653,11 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		header = (struct nvmeibt_topology_serialized_topo_header *)(serialized_topo_buf.data_buf);
 
 		// sanity check
-		if (header->sw_ver != TOMA_SW_COMPATIBILITY_VER) {
-			// Allow backward compatible versions during hot upgrade
-			if (header->sw_ver == 0x00020800) {
-				// 0x00020800: v2.8->v3.1 transition (sw_ver format change only)
-				// Note: 0x330 global topo is NOT accepted here because praid headers were 56 bytes
-				// (vs 48 now), and the parser would misalign. On rollback, the leader re-sends in 0x310 format.
-				N_Tf(qnbvd68, "Received topo from older TOMA sw_ver=@HEX08, current=@HEX08", header->sw_ver, TOMA_SW_COMPATIBILITY_VER);
-			} else {
-				N_Ef(qnbvd67, "Unknown structs version=@HEX08", header->sw_ver);
-				goto out;
-			}
-		}
+		if (!__is_compatible_version(header->sw_ver))
+			goto out;
 		if (header->topo_len != (unsigned int)wire_data_len) {
 			N_Ef(ry78uwq, "Corrupted global topo: actual len=@X header->len=@X", wire_data_len, header->topo_len);
-            goto out;
+			goto out;
 		}
 
 		print_s = NNVMEIBT_STR_ALLOC(fhy128e);
@@ -694,14 +699,8 @@ static int parse_bin_topo_buf(const char *wire_data_ptr,
 		header_ptr = (struct nvmeibt_active_topo_header *)(tmp_active_serialized_and_wire_topo_buf.data_buf);
 		nvmeibt_topology_convert_follower_header_le_be(header_ptr);
 		// sanity check
-		if (header_ptr->sw_ver != TOMA_SW_COMPATIBILITY_VER) {
-			if (header_ptr->sw_ver == 0x00020800) {
-				N_Tf(dpli982, "Received active topo from older TOMA sw_ver=@HEX08", header_ptr->sw_ver);
-			} else {
-				N_Ef(dpli981, "Unknown structs version=@HEX08", header_ptr->sw_ver);
-				goto out;
-			}
-		}
+		if (!__is_compatible_version(header_ptr->sw_ver))
+			goto out;
 		calc_len = header_ptr->segs_num * sizeof(struct nvmeibt_serialized_seg_active_topo) + sizeof(*header_ptr);
 		if ((header_ptr->topo_len != calc_len) || ((unsigned int)wire_data_len != calc_len)) {
 			N_Ef(yeuj122, "Corrupted applied topo: actual len=@INT inside len=@UINT calc len=@UINT",

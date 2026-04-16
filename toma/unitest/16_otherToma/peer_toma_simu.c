@@ -99,7 +99,7 @@ int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *T, const struct n
 	for (int i = 0; i < hdr.praids_num; i++) {							// Iterate praids and their segments (same pattern as wire_buf_test.c:find_praid_in_topo)
 		struct nvmeibt_praid_serialized_topo ld_praid;					// ld = leader decoded
 		struct nvmeibt_serialized_seg_leader_topo *wire_seg = (typeof(wire_seg))(&wire_praid[1]);
-		nvmeibt_praid_convert_topo_le_be(wire_praid, &ld_praid, TOMA_SW_COMPATIBILITY_VER);
+		nvmeibt_praid_convert_topo_le_be(wire_praid, &ld_praid);
 		for (int j = 0; j < ld_praid.segs_num; j++) {
 			struct nvmeibt_serialized_seg_leader_topo ld_seg;
 			const struct sb_seg_conf *sb_seg;

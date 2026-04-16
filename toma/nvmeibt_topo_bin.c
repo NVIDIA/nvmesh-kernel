@@ -93,7 +93,6 @@ void nvmeibt_praid_print_leader_wire_topo(int (*printf_fn)(void *ctx, const char
 void nvmeibt_praid_convert_topo_le_be(const struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr)
 {
 	{ _Static_assert(sizeof(struct nvmeibt_praid_serialized_topo) == 48, "Struct nvmeibt_praid_serialized_topo was changed without updating the serializing function! Also check all occurrences of the struct!"); }
-
 	memset(dst_ptr, 0, sizeof(*dst_ptr));
 	nvmeibt_strlcpy(dst_ptr->eyecatcher, src_ptr->eyecatcher, sizeof(dst_ptr->eyecatcher));
 	COPY_SWAP_UUID_STR_FIELD(src_ptr, dst_ptr, uuid);

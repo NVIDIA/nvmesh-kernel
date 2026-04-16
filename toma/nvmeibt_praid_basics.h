@@ -66,7 +66,7 @@ struct nvmeibt_praid_serialized_topo {
 	union nvmeib_uuid						uuid;									// 24
 	int										praid_version_major;					// 28
 	int										praid_version_minor;					// 32
-	int										leader_did_all_segs_sync_registrants;	// 36
+	int										leader_did_all_segs_sync_registrants;	// 36	- Todo: Why wasting 32 bits on boolean
 	enum PRAID_REGISTRANTS_SYNC_CMD			registrants_sync_cmd:32;				// 40
 	int										topo_idx_updated_lo;					// 44 (lower 32 bits of topo_idx_updated, carried in former res_2)
 	int16_t									res_3;									// 46

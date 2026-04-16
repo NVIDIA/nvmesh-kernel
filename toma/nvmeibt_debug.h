@@ -19,8 +19,9 @@
 #define TOMA_LOG_DIR        TOMA_ROOT_DIR "var/log/nvmesh"	// Logs directory
 #define TOMA_BINLOG_DIR     TOMA_LOG_DIR  "/trace_daemon"
 
-#define TOMA_SW_COMPATIBILITY_VER							0x00000310		// unint32, Current version,
-#define TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED	0x00000350U		// First TOMA software version whose followers can merge incremental wire buffers, and support N mirror. NDU supported from 330U
+#define TOMA_SW_VER_INCREMENTAL_WIRE_BUF_MERGE_SUPPORTED	0x00000350U		// Introduced in 3.5: First TOMA software version whose followers can merge incremental wire buffers, and support N mirror. NDU supported from 310 and 2.8
+#define TOMA_SW_COMPATIBILITY_VER							0x00000310U		// Current software version, Was defined in 3.1
+#define TOMA_SW_COMPATIBILITY_VER_OLDEST_SUPPORTED			0x00020800U		// Oldest Supported version, oldest encoding 2.8, v2.8->v3.1 transition (sw_ver format change only)
 
 #define WARN(x...) ({})		// Just in order to compile
 
