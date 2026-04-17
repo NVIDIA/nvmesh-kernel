@@ -222,7 +222,22 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 	/* Per-TPV L1/L2 tree tracking — populated by load_state or tpv_on_cdv_alloc_ok. */
 	alloc->l1_extent_index         = 0;
 	alloc->n_l2_tables_used        = 0;
-	xa_init(&alloc->l1_to_l2_phys);
+	xa_init(&alloc->l1_to_l2_ctx);
+
+	/*
+	 * L1 dirty-page bitmap — one bit per 4 KB page of the L1 table slot.
+	 * Allocated here because T (slot size) is known only after the
+	 * allocator geometry fields above have been populated.  A NULL on
+	 * OOM is tolerated: flush_state treats NULL as "mark all pages dirty"
+	 * (effectively falling back to full-slot writes).
+	 */
+	{
+		u64 T        = (u64)tpv_extent_size_kb << 10;
+		u64 n_pages  = (T + 4095ULL) / 4096ULL;
+
+		alloc->l1_dirty_pages = bitmap_zalloc(n_pages, GFP_KERNEL);
+	}
+
 	alloc->toma_extent_list        = NULL;
 	alloc->toma_extent_count       = 0;
 }
@@ -256,8 +271,22 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 	alloc->free_tpv_extent_count = 0;
 	alloc->cdv_extents_count     = 0;
 
-	/* Per-TPV L1/L2 tree cleanup. */
-	xa_destroy(&alloc->l1_to_l2_phys);
+	/* Per-TPV L1/L2 tree cleanup.  Free each tpv_l2_ctx and its dirty-page
+	 * bitmap before destroying the xarray. */
+	{
+		struct tpv_l2_ctx *ctx;
+		unsigned long      li;
+
+		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
+			if (ctx) {
+				bitmap_free(ctx->dirty_pages);
+				kfree(ctx);
+			}
+		}
+		xa_destroy(&alloc->l1_to_l2_ctx);
+	}
+	bitmap_free(alloc->l1_dirty_pages);
+	alloc->l1_dirty_pages = NULL;
 	kvfree(alloc->toma_extent_list);
 	alloc->toma_extent_list  = NULL;
 	alloc->toma_extent_count = 0;

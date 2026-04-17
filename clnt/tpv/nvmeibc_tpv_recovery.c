@@ -175,6 +175,11 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index)
 		alloc->l1_extent_index = extent_index;
 		promote_to_l1          = true;
 		first_s                = 1;	/* skip slot 0 in free-pool splice */
+		/*
+		 * Fresh L1 extent (promoted from orphan): on-disk slot 0 is
+		 * garbage, so force the first flush to rewrite the full L1.
+		 */
+		nvmeibc_tpv_mark_l1_full_dirty(tpv);
 	}
 
 	ref->extent_index    = extent_index;

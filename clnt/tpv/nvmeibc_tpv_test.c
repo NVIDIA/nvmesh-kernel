@@ -312,7 +312,13 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	/* Per-TPV L1/L2 tree tracking. */
 	alloc->l1_extent_index         = 0;
 	alloc->n_l2_tables_used        = 0;
-	xa_init(&alloc->l1_to_l2_phys);
+	xa_init(&alloc->l1_to_l2_ctx);
+	{
+		u64 T       = (u64)TPV_KTEST_TPV_EXT_KB << 10;
+		u64 n_pages = (T + 4095ULL) / 4096ULL;
+
+		alloc->l1_dirty_pages = bitmap_zalloc(n_pages, GFP_KERNEL);
+	}
 	alloc->toma_extent_list        = NULL;
 	alloc->toma_extent_count       = 0;
 
@@ -378,6 +384,7 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 		alloc->cdv_extents_count++;
 		alloc->l1_extent_index  = TPV_KTEST_L1_EXT_IDX;
 		alloc->n_l2_tables_used = 0;
+		nvmeibc_tpv_mark_l1_full_dirty(tpv);
 
 		for (s = 1; s < TPV_KTEST_N_SLOTS; s++) {
 			struct nvmeibc_tpv_free_slot *fs;
@@ -473,8 +480,21 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 	/* Free all free_slot entries. */
 	nvmeibc_tpv_free_slots_list(&alloc->free_tpv_extents);
 
-	/* Per-TPV L1/L2 tree cleanup. */
-	xa_destroy(&alloc->l1_to_l2_phys);
+	/* Per-TPV L1/L2 tree cleanup: free each tpv_l2_ctx, then the xarray. */
+	{
+		struct tpv_l2_ctx *ctx;
+		unsigned long      li;
+
+		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
+			if (ctx) {
+				bitmap_free(ctx->dirty_pages);
+				kfree(ctx);
+			}
+		}
+		xa_destroy(&alloc->l1_to_l2_ctx);
+	}
+	bitmap_free(alloc->l1_dirty_pages);
+	alloc->l1_dirty_pages = NULL;
 	kvfree(alloc->toma_extent_list);
 	alloc->toma_extent_list = NULL;
 

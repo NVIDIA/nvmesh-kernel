@@ -256,6 +256,14 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	if (schedule_alloc)
 		schedule_work(&tpv->cdv_alloc_work);
 
+	/*
+	 * Partial-page flush hook (§3.4.3): mark the 4 KB page of the owning
+	 * L2 table that holds this leaf as dirty.  No-op when the L2 ctx
+	 * does not exist yet (first-ever leaf under this L1 idx — flush_state
+	 * will create the ctx with all pages dirty).
+	 */
+	nvmeibc_tpv_mark_l2_leaf_dirty(tpv, virt_idx);
+
 	/* Mark dirty and schedule persistence outside allocator lock. */
 	spin_lock(&tpv->persist_lock);
 	if (!tpv->dirty) {
@@ -432,6 +440,13 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 out_unlock:
 	spin_unlock(&alloc->lock);
 
+	/*
+	 * Partial-page flush hook (§3.4.3): the L2 leaf for this virt_idx
+	 * must be zeroed on disk, so mark its page dirty.  No-op when the
+	 * L2 ctx doesn't exist yet (nothing to flush).
+	 */
+	nvmeibc_tpv_mark_l2_leaf_dirty(tpv, virt_idx);
+
 	/* Mark dirty: the tree leaf for this virt_idx must be cleared. */
 	spin_lock(&tpv->persist_lock);
 	if (!tpv->dirty) {
@@ -571,6 +586,11 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 
 		alloc->l1_extent_index  = extent_index;
 		alloc->n_l2_tables_used = 0;
+		/*
+		 * Fresh L1 extent: on-disk slot 0 is garbage.  Force the first
+		 * flush to write the full L1 slot (header + all-null entries).
+		 */
+		nvmeibc_tpv_mark_l1_full_dirty(tpv);
 
 		ref = kzalloc(sizeof(*ref), GFP_NOIO);
 		if (!ref)

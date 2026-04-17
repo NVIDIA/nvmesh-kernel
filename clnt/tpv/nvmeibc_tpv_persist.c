@@ -130,6 +130,72 @@ static inline u64 persist_phys_of(const struct nvmeibc_tpv_allocator *a,
 }
 
 /*
+ * Partial-page flush (§3.4.3).  Each L1/L2 table is flushed at 4 KB
+ * granularity; a per-table bitmap records which pages carry uncommitted
+ * changes.  TPV extent sizes are always a multiple of 4 KB (tpvExtentSizeKB
+ * is a power of 2 from 64 up to 65536), so every page is exactly 4 KB.
+ */
+#define PERSIST_PAGE_BYTES	4096ULL
+
+static inline u64 persist_n_pages(const struct nvmeibc_tpv_allocator *a)
+{
+	return (persist_slot_bytes(a) + PERSIST_PAGE_BYTES - 1) /
+	       PERSIST_PAGE_BYTES;
+}
+
+/* Bit index of the 4 KB page that holds L2[l2_idx]. */
+static inline u64 persist_l2_leaf_page(u64 l2_idx)
+{
+	return (l2_idx * sizeof(struct tpv_tree_entry)) / PERSIST_PAGE_BYTES;
+}
+
+/* Bit index of the 4 KB page that holds L1[l1_idx] (after the header). */
+static inline u64 persist_l1_entry_page(u64 l1_idx)
+{
+	u64 byte_off = sizeof(struct tpv_l1_header) +
+		       l1_idx * sizeof(struct tpv_tree_entry);
+	return byte_off / PERSIST_PAGE_BYTES;
+}
+
+/*
+ * Write pages marked in @dirty_pages from @buf to CDV at @base_phys.
+ * Adjacent set bits are coalesced into a single contiguous write.  Cleared
+ * bits are skipped.  The bitmap is zeroed for the pages successfully
+ * written.  Partial failure leaves the bitmap in the "remaining dirty"
+ * state so the next flush can retry.
+ */
+static int persist_write_dirty_pages(struct nvmeibc_tpv *tpv, u64 base_phys,
+				     const void *buf, unsigned long *dirty_pages,
+				     u64 n_pages)
+{
+	unsigned long pos = 0;
+	int rv = 0;
+
+	while (pos < n_pages) {
+		unsigned long start = find_next_bit(dirty_pages, n_pages, pos);
+		unsigned long end;
+
+		if (start >= n_pages)
+			break;
+
+		end = find_next_zero_bit(dirty_pages, n_pages, start);
+		if (end > n_pages)
+			end = n_pages;
+
+		rv = nvmeibc_tpv_cdv_sync_write(tpv,
+			base_phys + start * PERSIST_PAGE_BYTES,
+			(const u8 *)buf + start * PERSIST_PAGE_BYTES,
+			(end - start) * PERSIST_PAGE_BYTES);
+		if (rv)
+			return rv;
+
+		bitmap_clear(dirty_pages, start, end - start);
+		pos = end;
+	}
+	return 0;
+}
+
+/*
  * Decode a raw CDV byte offset into (1-based extent_index, slot-within-extent).
  * Used to convert an in-memory phys_offset (returned by alloc_l2_slot, or
  * stored in the extent_map) into the (extent_index, debug_meta) fields
@@ -165,24 +231,30 @@ static inline void persist_decode_phys(const struct nvmeibc_tpv_allocator *a,
  * at detach.
  */
 /*
- * Resolve the CDV byte offset of the L2 table backing L1 index @l1_idx,
- * allocating a new L2 slot from the free pool if none exists yet.  Updates
- * l1_to_l2_phys and n_l2_tables_used on first allocation.
+ * Resolve the tpv_l2_ctx for L1 index @l1_idx, allocating a fresh ctx
+ * (plus a brand-new L2 slot from the free pool and its dirty-page bitmap)
+ * if none exists yet.  Updates l1_to_l2_ctx and n_l2_tables_used.
  *
- * Returns 0 on success (*phys_out set), -EAGAIN when the free pool is
- * empty, -ENOMEM if the xa_store fails.
+ * On first allocation the L2 slot on disk is garbage, so the ctx's
+ * dirty_pages bitmap is set with every bit — forcing flush_state to write
+ * the entire T-byte L2 table once.  Caller is responsible for marking
+ * corresponding L1 dirty bits (the L1 entry page and the L1 header page).
+ *
+ * Returns 0 on success (*ctx_out set), -EAGAIN when the free pool is
+ * empty, -ENOMEM on allocation failure.
  */
-static int persist_get_or_alloc_l2_phys(struct nvmeibc_tpv *tpv,
-					u64 l1_idx, u64 *phys_out)
+static int persist_get_or_alloc_l2_ctx(struct nvmeibc_tpv *tpv, u64 l1_idx,
+				       struct tpv_l2_ctx **ctx_out)
 {
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
-	void *slot_p;
+	struct tpv_l2_ctx *ctx;
+	u64 n_pages = persist_n_pages(alloc);
 	u64 phys;
 	int rv;
 
-	slot_p = xa_load(&alloc->l1_to_l2_phys, l1_idx);
-	if (slot_p) {
-		*phys_out = (u64)xa_to_value(slot_p);
+	ctx = xa_load(&alloc->l1_to_l2_ctx, l1_idx);
+	if (ctx) {
+		*ctx_out = ctx;
 		return 0;
 	}
 
@@ -190,21 +262,110 @@ static int persist_get_or_alloc_l2_phys(struct nvmeibc_tpv *tpv,
 	if (rv)
 		return rv;
 
-	rv = xa_err(xa_store(&alloc->l1_to_l2_phys, l1_idx,
-			     xa_mk_value((unsigned long)phys), GFP_NOIO));
+	ctx = kzalloc(sizeof(*ctx), GFP_NOIO);
+	if (!ctx)
+		return -ENOMEM;
+
+	ctx->phys        = phys;
+	ctx->dirty_pages = bitmap_zalloc(n_pages, GFP_NOIO);
+	if (!ctx->dirty_pages) {
+		kfree(ctx);
+		return -ENOMEM;
+	}
+	bitmap_set(ctx->dirty_pages, 0, n_pages);	/* fresh: full write */
+
+	rv = xa_err(xa_store(&alloc->l1_to_l2_ctx, l1_idx, ctx, GFP_NOIO));
 	if (rv) {
-		/*
-		 * The L2 slot is reserved on the owning cdv_extent_ref but
-		 * not yet recorded in l1_to_l2_phys.  It stays pinned for
-		 * the TPV lifetime — effectively a small leak in the unlikely
-		 * xa_store failure path.  Returning an error lets the caller
-		 * back off; the next flush will try a fresh slot.
-		 */
+		bitmap_free(ctx->dirty_pages);
+		kfree(ctx);
 		return rv;
 	}
 
 	alloc->n_l2_tables_used++;
-	*phys_out = phys;
+	*ctx_out = ctx;
+	return 0;
+}
+
+/*
+ * nvmeibc_tpv_mark_l2_leaf_dirty — IO-path hook for partial-page flush.
+ *
+ * Called by alloc_extent and free_extent after the xarray mutation.  If
+ * an L2 ctx exists for the owning L1 index, mark the 4 KB page holding
+ * that leaf as dirty so the next flush writes only that page.
+ *
+ * If no ctx exists yet (first-ever leaf under this L1_idx), no marking
+ * is required: flush_state will create the ctx with all pages dirty the
+ * first time it walks the xarray and hits this L1 index.
+ *
+ * Safe from any context (set_bit is atomic; xa_load under rcu).
+ */
+void nvmeibc_tpv_mark_l2_leaf_dirty(struct nvmeibc_tpv *tpv, u64 virt_idx)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	u64 N_L2   = persist_n_l2(alloc);
+	u64 l1_idx = virt_idx / N_L2;
+	u64 l2_idx = virt_idx % N_L2;
+	struct tpv_l2_ctx *ctx;
+
+	ctx = xa_load(&alloc->l1_to_l2_ctx, l1_idx);
+	if (!ctx || !ctx->dirty_pages)
+		return;
+
+	set_bit(persist_l2_leaf_page(l2_idx), ctx->dirty_pages);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_mark_l2_leaf_dirty);
+
+/*
+ * nvmeibc_tpv_mark_l1_full_dirty — called after the L1 extent is first
+ * assigned (by tpv_on_cdv_alloc_ok or by recovery orphan promotion).
+ * Marks every L1 page dirty so the initial flush writes the header and a
+ * fresh all-null entry table to the CDV.
+ */
+void nvmeibc_tpv_mark_l1_full_dirty(struct nvmeibc_tpv *tpv)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	u64 n_pages = persist_n_pages(alloc);
+
+	if (!alloc->l1_dirty_pages)
+		return;
+	bitmap_set(alloc->l1_dirty_pages, 0, n_pages);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_mark_l1_full_dirty);
+
+/*
+ * flush_state_write_l2_ctx — write the just-built L2 buffer to CDV at
+ * ctx->phys, respecting ctx->dirty_pages (partial-page flush).  The L1
+ * entry for @l1_idx is set to ctx->phys after a successful write, and
+ * the L1-entry page is marked dirty if its value changed.
+ */
+static int flush_state_write_l2_ctx(struct nvmeibc_tpv *tpv,
+				    u64 l1_idx,
+				    struct tpv_l2_ctx *ctx,
+				    const void *l2_buf,
+				    u64 n_pages,
+				    struct tpv_tree_entry *l1_entries)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	int rv;
+
+	if (tpv_is_detaching(tpv))
+		return -ECANCELED;
+
+	rv = persist_write_dirty_pages(tpv, ctx->phys, l2_buf,
+				       ctx->dirty_pages, n_pages);
+	if (rv) {
+		_NE(tpv_flush_l2_write_fail,
+		    "TPV: @STR: L2 write for L1_idx=@LLU failed rv=@INT",
+		    tpv->tpv_name, l1_idx, rv);
+		return rv;
+	}
+
+	if (l1_entries[l1_idx].cdv_offset != ctx->phys) {
+		l1_entries[l1_idx].cdv_offset = ctx->phys;
+		if (alloc->l1_dirty_pages)
+			set_bit(persist_l1_entry_page(l1_idx),
+				alloc->l1_dirty_pages);
+	}
 	return 0;
 }
 
@@ -214,6 +375,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	u64  T       = persist_slot_bytes(alloc);
 	u64  N_L1    = persist_n_l1(alloc);
 	u64  N_L2    = persist_n_l2(alloc);
+	u64  n_pages = persist_n_pages(alloc);
 	u64  l1_ei   = alloc->l1_extent_index;
 	struct tpv_l1_header *hdr;
 	struct tpv_tree_entry *l1_entries;	/* entries portion of L1 buffer */
@@ -221,7 +383,9 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	void *l1_buf = NULL;
 	struct nvmeibc_tpv_extent_entry *entry;
 	unsigned long idx;
+	struct tpv_l2_ctx *prev_ctx = NULL;
 	u64  prev_l1_idx = (u64)-1;
+	u64  prev_n_l2_tables_used;
 	int  rv = 0;
 
 	if (tpv_is_detaching(tpv))
@@ -233,6 +397,8 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		    tpv->tpv_name);
 		return 0;
 	}
+
+	prev_n_l2_tables_used = alloc->n_l2_tables_used;
 
 	/* Allocate L1 buffer (T bytes, zeroed). */
 	l1_buf = vzalloc(T);
@@ -249,6 +415,22 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	       min_t(size_t, sizeof(hdr->tpv_uuid), sizeof(tpv->tpv_uuid)));
 	hdr->l1_extent_index    = l1_ei;
 	/* n_l2_tables_used is written after the loop below. */
+
+	/*
+	 * Pre-populate l1_entries from the existing l1_to_l2_ctx map so any
+	 * L1 pages we do NOT need to rewrite retain their correct content in
+	 * case find_next_bit picks up a dirty page that straddles an L1 entry
+	 * we're not touching this flush.
+	 */
+	{
+		unsigned long li;
+		struct tpv_l2_ctx *ctx;
+
+		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
+			if (li < N_L1 && ctx)
+				l1_entries[li].cdv_offset = ctx->phys;
+		}
+	}
 
 	/* Allocate reusable L2 buffer (T bytes). */
 	l2 = vzalloc(T);
@@ -278,46 +460,31 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 
 		if (l1_idx != prev_l1_idx) {
 			/*
-			 * Flush the previous L2 table (if any) before starting
-			 * the new one.  The first iteration (prev == -1) skips.
+			 * Transitioning to a new L1_idx: flush the previous L2
+			 * table (if any), then resolve/create the new ctx.
+			 * Both operations need to sleep (CDV IO, kzalloc), so
+			 * we drop RCU for the duration.
 			 */
+			rcu_read_unlock();
+
 			if (prev_l1_idx != (u64)-1) {
-				u64 l2_phys;
-
-				rcu_read_unlock();
-
-				rv = persist_get_or_alloc_l2_phys(tpv,
-					prev_l1_idx, &l2_phys);
-				if (rv) {
-					_NE(tpv_flush_l2_slot_fail,
-					    "TPV: @STR: get_or_alloc L2 slot for L1_idx=@LLU failed rv=@INT",
-					    tpv->tpv_name, prev_l1_idx, rv);
+				rv = flush_state_write_l2_ctx(tpv, prev_l1_idx,
+					prev_ctx, l2, n_pages, l1_entries);
+				if (rv)
 					goto out;
-				}
-
-				/* Write L2 to CDV. */
-				if (tpv_is_detaching(tpv)) {
-					rv = -ECANCELED;
-					goto out;
-				}
-				rv = nvmeibc_tpv_cdv_sync_write(tpv,
-					l2_phys, l2, T);
-				if (rv) {
-					_NE(tpv_flush_l2_write_fail,
-					    "TPV: @STR: L2 write for L1_idx=@LLU failed rv=@INT",
-					    tpv->tpv_name, prev_l1_idx, rv);
-					goto out;
-				}
-
-				/* Set L1 entry: CDV byte offset of the L2 table. */
-				l1_entries[prev_l1_idx].cdv_offset = l2_phys;
-
-				rcu_read_lock();
 			}
 
-			/* Zero the L2 buffer for the new L1_idx. */
+			rv = persist_get_or_alloc_l2_ctx(tpv, l1_idx, &prev_ctx);
+			if (rv) {
+				_NE(tpv_flush_l2_ctx_fail,
+				    "TPV: @STR: get_or_alloc L2 ctx for L1_idx=@LLU failed rv=@INT",
+				    tpv->tpv_name, l1_idx, rv);
+				goto out;
+			}
+
 			memset(l2, 0, T);
 			prev_l1_idx = l1_idx;
+			rcu_read_lock();
 		}
 
 		/* L2 leaf entry: raw CDV byte offset of the data slot. */
@@ -327,76 +494,63 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 
 	/* Flush the last L2 table. */
 	if (prev_l1_idx != (u64)-1) {
-		u64 l2_phys;
-
-		rv = persist_get_or_alloc_l2_phys(tpv, prev_l1_idx, &l2_phys);
-		if (rv) {
-			_NE(tpv_flush_l2_slot_fail2,
-			    "TPV: @STR: get_or_alloc L2 slot for L1_idx=@LLU failed rv=@INT (last)",
-			    tpv->tpv_name, prev_l1_idx, rv);
+		rv = flush_state_write_l2_ctx(tpv, prev_l1_idx, prev_ctx,
+					      l2, n_pages, l1_entries);
+		if (rv)
 			goto out;
-		}
-
-		if (tpv_is_detaching(tpv)) {
-			rv = -ECANCELED;
-			goto out;
-		}
-		rv = nvmeibc_tpv_cdv_sync_write(tpv, l2_phys, l2, T);
-		if (rv) {
-			_NE(tpv_flush_l2_write_fail2,
-			    "TPV: @STR: L2 write for L1_idx=@LLU failed rv=@INT",
-			    tpv->tpv_name, prev_l1_idx, rv);
-			goto out;
-		}
-
-		l1_entries[prev_l1_idx].cdv_offset = l2_phys;
 	}
 
 	/*
-	 * Also write L1 entries for L1_idxs that have L2 slots but no current
-	 * mappings (all entries freed since last flush).  The L2 slot still
-	 * exists; L1 must still point to it so load_state can re-read the
-	 * (now all-null) L2 table and not re-allocate a new L2 slot next flush.
+	 * Also flush L1 indices that have a ctx but no mapped leaves (all
+	 * leaves freed since last flush).  ctx->dirty_pages still carries
+	 * the bits set by free_extent — write only those pages.
 	 */
 	{
 		unsigned long li;
-		void *slot_p;
+		struct tpv_l2_ctx *ctx;
 
-		xa_for_each(&alloc->l1_to_l2_phys, li, slot_p) {
-			u64 l2_phys = (u64)xa_to_value(slot_p);
-
-			if (li >= N_L1)
+		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
+			if (li >= N_L1 || !ctx || !ctx->dirty_pages)
 				continue;
-			if (l1_entries[li].cdv_offset != TPV_TREE_NULL)
-				continue;	/* already set in the loop above */
-
+			/* Already handled in the main loop? (prev_l1_idx hit). */
+			if (bitmap_empty(ctx->dirty_pages, n_pages))
+				continue;
+			/* If the main loop already rewrote this L2, its dirty
+			 * bits were cleared; nothing to do. */
 			if (tpv_is_detaching(tpv)) {
 				rv = -ECANCELED;
 				goto out;
 			}
 			memset(l2, 0, T);
-			rv = nvmeibc_tpv_cdv_sync_write(tpv, l2_phys, l2, T);
-			if (rv) {
-				_NE(tpv_flush_l2_write_empty,
-				    "TPV: @STR: empty L2 write for L1_idx=@LLU failed rv=@INT",
-				    tpv->tpv_name, (u64)li, rv);
+			rv = flush_state_write_l2_ctx(tpv, li, ctx, l2,
+						      n_pages, l1_entries);
+			if (rv)
 				goto out;
-			}
-
-			l1_entries[li].cdv_offset = l2_phys;
 		}
 	}
 
-	/* Finalize header and write L1 to CDV. */
+	/* Finalize header; mark header page dirty if n_l2_tables_used changed. */
 	if (tpv_is_detaching(tpv)) {
 		rv = -ECANCELED;
 		goto out;
 	}
 	hdr->n_l2_tables_used = alloc->n_l2_tables_used;
+	if (alloc->n_l2_tables_used != prev_n_l2_tables_used &&
+	    alloc->l1_dirty_pages)
+		set_bit(0, alloc->l1_dirty_pages);
 
-	rv = nvmeibc_tpv_cdv_sync_write(tpv,
-		persist_tree_slot_offset(alloc, l1_ei, 0),
-		l1_buf, T);
+	if (alloc->l1_dirty_pages) {
+		rv = persist_write_dirty_pages(tpv,
+			persist_tree_slot_offset(alloc, l1_ei, 0),
+			l1_buf, alloc->l1_dirty_pages, n_pages);
+	} else {
+		/* Fallback: init-time OOM left l1_dirty_pages NULL.  Write the
+		 * full L1 slot so correctness is preserved even though write
+		 * amplification is back to the pre-§3.4.3 level. */
+		rv = nvmeibc_tpv_cdv_sync_write(tpv,
+			persist_tree_slot_offset(alloc, l1_ei, 0),
+			l1_buf, T);
+	}
 	if (rv)
 		_NE(tpv_flush_l1_write_fail,
 		    "TPV: @STR: L1 write failed rv=@INT",
@@ -720,13 +874,36 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		}
 
 		/*
-		 * Record L1→L2 location (phys offset).  flush_state will reuse
-		 * this slot for the L1_idx until the TPV is deleted.
+		 * Record L1→L2 location.  Create a fresh tpv_l2_ctx whose
+		 * dirty_pages bitmap is initially zero: the on-disk image we
+		 * just read IS the authoritative state, so no pages need
+		 * rewriting until alloc/free marks them.
 		 */
-		rv = xa_err(xa_store(&alloc->l1_to_l2_phys, i,
-			    xa_mk_value((unsigned long)l2_phys), GFP_NOIO));
-		if (rv)
-			goto out_free;
+		{
+			struct tpv_l2_ctx *ctx;
+
+			ctx = kzalloc(sizeof(*ctx), GFP_NOIO);
+			if (!ctx) {
+				rv = -ENOMEM;
+				goto out_free;
+			}
+			ctx->phys        = l2_phys;
+			ctx->dirty_pages = bitmap_zalloc(persist_n_pages(alloc),
+							 GFP_NOIO);
+			if (!ctx->dirty_pages) {
+				kfree(ctx);
+				rv = -ENOMEM;
+				goto out_free;
+			}
+
+			rv = xa_err(xa_store(&alloc->l1_to_l2_ctx, i, ctx,
+					     GFP_NOIO));
+			if (rv) {
+				bitmap_free(ctx->dirty_pages);
+				kfree(ctx);
+				goto out_free;
+			}
+		}
 
 		/*
 		 * Mark the L2 slot in its owning extent so it is excluded

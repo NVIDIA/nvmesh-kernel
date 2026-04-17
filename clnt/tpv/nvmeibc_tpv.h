@@ -38,6 +38,24 @@ enum nvmeibc_volume_class {
 /* ── TPV.allocator state ───────────────────────────────────────────────── */
 
 /*
+ * Per-L2-table persistence context (partial-page flush, §3.4.3).
+ *
+ * Each L2 table living in the TPV-owned pool is tracked by a tpv_l2_ctx
+ * in alloc->l1_to_l2_ctx (xarray keyed by L1_idx).  dirty_pages is a
+ * bitmap over DIV_ROUND_UP(T, 4096) 4 KB pages; bits are set by IO-path
+ * alloc/free and by flush_state on first allocation, and cleared by
+ * flush_state after the pages have been written back to CDV.
+ *
+ * A fresh L2 ctx starts with every bit set (on-disk image is garbage)
+ * so the very first flush writes the full T-byte table.  Subsequent
+ * flushes write only the 4 KB pages whose leaves changed.
+ */
+struct tpv_l2_ctx {
+	u64              phys;		/* CDV byte offset of this L2 slot */
+	unsigned long   *dirty_pages;	/* bitmap: DIV_ROUND_UP(T, 4096) bits */
+};
+
+/*
  * A single mapping entry: virtual_extent_index -> physical byte offset in CDV.
  * phys_offset == 0 means unmapped.  CDV offset 0 is inside the allocator area
  * and is never a valid TPV_extent location, so 0 is a safe sentinel.
@@ -153,14 +171,18 @@ struct nvmeibc_tpv_allocator {
 	 * allocated_count > 0 (since L2 slots count), so the normal
 	 * free-extent path already keeps it attached.
 	 *
-	 * l1_to_l2_phys maps L1_idx -> CDV byte offset of the L2 table
-	 * (encoded via xa_mk_value).  It is populated by load_state from the
-	 * on-disk L1 and extended by flush_state when new L1 indices first
-	 * become non-null.
+	 * l1_to_l2_ctx maps L1_idx -> struct tpv_l2_ctx *.  It is populated
+	 * by load_state from the on-disk L1 and extended by flush_state when
+	 * new L1 indices first become non-null.
+	 *
+	 * l1_dirty_pages tracks which 4 KB pages of the L1 table itself have
+	 * been modified since the last flush (partial-page flush, §3.4.3).
+	 * Bit 0 covers the L1 header; subsequent bits cover the L1 entries.
 	 */
 	u64              l1_extent_index;	/* CDV_extent holding L1 in slot 0; 0 = none yet */
 	u64              n_l2_tables_used;	/* L2 tables currently allocated */
-	struct xarray    l1_to_l2_phys;		/* L1_idx -> CDV byte offset of L2 table */
+	struct xarray    l1_to_l2_ctx;		/* L1_idx -> struct tpv_l2_ctx * */
+	unsigned long   *l1_dirty_pages;	/* bitmap: DIV_ROUND_UP(T, 4096) bits */
 
 	/*
 	 * Cached CDV_LIST_EXTENTS result from load_state.
@@ -435,6 +457,22 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
  * re-armed by the allocator as usual).
  */
 int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out);
+
+/*
+ * Partial-page flush hooks (§3.4.3).  Called by the IO-path allocator and
+ * by the extent-bootstrap code so flush_state writes only the 4 KB pages
+ * that actually changed.
+ *
+ * nvmeibc_tpv_mark_l2_leaf_dirty(tpv, virt_idx) is safe from IO context
+ * and is a no-op when no L2 ctx has been established for virt_idx's L1
+ * index yet (the first flush will create it with all pages dirty).
+ *
+ * nvmeibc_tpv_mark_l1_full_dirty(tpv) is called once, when the TPV's L1
+ * extent is first assigned, to force a full-slot write of the freshly
+ * initialised L1 header and (all-null) entry table.
+ */
+void nvmeibc_tpv_mark_l2_leaf_dirty(struct nvmeibc_tpv *tpv, u64 virt_idx);
+void nvmeibc_tpv_mark_l1_full_dirty(struct nvmeibc_tpv *tpv);
 
 /* ── IB admin CDV response dispatch (implemented in nvmeibc_tpv_ib_admin.c) ── */
 
