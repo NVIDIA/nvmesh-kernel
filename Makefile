@@ -511,7 +511,7 @@ COMPILE_PET = +$(MAKE) -C $(PET_DIR) fast_build COMMIT_ID=0x$(COMMIT_ID) COMMIT_
 # Pass COMMIT_ID so tarball content is under <commit>/ for dictionary binding to log files.
 # To disable PET dictionary build, set PET_MODULE to empty or undefined (PET_MODULE=$(PET_MODULE)). To enable, set it to the module default location (PET_MODULE=clnt/nvmeibc.ko), otherwise PET_MODULE=<path/to/nvmeibc.ko> if client module is built elsewhere.
 PET_MODULE?=clnt/nvmeibc.ko
-COLLECT_DICTIONARIES = COMMIT_ID=0x$(COMMIT_ID) PET_MODULE=$(PET_MODULE) ./collect_dictionaries.sh
+COLLECT_DICTIONARIES = PY=$(PY_TO_EXEC_VER) COMMIT_ID=0x$(COMMIT_ID) PET_MODULE=$(PET_MODULE) ./collect_dictionaries.sh
 CLEAN_AUTOGEN = +$(MAKE) -C $(AUTOGEN_DIR) NVMESH_SRC_DIR=$(NVMESH_SRC_DIR) clean
 CLEAN_LZ4 = +$(MAKE) -C $(TOOLS_DIR)/lz4 clean
 CLEAN_COMPRESS = +$(MAKE) -C $(TOOLS_DIR)/trace_compress_lib clean

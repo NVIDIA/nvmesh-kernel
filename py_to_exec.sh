@@ -2,7 +2,7 @@
 
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
+source pypi_sources.sh
 set -e
 
 SPEC_PATH=${SPEC_PATH:-$(dirname $(readlink -e $0))}
@@ -12,6 +12,7 @@ export PATH=$PATH:~/.local/bin
 type poetry || curl -sSL https://install.python-poetry.org | python${PY:-3} -
 set -x
 [ -n "$PY" ] && poetry env use "$PY"
+poetry_remove_nvidia_source_if_unreachable
 # Resolve dependencies for the build environment.
 poetry lock
 poetry install --sync --with=compile --no-root || {

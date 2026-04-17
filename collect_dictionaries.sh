@@ -3,6 +3,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+source pypi_sources.sh
 set -e #exit on first error
 echo "Collecting dictionaries for binary tracing..."
 
@@ -45,15 +46,30 @@ if ! command -v poetry >/dev/null 2>&1; then
 fi
 
 if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ] && command -v poetry >/dev/null 2>&1; then
+	poetry_remove_nvidia_source_if_unreachable
 	PET_DICT="${PET_DIR}/dict.${COMMIT_ID#0x}.json"
-
+	# In case there are multiple python versions installed, use the one specified by PY.
+	if [[ -n "$PY" ]]; then
+		if ! poetry env use "$PY"; then
+			echo "Failed to use Python version $PY"
+			exit 1
+		fi
+		echo "Poetry configured to use Python version $PY"
+	fi
 	# Verify required packages with poetry.
 	start=$SECONDS
-	poetry lock --no-update 2>/dev/null || true
+	# Take the poetry.lock file as the source of truth, regenerate if it is not up-to-date.
+	if ! poetry lock --no-update; then
+		echo "Warning: poetry.lock out of sync, regenerating with dependency updates..."
+		poetry lock
+	fi
+
 	poetry install --no-root --only pet
 	echo "poetry verifies required packages in $((SECONDS - start)) seconds"
 
-	PET_PYTHON="poetry run python3"
+	# Use the Python version specified by PY, or default to python3
+	PET_PYTHON="poetry run python${PY:-3}"
+	echo "poetry run python is set to $PET_PYTHON"
 	start=$SECONDS
 	if $PET_PYTHON common/pet/nvmeib_pet_messages.py save-dictionary "$PET_MODULE" "$PET_SECTION" "$PET_DICT"; then
 		runtime=$((SECONDS - start))

@@ -5,6 +5,17 @@ description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 
+# The "tool.poetry.source" is a project-wide setup. Although one can define multiple poetry sources,
+# they will not fallback to the follow-up poetry sources if it is due to connection failures. The other
+# poetry sources are referenced only when a package cannot be found in earlier poetry sources.
+#
+# To select poetry dynamically, we can either add sources based on their availability, or remove
+# sources if they are not reachable. We chose the latter because we assume NVIDIA internal PyPI repository
+# is available for our internal lab and dev use case, and we optimize for this case. For external use
+# cases(e.g., public cloud) where NVIDIA internal PyPI repository is not reachable, we dynamically remove
+# the NVIDIA internal PyPI repository from poetry, thus, fallback to the default pypi.org repository. The
+# poetry lock regenerate cost is only charged to the pypi.org path.
+
 # NVIDIA combined PyPI (public mirror + nv-shared-pypi-local).
 [[tool.poetry.source]]
 name = "nv-shared"
