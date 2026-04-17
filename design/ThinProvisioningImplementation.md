@@ -411,6 +411,106 @@ See Part 8 for complete file-by-file implementation detail. Summary:
 
 ---
 
+## Part 1.5 — Allocator Satellite Volume (`<CDV>-mgmt`)
+
+### 1.5.1 Problem Statement — Why a Satellite Volume
+
+The original design (§2.6, §2.7) relied on two claims to keep a replaced-but-still-alive allocator from corrupting the CDV's allocator area:
+
+1. A server-side `nvmeibt_raft_is_raft_valid()` gate on `handle_cdv_alloc_extent`.
+2. Client-side generation fencing that discards stale allocator responses.
+
+Neither prevents the actual write. The RAFT-majority gate only fires when *this* TOMA is in a minority partition; a normally-running ex-allocator that was replaced by topology change is still in the RAFT majority and its local `alloc->allocator_toma_id`/`allocator_generation` cache remains unchanged until it is either restarted or receives a `CDV_ALLOCATOR_NOTIFY`, which §2.6 explicitly sends **only to the new allocator**. In that window a stale allocator will continue accepting `CDV_ALLOC_EXTENT` requests, pick a "free" extent index from its own in-memory state, and issue `cdv_async_write_record` / `cdv_async_write_header` to `[0, A)` — concurrently with the new allocator doing the same. Both writes can succeed, both clients see success responses, and the on-disk allocator state is corrupted (two TPVs assigned the same extent index, oscillating header generations, or cross-TPV data exposure once the duplicated extent is written).
+
+Client-side generation fencing only discards stale **responses** on the client; it does not stop the old allocator's disk I/O. There is no mechanism in NVMesh today that fences the CDV itself against writes from a node that has been logically replaced.
+
+### 1.5.2 How NVMesh Actually Enforces Exclusivity — Preemption
+
+NVMesh enforces `EXCLUSIVE_READ_WRITE` via per-volume **preemption**, not via target-side identity or MR fencing:
+
+- Management owns a monotonic `reservation.version` per volume (`modules/client.js` `getTransitionQuery`).
+- On a reservation change, management publishes `ReservationModeChange` (Kafka, `ManagementToTOMA.reservationModeChange`, `modules/client.js:1510` `sendReservationModeChangeMessageToAllTargets`) carrying the new version to every TOMA serving the volume.
+- TOMA stores the new version in `active_reservation_mode_version` per segment (`toma/nvmeibt_seg_active.h:148`, `toma/nvmeibt_register.h:198`).
+- Every client I/O carries a `reservation_mode_version` (`toma/clnt/nvmeibt_client_protocol.h:389`). On each request TOMA compares: **if TOMA's version is higher than the client's, the I/O is rejected at the target.**
+- Clients that remain valid are told the new version via a topology push and bump their local cache; preempted clients are not notified and continue to issue I/O at the old version, which the target then rejects.
+
+This is a real server-side admission check — not sender-trusted — keyed on a monotonic version rather than on identity. It is whole-volume in its scope.
+
+### 1.5.3 Options Considered
+
+**Option A — per-range exclusivity on the CDV.** Mark `[0, A)` of the CDV as reservation-fenced for the allocator TOMA while `[A, end)` stays shared-RW for TPV clients. Because `reservation_mode_version` is per-volume and not per-range or per-client-identity, implementing this would require one of: a per-offset-range reservation version in the target admission path, a per-client-identity reservation version, or a rule that the allocator TOMA may never also be a TPV client of the same CDV. All three are new, load-bearing extensions to the core exclusivity mechanism, touching the data-plane hot path.
+
+**Option B — satellite allocator volume.** Introduce a dedicated small volume whose only purpose is to hold what would otherwise live in `[0, A)` of the CDV. The satellite is held `EXCLUSIVE_READ_WRITE` by the current allocator TOMA. Re-election is a plain preempt on the satellite: management bumps `reservation.version`, the new allocator attaches at the new version, and the old allocator's writes are rejected at the target by the existing version check. TPV clients hold attachments to the CDV, which has an independent `reservation.version`, and are not affected.
+
+**Decision: Option B.** Option B uses the existing preemption mechanism at its native granularity (per-volume, whole-attachment) on a volume whose purpose matches exactly what the mechanism supports. Option A requires inventing a new dimension of reservation versioning inside the target I/O admission path and has no standalone benefit. The cost of Option B is management-layer coupling between two volumes and a placement constraint — ordinary work in well-covered code.
+
+### 1.5.4 Implementation Spec
+
+#### 1.5.4.1 Volume layout
+
+- Every CDV has a **satellite volume** named `<CDV>-mgmt`. It is `1 GiB` in size (matches today's default `allocatorSizeGB = 1`). Future sizing parity: if `allocatorSizeGB` becomes tunable, the satellite volume size tracks it one-for-one.
+- The CDV itself **no longer reserves `[0, A)` for the allocator**. The CDV's user-visible capacity equals its on-disk data capacity; the leading allocator-area region is gone from the CDV on-disk layout. All user-facing presentations of CDV size (UI, CLI, REST, mNDU, CSI) show the CDV capacity without any satellite overhead.
+- The satellite volume holds exactly what used to live in `[0, A)`: the 4 KB header and the `cdv_extent_md[]` array. Offset math in `nvmeibt_cdv_alloc.c` is relative to the satellite volume's offset 0 (not to the CDV's offset 0). Data extents now start at CDV offset `0`.
+
+#### 1.5.4.2 Naming and sizing constraints
+
+- **CDV name limit: 16 characters.** `<CDV>-mgmt` is therefore ≤ 21 characters, well within NVMesh's volume name limit. Enforced in the create-CDV path (REST validation + UI form validation).
+- `<CDV>-mgmt` is a reserved suffix; regular volume creation rejects names ending in `-mgmt`.
+
+#### 1.5.4.3 Lifecycle — atomic create / delete, CDV-only extend
+
+- **Create.** `POST /volumes/save` for a CDV allocates `capacity + 1 GiB` of raw disk capacity and writes **both** documents (`<CDV>` and `<CDV>-mgmt`) in a single Mongo operation. If either write fails the operation is rolled back before any Kafka traffic is emitted. No state is published to TOMA/clients until both volumes are durable.
+- **Delete.** Deleting a CDV deletes both volumes in one operation. Users cannot delete the satellite independently; the satellite has no delete affordance in UI or REST (see §1.5.4.5).
+- **Extend.** Volume-extend on a CDV extends **only** the CDV. The satellite size is fixed at creation (1 GiB covers ~44.7M extents — sufficient for any realistic CDV). This keeps the Mongo update path single-document.
+- **Resize-down / encryption / other mutations** on the CDV do not touch the satellite.
+
+This "allocate raw + write two docs + single rollback" discipline keeps the Mongo transactional surface the same as today's single-volume create path — which is important because NVMesh Mongo writes are not multi-document atomic.
+
+#### 1.5.4.4 Attach discipline — allocator-driven, not management-driven
+
+- **TOMAs no longer auto-attach CDVs.** The existing `cdvTomaAutoAttach` mechanism (Part 5) was motivated by the need to give TOMA write access to `[0, A)`. With the allocator area moved to the satellite, the CDV itself requires no TOMA attachment. The auto-attach module becomes allocator-volume-scoped (see below) and CDV attachment is driven solely by TPV client flows.
+- **Allocator-initiated attach.** When RAFT elects an allocator TOMA (§2.6 election), the elected TOMA sends a new Kafka message `TOMAToManagement.attachSatelliteRequest(cdvUUID, tomaHostname)` to management. Management responds by:
+  1. Bumping the satellite's `reservation.version` and publishing `ReservationModeChange` to all targets of the satellite with `reservationMode = EXCLUSIVE_READ_WRITE`.
+  2. Attaching the satellite to the requesting TOMA in `EXCLUSIVE_READ_WRITE` with `preempt = true`, `isDetachOthers = true`. This reuses the existing preempt path (`modules/client.js:3513-3539`) verbatim — the prior allocator, if any, is the "other" client being preempted.
+- **No REST attach.** `POST /clients/attachVolumes` rejects any attach to a `-mgmt` volume. The satellite is attachable only via the internal Kafka request above. The UI never surfaces an attach control for satellites.
+- **Detach on re-election.** When a new allocator is elected, the old allocator's satellite attachment is preempted by the new allocator's attach request (above). No explicit detach message is required — preemption is the mechanism.
+- **Detach on TOMA failure.** Standard stale-client cleanup (`removeAlreadyDetachedAttachments`) applies; the satellite follows the same rules as any other EXCLUSIVE_READ_WRITE volume.
+
+#### 1.5.4.5 UI presentation
+
+- The satellite appears in the **Volumes table as a child row beneath its CDV**, named `<CDV>-mgmt`. It shows the same status columns as any volume (health, attached targets, capacity).
+- **No selection checkbox** for satellite rows — bulk-delete cannot target it.
+- **No edit button** — the satellite is not editable.
+- No create flow exposes satellites; they only come into existence via CDV creation.
+- The Thin Provisioning page does not show satellites at all; they belong to the CDV and are a CDV implementation detail.
+
+#### 1.5.4.6 TOMA kernel changes
+
+- All code in `toma/nvmeibt_cdv_alloc.c` that currently reads/writes the CDV's `[0, A)` range (`cdv_async_write_record`, `cdv_async_write_header`, `cdv_ondisk_scan`, `cdv_ondisk_scan_async`) now operates on the satellite volume. Offsets become relative to the satellite: header at offset 0; `cdv_extent_md[i]` at offset `4096 + i * sizeof(cdv_extent_md)`.
+- The satellite's UUID is resolved at allocator-initialization time from the CDV's management metadata (delivered in the topology push for the CDV, which now also carries `allocator_volume_uuid`).
+- On-disk header layout is unchanged — it's just at a different physical location.
+
+#### 1.5.4.7 Client kernel changes
+
+- **None.** Clients attach the CDV exactly as today, at `SHARED_READ_WRITE`. TPVs continue to allocate CDV extents via `CDV_ALLOC_EXTENT` on the admin channel. Clients do not attach the satellite and are not aware of it.
+- Offset translation in `nvmeibc_tpv.c` changes by a constant: the first CDV data extent is now at CDV offset `0` instead of `A`. This is a single `A = 0` simplification in `tpv_cdv_offset_for_extent` and related helpers.
+
+#### 1.5.4.8 Correctness argument
+
+- The allocator area can only be written by a holder of the satellite's `EXCLUSIVE_READ_WRITE` reservation at the current `reservation.version`.
+- Re-election bumps the version via the standard preempt path. The old allocator's I/O carries the old version; the target rejects it per §1.5.2. No identity cache, no notification, and no cooperation from the old allocator is required.
+- The node-may-also-be-a-TPV-client concern dissolves: the TPV client attaches the CDV, which has an independent `reservation.version`. Preempting the satellite does not touch the CDV.
+- The RAFT-majority gate and the `CDV_ALLOCATOR_NOTIFY` monotonicity guard in §2.6 become defense-in-depth rather than the primary safety argument. §2.6 / §2.7 will be revised in a follow-up to reflect this.
+
+### 1.5.5 What This Supersedes
+
+- **§2.2 On-Disk Format:** The allocator area moves out of the CDV and into the satellite. The `allocatorSizeGB` CDV property is replaced by the fixed-1-GiB satellite size; `cdvConfig.allocatorSizeGB` becomes obsolete (retained in the schema only for pre-migration volumes, if any).
+- **§2.6 Election and Identity Propagation:** Election unchanged. Identity propagation simplifies: no need for `CDV_ALLOCATOR_NOTIFY` unicast; the attach-satellite Kafka request + preempt is the propagation mechanism. The on-disk header-generation monotonicity guard stays as belt-and-suspenders but is not safety-critical.
+- **§2.7 Split-Brain Protection:** Write-before-respond stays. The RAFT-majority gate (`nvmeibt_raft_is_raft_valid`) stays but is no longer load-bearing — the reservation-version check at the target is the authority.
+- **Part 5 CDV Auto-Attachment:** Becomes "Allocator Volume Attachment" and applies only to the satellite. The CDV is no longer auto-attached to TOMAs.
+
+---
+
 ## Part 2 — TOMA: CDV.allocator
 
 ### 2.1 Overview
@@ -769,16 +869,95 @@ In `toma/nvmeibt_recovery.c`:
 - After EC recovery completes, before IO gates open: call `cdv_allocator_cold_recovery(cdv_uuid)`.
 - Background scrubbing: skip unallocated extents by checking `free_bitmap[extent_idx]`.
 
-### 2.10 Bad-Path Fencing (Force Detach)
+### 2.10 TPV Preemption via CDV Preemption (CRITICAL GAP)
 
-When a new client needs to attach to a TPV whose `exclusiveClient` is non-responsive:
-1. Management sends `ForceDetachTPV` Kafka message to TOMA.
-2. TOMA instructs the target server to revoke all CDV segment registrations for the stale client.
-3. TOMA increments a per-TPV fencing cookie (a `u64 generation` field in a per-TPV cookie table in the CDV allocator header).
-4. Target stops accepting IO from stale client for CDV segments.
-5. Management clears `tpvConfig.exclusiveClient`.
-6. New client attaches; receives the current fencing cookie in the MCS attach message.
-7. Client presents this cookie in CDV\_extent allocation requests; TOMA validates.
+#### 2.10.1 The actual problem
+
+A TPV is a virtual volume with no storage of its own. All TPV data writes land on the underlying **CDV**. Consequently, fencing a TPV from a misbehaving client at the TPV layer would be ineffective: the client can no longer be told "stop writing to TPV X" in any meaningful way — it can only be told "stop writing to the CDV." Any force-detach of a TPV from a client must therefore translate into a **preemption of that client's CDV attachment**, using the standard NVMesh preemption mechanism described in §1.5.2.
+
+The earlier version of this section proposed a bespoke "per-TPV fencing cookie" stored in the CDV allocator header and validated by TOMA on every ALLOC request. That design fenced the *allocation control path* but not the *data path* — the stale client could still issue RDMA writes to CDV extents it had already mapped in its TPV extent_map, because those writes go directly from client to CDV segments, not through TOMA. The design is therefore replaced.
+
+#### 2.10.2 Intended flow
+
+When a TPV's exclusive holder becomes non-responsive and must be displaced:
+
+1. Management detects the need to preempt (new attach request with `preempt=true`, or stale-client cleanup, or involuntary detach — same paths as today).
+2. Management **preempts the stale client's CDV attachment**, not the TPV attachment: bumps `cdv.reservation.version`, publishes `ReservationModeChange` to every TOMA serving the CDV, and pushes the new version to every non-preempted client attached to the CDV via the existing topology mechanism.
+3. The stale client's subsequent CDV RDMA writes carry the old version and are rejected at the target per §1.5.2. The client eventually observes I/O errors, marks the CDV `NCBD_PREEMPTED`, and stops issuing I/O.
+4. Management clears `tpvConfig.exclusiveClient`, removes the `tpv:<tpvUUID>` reference on the stale client's CDV attachment, and (if no other `tpv:*` references remain) removes the CDV attachment record — exactly as today.
+5. The new client then attaches the TPV and the CDV cleanly.
+
+This reuses the preemption mechanism at its native granularity and closes the data-path fencing hole the cookie design would have left open.
+
+#### 2.10.3 Critical gap — per-client CDV preemption on a SHARED_READ_WRITE volume
+
+The CDV is attached `SHARED_READ_WRITE` by potentially many TPV clients. We need to preempt *one* of them (the stale holder of some TPV) while leaving the others untouched. **Today's mechanism does not support this.** Code investigation (`nvmesh-management/modules/client.js:1510, 1955, 2905-2951, 3513-3539`, `toma/nvmeibt_seg_active.h:148`, `toma/nvmeibt_register.c:1015-1031, 2552`, `clnt/nvmeibc_block.c:1079-1091`) found:
+
+- `reservation.version` is bumped volume-wide.
+- Target-side `active_reservation_mode_version` is per-segment, with **zero per-client context** in the I/O admission comparison. A version bump that reaches the target rejects every client whose register is still at the old version, not just the intended one.
+- `ReservationModeChange` Kafka messages are only sent on transitions to `NONE`, not during preempt. The current preempt-on-exclusive safety comes from the new attacher's **register** request carrying the new version, bumping `highest_reservation_mode_version` at the target — a flow that has no analogue when no new attach is happening.
+- Preempted clients receive status `'P'` on the next I/O response, enter `NCBD_PREEMPTED`, stop issuing I/O, and wait for management-driven `DetachVolumes` to recover. No auto-reattach.
+- No existing test exercises "preempt one SHARED client, keep another SHARED client alive" on the same volume.
+
+Three candidate designs for closing this gap. **This list is not exhaustive; better options should be explored before implementation commits.** Each has open questions that need answers in its own right.
+
+##### Option P1 — Management-layer only, with survivor auto-reattach
+
+Lift the current restriction that `ReservationModeChange` is only sent on transitions to NONE: emit it during preempt too. On TPV force-detach:
+
+1. Management bumps the CDV's `reservation.version` and publishes `ReservationModeChange` to every TOMA of the CDV.
+2. Management removes the stale client's `(client, CDV)` attachment from Mongo (strips all `tpv:*` references, detaches CDV).
+3. Targets raise `highest_reservation_mode_version`. Every stale-version register becomes non-registrable; in-flight I/O from anyone at the old version gets `'P'`.
+4. Survivor clients go through `NCBD_PREEMPTED` transiently and auto-reattach at the new version. This path does not exist today and must be built: on `'P'`, a survivor consults management ("am I still a valid attachment?") and, if yes, detaches and re-attaches the CDV + TPVs without operator intervention.
+
+*Pros:* Minimal target-side surgery. Reuses the existing `'P'` path. Keeps the reservation-version contract intact.
+
+*Cons:* Every preempt causes a transient I/O stall for *all* survivor clients on the CDV. Survivor auto-reattach is a new client-kernel code path with its own correctness concerns (idempotency, fencing, dirty state). Bounded but non-zero user-visible impact on every force-detach event.
+
+*Open questions:* Can the auto-reattach re-establish TPV state without a user-visible I/O error? How long does the stall last under load? Does anything in the block layer break when `NCBD_PREEMPTED` is used as a transient state rather than a terminal one?
+
+##### Option P2 — Per-client register version at the target
+
+Extend `active_registrant` with a per-registrant `registrant_reservation_version`, and change the I/O-admission comparison to reject a registrant only if its own recorded version is below a per-registrant threshold that management can raise selectively. Preempting one client then means: bump the threshold for that registrant only; leave all others alone.
+
+*Pros:* No stall on survivor clients. Clean model — per-client preemption becomes a first-class primitive and is useful beyond thin provisioning.
+
+*Cons:* Real target-side change in the I/O hot path. New state in `active_registrants_hash`. New message type from management to target ("raise registrant X's threshold"). Ripples into mNDU compatibility, simulator coverage, recovery paths, and every place that reads `active_reservation_mode_version` today.
+
+*Open questions:* Where exactly in the I/O admission path does this predicate live? Is the per-registrant threshold durable (RAFT-replicated) or soft? What happens on TOMA failover?
+
+##### Option P3 — Direct client-revoke message
+
+Bypass the reservation-version machinery entirely for this case. Add a new Kafka message `RevokeClientFromVolume(clientID, volumeUUID)` to TOMA. Handler removes that specific entry from the volume's `active_registrants`, so subsequent I/O from that client (or that client's re-register) is refused until management re-admits.
+
+*Pros:* Narrow surgical change. Reservation versions and their invariants remain untouched. No survivor stall. Composable with future work.
+
+*Cons:* Introduces a second admission concept parallel to reservation versions — two mechanisms doing overlapping jobs. Subtle interactions with normal detach/reattach and with stale-client cleanup (`removeAlreadyDetachedAttachments`) need to be worked out so that a revoked client cannot silently re-attach through a different code path. Requires the target to know how to surface a revocation to the affected client (probably via existing `'P'`-style response or a new status code).
+
+*Open questions:* How does the revoked client learn it was revoked in a way distinguishable from a general I/O error? Is `active_registrants` the right level, or should revocation live at a higher level so it survives re-register storms?
+
+##### Summary
+
+| | Target-side change | Survivor impact | Novelty in admission path |
+|---|---|---|---|
+| P1 | none | transient stall + auto-reattach | new client-kernel path, not target |
+| P2 | significant (per-registrant state + predicate) | none | new first-class primitive |
+| P3 | moderate (new message, new removal path) | none | parallel admission concept |
+
+**Before committing to any of P1/P2/P3, we should explicitly look for better options.** Possibilities worth investigating include: leveraging MCS re-attach semantics already present in the NDU/hot-upgrade code paths (Part 11) to preempt without a `'P'` transition; per-attachment rather than per-registrant version tracking if `active_registrants_hash` already carries enough to do so cheaply; or an entirely management-layer approach that simply treats a force-detached TPV's CDV references as stale and lets the normal stale-client cleanup path do the work (if the cleanup path can be made authoritative on its own).
+
+**Until this gap is closed, the design has a known correctness hole:** a stale TPV client that ignores `DetachVolumes` can continue issuing RDMA writes to CDV extents it has already mapped, with no mechanism in place to stop it at the target. The satellite-volume work (§1.5) closes the allocator-side stale-writer hole; this section closes the client-side one. Both are required for the thin-provisioning feature to be correct under adversarial or buggy-client conditions.
+
+#### 2.10.4 Superseded
+
+The following are no longer part of the design:
+
+- Per-TPV fencing cookie table in the CDV allocator header.
+- `ForceDetachTPV` Kafka message as a distinct mechanism.
+- TOMA-side revocation of CDV segment registrations for a stale client.
+- Client-side cookie presentation in `CDV_ALLOC_EXTENT` requests.
+
+All of these are replaced by the single "preempt the CDV from the stale client" flow above.
 
 ### 2.11 NVCK Support
 
