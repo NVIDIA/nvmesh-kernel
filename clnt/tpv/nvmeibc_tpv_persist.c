@@ -40,6 +40,7 @@
 #include "common/kr_incs.h"
 #include "nvmeibc_tpv.h"
 #include "clnt/nvmeibc_block.h"		/* KERNEL_SECTOR_SHIFT */
+#include "clnt/nvmeibc_volume.h"	/* struct nvmeibc_volume, cdv_allocator_toma_id */
 
 /* ── Forward declarations for synchronous CDV IO ───────────────────────── */
 
