@@ -14,9 +14,10 @@
  *   nvmeibc_ib_admin_cdv_list_extents()  — list CDV_extents owned by a TPV
  *
  * Send path:
- *   Finds the CDV volume's first active disk segment, builds a
- *   nvmeibt_client_msg with the CDV request as thick.data[], and sends via
- *   icore_ops->toma_send().
+ *   Finds the CDV disk segment whose TOMA hostname matches the elected
+ *   allocator toma_id (falls back to first active segment if none match),
+ *   builds a nvmeibt_client_msg with the CDV request as thick.data[], and
+ *   sends via icore_ops->toma_send().
  *
  * Receive path (ALLOC and LIST only):
  *   The TOMA response arrives in nvmeibc_topology.c's message dispatch, which
@@ -96,17 +97,25 @@ static atomic64_t nvmeibc_tpv_req_id_counter = ATOMIC64_INIT(0);
 
 /* ── Segment lookup ──────────────────────────────────────────────────────
  *
- * Find the CDV volume's first active disk segment with a valid TOMA
- * registration.  CDV is JBOD: single chunk, single RAID-1, one or two
- * segments.  We take the head topology and walk chunks[0].raid1s[0].
+ * Find the CDV volume's active disk segment for the elected allocator TOMA.
+ * CDV is JBOD: single chunk, single RAID-1, one or two segments.
+ *
+ * When toma_id is non-empty, prefer a segment whose disk hostname matches.
+ * This ensures CDV_ALLOC_EXTENT/FREE/LIST go to the elected allocator TOMA
+ * rather than whichever segment happens to be first — on a RAID-1 CDV the
+ * two segments live on different TOMA nodes, and routing to the wrong one
+ * causes the not-allocator Path 4 WRONG_GEN loop.
+ *
+ * Falls back to the first active segment if none match toma_id (e.g. during
+ * initial attach before the topology push has arrived).
  */
-static struct nvmeibc_disk_segment *cdv_find_active_segment(
-	struct nvmeibc_volume *cdv)
+static struct nvmeibc_disk_segment *cdv_find_segment_for_toma(
+	struct nvmeibc_volume *cdv, const char *toma_id)
 {
 	struct nvmeibc_block_device *bdev;
 	struct nvmeibc_topologies *nt;
 	struct nvmeibc_topology *t;
-	struct nvmeibc_disk_segment *seg;
+	struct nvmeibc_disk_segment *seg, *fallback = NULL;
 	int si;
 
 	if (!cdv || !cdv->block_dev)
@@ -123,12 +132,24 @@ static struct nvmeibc_disk_segment *cdv_find_active_segment(
 		return NULL;
 
 	raid1_for_each_seg(&t->chunks[0].raid1s[0], seg, si) {
-		if (is_seg_active(*seg) && seg->toma_reg &&
-		    is_toma_reg_valid(seg->toma_reg))
-			return seg;
+		if (!is_seg_active(*seg) || !seg->toma_reg ||
+		    !is_toma_reg_valid(seg->toma_reg))
+			continue;
+		if (!fallback)
+			fallback = seg;
+		if (toma_id && toma_id[0] && seg->disk) {
+			const char *host = seg->disk->ops.get_host_name(seg->disk);
+
+			if (host && strncmp(host, toma_id, NVMEIB_HOST_NAME_LEN) == 0)
+				return seg;
+		}
 	}
 
-	return NULL;
+	if (fallback && toma_id && toma_id[0])
+		_NW(cdv_seg_toma_mismatch,
+		    "CDV: no segment for elected allocator toma=@STR; using fallback",
+		    toma_id);
+	return fallback;
 }
 
 /* ── TOMA send with CDV payload ──────────────────────────────────────────
@@ -276,7 +297,7 @@ int nvmeibc_ib_admin_cdv_alloc_extent(
 	if (unlikely(nvmeibc_tpv_test_cdv_alloc_fn))
 		return nvmeibc_tpv_test_cdv_alloc_fn(cdv, toma_id, req, resp);
 
-	seg = cdv_find_active_segment(cdv);
+	seg = cdv_find_segment_for_toma(cdv, toma_id);
 	if (!seg) {
 		_NE(cdv_alloc_no_seg,
 		    "CDV: ALLOC no active segment for CDV uuid=@STR",
@@ -361,7 +382,7 @@ int nvmeibc_ib_admin_cdv_free_extent(
 	if (unlikely(nvmeibc_tpv_test_cdv_free_fn))
 		return nvmeibc_tpv_test_cdv_free_fn(cdv, toma_id, req);
 
-	seg = cdv_find_active_segment(cdv);
+	seg = cdv_find_segment_for_toma(cdv, toma_id);
 	if (!seg) {
 		_NE(cdv_free_no_seg,
 		    "CDV: FREE no active segment for CDV uuid=@STR",
@@ -408,7 +429,7 @@ int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 		return nvmeibc_tpv_test_cdv_list_fn(cdv, toma_id, tpv_uuid,
 						    out_indices, out_count);
 
-	seg = cdv_find_active_segment(cdv);
+	seg = cdv_find_segment_for_toma(cdv, toma_id);
 	if (!seg)
 		return -ENODEV;
 
