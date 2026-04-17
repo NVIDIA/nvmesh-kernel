@@ -129,6 +129,32 @@ struct cdv_alloc_ondisk_record {
 /* Maximum hostname length — must match NVMEIB_HOST_NAME_LEN (64) on the client side. */
 #define NVMEIBT_CDV_HOSTNAME_LEN  64
 
+/*
+ * Allocator state machine on the elected TOMA.  See SatelliteVolumeForCDVAlloc.md
+ * §3.2 for the full election handoff protocol.
+ *
+ *   NOT_ALLOCATOR
+ *      │ RAFT-leader picks this TOMA as allocator (handle_notify())
+ *      ▼
+ *   AWAITING_SATELLITE_ATTACH
+ *      │ Stage A: AttachSatelliteRequest enqueued to management
+ *      │ Stage B: AttachSatelliteResponse(OK) received, satellite opened, scan run
+ *      ▼
+ *   ACTIVE
+ *      │ Reservation preempt observed on the satellite (next allocator elected)
+ *      ▼
+ *   NOT_ALLOCATOR
+ *
+ * In NOT_ALLOCATOR and AWAITING_SATELLITE_ATTACH states, ALLOC requests are
+ * answered with WRONG_GEN so the client retries until the topology push
+ * announces the new allocator generation.
+ */
+enum nvmeibt_cdv_alloc_state {
+	NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR = 0,
+	NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH,
+	NVMEIBT_CDV_ALLOC_STATE_ACTIVE,
+};
+
 struct nvmeibt_cdv_alloc {
 	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN]; /* hash key; must be first field */
 	uint64_t n_allocated;
@@ -144,11 +170,25 @@ struct nvmeibt_cdv_alloc {
 	bool     ondisk_loaded;		/* true after CDV allocator region has been scanned */
 	bool     scan_in_progress;	/* true while async scan WQ entry is in flight */
 	bool     scan_fresh_seen_once;	/* true after first scan returned "fresh" (no magic);
-					 * forces one retry to guard against CDV-not-yet-online
+					 * forces one retry to guard against satellite-not-yet-online
 					 * during simultaneous client+TOMA restart */
 	uint32_t scan_retry_delay_ms;	/* 0 on first attempt; 100 → 1000 backoff on failure
 					 * while this TOMA is the elected allocator and
 					 * ondisk_loaded is still false */
+	/*
+	 * Allocator state machine and satellite-volume binding.  When this TOMA is
+	 * the elected allocator (state != NOT_ALLOCATOR), the allocator metadata
+	 * (header + cdv_extent_md[] records) lives on the satellite volume named
+	 * '<cdv-name>-mgmt', NOT on the CDV itself.  The satellite is exclusively
+	 * attached to this TOMA via the management Kafka path; see Phase 2 of
+	 * SatelliteVolumeForCDVAlloc.md.
+	 */
+	enum nvmeibt_cdv_alloc_state state;
+	char     satellite_uuid[NVMEIBT_CDV_UUID_STRLEN]; /* satellite volume's UUID */
+	char     satellite_dev_path[80]; /* /dev/nvmesh/<cdvName>-mgmt */
+	int      satellite_fd;		/* cached fd; opened/used ONLY from io_wq worker thread */
+	uint64_t satellite_attach_request_id; /* idempotency key for the in-flight request */
+	uint64_t satellite_reservation_version; /* from AttachSatelliteResponse, for fencing */
 	/*
 	 * CDV geometry — cached on first free_all_for_tpv call and on scan.
 	 * Needed by the background zero worker to compute per-extent byte offsets
@@ -157,9 +197,16 @@ struct nvmeibt_cdv_alloc {
 	uint32_t allocator_size_gb;	/* size of on-CDV allocator region in GiB */
 	uint32_t cdv_extent_size_mb;	/* size of each data CDV extent in MiB */
 	uint64_t n_pending_zeroing;	/* extents with needs_zeroing=true (not yet re-usable) */
-	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread */
+	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread.
+					 * Currently still used by cdv_zero_execute (data-extent
+					 * zeroing on free) — that path requires the CDV itself to
+					 * be attached to this TOMA, which is no longer the
+					 * default after the satellite-volume migration.
+					 * If cdv_extent_zero_on_free is enabled, the operator
+					 * must arrange for the CDV to be attached here too. */
 	char     dev_path[80];		/* /dev/nvmesh/<name>; resolved on main thread */
-	struct nvmeibt_wq *io_wq;	/* per-CDV I/O work queue (scan + writes) */
+	struct nvmeibt_wq *io_wq;	/* per-satellite I/O work queue (scan + writes); lifetime tied
+					 * to this TOMA's allocator role on the CDV */
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
 };
 
@@ -338,10 +385,40 @@ void nvmeibt_cdv_alloc_send_notify_to_elected(const char *cdv_uuid,
 /*
  * nvmeibt_cdv_alloc_handle_notify — receiver: called from the RAFT dispatch
  * on RAFT_MSG_CDV_ALLOC_NOTIFY.  Applies the monotonicity guard, updates the
- * local alloc entry, schedules the on-disk scan, persists the identity to the
- * CDV header, and pushes CDV_ALLOCATOR_UPDATE to local registrants.
+ * local alloc entry, and starts the satellite-volume attach handshake (Stage A):
+ * transitions the state machine to AWAITING_SATELLITE_ATTACH and enqueues an
+ * AttachSatelliteRequest Kafka message to management.  The on-disk scan and
+ * push-to-registrants happen later in Stage B (handle_satellite_attach_response)
+ * once management replies that the satellite is exclusively attached to us.
  */
 void nvmeibt_cdv_alloc_handle_notify(const struct nvmeibt_cdv_alloc_notify_payload *payload);
+
+/*
+ * nvmeibt_cdv_alloc_handle_satellite_attach_response — Stage B handler.
+ *
+ * Called from the Kafka dispatch on attachSatelliteResponse (management → TOMA).
+ * On status OK with a matching cdv_uuid + request_id: opens the satellite
+ * volume's block device, dispatches the on-disk scan, and on scan completion
+ * promotes the state to ACTIVE and pushes CDV_ALLOCATOR_UPDATE to registrants.
+ *
+ * On non-OK status (STALE_GENERATION, CDV_NOT_FOUND, CDV_BEING_DELETED,
+ * INTERNAL_ERR): logs and either retries (transient) or tears down the local
+ * allocator entry (terminal).
+ *
+ * @cdv_uuid:                 parent CDV UUID (echoed from the request)
+ * @request_id:               idempotency key (echoed from the request)
+ * @status:                   "OK" / "STALE_GENERATION" / "CDV_NOT_FOUND" / etc.
+ * @satellite_uuid:           satellite volume UUID (only used on OK)
+ * @reservation_version:      satellite reservation version after preempt
+ * @allocator_generation:     echoed from the request
+ */
+void nvmeibt_cdv_alloc_handle_satellite_attach_response(
+	const char *cdv_uuid,
+	uint64_t    request_id,
+	const char *status,
+	const char *satellite_uuid,
+	uint64_t    reservation_version,
+	uint64_t    allocator_generation);
 
 /*
  * nvmeibt_cdv_alloc_push_all_to_new_registrant — unicast CDV_ALLOCATOR_UPDATE

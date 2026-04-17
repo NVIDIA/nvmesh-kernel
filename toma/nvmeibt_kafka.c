@@ -1190,6 +1190,20 @@ struct generic_CMD_params_ctx {
 			uint32_t						allocator_size_gb;
 			uint32_t						cdv_extent_size_mb;
 		} cdv_free_all;
+		/*
+		 * attachSatelliteResponse — management's reply to TOMA's
+		 * attachSatelliteRequest after the elected allocator has asked for the
+		 * satellite to be attached EXCLUSIVE_READ_WRITE (with preempt) to it.
+		 * See nvmesh-kernel/design/SatelliteVolumeForCDVAlloc.md Phase 2/3.
+		 */
+		struct attach_satellite_resp_t {
+			char							cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+			char							satellite_uuid[NVMEIBT_CDV_UUID_STRLEN];
+			char							status[32];	/* "OK" / "STALE_GENERATION" / etc. */
+			uint64_t						request_id;
+			uint64_t						reservation_version;
+			uint64_t						allocator_generation;
+		} attach_sat_resp;
 	};
 };
 
@@ -1386,6 +1400,19 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 				CMD_params->cdv_free_all.allocator_size_gb = (uint32_t)payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "cdvExtentSizeMB")) {
 				CMD_params->cdv_free_all.cdv_extent_size_mb = (uint32_t)payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "satelliteUUID")) {
+				/* attachSatelliteResponse — overlaps cdv_free_all.tpv_uuid in the union;
+				 * safe because the two message types are dispatched separately.        */
+				nvmeibt_strlcpy(CMD_params->attach_sat_resp.satellite_uuid, payload_kv->value->str, sizeof(CMD_params->attach_sat_resp.satellite_uuid));
+			} else if (!strcmp(payload_kv->key, "status")) {
+				nvmeibt_strlcpy(CMD_params->attach_sat_resp.status, payload_kv->value->str, sizeof(CMD_params->attach_sat_resp.status));
+			} else if (!strcmp(payload_kv->key, "requestId")) {
+				/* JS sends requestId as a string to keep 64-bit precision; parse it back.
+				 * The reservation version for attach_sat_resp comes via the top-level
+				 * "reservationVersion" key (already parsed into CMD_params->reservationVersion). */
+				CMD_params->attach_sat_resp.request_id = (uint64_t)strtoull(payload_kv->value->str, NULL, 10);
+			} else if (!strcmp(payload_kv->key, "allocatorGeneration")) {
+				CMD_params->attach_sat_resp.allocator_generation = (uint64_t)payload_kv->value->num;
 			} else {
 				N_Tf(__AUTOID__, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
@@ -2747,6 +2774,26 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 			nvmeibt_cdv_alloc_free_all_for_tpv(cfa->cdv_uuid, cfa->tpv_uuid,
 							   cfa->allocator_size_gb,
 							   cfa->cdv_extent_size_mb);
+		}
+	} else if (strcmp(messageType_params->messageType, "attachSatelliteResponse") == 0) {
+		const struct attach_satellite_resp_t *asr = &CMD_params->attach_sat_resp;
+
+		N_If(cdv_sat_attach_resp_cmd,
+		     "CDV: attachSatelliteResponse cdv=@STR sat=@STR status=@STR reqId=@LLU resv=@LLU gen=@LLU",
+		     asr->cdv_uuid, asr->satellite_uuid, asr->status,
+		     asr->request_id, CMD_params->reservationVersion, asr->allocator_generation);
+
+		if (asr->cdv_uuid[0] == '\0' || asr->status[0] == '\0') {
+			N_Ef(cdv_sat_attach_resp_bad,
+			     "CDV: attachSatelliteResponse missing cdv_uuid or status; ignoring");
+		} else {
+			nvmeibt_cdv_alloc_handle_satellite_attach_response(
+				asr->cdv_uuid,
+				asr->request_id,
+				asr->status,
+				asr->satellite_uuid,
+				CMD_params->reservationVersion,
+				asr->allocator_generation);
 		}
 	} else if (strcmp(messageType_params->messageType, "--- shutdown_me ---") == 0) {
 		N_Ef(p53ksmnz753bh, "******************** Use handle_update_state_shutdown() in the commands consumer");

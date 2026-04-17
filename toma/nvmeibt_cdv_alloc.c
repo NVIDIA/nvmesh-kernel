@@ -67,36 +67,71 @@ int64_t nvmeibt_cdv_extent_zero_on_free = CDV_EXTENT_ZERO_ON_FREE_DEFAULT;
 #define CDV_DEV_PATH_PREFIX	"/dev/nvmesh/"
 
 /*
- * cdv_ensure_io_wq — ensure the per-CDV I/O work queue exists.
+ * cdv_ensure_io_wq — ensure the per-allocator I/O work queue exists and the
+ * satellite (or, in legacy mode, CDV) device path is resolved.
  *
- * Resolves the CDV UUID to /dev/nvmesh/<name> via the bdev hash (main thread
- * only), creates the per-CDV WQ if it does not exist yet.  Called from the
- * main thread before dispatching any I/O for this CDV.
+ * After Phase 3, the allocator metadata lives on the satellite volume named
+ * '<cdvName>-mgmt'.  When alloc->satellite_uuid is set (i.e., management has
+ * confirmed the satellite is attached to us via Phase 2), this resolves the
+ * satellite block device path and the I/O WQ does its work against it.
  *
- * Returns 0 on success.  Returns -ENOENT if the bdev is not available yet
- * (CDV not attached to this node), -ENOMEM on allocation failure.
+ * In legacy/transitional mode (satellite_uuid empty), falls back to resolving
+ * the CDV itself.  This keeps the function compatible with the (now-rare)
+ * case where the satellite has not yet been attached but the allocator already
+ * has the CDV available.  The legacy path will go away when all callers
+ * gate I/O on state == ACTIVE.
+ *
+ * Main-thread only.
+ *
+ * Returns 0 on success.  Returns -ENOENT if neither bdev is available yet,
+ * -ENOMEM on allocation failure.
  */
 static int cdv_ensure_io_wq(const char *cdv_uuid,
 			     struct nvmeibt_cdv_alloc *alloc)
 {
+	/* Resolve satellite path lazily once we know its UUID. */
+	if (alloc->satellite_uuid[0] && !alloc->satellite_dev_path[0]) {
+		union nvmeib_uuid sat_uuid;
+		struct nvmeibt_block_device *bdev;
+
+		if (nvmeibt_urn_uuid_str_to_union_uuid(&sat_uuid, alloc->satellite_uuid) >= 0) {
+			bdev = nvmeibt_block_device_get_block_device_by_id(&sat_uuid);
+			if (bdev) {
+				snprintf(alloc->satellite_dev_path, sizeof(alloc->satellite_dev_path),
+					 "%s%s", CDV_DEV_PATH_PREFIX, bdev->from_config.client_blkdev_name);
+			}
+		}
+	}
+
 	if (alloc->io_wq)
 		return 0;   /* already set up */
 
-	/* Resolve CDV UUID → /dev/nvmesh/<name> on the main thread. */
+	/*
+	 * Legacy: resolve the CDV path too.  Used by cdv_zero_execute (data
+	 * extent zeroing on free), which still targets the CDV directly.
+	 * This requires the CDV to be attached to this TOMA — only true when
+	 * cdv_extent_zero_on_free has been enabled with the operator-arranged
+	 * CDV attach.  See struct nvmeibt_cdv_alloc::cdv_fd doc comment.
+	 */
 	if (!alloc->dev_path[0]) {
 		union nvmeib_uuid bdev_uuid;
 		struct nvmeibt_block_device *bdev;
 
-		if (nvmeibt_urn_uuid_str_to_union_uuid(&bdev_uuid, cdv_uuid) < 0)
-			return -EINVAL;
-
-		bdev = nvmeibt_block_device_get_block_device_by_id(&bdev_uuid);
-		if (!bdev || !bdev->from_config.is_cdv)
-			return -ENOENT;
-
-		snprintf(alloc->dev_path, sizeof(alloc->dev_path), "%s%s",
-			 CDV_DEV_PATH_PREFIX, bdev->from_config.client_blkdev_name);
+		if (nvmeibt_urn_uuid_str_to_union_uuid(&bdev_uuid, cdv_uuid) < 0) {
+			if (!alloc->satellite_dev_path[0])
+				return -EINVAL;
+		} else {
+			bdev = nvmeibt_block_device_get_block_device_by_id(&bdev_uuid);
+			if (bdev && bdev->from_config.is_cdv) {
+				snprintf(alloc->dev_path, sizeof(alloc->dev_path), "%s%s",
+					 CDV_DEV_PATH_PREFIX, bdev->from_config.client_blkdev_name);
+			}
+		}
 	}
+
+	/* We need at least one resolved path to proceed. */
+	if (!alloc->satellite_dev_path[0] && !alloc->dev_path[0])
+		return -ENOENT;
 
 	{
 		char wq_name[80];
@@ -111,22 +146,63 @@ static int cdv_ensure_io_wq(const char *cdv_uuid,
 	}
 
 	N_If(cdv_io_wq_created,
-	     "CDV-alloc: created I/O WQ for cdv=@STR path=@STR",
-	     cdv_uuid, alloc->dev_path);
+	     "CDV-alloc: created I/O WQ for cdv=@STR sat_path=@STR cdv_path=@STR",
+	     cdv_uuid,
+	     alloc->satellite_dev_path[0] ? alloc->satellite_dev_path : "(unresolved)",
+	     alloc->dev_path[0] ? alloc->dev_path : "(unresolved)");
 	return 0;
 }
 
 /*
- * cdv_worker_open_fd — open the CDV volume from the worker thread (lazy).
+ * cdv_worker_open_fd — open the allocator-metadata block device (satellite if
+ * bound, else legacy CDV) from the worker thread (lazy).
  *
- * Must ONLY be called from the io_wq worker thread.  Opens alloc->dev_path
- * and caches the fd in alloc->cdv_fd for reuse across WQ entries.
+ * Must ONLY be called from the io_wq worker thread.  Used by the header /
+ * record / scan I/O paths which target the allocator metadata region.  The
+ * satellite is preferred when its path is resolved (post-Stage-B); legacy
+ * CDV is only used during the transition / before satellite is bound.
+ *
+ * NOTE: cdv_zero_execute (data-extent zeroing on free) must NOT use this —
+ * it must open the CDV directly via cdv_worker_open_cdv_fd_for_zeroing()
+ * because zeroing targets data-extent offsets on the CDV, not the satellite.
+ *
  * Returns the fd (>= 0) on success, negative on failure.
  */
 static int cdv_worker_open_fd(struct nvmeibt_cdv_alloc *alloc)
 {
+	if (alloc->satellite_dev_path[0]) {
+		if (alloc->satellite_fd >= 0)
+			return alloc->satellite_fd;
+		alloc->satellite_fd = NNVMEIBT_OPEN_LOCAL_DISK_WRITE(cdv_wq_sat_open,
+								      alloc->satellite_dev_path);
+		return alloc->satellite_fd;
+	}
+
 	if (alloc->cdv_fd >= 0)
 		return alloc->cdv_fd;
+
+	alloc->cdv_fd = NNVMEIBT_OPEN_LOCAL_DISK_WRITE(cdv_wq_vol_open,
+							alloc->dev_path);
+	return alloc->cdv_fd;
+}
+
+/*
+ * cdv_worker_open_cdv_fd_for_zeroing — open the CDV block device specifically
+ * for cdv_zero_execute, which writes zeros to CDV data-extent offsets.
+ *
+ * Must ONLY be called from the io_wq worker thread.  Always targets the CDV
+ * (alloc->dev_path), never the satellite.  Returns negative if the CDV is not
+ * attached to this TOMA — which is the default state after the satellite
+ * migration; zero-on-free will fail gracefully in that case (the extent stays
+ * in NEEDS_ZEROING and is not reused).
+ */
+static int cdv_worker_open_cdv_fd_for_zeroing(struct nvmeibt_cdv_alloc *alloc)
+{
+	if (alloc->cdv_fd >= 0)
+		return alloc->cdv_fd;
+
+	if (!alloc->dev_path[0])
+		return -ENODEV;
 
 	alloc->cdv_fd = NNVMEIBT_OPEN_LOCAL_DISK_WRITE(cdv_wq_vol_open,
 							alloc->dev_path);
@@ -377,6 +453,21 @@ static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
  * Runs in TOMA's main thread after the worker completes.  All shared-state
  * mutations happen here (hash lookups, add_extent, flag updates).
  */
+/* Close whichever fd was used by the worker (satellite first; legacy CDV).
+ * Used by the scan-retry paths to force a fresh open on the next attempt
+ * (the device may have come online since the previous open). */
+static void cdv_close_worker_fds(struct nvmeibt_cdv_alloc *alloc)
+{
+	if (alloc->satellite_fd >= 0) {
+		NNVMEIBT_CLOSE(cdv_close_worker_sat, alloc->satellite_fd);
+		alloc->satellite_fd = -1;
+	}
+	if (alloc->cdv_fd >= 0) {
+		NNVMEIBT_CLOSE(cdv_close_worker_cdv, alloc->cdv_fd);
+		alloc->cdv_fd = -1;
+	}
+}
+
 static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct cdv_ondisk_scan_wq_entry *e =
@@ -414,10 +505,7 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 		 * trigger another scan attempt.  Do NOT accept as fresh: the
 		 * CDV may have existing data that would be lost.
 		 */
-		if (alloc->cdv_fd >= 0) {
-			NNVMEIBT_CLOSE(cdv_scan_fin_err_close, alloc->cdv_fd);
-			alloc->cdv_fd = -1;
-		}
+		cdv_close_worker_fds(alloc);
 		N_Wf(cdv_scan_fin_err,
 		     "CDV-alloc: scan finalize cdv=@STR worker failed rv=@INT; closed fd, will retry",
 		     e->cdv_uuid, e->rv);
@@ -441,13 +529,9 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 		 */
 		if (!alloc->scan_fresh_seen_once) {
 			alloc->scan_fresh_seen_once = true;
-			/* Close cached fd so the retry reopens the (hopefully now
-			 * online) NVMesh device with a fresh file descriptor.
-			 */
-			if (alloc->cdv_fd >= 0) {
-				NNVMEIBT_CLOSE(cdv_scan_fin_fresh_retry_close, alloc->cdv_fd);
-				alloc->cdv_fd = -1;
-			}
+			/* Close cached fds so the retry reopens the (hopefully now
+			 * online) NVMesh device with a fresh file descriptor. */
+			cdv_close_worker_fds(alloc);
 			N_Wf(cdv_scan_fin_fresh_retry,
 			     "CDV-alloc: scan finalize cdv=@STR scan says fresh (first attempt); "
 			     "will retry once to rule out CDV-not-yet-online race",
@@ -475,10 +559,7 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 	 * stale/zero data for the per-extent region.  Reject and retry.
 	 */
 	if (e->n_results == 0 && alloc->n_allocated > 0) {
-		if (alloc->cdv_fd >= 0) {
-			NNVMEIBT_CLOSE(cdv_scan_fin_zero_retry_close, alloc->cdv_fd);
-			alloc->cdv_fd = -1;
-		}
+		cdv_close_worker_fds(alloc);
 		N_Wf(cdv_scan_fin_zero_suspect,
 		     "CDV-alloc: scan finalize cdv=@STR scan found 0 extents on-disk but @LLU in-memory; "
 		     "CDV likely not fully online yet - will retry on next request",
@@ -531,6 +612,19 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 	alloc->ondisk_loaded = true;
 	alloc->scan_fresh_seen_once = false;  /* successful load; reset for future re-scans */
+
+	/*
+	 * Promote to ACTIVE if the scan succeeded while we were waiting for the
+	 * satellite to be open (Stage B of the satellite-attach handshake).  This
+	 * is what unblocks handle_cdv_alloc_extent from returning WRONG_GEN.
+	 */
+	if (alloc->state == NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH) {
+		alloc->state = NVMEIBT_CDV_ALLOC_STATE_ACTIVE;
+		N_If(cdv_alloc_state_active,
+		     "CDV-alloc: state→ACTIVE cdv=@STR gen=@LLU",
+		     e->cdv_uuid, alloc->allocator_generation);
+	}
+
 	N_If(cdv_scan_fin_done,
 	     "CDV-alloc: scan finalize cdv=@STR loaded @LLU extents",
 	     e->cdv_uuid, n_loaded);
@@ -871,8 +965,35 @@ static void cdv_zero_execute(struct nvmeibt_wq_entry *wq_entry)
 	uint64_t total = (uint64_t)e->extent_size_mb << 20;
 	int fd;
 
+	/*
+	 * DESIGN GAP — see ThinProvisioningImplementation.md §3.9 ("Design gap:
+	 * zero-on-free is non-functional after the satellite-volume migration").
+	 *
+	 * After the satellite-volume migration the CDV is no longer auto-attached
+	 * to the allocator TOMA, so cdv_worker_open_cdv_fd_for_zeroing() will
+	 * almost certainly return -ENODEV.  cdv_extent_zero_on_free is off by
+	 * default, so this path is normally not entered.  If it IS entered,
+	 * surface a single loud warning so operators can see the behaviour in
+	 * traces; the freed extent will remain in NEEDS_ZEROING state and is not
+	 * reused (capacity loss but no correctness issue).
+	 */
+	{
+		static bool warned_once_per_process = false;
+		if (!warned_once_per_process) {
+			warned_once_per_process = true;
+			N_Ef(cdv_zero_post_migration_warn,
+			     "CDV-zero: invoked but CDV is no longer auto-attached to TOMA "
+			     "after the satellite-volume migration; freed extents will stay "
+			     "in NEEDS_ZEROING and not be reused.  See ThinProvisioning §3.9.  "
+			     "First occurrence cdv=@STR idx=@LLU",
+			     e->cdv_uuid, e->extent_index);
+		}
+	}
+
 	e->rv = 0;
-	fd = cdv_worker_open_fd(e->alloc);
+	/* Zero-on-free targets CDV data-extent offsets — must use the CDV fd,
+	 * NOT the satellite fd.  See cdv_worker_open_cdv_fd_for_zeroing doc. */
+	fd = cdv_worker_open_cdv_fd_for_zeroing(e->alloc);
 	if (fd < 0) {
 		e->rv = -ENODEV;
 		goto done;
@@ -1201,7 +1322,9 @@ static int cdv_alloc_insert(const char *cdv_uuid,
 		}
 		strncpy(alloc->cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
 		alloc->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
-		alloc->cdv_fd = -1;
+		alloc->cdv_fd       = -1;
+		alloc->satellite_fd = -1;
+		alloc->state        = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
 		XDLIST_HEAD_INIT(&alloc->extents);
 		alloc->n_allocated = 0;
 		nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
@@ -1428,9 +1551,11 @@ void nvmeibt_cdv_alloc_remove(const char *cdv_uuid)
 		NNVMEIBT_BM_FREE(cdv_alloc_remove_entry, entry);
 	}
 
-	/* Close the cached CDV volume fd if open. */
+	/* Close the cached CDV and satellite fds if open. */
 	if (alloc->cdv_fd >= 0)
 		NNVMEIBT_CLOSE(cdv_alloc_remove_close, alloc->cdv_fd);
+	if (alloc->satellite_fd >= 0)
+		NNVMEIBT_CLOSE(cdv_alloc_remove_sat_close, alloc->satellite_fd);
 
 	nvmeib_hash_delete_ascii_str(cdv_alloc_hash, cdv_uuid);
 	NNVMEIBT_BM_FREE(cdv_alloc_remove_alloc, alloc);
@@ -1532,7 +1657,9 @@ static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
 	strncpy(alloc->cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
 	alloc->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
 	alloc->allocator_toma_id[0] = '\0';
-	alloc->cdv_fd = -1;
+	alloc->cdv_fd       = -1;
+	alloc->satellite_fd = -1;
+	alloc->state        = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
 	XDLIST_HEAD_INIT(&alloc->extents);
 	nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
 	return alloc;
@@ -1602,12 +1729,19 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 	alloc->allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
 	alloc->allocator_generation++;
 
-	/* Scan CDV to rebuild extent state (first election or allocator change). */
-	if (!alloc->ondisk_loaded)
-		cdv_ondisk_scan_async(cdv_uuid, alloc);
-
-	/* Write updated allocator identity to CDV header (async, best-effort). */
-	cdv_async_write_header(alloc);
+	/*
+	 * Post-satellite-migration: scan + header-write are NOT done here.
+	 *
+	 * Elect runs on the RAFT leader, which may or may not be the chosen
+	 * allocator.  If the leader is the chosen allocator, the local notify
+	 * dispatch (nvmeibt_cdv_alloc_send_notify_to_elected → handle_notify)
+	 * runs Stage A, which kicks off the satellite-attach handshake whose
+	 * Stage B does the real scan + header-write on the satellite.  If the
+	 * leader is not the chosen allocator, the unicast notify causes the
+	 * chosen TOMA to do the same.  Either way, scanning here would target
+	 * the CDV (which may no longer be attached to the leader) and would
+	 * fail noisily.  Leave the work to Stage B exclusively.
+	 */
 
 	return 1;   /* 1 = newly elected — caller should push CDV_ALLOCATOR_UPDATE */
 }
@@ -1757,6 +1891,57 @@ cdv_find_node_by_hostname(const char *hostname)
 	return NULL;
 }
 
+/*
+ * cdv_send_attach_satellite_request — Stage A of the satellite attach handshake.
+ *
+ * Publishes an `attachSatelliteRequest` Kafka message asking management to attach
+ * the CDV's satellite volume to this TOMA in EXCLUSIVE_READ_WRITE mode (with
+ * preempt+isDetachOthers).  Management replies with `attachSatelliteResponse`,
+ * which dispatches to nvmeibt_cdv_alloc_handle_satellite_attach_response (Stage B).
+ *
+ * Idempotent: the request_id stays stable across retries while in
+ * AWAITING_SATELLITE_ATTACH.  Caller bumps the request_id only when starting a
+ * new attach (e.g., on transition from NOT_ALLOCATOR).
+ */
+static void cdv_send_attach_satellite_request(struct nvmeibt_cdv_alloc *alloc)
+{
+	struct nvmeibt_Str *json;
+
+	json = NNVMEIBT_STR_ALLOC(cdv_sat_req_json_alloc);
+	if (!json) {
+		N_Ef(cdv_sat_req_oom,
+		     "CDV-alloc: attachSatelliteRequest OOM cdv=@STR", alloc->cdv_uuid);
+		return;
+	}
+
+	nvmeibt_Str_sprintf(json,
+		"{" KAFKA_PRODUCER_MSG_HEADER_FMT
+		"\"payload\": {\"cdvUUID\": \"%s\", "
+		"\"allocatorTomaHostname\": \"%s\", "
+		"\"allocatorGeneration\": %llu, "
+		"\"raftTerm\": %llu, "
+		"\"requestId\": \"%llu\"}}",
+		KAFKA_PRODUCER_MSG_HEADER_VAR("attachSatelliteRequest", 1),
+		alloc->cdv_uuid,
+		nvmeibt_get_my_hostname(),
+		alloc->allocator_generation,
+		nvmeibt_raft_get_current_term(),
+		alloc->satellite_attach_request_id);
+
+	N_If(cdv_sat_req_send,
+	     "CDV-alloc: attachSatelliteRequest cdv=@STR gen=@LLU reqId=@LLU",
+	     alloc->cdv_uuid, alloc->allocator_generation,
+	     alloc->satellite_attach_request_id);
+
+	nvmeibt_kafka_outgoing_msgs_queue_add(
+		alloc->cdv_uuid,
+		nvmeibt_Str_str(json),
+		nvmeibt_Str_strlen(json) + 1,
+		NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+
+	NNVMEIBT_STR_FREE(cdv_sat_req_json_free, json);
+}
+
 void nvmeibt_cdv_alloc_handle_notify(const struct nvmeibt_cdv_alloc_notify_payload *payload)
 {
 	struct nvmeibt_cdv_alloc *alloc;
@@ -1805,23 +1990,180 @@ void nvmeibt_cdv_alloc_handle_notify(const struct nvmeibt_cdv_alloc_notify_paylo
 	     cdv_uuid, toma_id, gen, (int)am_new_allocator);
 
 	/*
-	 * Only the newly-elected allocator does the scan / header write / push.
-	 * If this notify reached us but we are not named as allocator, we still
-	 * bumped the local generation so subsequent ALLOC requests to us are
-	 * rejected with WRONG_GEN — but we don't own the CDV, so that state is
-	 * harmless and will be overwritten by the next notify.
+	 * If we are NOT the newly-elected allocator: tear down our local
+	 * allocator-side state for this CDV.  The new allocator's
+	 * AttachSatelliteRequest will preempt our exclusive hold on the satellite
+	 * via management's reservation-version bump; subsequent satellite writes
+	 * from us would be rejected at the host TOMAs anyway.  Close our satellite
+	 * fd/WQ proactively so we stop trying.
 	 */
-	if (!am_new_allocator)
+	if (!am_new_allocator) {
+		alloc->state         = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
+		alloc->ondisk_loaded = false;
+		/* WQ must be drained before closing its fds — the worker thread
+		 * may still be holding references. */
+		if (alloc->io_wq) {
+			nvmeibt_wq_drain(alloc->io_wq);
+			nvmeibt_wq_destroy(alloc->io_wq);
+			alloc->io_wq = NULL;
+		}
+		cdv_close_worker_fds(alloc);
+		alloc->satellite_dev_path[0] = '\0';
+		alloc->satellite_uuid[0]     = '\0';
+		alloc->satellite_reservation_version = 0;
+		N_If(cdv_alloc_demoted,
+		     "CDV-alloc: demoted cdv=@STR (allocator is now @STR gen=@LLU)",
+		     cdv_uuid, toma_id, gen);
 		return;
+	}
 
-	/* Load extent state from the CDV on-disk header (backoff-retries). */
+	/*
+	 * We are the new allocator.  Begin Stage A: transition to
+	 * AWAITING_SATELLITE_ATTACH and ask management to attach the satellite
+	 * volume to us EXCLUSIVE_READ_WRITE (with preempt over any prior holder).
+	 *
+	 * The on-disk scan and push_to_registrants happen later in Stage B once
+	 * the AttachSatelliteResponse arrives and we have the satellite open.
+	 *
+	 * Allocate a fresh request_id derived from the new generation so retries
+	 * across this transition are idempotent on the management side.
+	 *
+	 * Tear down any satellite state left from a previous tenure as allocator
+	 * on this CDV so Stage B re-opens the satellite fresh.  The new attach
+	 * carries a bumped reservation version at the target; an fd opened before
+	 * that bump would continue to use the old MCS session / version.
+	 */
+	if (alloc->io_wq) {
+		nvmeibt_wq_drain(alloc->io_wq);
+		nvmeibt_wq_destroy(alloc->io_wq);
+		alloc->io_wq = NULL;
+	}
+	cdv_close_worker_fds(alloc);
+	alloc->satellite_dev_path[0] = '\0';
+	alloc->satellite_uuid[0]     = '\0';
+	alloc->satellite_reservation_version = 0;
+
+	alloc->state                       = NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH;
+	alloc->satellite_attach_request_id = gen;
+	alloc->ondisk_loaded               = false;
+
+	cdv_send_attach_satellite_request(alloc);
+}
+
+/*
+ * Stage B: invoked from the Kafka dispatch on attachSatelliteResponse.
+ *
+ * On OK: store the satellite UUID, build the satellite device path, kick off
+ * the scan WQ which (a) opens the satellite block device and (b) loads any
+ * previously-persisted allocator state.  Promote to ACTIVE on scan finalize.
+ *
+ * On non-OK: log + leave state as AWAITING_SATELLITE_ATTACH so retries
+ * (delivered as fresh AttachSatelliteRequest from cdv_alloc_retry_pending,
+ * not yet implemented) can proceed.  Terminal failures (CDV_NOT_FOUND,
+ * CDV_BEING_DELETED) tear down the allocator entry.
+ */
+void nvmeibt_cdv_alloc_handle_satellite_attach_response(
+	const char *cdv_uuid,
+	uint64_t    request_id,
+	const char *status,
+	const char *satellite_uuid,
+	uint64_t    reservation_version,
+	uint64_t    allocator_generation)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+
+	if (!cdv_uuid || !status) {
+		N_Ef(cdv_sat_resp_bad_args, "CDV-alloc: attachSatelliteResponse bad args");
+		return;
+	}
+
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (!alloc) {
+		N_Wf(cdv_sat_resp_no_alloc,
+		     "CDV-alloc: attachSatelliteResponse cdv=@STR has no local alloc entry; ignoring",
+		     cdv_uuid);
+		return;
+	}
+
+	/* Reject responses that do not match our in-flight request. */
+	if (alloc->state != NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH) {
+		N_Wf(cdv_sat_resp_bad_state,
+		     "CDV-alloc: attachSatelliteResponse cdv=@STR state=@INT not AWAITING; ignoring",
+		     cdv_uuid, (int)alloc->state);
+		return;
+	}
+	if (request_id != alloc->satellite_attach_request_id) {
+		N_Wf(cdv_sat_resp_stale_reqid,
+		     "CDV-alloc: attachSatelliteResponse cdv=@STR stale reqId=@LLU expected=@LLU; ignoring",
+		     cdv_uuid, request_id, alloc->satellite_attach_request_id);
+		return;
+	}
+	if (allocator_generation != alloc->allocator_generation) {
+		N_Wf(cdv_sat_resp_stale_gen,
+		     "CDV-alloc: attachSatelliteResponse cdv=@STR stale gen=@LLU expected=@LLU; ignoring",
+		     cdv_uuid, allocator_generation, alloc->allocator_generation);
+		return;
+	}
+
+	if (strcmp(status, "OK") != 0) {
+		N_Wf(cdv_sat_resp_not_ok,
+		     "CDV-alloc: attachSatelliteResponse cdv=@STR status=@STR; will retry on next notify",
+		     cdv_uuid, status);
+		/*
+		 * Terminal failures: drop our claim on this CDV.  Transient failures
+		 * (INTERNAL_ERR, etc.) leave us in AWAITING_SATELLITE_ATTACH; the
+		 * RAFT layer will redeliver a notify when the allocator is re-elected.
+		 */
+		if (!strcmp(status, "CDV_NOT_FOUND") || !strcmp(status, "CDV_BEING_DELETED"))
+			alloc->state = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
+		return;
+	}
+
+	/* OK path: bind the satellite to this allocator entry and start the scan. */
+	if (satellite_uuid && satellite_uuid[0]) {
+		strncpy(alloc->satellite_uuid, satellite_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+		alloc->satellite_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	}
+	alloc->satellite_reservation_version = reservation_version;
+
+	/*
+	 * Set up the per-CDV I/O WQ now (resolves satellite_dev_path from
+	 * satellite_uuid) so subsequent scan + header writes can dispatch.  If the
+	 * satellite block device is not yet visible to this TOMA (timing race —
+	 * the AddVolume Kafka message for the satellite may still be in flight),
+	 * leave state in AWAITING; the lazy retry on incoming ALLOC requests
+	 * (handle_cdv_alloc_extent state gate) will re-fire Stage A and we'll
+	 * land here again.
+	 */
+	if (cdv_ensure_io_wq(cdv_uuid, alloc) < 0) {
+		N_Wf(cdv_sat_resp_no_wq,
+		     "CDV-alloc: attachSatelliteResponse OK but satellite bdev not ready for cdv=@STR; will retry",
+		     cdv_uuid);
+		return;
+	}
+
+	/*
+	 * Scan the satellite to load any persisted allocator state.  The scan
+	 * worker opens alloc->satellite_dev_path lazily (see cdv_worker_open_fd).
+	 * On scan finalize the state is promoted to ACTIVE and the registrants
+	 * are notified — see cdv_scan_finalize / promote-on-load logic.
+	 */
 	if (!alloc->ondisk_loaded)
 		cdv_ondisk_scan_async(cdv_uuid, alloc);
 
-	/* Persist the new identity to the CDV on-disk header (durability). */
+	/* Persist the allocator identity to the satellite header (durability). */
 	cdv_async_write_header(alloc);
 
-	/* Deliver CDV_ALLOCATOR_UPDATE to all local registrants. */
+	/*
+	 * Until the scan finalizes we remain in AWAITING_SATELLITE_ATTACH so
+	 * incoming ALLOC requests are rejected with WRONG_GEN.  When ondisk_loaded
+	 * flips to true, handle_cdv_alloc_extent will see state == ACTIVE and
+	 * begin serving.  (Promotion is wired in the scan finalize path.)
+	 */
+	N_If(cdv_sat_resp_ok,
+	     "CDV-alloc: attachSatelliteResponse OK cdv=@STR sat=@STR resv=@LLU gen=@LLU",
+	     cdv_uuid, satellite_uuid ? satellite_uuid : "", reservation_version, allocator_generation);
+
 	nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
 }
 
@@ -2183,6 +2525,21 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	if (!alloc)
 		return -ENOMEM;
 
+	/*
+	 * Post-satellite-migration: only the elected allocator TOMA owns the
+	 * satellite write path.  Management's cdvAllocatorFreeAll Kafka message
+	 * is fan-out to all first-pRAID host TOMAs (legacy delivery pattern); on
+	 * non-allocator nodes there is no satellite open and the record/header
+	 * writes would fail.  Silently ignore on non-allocators so the elected
+	 * allocator (which receives the same Kafka) handles the work.
+	 */
+	if (alloc->state != NVMEIBT_CDV_ALLOC_STATE_ACTIVE) {
+		N_If(cdv_free_all_skip_not_alloc,
+		     "CDV-alloc: free_all_for_tpv cdv=@STR tpv=@STR state=@INT not ACTIVE; skipping (allocator handles it)",
+		     cdv_uuid, tpv_uuid, (int)alloc->state);
+		return 0;
+	}
+
 	/* Cache CDV geometry for use by the background zero worker. */
 	if (allocator_size_gb && !alloc->allocator_size_gb)
 		alloc->allocator_size_gb = allocator_size_gb;
@@ -2350,6 +2707,30 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	}
 
 	alloc       = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+
+	/*
+	 * Allocator-state gate: only serve ALLOC when we are in the ACTIVE state.
+	 * In NOT_ALLOCATOR we have no business serving (someone else holds the
+	 * role).  In AWAITING_SATELLITE_ATTACH the satellite is not yet open and
+	 * any record write would fail; reject so the client retries until the
+	 * satellite-attach handshake completes (handle_satellite_attach_response
+	 * promotes us to ACTIVE on scan finalize).
+	 *
+	 * Lazy retry: if we're stuck in AWAITING (response dropped or transient
+	 * failure), opportunistically re-fire Stage A on incoming ALLOC requests
+	 * so the handshake makes progress without needing a dedicated timer.
+	 * Idempotent on management's side via (cdvUUID, requestId).
+	 */
+	if (alloc && alloc->state != NVMEIBT_CDV_ALLOC_STATE_ACTIVE) {
+		N_Wf(cdv_alloc_state_not_active,
+		     "CDV-alloc: ALLOC cdv=@STR rejected: state=@INT not ACTIVE",
+		     cdv_uuid, (int)alloc->state);
+		if (alloc->state == NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH)
+			cdv_send_attach_satellite_request(alloc);
+		resp.status = NVMEIBT_CDV_ALLOC_WRONG_GEN;
+		resp.allocator_generation = alloc->allocator_generation;
+		goto send;
+	}
 
 	/* On-demand CDV scan: if we have an allocator entry but haven't yet
 	 * loaded the on-CDV extent records, dispatch an async scan and tell the
