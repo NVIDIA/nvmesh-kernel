@@ -3948,7 +3948,8 @@ Snapshot/clone and auto-create-CDV are explicitly out of scope.
 | `cdvName` | A | one of two | Exact CDV name (Phase A). |
 | `cdvNameRegex` | B | one of two | JavaScript-compatible regex matched against CDV `name` (Phase B). Mutually exclusive with `cdvName`. |
 | `tpvExtentSizeKB` | A | optional | Power-of-2, [64, 65536]. Default from driver config. Must satisfy `tpvExtentSizeKB ≤ parent.cdvExtentSizeMB × 1024`. |
-| `maxVirtualSizeGB` | A | optional | Hard ceiling for future `ControllerExpandVolume`. Default from driver config. |
+
+The TPV virtual-size ceiling is the parent CDV's `capacity` — enforced server-side in `modules/volume.js` (`createTPV`: "TPV capacity cannot exceed parent CDV capacity") and again on `/tpv/extend`. No driver-side cap.
 
 Access mode: `SINGLE_NODE_WRITER` only. The driver rejects `MULTI_NODE_*` with CSI `InvalidArgument` before hitting management, to match TPV's `exclusiveClient` semantics.
 
@@ -3987,9 +3988,9 @@ and get back the candidate CDVs already filtered and sorted server-side. Fields 
 | `driver/controller_service.py` | Branch on `volumeClass` in `CreateVolume`, `ControllerExpandVolume`, `DeleteVolume`. Pre-check `tpvConfig.exclusiveClient` in `ControllerPublishVolume`. |
 | `driver/topology_service.py` | Expose `zones_matching(topology_requirement)` helper reused by the pool selector. |
 | `driver/consts.py` | Add `VOLUME_CLASS_TPV/CDV/REGULAR`, extent-size bounds, parameter-name constants. |
-| `driver/config.py` | Add `TPV_DEFAULT_EXTENT_KB`, `TPV_DEFAULT_MAX_VIRTUAL_GB`. |
+| `driver/config.py` | Add `TPV_DEFAULT_EXTENT_KB`. |
 | `deploy/kubernetes/helm/.../templates/storageclass.yaml` | Add example TPV StorageClass (`volumeClass: TPV`, `cdvNameRegex: "^pool-"`). |
-| `test/integration/` | New cases: TPV create/attach/detach/extend/delete; pool with 0 matches → `ResourceExhausted`; access-mode rejection; expand past `maxVirtualSizeGB` → `OutOfRange`. |
+| `test/integration/` | New cases: TPV create/attach/detach/extend/delete; pool with 0 matches → `ResourceExhausted`; access-mode rejection; extend past CDV capacity → `FailedPrecondition`. |
 
 ### 14.5 Controller RPC Changes (detail)
 
@@ -4006,8 +4007,7 @@ if params.volumeClass == TPV:
     tpv = mgmt.create_tpv(name=req.name,
                           cdv_uuid=cdv._id,
                           virtual_size_gb=ceil_gib(req.capacity_range),
-                          tpv_extent_kb=params.tpvExtentSizeKB or cfg.default,
-                          max_virtual_gb=params.maxVirtualSizeGB or cfg.default)
+                          tpv_extent_kb=params.tpvExtentSizeKB or cfg.default)
     ctx = {"volumeClass": "TPV", "cdvUuid": cdv._id, "cdvName": cdv.name, ...}
     return Volume(..., accessible_topology=[{zone: cdv.zone}], volume_context=ctx)
 else:
@@ -4018,7 +4018,7 @@ else:
 
 **`ControllerUnpublishVolume`:** unchanged. Management's `detachTPV()` handles CDV ref-count decrement and conditional CDV detach.
 
-**`ControllerExpandVolume`:** branch to `POST /volumes/tpv/extend` for `volumeClass == TPV`. Virtual-only expansion; no physical provisioning. Reject with `OutOfRange` if `newSize > tpvConfig.maxVirtualSizeGB`.
+**`ControllerExpandVolume`:** branch to `POST /volumes/tpv/extend` for `volumeClass == TPV`. Virtual-only expansion; no physical provisioning. Management enforces the upper bound (TPV virtual size cannot exceed parent CDV capacity).
 
 **`DeleteVolume`:** branch to `POST /volumes/tpv/delete` for TPVs. Management enforces "must be detached"; the driver surfaces any resulting error as CSI `FailedPrecondition`.
 
@@ -4032,7 +4032,7 @@ The CSI driver cannot subscribe to the Kafka `CDVCapacityWarning` topic directly
 
 ### 14.8 Immutability and ModifyVolume
 
-`ControllerModifyVolume` (CSI 1.10+): accept only `description`. Every `tpvConfig` field except `maxVirtualSizeGB` (settable via `/volumes/tpv/update`) is immutable and must be rejected with `InvalidArgument`. `cdvConfig` is fully immutable.
+`ControllerModifyVolume` (CSI 1.10+): accept only `description`. Every `tpvConfig` field is immutable and must be rejected with `InvalidArgument`. `cdvConfig` is fully immutable.
 
 ### 14.9 Known Pitfalls
 
