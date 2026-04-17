@@ -140,6 +140,25 @@ static inline u64 persist_slot_of(const struct nvmeibc_tpv_allocator *a,
 	return (phys_offset - base) / persist_slot_bytes(a);
 }
 
+/*
+ * Decode a raw CDV byte offset into (1-based extent_index, slot-within-extent).
+ * Used to convert an in-memory phys_offset (returned by alloc_l2_slot, or
+ * stored in the extent_map) into the (extent_index, debug_meta) fields
+ * written to an L1 entry.
+ */
+static inline void persist_decode_phys(const struct nvmeibc_tpv_allocator *a,
+				       u64 phys_offset,
+				       u64 *extent_index_out,
+				       u64 *slot_out)
+{
+	u64 E   = persist_extent_bytes(a);
+	u64 T   = persist_slot_bytes(a);
+	u64 off = phys_offset - persist_alloc_bytes(a);
+
+	*extent_index_out = (off / E) + 1;
+	*slot_out         = (off % E) / T;
+}
+
 /* ── nvmeibc_tpv_flush_state ───────────────────────────────────────────── */
 
 /*
@@ -156,13 +175,57 @@ static inline u64 persist_slot_of(const struct nvmeibc_tpv_allocator *a,
  * Called from persist_work (work context, may sleep) or synchronously
  * at detach.
  */
+/*
+ * Resolve the CDV byte offset of the L2 table backing L1 index @l1_idx,
+ * allocating a new L2 slot from the free pool if none exists yet.  Updates
+ * l1_to_l2_phys and n_l2_tables_used on first allocation.
+ *
+ * Returns 0 on success (*phys_out set), -EAGAIN when the free pool is
+ * empty, -ENOMEM if the xa_store fails.
+ */
+static int persist_get_or_alloc_l2_phys(struct nvmeibc_tpv *tpv,
+					u64 l1_idx, u64 *phys_out)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	void *slot_p;
+	u64 phys;
+	int rv;
+
+	slot_p = xa_load(&alloc->l1_to_l2_phys, l1_idx);
+	if (slot_p) {
+		*phys_out = (u64)xa_to_value(slot_p);
+		return 0;
+	}
+
+	rv = nvmeibc_tpv_alloc_l2_slot(tpv, &phys);
+	if (rv)
+		return rv;
+
+	rv = xa_err(xa_store(&alloc->l1_to_l2_phys, l1_idx,
+			     xa_mk_value((unsigned long)phys), GFP_NOIO));
+	if (rv) {
+		/*
+		 * The L2 slot is reserved on the owning cdv_extent_ref but
+		 * not yet recorded in l1_to_l2_phys.  It stays pinned for
+		 * the TPV lifetime — effectively a small leak in the unlikely
+		 * xa_store failure path.  Returning an error lets the caller
+		 * back off; the next flush will try a fresh slot.
+		 */
+		return rv;
+	}
+
+	alloc->n_l2_tables_used++;
+	*phys_out = phys;
+	return 0;
+}
+
 int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 {
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
 	u64  T       = persist_slot_bytes(alloc);
 	u64  N_L1    = persist_n_l1(alloc);
 	u64  N_L2    = persist_n_l2(alloc);
-	u64  tree_ei = alloc->tree_extent_index;
+	u64  l1_ei   = alloc->l1_extent_index;
 	struct tpv_l1_header *hdr;
 	struct tpv_tree_entry *l1_entries;	/* entries portion of L1 buffer */
 	struct tpv_tree_entry *l2 = NULL;	/* reusable L2 buffer */
@@ -175,9 +238,9 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	if (tpv_is_detaching(tpv))
 		return -ECANCELED;
 
-	if (tree_ei == 0) {
-		_NW(tpv_flush_no_tree,
-		    "TPV: @STR: flush_state: no tree extent; nothing to flush",
+	if (l1_ei == 0) {
+		_NW(tpv_flush_no_l1_ext,
+		    "TPV: @STR: flush_state: no L1 extent yet; nothing to flush",
 		    tpv->tpv_name);
 		return 0;
 	}
@@ -195,8 +258,8 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	hdr->version            = TPV_L1_VERSION;
 	memcpy(hdr->tpv_uuid, tpv->tpv_uuid,
 	       min_t(size_t, sizeof(hdr->tpv_uuid), sizeof(tpv->tpv_uuid)));
-	hdr->tree_extent_index  = tree_ei;
-	/* n_l2_slots_used is written after the loop below. */
+	hdr->l1_extent_index    = l1_ei;
+	/* n_l2_tables_used is written after the loop below. */
 
 	/* Allocate reusable L2 buffer (T bytes). */
 	l2 = vzalloc(T);
@@ -233,30 +296,18 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 			 * the new one.  The first iteration (prev == -1) skips.
 			 */
 			if (prev_l1_idx != (u64)-1) {
-				void *slot_p;
-				u64 l2_slot;
+				u64 l2_phys;
+				u64 l2_ext, l2_slot;
 
 				rcu_read_unlock();
 
-				/* Look up or allocate L2 slot for prev_l1_idx. */
-				slot_p = xa_load(&alloc->l1_to_l2_slot, prev_l1_idx);
-				if (!slot_p) {
-					if (unlikely(alloc->tree_l2_next_slot >=
-						     persist_slots_per_extent(alloc))) {
-						_NE(tpv_flush_tree_full,
-						    "TPV: @STR: tree extent L2 slots exhausted",
-						    tpv->tpv_name);
-						rv = -ENOSPC;
-						goto out;
-					}
-					l2_slot = alloc->tree_l2_next_slot++;
-					alloc->n_l2_slots_used++;
-					xa_store(&alloc->l1_to_l2_slot,
-						 prev_l1_idx,
-						 xa_mk_value(l2_slot),
-						 GFP_NOIO);
-				} else {
-					l2_slot = xa_to_value(slot_p);
+				rv = persist_get_or_alloc_l2_phys(tpv,
+					prev_l1_idx, &l2_phys);
+				if (rv) {
+					_NE(tpv_flush_l2_slot_fail,
+					    "TPV: @STR: get_or_alloc L2 slot for L1_idx=@LLU failed rv=@INT",
+					    tpv->tpv_name, prev_l1_idx, rv);
+					goto out;
 				}
 
 				/* Write L2 to CDV. */
@@ -265,8 +316,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 					goto out;
 				}
 				rv = nvmeibc_tpv_cdv_sync_write(tpv,
-					persist_tree_slot_offset(alloc, tree_ei, l2_slot),
-					l2, T);
+					l2_phys, l2, T);
 				if (rv) {
 					_NE(tpv_flush_l2_write_fail,
 					    "TPV: @STR: L2 write for L1_idx=@LLU failed rv=@INT",
@@ -274,8 +324,10 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 					goto out;
 				}
 
-				/* Set L1 entry for prev_l1_idx. */
-				l1_entries[prev_l1_idx].extent_index = tree_ei;
+				/* Set L1 entry: encode (extent, slot) of L2. */
+				persist_decode_phys(alloc, l2_phys,
+						    &l2_ext, &l2_slot);
+				l1_entries[prev_l1_idx].extent_index = l2_ext;
 				l1_entries[prev_l1_idx].debug_meta   = l2_slot;
 
 				rcu_read_lock();
@@ -294,36 +346,22 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 
 	/* Flush the last L2 table. */
 	if (prev_l1_idx != (u64)-1) {
-		void *slot_p;
-		u64 l2_slot;
+		u64 l2_phys;
+		u64 l2_ext, l2_slot;
 
-		slot_p = xa_load(&alloc->l1_to_l2_slot, prev_l1_idx);
-		if (!slot_p) {
-			if (unlikely(alloc->tree_l2_next_slot >=
-				     persist_slots_per_extent(alloc))) {
-				_NE(tpv_flush_tree_full2,
-				    "TPV: @STR: tree extent L2 slots exhausted (last)",
-				    tpv->tpv_name);
-				rv = -ENOSPC;
-				goto out;
-			}
-			l2_slot = alloc->tree_l2_next_slot++;
-			alloc->n_l2_slots_used++;
-			xa_store(&alloc->l1_to_l2_slot,
-				 prev_l1_idx,
-				 xa_mk_value(l2_slot),
-				 GFP_NOIO);
-		} else {
-			l2_slot = xa_to_value(slot_p);
+		rv = persist_get_or_alloc_l2_phys(tpv, prev_l1_idx, &l2_phys);
+		if (rv) {
+			_NE(tpv_flush_l2_slot_fail2,
+			    "TPV: @STR: get_or_alloc L2 slot for L1_idx=@LLU failed rv=@INT (last)",
+			    tpv->tpv_name, prev_l1_idx, rv);
+			goto out;
 		}
 
 		if (tpv_is_detaching(tpv)) {
 			rv = -ECANCELED;
 			goto out;
 		}
-		rv = nvmeibc_tpv_cdv_sync_write(tpv,
-			persist_tree_slot_offset(alloc, tree_ei, l2_slot),
-			l2, T);
+		rv = nvmeibc_tpv_cdv_sync_write(tpv, l2_phys, l2, T);
 		if (rv) {
 			_NE(tpv_flush_l2_write_fail2,
 			    "TPV: @STR: L2 write for L1_idx=@LLU failed rv=@INT",
@@ -331,47 +369,45 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 			goto out;
 		}
 
-		l1_entries[prev_l1_idx].extent_index = tree_ei;
+		persist_decode_phys(alloc, l2_phys, &l2_ext, &l2_slot);
+		l1_entries[prev_l1_idx].extent_index = l2_ext;
 		l1_entries[prev_l1_idx].debug_meta   = l2_slot;
 	}
 
-	/* Also write L1 entries for L1_idxs that have L2 slots but no current
+	/*
+	 * Also write L1 entries for L1_idxs that have L2 slots but no current
 	 * mappings (all entries freed since last flush).  The L2 slot still
-	 * exists; L1 must still point to it so load_state can read the (now
-	 * all-null) L2 table and not lose the slot assignment.  Walk l1_to_l2_slot
-	 * for any entries not already set above.
+	 * exists; L1 must still point to it so load_state can re-read the
+	 * (now all-null) L2 table and not re-allocate a new L2 slot next flush.
 	 */
 	{
 		unsigned long li;
 		void *slot_p;
 
-		xa_for_each(&alloc->l1_to_l2_slot, li, slot_p) {
-			u64 l2_slot = xa_to_value(slot_p);
+		xa_for_each(&alloc->l1_to_l2_phys, li, slot_p) {
+			u64 l2_phys = (u64)xa_to_value(slot_p);
+			u64 l2_ext, l2_slot;
 
 			if (li >= N_L1)
 				continue;
 			if (l1_entries[li].extent_index != TPV_TREE_NULL)
 				continue;	/* already set in the loop above */
 
-			/*
-			 * This L2 table has no mapped entries.  Write a zeroed L2
-			 * table so load_state sees all-null leaves.
-			 */
 			if (tpv_is_detaching(tpv)) {
 				rv = -ECANCELED;
 				goto out;
 			}
 			memset(l2, 0, T);
-			rv = nvmeibc_tpv_cdv_sync_write(tpv,
-				persist_tree_slot_offset(alloc, tree_ei, l2_slot),
-				l2, T);
+			rv = nvmeibc_tpv_cdv_sync_write(tpv, l2_phys, l2, T);
 			if (rv) {
 				_NE(tpv_flush_l2_write_empty,
 				    "TPV: @STR: empty L2 write for L1_idx=@LLU failed rv=@INT",
 				    tpv->tpv_name, (u64)li, rv);
 				goto out;
 			}
-			l1_entries[li].extent_index = tree_ei;
+
+			persist_decode_phys(alloc, l2_phys, &l2_ext, &l2_slot);
+			l1_entries[li].extent_index = l2_ext;
 			l1_entries[li].debug_meta   = l2_slot;
 		}
 	}
@@ -381,10 +417,10 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		rv = -ECANCELED;
 		goto out;
 	}
-	hdr->n_l2_slots_used = alloc->n_l2_slots_used;
+	hdr->n_l2_tables_used = alloc->n_l2_tables_used;
 
 	rv = nvmeibc_tpv_cdv_sync_write(tpv,
-		persist_tree_slot_offset(alloc, tree_ei, 0),
+		persist_tree_slot_offset(alloc, l1_ei, 0),
 		l1_buf, T);
 	if (rv)
 		_NE(tpv_flush_l1_write_fail,
@@ -419,7 +455,8 @@ EXPORT_SYMBOL(nvmeibc_tpv_flush_state);
 struct persist_load_extent {
 	u64              extent_index;
 	u64              n_slots;
-	unsigned long   *used_bm;
+	unsigned long   *used_bm;	/* bit set = data slot referenced by xarray */
+	unsigned long   *l2_bm;		/* bit set = L2 table slot (dynamic placement) */
 	struct list_head node;
 };
 
@@ -445,6 +482,12 @@ persist_find_or_create_le(struct list_head *le_list,
 		kfree(le);
 		return NULL;
 	}
+	le->l2_bm        = bitmap_zalloc(n_slots, GFP_NOIO);
+	if (!le->l2_bm) {
+		bitmap_free(le->used_bm);
+		kfree(le);
+		return NULL;
+	}
 	INIT_LIST_HEAD(&le->node);
 	list_add_tail(&le->node, le_list);
 	return le;
@@ -457,6 +500,7 @@ static void persist_free_le_list(struct list_head *le_list)
 	list_for_each_entry_safe(le, tmp, le_list, node) {
 		list_del(&le->node);
 		bitmap_free(le->used_bm);
+		bitmap_free(le->l2_bm);
 		kfree(le);
 	}
 }
@@ -489,7 +533,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	struct tpv_l1_header  *hdr;
 	struct tpv_tree_entry *l1_entries;
 	struct tpv_tree_entry *l2 = NULL;
-	u64  tree_ei = 0;
+	u64  l1_ei   = 0;	/* CDV_extent holding the L1 table */
 	u64  loaded  = 0;
 	u64  i;
 	int  rv;
@@ -577,7 +621,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		return 0;
 	}
 
-	/* ── 3. Find tree extent (scan TOMA list for L1 magic) ────────── */
+	/* ── 3. Find L1 extent (scan TOMA list for magic in slot 0) ───── */
 	{
 		/*
 		 * Read a full page for the probe — the L1 header is only 64 bytes
@@ -612,22 +656,21 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			    memcmp(probe->tpv_uuid, tpv->tpv_uuid,
 				   min_t(size_t, sizeof(probe->tpv_uuid),
 					 sizeof(tpv->tpv_uuid))) == 0) {
-				tree_ei = toma_indices[i];
+				l1_ei = toma_indices[i];
 				break;
 			}
 		}
 		free_page((unsigned long)probe_buf);
 	}
 
-	if (tree_ei == 0) {
+	if (l1_ei == 0) {
 		/*
-		 * No tree extent found.  This happens for a fresh TPV whose
-		 * extents were allocated but tree was never written, or after
-		 * an upgrade from the old flat-L1 format.  TOMA reports the
-		 * extents; recovery will adopt them as orphans.
+		 * No L1 extent found.  This happens for a fresh TPV whose
+		 * extents were allocated but the L1 was never written.
+		 * TOMA reports the extents; recovery will adopt them as orphans.
 		 */
-		_NW(tpv_load_no_tree,
-		    "TPV: @STR: no tree extent found among @LLU TOMA extents; empty allocator",
+		_NW(tpv_load_no_l1_ext,
+		    "TPV: @STR: no L1 extent found among @LLU TOMA extents; empty allocator",
 		    tpv->tpv_name, toma_count);
 		goto store_toma_list;
 	}
@@ -644,38 +687,21 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		goto out_free;
 	}
 	rv = nvmeibc_tpv_cdv_sync_read(tpv,
-		persist_tree_slot_offset(alloc, tree_ei, 0),
+		persist_tree_slot_offset(alloc, l1_ei, 0),
 		l1_buf, T);
 	if (rv) {
 		_NE(tpv_load_l1_read_fail,
-		    "TPV: @STR: L1 read from tree extent[@LLU] failed rv=@INT",
-		    tpv->tpv_name, tree_ei, rv);
+		    "TPV: @STR: L1 read from L1 extent[@LLU] failed rv=@INT",
+		    tpv->tpv_name, l1_ei, rv);
 		goto out_free;
 	}
 
 	hdr = l1_buf;
 	l1_entries = (struct tpv_tree_entry *)((u8 *)l1_buf + sizeof(*hdr));
 
-	/* Populate tree extent tracking. */
-	alloc->tree_extent_index = tree_ei;
-	alloc->n_l2_slots_used   = hdr->n_l2_slots_used;
-	alloc->tree_l2_next_slot = hdr->n_l2_slots_used + 1;
-
-	/* Add tree extent to cdv_extent_list as all-reserved. */
-	{
-		struct nvmeibc_cdv_extent_ref *tree_ref;
-
-		tree_ref = kzalloc(sizeof(*tree_ref), GFP_NOIO);
-		if (!tree_ref) {
-			rv = -ENOMEM;
-			goto out_free;
-		}
-		tree_ref->extent_index    = tree_ei;
-		tree_ref->allocated_count = n_slots;	/* all reserved for tree */
-		INIT_LIST_HEAD(&tree_ref->node);
-		list_add_tail(&tree_ref->node, &alloc->cdv_extent_list);
-		alloc->cdv_extents_count++;
-	}
+	/* Populate L1 extent tracking. */
+	alloc->l1_extent_index  = l1_ei;
+	alloc->n_l2_tables_used = hdr->n_l2_tables_used;
 
 	/* ── 5. Walk L1, read L2 tables, populate xarray ──────────────── */
 	l2 = vzalloc(T);
@@ -685,7 +711,8 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	}
 
 	for (i = 0; i < N_L1; i++) {
-		u64 l2_extent_idx, l2_slot;
+		u64 l2_extent_idx, l2_slot, l2_phys;
+		struct persist_load_extent *l2_le;
 		u64 j;
 
 		if (l1_entries[i].extent_index == TPV_TREE_NULL)
@@ -694,31 +721,62 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		l2_extent_idx = l1_entries[i].extent_index;
 		l2_slot       = l1_entries[i].debug_meta;
 
-		/* Sanity: L1 entry must point into our tree extent. */
-		if (tp_verify_l1_l2_extent_ownership &&
-		    l2_extent_idx != tree_ei) {
-			_NE(tpv_load_bad_l1,
-			    "TPV: @STR: L1[@LLU] references extent @LLU, expected tree extent @LLU; skipping",
-			    tpv->tpv_name, i, l2_extent_idx, tree_ei);
-			continue;
+		/*
+		 * Under dynamic L2 placement, L1 entries may point at any
+		 * TPV-owned CDV_extent.  Sanity check: the referenced extent
+		 * must appear in the TOMA-reported list.
+		 */
+		if (tp_verify_l1_l2_extent_ownership) {
+			u64 k;
+			bool owned = false;
+
+			for (k = 0; k < toma_count; k++) {
+				if (toma_indices[k] == l2_extent_idx) {
+					owned = true;
+					break;
+				}
+			}
+			if (!owned) {
+				_NE(tpv_load_bad_l1,
+				    "TPV: @STR: L1[@LLU] references extent @LLU not in TOMA list; skipping",
+				    tpv->tpv_name, i, l2_extent_idx);
+				continue;
+			}
 		}
 
-		/* Record L1→L2 slot mapping. */
-		xa_store(&alloc->l1_to_l2_slot, i,
-			 xa_mk_value(l2_slot), GFP_NOIO);
+		l2_phys = persist_phys_of(alloc, l2_extent_idx, l2_slot);
+
+		/*
+		 * Record L1→L2 location (phys offset).  flush_state will reuse
+		 * this slot for the L1_idx until the TPV is deleted.
+		 */
+		rv = xa_err(xa_store(&alloc->l1_to_l2_phys, i,
+			    xa_mk_value((unsigned long)l2_phys), GFP_NOIO));
+		if (rv)
+			goto out_free;
+
+		/*
+		 * Mark the L2 slot in its owning extent so it is excluded
+		 * from the free pool when building cdv_extent_list below.
+		 */
+		l2_le = persist_find_or_create_le(&le_list, l2_extent_idx,
+						  n_slots);
+		if (!l2_le) {
+			rv = -ENOMEM;
+			goto out_free;
+		}
+		set_bit(l2_slot, l2_le->l2_bm);
 
 		/* Read L2 table from CDV. */
 		if (tpv_is_detaching(tpv)) {
 			rv = -ECANCELED;
 			goto out_free;
 		}
-		rv = nvmeibc_tpv_cdv_sync_read(tpv,
-			persist_tree_slot_offset(alloc, l2_extent_idx, l2_slot),
-			l2, T);
+		rv = nvmeibc_tpv_cdv_sync_read(tpv, l2_phys, l2, T);
 		if (rv) {
 			_NE(tpv_load_l2_read_fail,
-			    "TPV: @STR: L2 read L1_idx=@LLU slot=@LLU failed rv=@INT",
-			    tpv->tpv_name, i, l2_slot, rv);
+			    "TPV: @STR: L2 read L1_idx=@LLU ext=@LLU slot=@LLU failed rv=@INT",
+			    tpv->tpv_name, i, l2_extent_idx, l2_slot, rv);
 			goto out_free;
 		}
 
@@ -790,13 +848,32 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	vfree(l1_buf);
 	l1_buf = NULL;
 
-	/* ── 6. Build cdv_extent_list and free_tpv_extents for data extents ── */
+	/* ── 6. Ensure every TOMA-owned extent has an le entry ──────────
+	 *
+	 * An extent that has no data mappings and no L2 slots would not be
+	 * in le_list (it wouldn't have been added by the L1/L2 walk above).
+	 * Under change 1, such an extent is still part of the TPV and its
+	 * slots must enter free_tpv_extents.  The L1 extent always needs
+	 * an le entry too (its slot 0 is reserved even if nothing is mapped).
+	 */
+	for (i = 0; i < toma_count; i++) {
+		if (!persist_find_or_create_le(&le_list, toma_indices[i],
+					       n_slots)) {
+			rv = -ENOMEM;
+			goto out_free;
+		}
+	}
+
+	/* ── 7. Build cdv_extent_list and free_tpv_extents ───────────── */
 	{
 		struct persist_load_extent *le;
 
 		list_for_each_entry(le, &le_list, node) {
 			struct nvmeibc_cdv_extent_ref *ref;
 			u64 s;
+			u64 data_cnt = bitmap_weight(le->used_bm, le->n_slots);
+			u64 l2_cnt   = bitmap_weight(le->l2_bm,   le->n_slots);
+			bool is_l1   = (le->extent_index == l1_ei);
 
 			ref = kzalloc(sizeof(*ref), GFP_NOIO);
 			if (!ref) {
@@ -804,22 +881,29 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 				goto out_free;
 			}
 			ref->extent_index    = le->extent_index;
-			ref->allocated_count = bitmap_weight(le->used_bm,
-							     le->n_slots);
+			ref->allocated_count = data_cnt + l2_cnt;
+			ref->l2_slots        = l2_cnt;
+			ref->is_l1_extent    = is_l1;
 			INIT_LIST_HEAD(&ref->node);
 			list_add_tail(&ref->node, &alloc->cdv_extent_list);
 			alloc->cdv_extents_count++;
 
 			_NT(tpv_load_cdv_ext,
-			    "TPV: @STR: load_state CDV_extent[@LLU] allocated=@LLU free=@LLU",
-			    tpv->tpv_name, le->extent_index,
-			    ref->allocated_count,
-			    le->n_slots - ref->allocated_count);
+			    "TPV: @STR: load_state CDV_extent[@LLU] is_l1=@INT data=@LLU l2=@LLU",
+			    tpv->tpv_name, le->extent_index, (int)is_l1,
+			    data_cnt, l2_cnt);
 
 			for (s = 0; s < le->n_slots; s++) {
 				struct nvmeibc_tpv_free_slot *fs;
 
+				/* Skip slot 0 of the L1 extent (holds L1 table). */
+				if (is_l1 && s == 0)
+					continue;
+				/* Skip data slots (already mapped in xarray). */
 				if (test_bit(s, le->used_bm))
+					continue;
+				/* Skip L2 slots (reserved for L2 tables). */
+				if (test_bit(s, le->l2_bm))
 					continue;
 
 				fs = kzalloc(sizeof(*fs), GFP_NOIO);
@@ -841,9 +925,9 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	persist_free_le_list(&le_list);
 
 	_NI(tpv_load_done,
-	    "TPV: @STR: loaded @LLU mapped extents across @LLU CDV_extents (@LLU free slots) tree_extent=@LLU",
+	    "TPV: @STR: loaded @LLU mapped extents across @LLU CDV_extents (@LLU free slots) l1_extent=@LLU",
 	    tpv->tpv_name, loaded, alloc->cdv_extents_count,
-	    alloc->free_tpv_extent_count, tree_ei);
+	    alloc->free_tpv_extent_count, l1_ei);
 
 store_toma_list:
 	/* ── 7. Store TOMA list for recovery ──────────────────────────── */

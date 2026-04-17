@@ -65,12 +65,26 @@ struct nvmeibc_tpv_free_slot {
 };
 
 /*
- * Tracks a single data CDV_extent allocated from the CDV.allocator (TOMA).
+ * Tracks a single CDV_extent allocated from the CDV.allocator (TOMA).
  * One CDV_extent holds n_slots = (cdv_extent_size / tpv_extent_size) TPV_extents.
+ *
+ * Slots within this extent may be (a) free — on alloc->free_tpv_extents,
+ * (b) a data slot referenced by the xarray, (c) an L2 table (dynamic L2
+ * placement, see nvmeibc_tpv_persist.c), or (d) slot 0 of the L1 extent.
+ *
+ * allocated_count counts (b) + (c); slot 0 of the L1 extent is pinned
+ * separately by is_l1_extent and is not reflected in allocated_count.
+ *
+ * In change 1 L2 tables are never migrated or freed during the TPV
+ * lifetime, so l2_slots is sticky-monotonic.  Because an extent with
+ * l2_slots > 0 also has allocated_count > 0, the "can this extent be
+ * returned to TOMA" check is simply (allocated_count == 0 && !is_l1_extent).
  */
 struct nvmeibc_cdv_extent_ref {
-	u64              extent_index;		/* data CDV_extent index i */
-	u64              allocated_count;	/* TPV_extents in use within this CDV_extent */
+	u64              extent_index;		/* CDV_extent index i */
+	u64              allocated_count;	/* data + L2 slots in use */
+	u64              l2_slots;		/* L2 tables currently in this extent */
+	bool             is_l1_extent;		/* slot 0 holds the L1 table; extent pinned */
 	struct list_head node;
 };
 
@@ -126,16 +140,27 @@ struct nvmeibc_tpv_allocator {
 	atomic64_t       stat_cdv_alloc_ns;	/* cumulative CDV alloc round-trip time (ns) */
 
 	/*
-	 * Per-TPV L1/L2 tree metadata.
+	 * Per-TPV L1/L2 tree metadata (dynamic L2 placement).
 	 *
-	 * The first CDV_extent allocated from TOMA becomes the "tree extent".
-	 * Slot 0 holds the L1 table; slots 1+ hold L2 tables on demand.
-	 * No data is stored in the tree extent.
+	 * L1 lives in slot 0 of the "L1 extent" — the first CDV_extent ever
+	 * allocated to this TPV.  The L1 extent is a normal data extent in
+	 * every other respect: its remaining slots (1..n_slots-1) enter
+	 * free_tpv_extents and are used for data or for L2 tables.
+	 *
+	 * L2 tables are allocated lazily from free_tpv_extents by
+	 * nvmeibc_tpv_flush_state(); any TPV-owned CDV_extent may host an
+	 * L2 slot.  An extent that currently holds any L2 slot has
+	 * allocated_count > 0 (since L2 slots count), so the normal
+	 * free-extent path already keeps it attached.
+	 *
+	 * l1_to_l2_phys maps L1_idx -> CDV byte offset of the L2 table
+	 * (encoded via xa_mk_value).  It is populated by load_state from the
+	 * on-disk L1 and extended by flush_state when new L1 indices first
+	 * become non-null.
 	 */
-	u64              tree_extent_index;	/* CDV_extent holding L1+L2; 0 = none yet */
-	u64              tree_l2_next_slot;	/* next free slot in tree extent for L2 */
-	u64              n_l2_slots_used;	/* L2 slots currently allocated */
-	struct xarray    l1_to_l2_slot;		/* L1_idx -> L2 slot number in tree extent */
+	u64              l1_extent_index;	/* CDV_extent holding L1 in slot 0; 0 = none yet */
+	u64              n_l2_tables_used;	/* L2 tables currently allocated */
+	struct xarray    l1_to_l2_phys;		/* L1_idx -> CDV byte offset of L2 table */
 
 	/*
 	 * Cached CDV_LIST_EXTENTS result from load_state.
@@ -268,7 +293,7 @@ struct nvmeibc_tpv {
 #define tpv_disk(tpv)   ((tpv)->atom.disk)
 #define tpv_queue(tpv)  ((tpv)->atom.queue)
 
-/* ── L1/L2 tree on-disk entry format (per-TPV tree extent) ─────────────── */
+/* ── L1/L2 tree on-disk entry format ────────────────────────────────────── */
 
 /*
  * Every entry at every level (L1, L2) is 16 bytes.
@@ -276,12 +301,14 @@ struct nvmeibc_tpv {
  * CDV_extent index 0 is never allocated by TOMA (it is the TOMA allocator
  * area's own L1), so 0 is a safe null sentinel.
  *
- * L1/L2 tree model:
- *   Each TPV has a private "tree extent" (a CDV_extent whose slots hold
- *   metadata, not data).  Slot 0 = L1 table, slots 1+ = L2 tables.
+ * L1/L2 tree model (dynamic L2 placement):
+ *   Each TPV has a private L1 table stored in slot 0 of the "L1 extent"
+ *   (the first CDV_extent ever allocated to this TPV).  L2 tables live in
+ *   arbitrary TPV-owned slots allocated lazily from the free pool by
+ *   nvmeibc_tpv_flush_state().  Data slots live in all remaining slots.
  *
- *   L1 entries: extent_index = tree_extent_index,
- *               debug_meta   = slot number within tree extent holding the L2
+ *   L1 entries:    extent_index = CDV_extent holding the L2 table,
+ *                  debug_meta   = slot within that extent
  *   L2 leaf entries: extent_index = data CDV_extent index,
  *                    debug_meta   = slot within that CDV_extent
  *
@@ -289,16 +316,16 @@ struct nvmeibc_tpv {
  *     L1_idx = V / N_L2;  L2_idx = V % N_L2
  *     data_idx = L2[L2_idx].extent_index
  *     slot     = L2[L2_idx].debug_meta
- *     phys_offset = A + data_idx * E + slot * T
+ *     phys_offset = A + (data_idx - 1) * E + slot * T
  */
 struct tpv_tree_entry {
 	u64 extent_index;		/* CDV_extent index of child table or data extent */
-	u64 debug_meta;			/* L1: slot of L2 in tree extent; L2 leaf: unused */
+	u64 debug_meta;			/* L1: slot of L2 within extent_index; L2 leaf: slot of data */
 };
 
 #define TPV_TREE_NULL  0ULL
 
-/* ── L1 table on-disk header (first 64 bytes of tree extent slot 0) ───── */
+/* ── L1 table on-disk header (first 64 bytes of L1 extent slot 0) ───── */
 
 #define TPV_L1_MAGIC		0x5450564C31544142ULL	/* "TPVL1TAB" */
 #define TPV_L1_VERSION		1
@@ -307,8 +334,8 @@ struct tpv_l1_header {
 	u64 magic;			/* TPV_L1_MAGIC */
 	u64 version;			/* TPV_L1_VERSION */
 	u8  tpv_uuid[16];		/* owning TPV UUID */
-	u64 tree_extent_index;		/* CDV_extent holding this tree */
-	u64 n_l2_slots_used;		/* number of L2 slots consumed */
+	u64 l1_extent_index;		/* CDV_extent holding the L1 in its slot 0 */
+	u64 n_l2_tables_used;		/* number of L2 tables currently allocated */
 	u8  reserved[16];		/* pad to 64 bytes total */
 };
 
@@ -392,6 +419,18 @@ void nvmeibc_tpv_update_allocator_id(struct nvmeibc_tpv *tpv,
 void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 					   const char *toma_id,
 					   u64 generation);
+
+/*
+ * nvmeibc_tpv_alloc_l2_slot — claim a free TPV_extent slot for use as an L2
+ * table.  Pops one slot off alloc->free_tpv_extents and increments the owning
+ * cdv_extent_ref's allocated_count and l2_slots.  Used by flush_state when a
+ * new L1 index becomes non-null and must be backed by a fresh L2 table.
+ *
+ * Returns 0 on success (*phys_offset_out populated), -EAGAIN when the free
+ * pool is empty (caller should defer the flush; cdv_alloc_work will be
+ * re-armed by the allocator as usual).
+ */
+int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out);
 
 /* ── IB admin CDV response dispatch (implemented in nvmeibc_tpv_ib_admin.c) ── */
 

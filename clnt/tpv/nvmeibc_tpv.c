@@ -220,10 +220,9 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 	alloc->low_watermark           = nvmeibc_tpv_calc_watermark(tpv_extent_size_kb);
 
 	/* Per-TPV L1/L2 tree tracking — populated by load_state or tpv_on_cdv_alloc_ok. */
-	alloc->tree_extent_index       = 0;
-	alloc->tree_l2_next_slot       = 0;
-	alloc->n_l2_slots_used         = 0;
-	xa_init(&alloc->l1_to_l2_slot);
+	alloc->l1_extent_index         = 0;
+	alloc->n_l2_tables_used        = 0;
+	xa_init(&alloc->l1_to_l2_phys);
 	alloc->toma_extent_list        = NULL;
 	alloc->toma_extent_count       = 0;
 }
@@ -258,7 +257,7 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 	alloc->cdv_extents_count     = 0;
 
 	/* Per-TPV L1/L2 tree cleanup. */
-	xa_destroy(&alloc->l1_to_l2_slot);
+	xa_destroy(&alloc->l1_to_l2_phys);
 	kvfree(alloc->toma_extent_list);
 	alloc->toma_extent_list  = NULL;
 	alloc->toma_extent_count = 0;

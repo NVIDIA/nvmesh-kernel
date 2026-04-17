@@ -270,6 +270,55 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 }
 EXPORT_SYMBOL(nvmeibc_tpv_alloc_extent);
 
+/* ── nvmeibc_tpv_alloc_l2_slot ─────────────────────────────────────────────
+ *
+ * Reserve one slot from the free pool for use as an L2 table.  Used by
+ * flush_state when a new L1 index becomes non-null.  The slot is removed
+ * from free_tpv_extents and its owning cdv_extent_ref's bookkeeping is
+ * updated to reflect the L2 reservation (allocated_count + l2_slots both
+ * increment, so the owning extent is pinned until the L2 is relocated or
+ * the TPV is deleted).
+ *
+ * Returns 0 on success (*phys_offset_out set), -EAGAIN when the pool is
+ * empty.  -EAGAIN is recoverable: flush_state rearms itself on the next
+ * dirty mark once new free slots arrive from tpv_on_cdv_alloc_ok.
+ */
+int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out)
+{
+	struct nvmeibc_tpv_allocator  *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_free_slot  *slot;
+	struct nvmeibc_cdv_extent_ref *ref;
+
+	spin_lock(&alloc->lock);
+
+	if (list_empty(&alloc->free_tpv_extents)) {
+		spin_unlock(&alloc->lock);
+		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+			schedule_work(&tpv->cdv_alloc_work);
+		return -EAGAIN;
+	}
+
+	slot = list_first_entry(&alloc->free_tpv_extents,
+				struct nvmeibc_tpv_free_slot, node);
+	list_del(&slot->node);
+	alloc->free_tpv_extent_count--;
+
+	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
+		if (ref->extent_index == slot->cdv_extent_index) {
+			ref->allocated_count++;
+			ref->l2_slots++;
+			break;
+		}
+	}
+
+	*phys_offset_out = slot->phys_offset;
+	spin_unlock(&alloc->lock);
+
+	kfree(slot);
+	return 0;
+}
+EXPORT_SYMBOL(nvmeibc_tpv_alloc_l2_slot);
+
 /* ── nvmeibc_tpv_free_extent ────────────────────────────────────────────────
  *
  * Erase the mapping for virt_idx from the xarray and return the physical slot
@@ -349,7 +398,14 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 
 	found_ref->allocated_count--;
 
-	if (found_ref->allocated_count == 0) {
+	/*
+	 * Return the CDV_extent to TOMA when it holds no data or L2 slots
+	 * and is not the L1 extent.  The L1 extent is pinned for the TPV
+	 * lifetime because its slot 0 holds the L1 table.  An extent that
+	 * still hosts L2 tables keeps allocated_count > 0 via the L2 count
+	 * and is therefore implicitly retained.
+	 */
+	if (found_ref->allocated_count == 0 && !found_ref->is_l1_extent) {
 		/*
 		 * All TPV_extents within this CDV_extent are free.
 		 * Remove all its slots from free_tpv_extents (they
@@ -501,29 +557,55 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 	n_slots = tpv_slots_per_cdv_extent(alloc);
 
 	/*
-	 * If no tree extent yet, this CDV_extent becomes the tree extent.
-	 * Reserve all its slots for L1/L2 metadata; do not add to free pool.
+	 * If no L1 extent yet, this CDV_extent hosts the L1 table in slot 0.
+	 * Its remaining slots (1..n_slots-1) enter the free pool as ordinary
+	 * data/L2 candidates.  is_l1_extent pins the extent for the TPV
+	 * lifetime (see free_extent logic) so slot 0 is never reclaimed.
+	 *
+	 * We skip install_data_extent here: the L1 table does not exist yet,
+	 * so there is nothing to record.  flush_state will write the initial
+	 * L1 on the first persist cycle.
 	 */
-	if (alloc->tree_extent_index == 0) {
-		alloc->tree_extent_index = extent_index;
-		alloc->tree_l2_next_slot = 1;	/* slot 0 = L1 */
-		alloc->n_l2_slots_used   = 0;
+	if (alloc->l1_extent_index == 0) {
+		u64 first_free_slot = 1;	/* slot 0 reserved for L1 */
+
+		alloc->l1_extent_index  = extent_index;
+		alloc->n_l2_tables_used = 0;
 
 		ref = kzalloc(sizeof(*ref), GFP_NOIO);
 		if (!ref)
 			return -ENOMEM;
 		ref->extent_index    = extent_index;
-		ref->allocated_count = n_slots;	/* all reserved for tree */
+		ref->allocated_count = 0;	/* slot 0 is pinned via is_l1_extent */
+		ref->l2_slots        = 0;
+		ref->is_l1_extent    = true;
 		INIT_LIST_HEAD(&ref->node);
+
+		for (s = first_free_slot; s < n_slots; s++) {
+			fs = kzalloc(sizeof(*fs), GFP_NOIO);
+			if (!fs) {
+				list_for_each_entry_safe(fs, fstmp, &batch, node) {
+					list_del(&fs->node);
+					kfree(fs);
+				}
+				kfree(ref);
+				return -ENOMEM;
+			}
+			fs->phys_offset      = tpv_slot_phys_offset(alloc, extent_index, s);
+			fs->cdv_extent_index = extent_index;
+			list_add_tail(&fs->node, &batch);
+		}
 
 		spin_lock(&alloc->lock);
 		list_add_tail(&ref->node, &alloc->cdv_extent_list);
 		alloc->cdv_extents_count++;
+		list_splice_tail(&batch, &alloc->free_tpv_extents);
+		alloc->free_tpv_extent_count += (n_slots - first_free_slot);
 		spin_unlock(&alloc->lock);
 
-		_NI(tpv_tree_extent_set,
-		    "TPV: @STR: CDV_extent[@LLU] is the tree extent (@LLU slots reserved)",
-		    tpv->tpv_name, extent_index, n_slots);
+		_NI(tpv_l1_extent_set,
+		    "TPV: @STR: CDV_extent[@LLU] is the L1 extent (slot 0 pinned; @LLU data/L2 slots added)",
+		    tpv->tpv_name, extent_index, n_slots - first_free_slot);
 		return 0;
 	}
 
@@ -545,6 +627,8 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 
 	ref->extent_index    = extent_index;
 	ref->allocated_count = 0;
+	ref->l2_slots        = 0;
+	ref->is_l1_extent    = false;
 	INIT_LIST_HEAD(&ref->node);
 
 	/*

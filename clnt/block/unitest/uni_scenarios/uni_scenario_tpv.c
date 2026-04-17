@@ -144,54 +144,64 @@ TEST_FUNC int unitest_tpv_alloc_free(
 
 	alloc = &ctx.tpv->allocator;
 
-	/* ── 1. Verify pool size after fill ── */
-	TPV_CHECK(alloc->free_tpv_extent_count ==
-		  (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS,
-		  "expected %llu free slots, got %llu",
-		  (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS,
-		  alloc->free_tpv_extent_count);
+	/*
+	 * Under dynamic L2 placement the first CDV_extent allocated by
+	 * tpv_on_cdv_alloc_ok becomes the L1 extent with slot 0 pinned for
+	 * the L1 table; its remaining N_SLOTS-1 slots plus all slots of the
+	 * (N_DATA_EXT-1) pure data extents enter the free pool.
+	 */
+	{
+		u64 pool_max = (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS - 1;
 
-	TPV_CHECK((s64)atomic64_read(&alloc->stat_cdv_alloc_ok) ==
-		  (s64)TPV_SIMU_N_DATA_EXT,
-		  "expected %d CDV alloc_ok, got %lld",
-		  TPV_SIMU_N_DATA_EXT,
-		  (s64)atomic64_read(&alloc->stat_cdv_alloc_ok));
+		/* ── 1. Verify pool size after fill ── */
+		TPV_CHECK(alloc->free_tpv_extent_count == pool_max,
+			  "expected %llu free slots, got %llu",
+			  pool_max, alloc->free_tpv_extent_count);
 
-	/* ── 2. Allocate n_alloc virtual extents ── */
-	for (i = 0; i < n_alloc; i++) {
-		int arc = nvmeibc_tpv_alloc_extent(ctx.tpv, i, &entry);
+		TPV_CHECK((s64)atomic64_read(&alloc->stat_cdv_alloc_ok) ==
+			  (s64)TPV_SIMU_N_DATA_EXT,
+			  "expected %d CDV alloc_ok, got %lld",
+			  TPV_SIMU_N_DATA_EXT,
+			  (s64)atomic64_read(&alloc->stat_cdv_alloc_ok));
 
-		TPV_CHECK(arc == 0, "alloc_extent(%llu) returned %d", i, arc);
-		if (arc != 0)
-			continue;
+		/* ── 2. Allocate n_alloc virtual extents ── */
+		for (i = 0; i < n_alloc; i++) {
+			int arc = nvmeibc_tpv_alloc_extent(ctx.tpv, i, &entry);
 
-		/* phys_offset must lie within a data CDV extent */
-		TPV_CHECK(entry->phys_offset >= TPV_SIMU_E_BYTES,
-			  "virt=%llu phys=0x%llx below first data extent",
-			  i, entry->phys_offset);
-		TPV_CHECK(entry->phys_offset < TPV_SIMU_CDV_BYTES,
-			  "virt=%llu phys=0x%llx beyond CDV end",
-			  i, entry->phys_offset);
-		TPV_CHECK(entry->cdv_extent_index >= 1 &&
-			  entry->cdv_extent_index <= (u64)TPV_SIMU_N_DATA_EXT,
-			  "virt=%llu bad cdv_extent_index=%llu",
-			  i, entry->cdv_extent_index);
+			TPV_CHECK(arc == 0, "alloc_extent(%llu) returned %d", i, arc);
+			if (arc != 0)
+				continue;
+
+			/*
+			 * phys_offset must lie within a TPV-owned CDV_extent.
+			 * With A=0, the first alloc pops slot 1 of extent 1
+			 * (the L1 extent), so phys >= T_BYTES.
+			 */
+			TPV_CHECK(entry->phys_offset >= TPV_SIMU_T_BYTES,
+				  "virt=%llu phys=0x%llx below first usable slot",
+				  i, entry->phys_offset);
+			TPV_CHECK(entry->phys_offset < TPV_SIMU_CDV_BYTES,
+				  "virt=%llu phys=0x%llx beyond CDV end",
+				  i, entry->phys_offset);
+			TPV_CHECK(entry->cdv_extent_index >= 1 &&
+				  entry->cdv_extent_index <= (u64)TPV_SIMU_N_DATA_EXT,
+				  "virt=%llu bad cdv_extent_index=%llu",
+				  i, entry->cdv_extent_index);
+		}
+
+		TPV_CHECK((s64)atomic64_read(&alloc->stat_tpv_alloc_ok) == (s64)n_alloc,
+			  "stat_tpv_alloc_ok: expected %llu got %lld",
+			  n_alloc, (s64)atomic64_read(&alloc->stat_tpv_alloc_ok));
+
+		TPV_CHECK(tpv_test_count_mapped(ctx.tpv) == n_alloc,
+			  "xarray has %llu entries, expected %llu",
+			  tpv_test_count_mapped(ctx.tpv), n_alloc);
+
+		TPV_CHECK(alloc->free_tpv_extent_count == pool_max - n_alloc,
+			  "pool after %llu allocs: expected %llu, got %llu",
+			  n_alloc, pool_max - n_alloc,
+			  alloc->free_tpv_extent_count);
 	}
-
-	TPV_CHECK((s64)atomic64_read(&alloc->stat_tpv_alloc_ok) == (s64)n_alloc,
-		  "stat_tpv_alloc_ok: expected %llu got %lld",
-		  n_alloc, (s64)atomic64_read(&alloc->stat_tpv_alloc_ok));
-
-	TPV_CHECK(tpv_test_count_mapped(ctx.tpv) == n_alloc,
-		  "xarray has %llu entries, expected %llu",
-		  tpv_test_count_mapped(ctx.tpv), n_alloc);
-
-	TPV_CHECK(alloc->free_tpv_extent_count ==
-		  (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS - n_alloc,
-		  "pool after %llu allocs: expected %llu, got %llu",
-		  n_alloc,
-		  (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS - n_alloc,
-		  alloc->free_tpv_extent_count);
 
 	/* ── 3. Free all allocated extents ── */
 	for (i = 0; i < n_alloc; i++) {
@@ -384,8 +394,13 @@ TEST_FUNC int unitest_tpv_recovery(
 		TPV_CHECK(rrc == 0, "nvmeibc_tpv_recovery returned %d", rrc);
 	}
 
-	/* After recovery, the n_orphan CDV extents must be in the free pool. */
-	expected_slots = n_orphan * TPV_SIMU_N_SLOTS;
+	/*
+	 * After recovery, the n_orphan CDV extents must be in the free pool.
+	 * Dynamic L2 placement: the first adopted orphan is promoted to the
+	 * L1 extent so slot 0 is pinned — one fewer free slot than the naive
+	 * n_orphan × N_SLOTS count.
+	 */
+	expected_slots = n_orphan * TPV_SIMU_N_SLOTS - 1;
 	TPV_CHECK(alloc->free_tpv_extent_count == expected_slots,
 		  "after recovery: expected %llu free slots, got %llu",
 		  expected_slots, alloc->free_tpv_extent_count);
@@ -586,7 +601,11 @@ TEST_FUNC int unitest_tpv_pool_exhaustion(
 	struct tpv_test_ctx ctx = {0};
 	struct nvmeibc_tpv_allocator *alloc;
 	struct nvmeibc_tpv_extent_entry *entry;
-	u64 total_slots = (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS;
+	/*
+	 * Dynamic L2 placement: the first CDV_extent becomes the L1 extent
+	 * with slot 0 pinned — one fewer addressable slot than N × n_slots.
+	 */
+	u64 total_slots = (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS - 1;
 	u64 i;
 	int rc;
 	int rv = 0;

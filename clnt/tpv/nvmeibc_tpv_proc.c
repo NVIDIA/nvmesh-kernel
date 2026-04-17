@@ -123,8 +123,8 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("cdv_extents_allocated: %llu / %llu\n",
 		cdv_extents_allocated, cdv_extents_total);
 	BUF_ADD("free_tpv_slots:      %llu\n", free_tpv_slots);
-	BUF_ADD("tree_extent_index:  %llu\n", alloc->tree_extent_index);
-	BUF_ADD("tree_l2_slots_used: %llu\n", alloc->n_l2_slots_used);
+	BUF_ADD("l1_extent_index:     %llu\n", alloc->l1_extent_index);
+	BUF_ADD("n_l2_tables_used:    %llu\n", alloc->n_l2_tables_used);
 	BUF_ADD("allocator_toma:      %s\n",  toma_id[0] ? toma_id : "(none)");
 	BUF_ADD("allocator_gen:       %llu\n", gen);
 
@@ -160,9 +160,8 @@ static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("low_watermark:           %llu\n", alloc->low_watermark);
 	BUF_ADD("pending_return_count:    %llu\n", pending);
 	BUF_ADD("cdv_alloc_pending:       %d\n",   atomic_read(&tpv->cdv_alloc_pending));
-	BUF_ADD("tree_extent_index:       %llu\n", alloc->tree_extent_index);
-	BUF_ADD("tree_l2_next_slot:       %llu\n", alloc->tree_l2_next_slot);
-	BUF_ADD("tree_l2_slots_used:      %llu\n", alloc->n_l2_slots_used);
+	BUF_ADD("l1_extent_index:         %llu\n", alloc->l1_extent_index);
+	BUF_ADD("n_l2_tables_used:        %llu\n", alloc->n_l2_tables_used);
 
 #undef BUF_ADD
 	return count;
@@ -234,7 +233,8 @@ static ssize_t tpv_proc_cdv_extent_map_fill(void *arg, char *buf, size_t len)
 
 #define BUF_ADD(...) count += scnprintf(buf + count, len - count, __VA_ARGS__)
 
-	BUF_ADD("%-6s  ==>  %-16s  %s\n", "seq", "cdv_extent_idx", "in_use_slots");
+	BUF_ADD("%-6s  ==>  %-16s  %-6s  %-6s  %s\n",
+		"seq", "cdv_extent_idx", "is_l1", "l2", "in_use");
 
 	spin_lock(&alloc->lock);
 	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
@@ -243,8 +243,9 @@ static ssize_t tpv_proc_cdv_extent_map_fill(void *arg, char *buf, size_t len)
 			BUF_ADD("... (truncated at %llu entries; buffer too small)\n", seq);
 			goto out;
 		}
-		BUF_ADD("%-6llu  ==>  %-16llu  %llu\n",
-			seq, ref->extent_index, ref->allocated_count);
+		BUF_ADD("%-6llu  ==>  %-16llu  %-6d  %-6llu  %llu\n",
+			seq, ref->extent_index, (int)ref->is_l1_extent,
+			ref->l2_slots, ref->allocated_count);
 		seq++;
 	}
 	spin_unlock(&alloc->lock);

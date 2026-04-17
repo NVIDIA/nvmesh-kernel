@@ -156,18 +156,34 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index)
 	struct nvmeibc_cdv_extent_ref *ref;
 	struct nvmeibc_tpv_free_slot  *fs, *fstmp;
 	u64   n_slots = recov_slots_per_extent(alloc);
-	u64   s;
+	u64   s, first_s = 0;
+	bool  promote_to_l1 = false;
 	LIST_HEAD(batch);
 
 	ref = kzalloc(sizeof(*ref), GFP_NOIO);
 	if (!ref)
 		return -ENOMEM;
 
+	/*
+	 * If the TPV has no L1 extent yet (client crashed between a CDV_ALLOC
+	 * success and the first flush_state), promote the first orphan we
+	 * adopt.  Without this the next flush_state has nowhere to write L1.
+	 * Mirrors the tpv_on_cdv_alloc_ok bootstrap path: reserve slot 0 for
+	 * the forthcoming L1 write and keep the rest as free slots.
+	 */
+	if (alloc->l1_extent_index == 0) {
+		alloc->l1_extent_index = extent_index;
+		promote_to_l1          = true;
+		first_s                = 1;	/* skip slot 0 in free-pool splice */
+	}
+
 	ref->extent_index    = extent_index;
 	ref->allocated_count = 0;
+	ref->l2_slots        = 0;
+	ref->is_l1_extent    = promote_to_l1;
 	INIT_LIST_HEAD(&ref->node);
 
-	for (s = 0; s < n_slots; s++) {
+	for (s = first_s; s < n_slots; s++) {
 		fs = kzalloc(sizeof(*fs), GFP_NOIO);
 		if (!fs) {
 			list_for_each_entry_safe(fs, fstmp, &batch, node) {
@@ -190,7 +206,7 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index)
 	list_add_tail(&ref->node, &alloc->cdv_extent_list);
 	alloc->cdv_extents_count++;
 	list_splice_tail(&batch, &alloc->free_tpv_extents);
-	alloc->free_tpv_extent_count += n_slots;
+	alloc->free_tpv_extent_count += (n_slots - first_s);
 
 	return 0;
 }
@@ -256,18 +272,16 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 	    "TPV: @STR: TOMA reports @LLU data CDV_extents; tree has @LLU",
 	    tpv->tpv_name, toma_count, alloc->cdv_extents_count);
 
-	/* ── 3. Cross-reference and adopt orphans ───────────────────────────── */
+	/* ── 3. Cross-reference and adopt orphans ─────────────────────────────
+	 *
+	 * Dynamic L2 placement: the L1 extent is a normal entry in
+	 * cdv_extent_list after load_state (is_l1_extent is set on its ref
+	 * but it is otherwise indistinguishable).  No special skip needed:
+	 * tpv_recovery_is_known() handles it.
+	 */
 	for (i = 0; i < toma_count; i++) {
 		u64 eidx = toma_indices[i];
 		bool known;
-
-		/* Skip the tree extent — it is metadata, not a data orphan. */
-		if (eidx == alloc->tree_extent_index) {
-			_NT(tpv_recovery_skip_tree,
-			    "TPV: @STR: skipping tree extent[@LLU]",
-			    tpv->tpv_name, eidx);
-			continue;
-		}
 
 		known = tpv_recovery_is_known(alloc, eidx);
 

@@ -91,9 +91,10 @@ int  nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 #define TPV_KTEST_TPV_EXT_KB	64u		/* T: TPV_extent size in KB */
 #define TPV_KTEST_N_SLOTS	((u64)(TPV_KTEST_CDV_EXT_MB) * 1024u / (u64)(TPV_KTEST_TPV_EXT_KB))	/* 16 */
 #define TPV_KTEST_N_DATA_EXTS	4u		/* data CDV_extents: 1-based indices 2..5 */
-#define TPV_KTEST_TREE_EXT_IDX	1u		/* tree extent at 1-based index 1 */
+#define TPV_KTEST_L1_EXT_IDX	1u		/* L1 extent at 1-based index 1 */
+#define TPV_KTEST_TREE_EXT_IDX	TPV_KTEST_L1_EXT_IDX	/* legacy alias */
 #define TPV_KTEST_VIRT_SIZE	((u64)64u << 20)	/* 64 MB virtual volume size */
-/* CDV buffer: tree extent 1 at offset 0 + data extents 2..5.
+/* CDV buffer: L1 extent 1 at offset 0 + data extents 2..5.
  * 1-based indices 1..5, A=0 so extent 1 starts at byte 0.
  * Need 5 extent slots total. */
 #define TPV_KTEST_CDV_BUF_SZ	((u64)(TPV_KTEST_N_DATA_EXTS + 1u) * ((u64)(TPV_KTEST_CDV_EXT_MB) << 20))
@@ -309,10 +310,9 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	alloc->low_watermark           = 0;	/* disable proactive pre-fetch */
 
 	/* Per-TPV L1/L2 tree tracking. */
-	alloc->tree_extent_index       = 0;
-	alloc->tree_l2_next_slot       = 0;
-	alloc->n_l2_slots_used         = 0;
-	xa_init(&alloc->l1_to_l2_slot);
+	alloc->l1_extent_index         = 0;
+	alloc->n_l2_tables_used        = 0;
+	xa_init(&alloc->l1_to_l2_phys);
 	alloc->toma_extent_list        = NULL;
 	alloc->toma_extent_count       = 0;
 
@@ -343,11 +343,16 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 }
 
 /*
- * tpv_ktest_seed_pool — inject tree extent + n_data_extents into
+ * tpv_ktest_seed_pool — inject L1 extent + n_data_extents into
  * tpv->allocator without going through the TOMA work path.
  *
- * Tree extent at index TPV_KTEST_TREE_EXT_IDX (all slots reserved).
- * Data extents at indices TPV_KTEST_TREE_EXT_IDX+1 .. +n_data_extents.
+ * L1 extent at index TPV_KTEST_L1_EXT_IDX: slot 0 pinned (holds L1 table),
+ * slots 1..N_SLOTS-1 enter the free pool as ordinary data/L2 candidates.
+ * Data extents at indices TPV_KTEST_L1_EXT_IDX+1 .. +n_data_extents.
+ *
+ * Slots are spliced at the tail so the free-pool order is L1-extent slots
+ * first, then data-extent slots — matching the natural order in which
+ * tpv_on_cdv_alloc_ok would insert them.
  */
 static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 {
@@ -357,26 +362,40 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 	u64 A = (u64)TPV_KTEST_ALLOC_GB << 30;
 	u64 ei, s;
 
-	/* Tree extent: all slots reserved for L1/L2 metadata. */
+	/* L1 extent: slot 0 reserved, slots 1..N-1 added to free pool. */
 	{
 		struct nvmeibc_cdv_extent_ref *ref;
 
 		ref = kzalloc(sizeof(*ref), GFP_KERNEL);
 		if (!ref)
 			return -ENOMEM;
-		ref->extent_index    = TPV_KTEST_TREE_EXT_IDX;
-		ref->allocated_count = TPV_KTEST_N_SLOTS;	/* all reserved */
+		ref->extent_index    = TPV_KTEST_L1_EXT_IDX;
+		ref->allocated_count = 0;
+		ref->l2_slots        = 0;
+		ref->is_l1_extent    = true;
 		INIT_LIST_HEAD(&ref->node);
 		list_add_tail(&ref->node, &alloc->cdv_extent_list);
 		alloc->cdv_extents_count++;
-		alloc->tree_extent_index = TPV_KTEST_TREE_EXT_IDX;
-		alloc->tree_l2_next_slot = 1;	/* slot 0 = L1 */
-		alloc->n_l2_slots_used   = 0;
+		alloc->l1_extent_index  = TPV_KTEST_L1_EXT_IDX;
+		alloc->n_l2_tables_used = 0;
+
+		for (s = 1; s < TPV_KTEST_N_SLOTS; s++) {
+			struct nvmeibc_tpv_free_slot *fs;
+
+			fs = kzalloc(sizeof(*fs), GFP_KERNEL);
+			if (!fs)
+				return -ENOMEM;
+			fs->phys_offset      = A + (TPV_KTEST_L1_EXT_IDX - 1) * E + s * T;
+			fs->cdv_extent_index = TPV_KTEST_L1_EXT_IDX;
+			INIT_LIST_HEAD(&fs->node);
+			list_add_tail(&fs->node, &alloc->free_tpv_extents);
+			alloc->free_tpv_extent_count++;
+		}
 	}
 
-	/* Data extents: indices TREE_EXT_IDX+1 .. +n_data_extents. */
-	for (ei = TPV_KTEST_TREE_EXT_IDX + 1;
-	     ei <= TPV_KTEST_TREE_EXT_IDX + n_data_extents; ei++) {
+	/* Data extents: indices L1_EXT_IDX+1 .. +n_data_extents. */
+	for (ei = TPV_KTEST_L1_EXT_IDX + 1;
+	     ei <= TPV_KTEST_L1_EXT_IDX + n_data_extents; ei++) {
 		struct nvmeibc_cdv_extent_ref *ref;
 
 		ref = kzalloc(sizeof(*ref), GFP_KERNEL);
@@ -384,6 +403,8 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 			return -ENOMEM;
 		ref->extent_index    = ei;
 		ref->allocated_count = 0;
+		ref->l2_slots        = 0;
+		ref->is_l1_extent    = false;
 		INIT_LIST_HEAD(&ref->node);
 		list_add_tail(&ref->node, &alloc->cdv_extent_list);
 		alloc->cdv_extents_count++;
@@ -453,7 +474,7 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 	nvmeibc_tpv_free_slots_list(&alloc->free_tpv_extents);
 
 	/* Per-TPV L1/L2 tree cleanup. */
-	xa_destroy(&alloc->l1_to_l2_slot);
+	xa_destroy(&alloc->l1_to_l2_phys);
 	kvfree(alloc->toma_extent_list);
 	alloc->toma_extent_list = NULL;
 
@@ -495,13 +516,14 @@ static void tpv_ktest_alloc_free(struct tpv_ktest_output *kto)
 
 	/*
 	 * Slots are served FIFO from free_tpv_extents (list_first_entry).
-	 * After seeding 1 data extent at index 2, slot 0 is at the head.
-	 * Extent indices are 1-based: extent 2 is at A + (2-1)*E = 1 MB.
-	 *   phys0 = 0 + 1*1MB + 0*64KB = 1MB
-	 *   phys1 = 0 + 1*1MB + 1*64KB = 1MB + 64KB
+	 * Under dynamic L2 placement the seed_pool feeds slot 1..N-1 of the
+	 * L1 extent first, then data-extent slots.  First alloc therefore
+	 * takes L1-extent slot 1 and the second takes L1-extent slot 2.
+	 *   phys0 = A + (L1_EXT_IDX-1)*E + 1*T = 1*T = 64KB
+	 *   phys1 = A + (L1_EXT_IDX-1)*E + 2*T = 2*T = 128KB
 	 */
-	expect_phys0 = (u64)1 << 20;
-	expect_phys1 = ((u64)1 << 20) + ((u64)64 << 10);
+	expect_phys0 = (u64)64 << 10;
+	expect_phys1 = (u64)128 << 10;
 
 	/* First alloc. */
 	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry0);
@@ -571,8 +593,11 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 {
 	struct nvmeibc_tpv *tpv = NULL, *tpv2 = NULL;
 	struct nvmeibc_tpv_extent_entry *e;
-	u64 data_ext_idx = TPV_KTEST_TREE_EXT_IDX + 1;	/* = 2 */
-	u64 expect_phys;	/* phys of virt_idx=0, slot 0 of data extent 2 */
+	u64 data_ext_idx = TPV_KTEST_L1_EXT_IDX + 1;	/* = 2 */
+	u64 E_b = (u64)TPV_KTEST_CDV_EXT_MB << 20;
+	u64 T_b = (u64)TPV_KTEST_TPV_EXT_KB << 10;
+	u64 A_b = (u64)TPV_KTEST_ALLOC_GB << 30;
+	u64 expect_phys;	/* phys of virt_idx=0 — first pool pop = L1 extent slot 1 */
 	u64 saved_toma_extents[2];
 	int rc;
 
@@ -590,8 +615,14 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 		goto done;
 	}
 
-	/* Alloc virt_idx=0 → slot 0 of data extent 2 → phys = A + (2-1)*E = 1 MB. */
-	expect_phys = (u64)(data_ext_idx - 1) << 20;
+	/*
+	 * Under dynamic L2 placement, seed_pool feeds the L1 extent slots
+	 * 1..N-1 first, then data-extent slots.  The first alloc therefore
+	 * pops slot 1 of the L1 extent.
+	 *   expect_phys = A + (L1_EXT_IDX - 1) * E + 1 * T = T
+	 */
+	expect_phys = A_b + (TPV_KTEST_L1_EXT_IDX - 1) * E_b + 1 * T_b;
+	(void)data_ext_idx;
 	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &e);
 	if (rc != 0 || !e || e->phys_offset != expect_phys) {
 		KTO_FAIL(kto, "persist", "alloc_extent rc=%d phys=0x%llx",
@@ -663,32 +694,38 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 			 e->phys_offset, expect_phys);
 		goto done;
 	}
-	if (e->cdv_extent_index != data_ext_idx) {
+	if (e->cdv_extent_index != TPV_KTEST_L1_EXT_IDX) {
 		KTO_FAIL(kto, "persist",
-			 "loaded cdv_extent_index %llu != %llu",
-			 e->cdv_extent_index, data_ext_idx);
+			 "loaded cdv_extent_index %llu != %u",
+			 e->cdv_extent_index, TPV_KTEST_L1_EXT_IDX);
 		goto done;
 	}
 
 	/*
-	 * Verify free pool: all n_slots slots of data extent 2 are loaded.
-	 * Slot 0 is used (virt_idx=0); slots 1..15 are free.
-	 * free_tpv_extent_count should be N_SLOTS - 1 = 15.
+	 * Verify free pool under dynamic L2 placement.  On tpv:
+	 *   - L1 extent slot 0 pinned (L1 table)
+	 *   - L1 extent slot 1 allocated as data (virt_idx=0)
+	 *   - L1 extent slot 2 allocated as L2 by the first flush_state
+	 *   - L1 extent slots 3..N-1 free           (N - 3 free slots)
+	 *   - Data extent slots 0..N-1 free         (N free slots)
+	 * Total: (N_SLOTS - 3) + N_SLOTS = 2 * N_SLOTS - 3.
 	 */
-	if (tpv2->allocator.free_tpv_extent_count != TPV_KTEST_N_SLOTS - 1) {
-		KTO_FAIL(kto, "persist",
-			 "free_tpv_extent_count %llu, want %llu",
-			 tpv2->allocator.free_tpv_extent_count,
-			 TPV_KTEST_N_SLOTS - 1);
-		goto done;
+	{
+		u64 want = 2 * TPV_KTEST_N_SLOTS - 3;
+		if (tpv2->allocator.free_tpv_extent_count != want) {
+			KTO_FAIL(kto, "persist",
+				 "free_tpv_extent_count %llu, want %llu",
+				 tpv2->allocator.free_tpv_extent_count, want);
+			goto done;
+		}
 	}
 
-	/* Verify tree extent was identified. */
-	if (tpv2->allocator.tree_extent_index != TPV_KTEST_TREE_EXT_IDX) {
+	/* Verify L1 extent was identified. */
+	if (tpv2->allocator.l1_extent_index != TPV_KTEST_L1_EXT_IDX) {
 		KTO_FAIL(kto, "persist",
-			 "tree_extent_index %llu, want %u",
-			 tpv2->allocator.tree_extent_index,
-			 TPV_KTEST_TREE_EXT_IDX);
+			 "l1_extent_index %llu, want %u",
+			 tpv2->allocator.l1_extent_index,
+			 TPV_KTEST_L1_EXT_IDX);
 		goto done;
 	}
 
@@ -895,22 +932,34 @@ static void tpv_ktest_recovery(struct tpv_ktest_output *kto)
 		goto done;
 	}
 
-	/* recovery: adopts extent_index=1 → adds N_SLOTS free slots. */
+	/*
+	 * recovery: adopts extent_index=1.  Under dynamic L2 placement the
+	 * first adopted orphan is promoted to the L1 extent (to give the
+	 * next flush somewhere to write the L1 table), so slot 0 is pinned
+	 * and only N_SLOTS - 1 slots enter the free pool.
+	 */
 	rc = nvmeibc_tpv_recovery(tpv);
 	if (rc != 0) {
 		KTO_FAIL(kto, "recovery", "nvmeibc_tpv_recovery rc=%d", rc);
 		goto done;
 	}
-	if (alloc->free_tpv_extent_count != TPV_KTEST_N_SLOTS) {
+	if (alloc->free_tpv_extent_count != TPV_KTEST_N_SLOTS - 1) {
 		KTO_FAIL(kto, "recovery",
 			 "free_tpv_extent_count %llu after recovery (want %llu)",
-			 alloc->free_tpv_extent_count, TPV_KTEST_N_SLOTS);
+			 alloc->free_tpv_extent_count,
+			 (u64)(TPV_KTEST_N_SLOTS - 1));
 		goto done;
 	}
 	if (alloc->cdv_extents_count != 1) {
 		KTO_FAIL(kto, "recovery",
 			 "cdv_extents_count %llu after recovery (want 1)",
 			 alloc->cdv_extents_count);
+		goto done;
+	}
+	if (alloc->l1_extent_index != orphan_idx) {
+		KTO_FAIL(kto, "recovery",
+			 "l1_extent_index %llu after recovery (want %llu)",
+			 alloc->l1_extent_index, orphan_idx);
 		goto done;
 	}
 
