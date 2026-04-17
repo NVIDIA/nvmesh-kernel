@@ -122,6 +122,18 @@ The current module attaches the CDV to every TOMA hosting the first pRAID so TOM
 
 **Goal:** one new Kafka message pair lets an elected allocator TOMA request its exclusive attachment to the satellite.
 
+### 2.0 Alternative considered: TOMA-driven RAFT eviction
+
+We considered skipping the management round-trip and having the elected TOMA leader drive the satellite version bump directly via RAFT broadcast (calling `nvmeibt_block_device_reservation_mode_change()` locally on every TOMA hosting the satellite). This would save one Kafka request/response per re-election but requires:
+
+1. A new RAFT message type carrying `{satellite_uuid, new_version}`.
+2. A second source of reservation versions on the kernel client side (today the client learns versions exclusively from management's config push), so the new allocator's MCS register on the satellite can advertise the new version.
+3. Acceptance that Mongo's `reservation` field on satellites permanently diverges from reality.
+
+Rejected for now: piece (2) is the load-bearing change — touching the client kernel's reservation pipeline to source versions from a parallel channel (RAFT instead of management) is historically expensive to land and requires its own correctness argument. The Kafka round-trip with management is one extra hop on a rare path (re-election, not steady state) and reuses the existing preempt-attach machinery end-to-end, which makes it cheaper to ship and test.
+
+**Future trigger to revisit:** if scaling tests show Kafka-coordinated re-election doesn't keep up with churn — many CDVs spread across many zones, simultaneous topology changes — switching to TOMA-driven RAFT eviction becomes worth its complexity. The Phase 2 message types and management handler can stay as a fallback path while RAFT-driven preempt becomes the steady-state mechanism.
+
 ### 2.1 Request message
 
 New `models/kafkaMessages/AttachSatelliteRequest.js`:

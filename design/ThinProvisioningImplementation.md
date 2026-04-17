@@ -1344,6 +1344,20 @@ From management (no client attach needed):
 
 There is no CDV-level encryption; encryption is at the TPV level (see Architecture Decision #18). `cdv_extent_zero_on_free` therefore defaults to **off** — operators who need stale-data scrubbing for an untrusted-multi-tenant deployment can opt in via `toma_rpc config set cdv_extent_zero_on_free 1`.
 
+#### Design gap: zero-on-free is non-functional after the satellite-volume migration
+
+After Phase 1 of `SatelliteVolumeForCDVAlloc.md` retired the CDV auto-attach to TOMA nodes, the allocator TOMA no longer has the CDV's block device open. `cdv_zero_execute` writes to CDV data-extent offsets, which requires `/dev/nvmesh/<cdv>` to be available on the allocator TOMA — which it is not in the default deployment.
+
+The kernel-side opener (`cdv_worker_open_cdv_fd_for_zeroing` in `toma/nvmeibt_cdv_alloc.c`) returns `-ENODEV` when the CDV is not attached locally, causing `cdv_zero_execute` to fail gracefully: the freed extent stays in `NEEDS_ZEROING` state on the satellite and is **not reused**. No silent corruption, but if `cdv_extent_zero_on_free` is enabled, every freed extent is permanently lost capacity.
+
+**Status:** known limitation. Acceptable while `cdv_extent_zero_on_free` is off-by-default (the only justification for ever turning it on is unencrypted multi-tenant deployments, and that combination is not currently supported). To re-enable zero-on-free post-migration, options include:
+
+1. Add a separate auto-attach path that attaches the CDV (not the satellite) to the elected allocator TOMA when zero-on-free is enabled.
+2. Move the zeroing work to a TOMA that does host the CDV (e.g., a first-pRAID owner) via a new Kafka instruction.
+3. Have the client kernel zero the extent before releasing it (TPV side instead of TOMA side).
+
+The `cdv_zero_execute` worker logs a one-shot warning per CDV when invoked in this state so operators can see the behavior in traces.
+
 ### 3.10 TPV Grow
 
 `POST /volumes/tpv/extend` sends `UpdateVolume` MCS to client:
