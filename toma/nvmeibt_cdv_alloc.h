@@ -133,6 +133,9 @@ struct nvmeibt_cdv_alloc {
 	bool     scan_fresh_seen_once;	/* true after first scan returned "fresh" (no magic);
 					 * forces one retry to guard against CDV-not-yet-online
 					 * during simultaneous client+TOMA restart */
+	uint32_t scan_retry_delay_ms;	/* 0 on first attempt; 100 → 1000 backoff on failure
+					 * while this TOMA is the elected allocator and
+					 * ondisk_loaded is still false */
 	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread */
 	char     dev_path[80];		/* /dev/nvmesh/<name>; resolved on main thread */
 	struct nvmeibt_wq *io_wq;	/* per-CDV I/O work queue (scan + writes) */

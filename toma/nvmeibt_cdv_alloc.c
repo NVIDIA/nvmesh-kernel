@@ -16,6 +16,7 @@
 
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>			/* usleep for scan retry backoff */
 #include "nvmeibt_cdv_alloc.h"
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
@@ -167,6 +168,8 @@ struct cdv_ondisk_scan_wq_entry {
 	/* ── Input (set by dispatcher on main thread, read by worker) ── */
 	struct nvmeibt_cdv_alloc *alloc;	/* for cached fd; valid: we drain before remove */
 	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	uint32_t pre_sleep_ms;			/* worker sleeps this long before the I/O —
+						 * drives the scan retry backoff */
 
 	/* ── Output (set by worker, consumed by finalize) ── */
 	int      rv;			/* 0 = success, negative = error */
@@ -198,6 +201,10 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 	e->is_fresh = false;
 	e->results = NULL;
 	e->n_results = 0;
+
+	/* Backoff delay from the previous failed scan (100ms → 1000ms). */
+	if (e->pre_sleep_ms)
+		usleep((useconds_t)e->pre_sleep_ms * 1000);
 
 	/* Open the CDV volume (lazy, cached in alloc->cdv_fd). */
 	fd = cdv_worker_open_fd(e->alloc);
@@ -335,6 +342,9 @@ done:
 				    &e->wq_entry);
 }
 
+static void cdv_ondisk_scan_async(const char *cdv_uuid,
+				  struct nvmeibt_cdv_alloc *alloc);
+
 /*
  * cdv_scan_finalize — main thread: apply scan results to the allocator.
  *
@@ -469,6 +479,36 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 	     e->cdv_uuid, n_loaded);
 
 out:
+	/*
+	 * If this TOMA is the elected allocator but the scan has not yet
+	 * succeeded, self-reschedule with backoff (100ms → 1000ms).  Otherwise
+	 * the on-disk load depends on an external trigger (client request or
+	 * topology recalc) that may never arrive — e.g. for a fresh CDV whose
+	 * block device is still coming online.
+	 */
+	if (alloc) {
+		if (alloc->ondisk_loaded) {
+			alloc->scan_retry_delay_ms = 0;
+		} else {
+			const char *me = nvmeibt_get_my_hostname();
+			bool am_allocator = me && me[0] &&
+				strncmp(alloc->allocator_toma_id, me,
+					NVMEIBT_CDV_HOSTNAME_LEN) == 0;
+
+			if (am_allocator) {
+				uint32_t prev = alloc->scan_retry_delay_ms;
+				uint32_t next = prev ? prev * 2 : 100;
+
+				if (next > 1000)
+					next = 1000;
+				alloc->scan_retry_delay_ms = next;
+				N_Wf(cdv_scan_retry_backoff,
+				     "CDV-alloc: scan cdv=@STR not loaded; retrying in @INT ms",
+				     e->cdv_uuid, (int)next);
+				cdv_ondisk_scan_async(e->cdv_uuid, alloc);
+			}
+		}
+	}
 	return; /* free callback handles memory */
 }
 
@@ -523,6 +563,7 @@ static void cdv_ondisk_scan_async(const char *cdv_uuid,
 	e->alloc = alloc;
 	strncpy(e->cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
 	e->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	e->pre_sleep_ms = alloc->scan_retry_delay_ms;
 
 	alloc->scan_in_progress = true;
 	nvmeibt_wq_addw(alloc->io_wq, &e->wq_entry);
