@@ -1757,11 +1757,54 @@ void nvmeibt_topology_calc_topology(void)
 					    & PRAID_REGISTRANTS_SYNC_CMD_STABLE);
 
 			if (is_first_praid && is_stable && blkdev->from_config.is_cdv) {
-				const char *candidates[1] = { nvmeibt_get_my_hostname() };
+				/*
+				 * Candidates = distinct owner hostnames of the first pRAID's
+				 * data disk segments.  Only a node that actually hosts one
+				 * of these segments is a valid allocator; otherwise the
+				 * elected TOMA has no local CDV block device to open
+				 * (cdv_worker_open_fd fails repeatedly) and clients on the
+				 * real data-bearing nodes never learn a usable allocator.
+				 */
 				const char *cdv_uuid = blkdev->urn_uuid.str;
+				const char *candidates[NVMEIBT_MAX_N_SEGMENTS_IN_PRAID];
+				int n_candidates = 0;
+				int si;
 
-				if (nvmeibt_cdv_alloc_elect(cdv_uuid, candidates, 1) > 0)
+				for (si = 0; si < praid->praid_mgmt.n_topo_segs; si++) {
+					struct nvmeibt_disk_segment *seg =
+						praid->praid_mgmt.topo_segs[si];
+					struct nvmeibt_disk *disk;
+					const char *name;
+					int k;
+					bool dup = false;
+
+					if (!seg)
+						continue;
+					disk = seg->seg_mgmt.its_disk;
+					if (!disk || !disk->its_node_config)
+						continue;
+					name = nvmeibt_node_name(disk->its_node_config);
+					if (!name || !name[0])
+						continue;
+					for (k = 0; k < n_candidates; k++) {
+						if (strcmp(candidates[k], name) == 0) {
+							dup = true;
+							break;
+						}
+					}
+					if (!dup)
+						candidates[n_candidates++] = name;
+				}
+
+				if (n_candidates == 0) {
+					N_Wf(cdv_alloc_elect_no_owners,
+					     "CDV-alloc: first pRAID @UUID_LE has no resolvable segment owners; skipping elect",
+					     nvmeibt_praid_UUID(praid));
+				} else if (nvmeibt_cdv_alloc_elect(cdv_uuid,
+								   candidates,
+								   n_candidates) > 0) {
 					nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
+				}
 			}
 		}
 	}
