@@ -161,6 +161,9 @@ static inline uint64_t cdv_ondisk_record_offset(uint64_t extent_index)
 struct cdv_scan_result_entry {
 	uint64_t extent_index;
 	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	bool     needs_zeroing;
+	uint32_t zeroing_allocator_size_gb;
+	uint32_t zeroing_cdv_extent_size_mb;
 };
 
 /* WQ entry for async CDV ondisk scan. */
@@ -320,6 +323,11 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 		rec->tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
 		strncpy(results[n_results].tpv_uuid, rec->tpv_uuid,
 			NVMEIBT_CDV_UUID_STRLEN);
+		if (rec->flags & CDV_ONDISK_RECORD_FLAG_NEEDS_ZEROING) {
+			results[n_results].needs_zeroing = true;
+			results[n_results].zeroing_allocator_size_gb  = rec->zeroing_allocator_size_gb;
+			results[n_results].zeroing_cdv_extent_size_mb = rec->zeroing_cdv_extent_size_mb;
+		}
 		n_results++;
 
 		memset(rec, 0, CDV_ONDISK_BLOCK_SIZE);
@@ -346,6 +354,11 @@ done:
 
 static void cdv_ondisk_scan_async(const char *cdv_uuid,
 				  struct nvmeibt_cdv_alloc *alloc);
+static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
+				     uint64_t extent_index,
+				     const char *tpv_uuid,
+				     uint32_t allocator_size_gb,
+				     uint32_t cdv_extent_size_mb);
 
 /*
  * cdv_scan_finalize — main thread: apply scan results to the allocator.
@@ -464,14 +477,45 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 	/* Apply extent entries — add_extent deduplicates. */
 	for (i = 0; i < e->n_results; i++) {
+		struct cdv_scan_result_entry *r = &e->results[i];
+
 		if (nvmeibt_cdv_alloc_add_extent(e->cdv_uuid,
-						 e->results[i].extent_index,
-						 e->results[i].tpv_uuid) < 0)
+						 r->extent_index,
+						 r->tpv_uuid) < 0) {
 			N_Ef(cdv_scan_fin_add_fail,
 			     "CDV-alloc: scan finalize cdv=@STR idx=@LLU add_extent failed",
-			     e->cdv_uuid, e->results[i].extent_index);
-		else
-			n_loaded++;
+			     e->cdv_uuid, r->extent_index);
+			continue;
+		}
+
+		n_loaded++;
+
+		if (r->needs_zeroing) {
+			struct nvmeibt_cdv_extent_entry *ext;
+
+			XDLIST_FOREACH(ext, &alloc->extents) {
+				if (ext->extent_index == r->extent_index) {
+					ext->needs_zeroing = true;
+					alloc->n_pending_zeroing++;
+					if (r->zeroing_allocator_size_gb && r->zeroing_cdv_extent_size_mb) {
+						if (alloc->allocator_size_gb == 0)
+							alloc->allocator_size_gb = r->zeroing_allocator_size_gb;
+						if (alloc->cdv_extent_size_mb == 0)
+							alloc->cdv_extent_size_mb = r->zeroing_cdv_extent_size_mb;
+						cdv_dispatch_zero_extent(alloc, r->extent_index,
+									 r->tpv_uuid,
+									 r->zeroing_allocator_size_gb,
+									 r->zeroing_cdv_extent_size_mb);
+					} else {
+						N_Wf(cdv_scan_fin_zero_no_geom,
+						     "CDV-alloc: scan cdv=@STR idx=@LLU NEEDS_ZEROING "
+						     "but geometry missing; will zero on next free_all",
+						     e->cdv_uuid, r->extent_index);
+					}
+					break;
+				}
+			}
+		}
 	}
 
 	alloc->ondisk_loaded = true;
@@ -733,6 +777,230 @@ static void cdv_async_write_header(struct nvmeibt_cdv_alloc *alloc)
 		offsetof(struct cdv_alloc_ondisk_header, crc32));
 
 	cdv_dispatch_write(alloc, hdr, 0ULL);
+}
+
+/*
+ * cdv_data_extent_offset — CDV byte offset of data extent @extent_index.
+ *
+ * Data extents are 1-based (extent 0 is the allocator area).
+ * Byte offset = allocator_size_gb * 1 GiB + (extent_index - 1) * cdv_extent_size_mb * 1 MiB
+ */
+static inline uint64_t cdv_data_extent_offset(uint64_t extent_index,
+					       uint32_t allocator_size_gb,
+					       uint32_t cdv_extent_size_mb)
+{
+	return (uint64_t)allocator_size_gb * (1ULL << 30)
+	     + (extent_index - 1) * (uint64_t)cdv_extent_size_mb * (1ULL << 20);
+}
+
+/*
+ * cdv_async_write_record_needs_zeroing — write an ALLOCATED|NEEDS_ZEROING record
+ * carrying geometry in the reserved2 extension fields (not CRC-covered).
+ */
+static void cdv_async_write_record_needs_zeroing(struct nvmeibt_cdv_alloc *alloc,
+						  uint64_t extent_index,
+						  const char *tpv_uuid,
+						  uint32_t allocator_size_gb,
+						  uint32_t cdv_extent_size_mb)
+{
+	struct cdv_alloc_ondisk_record *rec;
+
+	rec = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_async_wr_nz_rec_alloc,
+					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
+	if (!rec)
+		return;
+
+	rec->flags = CDV_ONDISK_RECORD_FLAG_ALLOCATED | CDV_ONDISK_RECORD_FLAG_NEEDS_ZEROING;
+	strncpy(rec->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	rec->tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	rec->crc32 = crc32_seedless(rec,
+		offsetof(struct cdv_alloc_ondisk_record, crc32));
+	/* Geometry fields are after crc32, not CRC-covered. */
+	rec->zeroing_allocator_size_gb  = allocator_size_gb;
+	rec->zeroing_cdv_extent_size_mb = cdv_extent_size_mb;
+
+	cdv_dispatch_write(alloc, rec, cdv_ondisk_record_offset(extent_index));
+}
+
+/* ── Background CDV data-extent zero (work-queue based) ────────────────────
+ *
+ * When a TPV is deleted, all CDV data extents it owned are zeroed in the
+ * background before being made available for a new TPV.  This prevents data
+ * leakage between TPVs sharing the same CDV.
+ *
+ * The zero WQ entry writes the full CDV extent (cdv_extent_size_mb MiB) in
+ * 1 MiB chunks using an aligned calloc buffer.  On success the finalize
+ * callback writes a free ondisk record and removes the extent from the
+ * in-memory list.  On failure the entry is left in place so the next
+ * free_all_for_tpv call (or scan after restart) will retry.
+ */
+
+struct cdv_zero_wq_entry {
+	struct nvmeibt_wq_entry   wq_entry;
+	struct nvmeibt_cdv_alloc *alloc;
+
+	/* Inputs set by dispatcher (main thread). */
+	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	uint64_t extent_index;
+	uint64_t data_offset;		/* CDV byte offset of the data extent */
+	uint32_t extent_size_mb;	/* size of this data extent in MiB */
+
+	/* Output set by worker. */
+	int      rv;
+};
+
+static void cdv_zero_execute(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_zero_wq_entry *e =
+		container_of(wq_entry, struct cdv_zero_wq_entry, wq_entry);
+	uint8_t *zbuf;
+	uint32_t chunk_size = 1U << 20; /* 1 MiB */
+	uint64_t written = 0;
+	uint64_t total = (uint64_t)e->extent_size_mb << 20;
+	int fd;
+
+	e->rv = 0;
+	fd = cdv_worker_open_fd(e->alloc);
+	if (fd < 0) {
+		e->rv = -ENODEV;
+		goto done;
+	}
+
+	zbuf = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_zero_buf_alloc, PAGE_SIZE, chunk_size);
+	if (!zbuf) {
+		e->rv = -ENOMEM;
+		goto done;
+	}
+
+	while (written < total) {
+		uint64_t remaining = total - written;
+		uint32_t this_chunk = (remaining < chunk_size) ? (uint32_t)remaining : chunk_size;
+
+		if (NNVMEIBT_PWRITE(cdv_zero_wr, fd, zbuf, this_chunk,
+				    e->data_offset + written, 0ULL) < 0) {
+			N_Ef(cdv_zero_wr_err,
+			     "CDV-zero: write failed cdv=@STR idx=@LLU offset=@LLU",
+			     e->cdv_uuid, e->extent_index, e->data_offset + written);
+			e->rv = -EIO;
+			break;
+		}
+		written += this_chunk;
+	}
+
+	NNVMEIBT_BM_FREE(cdv_zero_buf_free, zbuf);
+
+done:
+	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, &e->wq_entry);
+}
+
+static void cdv_zero_finalize(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_zero_wq_entry *e =
+		container_of(wq_entry, struct cdv_zero_wq_entry, wq_entry);
+	struct nvmeibt_cdv_alloc        *alloc;
+	struct nvmeibt_cdv_extent_entry *entry;
+
+	if (wq_entry->is_canceled) {
+		N_Wf(cdv_zero_fin_canceled,
+		     "CDV-zero: cdv=@STR idx=@LLU canceled (shutdown)",
+		     e->cdv_uuid, e->extent_index);
+		return;
+	}
+
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, e->cdv_uuid);
+	if (!alloc) {
+		N_Wf(cdv_zero_fin_no_alloc,
+		     "CDV-zero: cdv=@STR idx=@LLU allocator gone; discarding",
+		     e->cdv_uuid, e->extent_index);
+		return;
+	}
+
+	if (e->rv < 0) {
+		N_Ef(cdv_zero_fin_err,
+		     "CDV-zero: cdv=@STR idx=@LLU zero failed rv=@INT; "
+		     "extent stays NEEDS_ZEROING, will retry on next restart",
+		     e->cdv_uuid, e->extent_index, e->rv);
+		return;
+	}
+
+	/* Zero succeeded: write a free ondisk record, then remove entry. */
+	cdv_async_write_record(alloc, e->extent_index, NULL);
+
+	XDLIST_FOREACH_SAFE(entry, &alloc->extents) {
+		if (entry->extent_index != e->extent_index)
+			continue;
+		if (strncmp(entry->tpv_uuid, e->tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0)
+			continue;
+
+		XDLIST_ELEM_DEL(&alloc->extents, entry);
+		alloc->n_allocated--;
+		if (alloc->n_pending_zeroing > 0)
+			alloc->n_pending_zeroing--;
+		NNVMEIBT_BM_FREE(cdv_zero_fin_entry, entry);
+		break;
+	}
+
+	cdv_async_write_header(alloc);
+	cdv_maybe_warn_capacity(alloc);
+	cdv_publish_alloc_stats(alloc);
+
+	N_If(cdv_zero_fin_ok,
+	     "CDV-zero: cdv=@STR idx=@LLU zeroed and freed; remaining pending=@LLU",
+	     e->cdv_uuid, e->extent_index, alloc->n_pending_zeroing);
+}
+
+static void cdv_zero_free(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_zero_wq_entry *e =
+		container_of(wq_entry, struct cdv_zero_wq_entry, wq_entry);
+
+	NNVMEIBT_BM_FREE(cdv_zero_wqe_free, e);
+}
+
+/*
+ * cdv_dispatch_zero_extent — enqueue a background data-extent zero on the per-CDV WQ.
+ */
+static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
+				     uint64_t extent_index,
+				     const char *tpv_uuid,
+				     uint32_t allocator_size_gb,
+				     uint32_t cdv_extent_size_mb)
+{
+	struct cdv_zero_wq_entry *e;
+
+	if (!alloc->io_wq)
+		return;
+
+	e = NNVMEIBT_BM_CALLOC(cdv_zero_wqe_alloc, sizeof(*e));
+	if (!e) {
+		N_Ef(cdv_zero_wqe_oom,
+		     "CDV-zero: cdv=@STR idx=@LLU WQ entry alloc failed",
+		     alloc->cdv_uuid, extent_index);
+		return;
+	}
+
+	e->wq_entry.type     = "CDV_ZERO_EXTENT";
+	e->wq_entry.execute  = cdv_zero_execute;
+	e->wq_entry.finalize = cdv_zero_finalize;
+	e->wq_entry.abort    = nvmeibt_toma_wakeup_wq_abort_func;
+	e->wq_entry.free     = cdv_zero_free;
+
+	e->alloc          = alloc;
+	e->extent_index   = extent_index;
+	e->data_offset    = cdv_data_extent_offset(extent_index, allocator_size_gb, cdv_extent_size_mb);
+	e->extent_size_mb = cdv_extent_size_mb;
+
+	strncpy(e->cdv_uuid, alloc->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	e->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	strncpy(e->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	e->tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+
+	nvmeibt_wq_addw(alloc->io_wq, &e->wq_entry);
+
+	N_If(cdv_zero_dispatched,
+	     "CDV-zero: queued cdv=@STR idx=@LLU offset=@LLU size_mb=@UINT",
+	     alloc->cdv_uuid, extent_index, e->data_offset, cdv_extent_size_mb);
 }
 
 /* Forward declaration — defined in the incoming-message handler section. */
@@ -1821,7 +2089,7 @@ void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 						  / alloc->total_data_extents);
 
 		(*printf_fn)(printf_ctx,
-			     "\t- cdv=%-20s [%-40s] allocator=%-20s gen=%-6llu allocated=%-6llu / %-6llu  (%u%%)%s\n",
+			     "\t- cdv=%-20s [%-40s] allocator=%-20s gen=%-6llu allocated=%-6llu / %-6llu  (%u%%)%s%s\n",
 			     cdv_name,
 			     alloc->cdv_uuid,
 			     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(unelected)",
@@ -1829,7 +2097,8 @@ void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 			     alloc->n_allocated,
 			     alloc->total_data_extents,
 			     used_pct,
-			     alloc->capacity_warning_sent ? " [CAPACITY WARNING]" : "");
+			     alloc->capacity_warning_sent ? " [CAPACITY WARNING]" : "",
+			     alloc->n_pending_zeroing ? " [ZEROING]" : "");
 		n_cdvs++;
 	}
 
@@ -1872,12 +2141,13 @@ void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const c
 
 		if (!XDLIST_EMPTY(&alloc->extents)) {
 			(*printf_fn)(printf_ctx,
-				     "\t  %-8s  %s\n",
-				     "ext_idx", "tpv_uuid");
+				     "\t  %-8s  %-6s  %s\n",
+				     "ext_idx", "state", "tpv_uuid");
 			XDLIST_FOREACH(entry, &alloc->extents) {
 				(*printf_fn)(printf_ctx,
-					     "\t  %-8llu  %s\n",
+					     "\t  %-8llu  %-6s  %s\n",
 					     entry->extent_index,
+					     entry->needs_zeroing ? "ZERO" : "alloc",
 					     entry->tpv_uuid);
 			}
 		} else {
@@ -1895,67 +2165,66 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 {
 	struct nvmeibt_cdv_alloc        *alloc;
 	struct nvmeibt_cdv_extent_entry *entry;
-	uint64_t n_freed = 0;
-
-	(void)allocator_size_gb;
-	(void)cdv_extent_size_mb;
+	uint64_t n_queued = 0;
 
 	/* ── 1. Find or create the per-CDV allocator; ensure I/O WQ ── */
 	alloc = find_or_create_alloc(cdv_uuid);
 	if (!alloc)
 		return -ENOMEM;
 
-	/* Best-effort: set up I/O WQ for async persistence. */
+	/* Cache CDV geometry for use by the background zero worker. */
+	if (allocator_size_gb && !alloc->allocator_size_gb)
+		alloc->allocator_size_gb = allocator_size_gb;
+	if (cdv_extent_size_mb && !alloc->cdv_extent_size_mb)
+		alloc->cdv_extent_size_mb = cdv_extent_size_mb;
+
+	/* Best-effort: set up I/O WQ for async writes + zeroing. */
 	(void)cdv_ensure_io_wq(cdv_uuid, alloc);
 
 	if (!alloc->ondisk_loaded) {
 		cdv_ondisk_scan_async(cdv_uuid, alloc);
 		/*
-		 * Scan in progress — cannot free what we haven't loaded yet.
-		 * The in-memory extent list may be incomplete; proceed anyway
-		 * and free whatever we have.  On the next heartbeat the scan
-		 * will complete and a subsequent free_all (if needed) will
-		 * catch the rest.
+		 * Scan in progress — in-memory extent list may be incomplete.
+		 * Proceed with whatever is loaded; the scan finalize will
+		 * re-dispatch zeroing for any NEEDS_ZEROING entries it finds.
 		 */
 	}
 
-	/* ── 2. Free in-memory entries + dispatch on-disk record clears ── */
-	XDLIST_FOREACH_SAFE(entry, &alloc->extents) {
+	/*
+	 * ── 2. Mark extents NEEDS_ZEROING + dispatch background zero ──
+	 *
+	 * Do NOT remove entries from the list or decrement n_allocated here.
+	 * The entry stays in place (blocking reallocation) until the background
+	 * zero completes and cdv_zero_finalize removes it.
+	 */
+	XDLIST_FOREACH(entry, &alloc->extents) {
 		if (strncmp(entry->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0)
 			continue;
+		if (entry->needs_zeroing)
+			continue;   /* already queued (e.g. duplicate Kafka delivery) */
 
-		cdv_async_write_record(alloc, entry->extent_index, NULL);
+		entry->needs_zeroing = true;
+		alloc->n_pending_zeroing++;
 
-		XDLIST_ELEM_DEL(&alloc->extents, entry);
-		alloc->n_allocated--;
-		NNVMEIBT_BM_FREE(cdv_free_all_entry, entry);
-		n_freed++;
+		cdv_async_write_record_needs_zeroing(alloc, entry->extent_index,
+						     tpv_uuid,
+						     allocator_size_gb,
+						     cdv_extent_size_mb);
+
+		cdv_dispatch_zero_extent(alloc, entry->extent_index,
+					 tpv_uuid,
+					 allocator_size_gb,
+					 cdv_extent_size_mb);
+		n_queued++;
 	}
 
-	/* ── 3. Rewrite header to reflect updated n_allocated (async) ── */
-	if (n_freed > 0)
+	/* ── 3. Rewrite header (extent count unchanged; records updated) ── */
+	if (n_queued > 0)
 		cdv_async_write_header(alloc);
 
-	/* Check whether the capacity warning flag can be cleared. */
-	cdv_maybe_warn_capacity(alloc);
-
 	N_If(cdv_free_all_done,
-	     "CDV-alloc: free_all cdv=@STR tpv=@STR freed=@LLU remaining=@LLU",
-	     cdv_uuid, tpv_uuid, n_freed, alloc->n_allocated);
-
-	/*
-	 * ── 4. Zero the TPV's tree extent L1 header ──
-	 *
-	 * The TPV's L1/L2 tree lives in one of the freed CDV_extents (the
-	 * "tree extent"), identified by a magic header at slot 0.  The L1
-	 * header was already cleared when cdv_ondisk_write_record(NULL) reset
-	 * the on-disk record for that extent in step 2.  The physical slot
-	 * data (L1/L2 tables in the CDV data region) will be zeroed by the
-	 * NEEDS_ZEROING → background-zero path before the extent is reused.
-	 *
-	 * No additional zeroing is needed here — each TPV has its own
-	 * tree extent that is zeroed when the TPV is deleted.
-	 */
+	     "CDV-alloc: free_all cdv=@STR tpv=@STR queued_for_zero=@LLU pending=@LLU total=@LLU",
+	     cdv_uuid, tpv_uuid, n_queued, alloc->n_pending_zeroing, alloc->n_allocated);
 
 	return 0;
 }

@@ -51,10 +51,15 @@
  * Lives on nvmeibt_cdv_alloc.extents.  One node per allocated CDV_extent.
  * The 'link' field is the XDLIST embedded link; must match the field name
  * in the XDLIST_DECLARE in nvmeibt_cdv_alloc.
+ *
+ * When needs_zeroing is true the extent has been freed by a deleted TPV but
+ * not yet zeroed on disk.  It stays in the extents list (counted in n_allocated)
+ * to block reallocation until the background zero completes.
  */
 struct nvmeibt_cdv_extent_entry {
 	uint64_t   extent_index;
 	char       tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	bool       needs_zeroing;	/* freed but awaiting background zero before reuse */
 	struct xdlist link;
 };
 
@@ -96,14 +101,22 @@ struct cdv_alloc_ondisk_header {
 	uint8_t  reserved[CDV_ONDISK_BLOCK_SIZE - 4 - 4 - 8 - 64 - 8 - 4];
 } __attribute__((__packed__));
 
-#define CDV_ONDISK_RECORD_FLAG_ALLOCATED  0x01
+#define CDV_ONDISK_RECORD_FLAG_ALLOCATED     0x01
+#define CDV_ONDISK_RECORD_FLAG_NEEDS_ZEROING 0x02  /* freed but not yet zeroed; blocked from reuse */
 
 struct cdv_alloc_ondisk_record {
-	uint8_t  flags;                                  /* CDV_ONDISK_RECORD_FLAG_ALLOCATED or 0 */
+	uint8_t  flags;                                  /* CDV_ONDISK_RECORD_FLAG_* */
 	uint8_t  reserved1[7];
 	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];     /* 64 bytes; zeroed if free */
 	uint32_t crc32;
-	uint8_t  reserved2[CDV_ONDISK_BLOCK_SIZE - 1 - 7 - 64 - 4];
+	/*
+	 * Zeroing geometry — not CRC-covered; valid only when NEEDS_ZEROING is set.
+	 * Stored here so the zeroing worker can recover geometry on restart without
+	 * requiring a separate management query.
+	 */
+	uint32_t zeroing_allocator_size_gb;
+	uint32_t zeroing_cdv_extent_size_mb;
+	uint8_t  reserved2[CDV_ONDISK_BLOCK_SIZE - 1 - 7 - 64 - 4 - 4 - 4];
 } __attribute__((__packed__));
 
 /* ── Per-CDV allocator ──────────────────────────────────────────────────────
@@ -136,6 +149,14 @@ struct nvmeibt_cdv_alloc {
 	uint32_t scan_retry_delay_ms;	/* 0 on first attempt; 100 → 1000 backoff on failure
 					 * while this TOMA is the elected allocator and
 					 * ondisk_loaded is still false */
+	/*
+	 * CDV geometry — cached on first free_all_for_tpv call and on scan.
+	 * Needed by the background zero worker to compute per-extent byte offsets
+	 * when re-dispatching zeroing after a TOMA restart.
+	 */
+	uint32_t allocator_size_gb;	/* size of on-CDV allocator region in GiB */
+	uint32_t cdv_extent_size_mb;	/* size of each data CDV extent in MiB */
+	uint64_t n_pending_zeroing;	/* extents with needs_zeroing=true (not yet re-usable) */
 	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread */
 	char     dev_path[80];		/* /dev/nvmesh/<name>; resolved on main thread */
 	struct nvmeibt_wq *io_wq;	/* per-CDV I/O work queue (scan + writes) */
@@ -322,24 +343,29 @@ struct nvmeibt_registrant_ctx;
 void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx *reg_ctx);
 
 /*
- * nvmeibt_cdv_alloc_free_all_for_tpv — release all CDV extents owned by a TPV
- * and zero the flat-L1 tree extent (CDV_extent[0]).
+ * nvmeibt_cdv_alloc_free_all_for_tpv — queue zeroing of all CDV data extents
+ * owned by a deleted TPV before making them available for reuse.
  *
  * Called from the Kafka CDVAllocatorFreeAll handler when a TPV is deleted.
  * The function:
  *   1. Finds (or creates) the per-CDV allocator; scans on-disk state if not yet
  *      loaded (handles TOMA-restart-before-handler race).
- *   2. Iterates the in-memory extent list; for each extent owned by @tpv_uuid:
- *      writes a free ondisk record, removes from the in-memory list.
- *   3. Rewrites the allocator header.
- *   4. Zeroes CDV_extent[0] (the client flat-L1 tree) at byte offset
- *      @allocator_size_gb × 1 GiB, size @cdv_extent_size_mb × 1 MiB.
- *      This prevents a subsequent TPV from inheriting stale virtual→physical
- *      mappings left by the deleted TPV.
+ *   2. Stores the CDV geometry (@allocator_size_gb, @cdv_extent_size_mb) in
+ *      the allocator struct for use by the background zero worker.
+ *   3. Iterates the in-memory extent list; for each extent owned by @tpv_uuid:
+ *      - sets entry->needs_zeroing = true and increments n_pending_zeroing
+ *      - writes an ALLOCATED|NEEDS_ZEROING ondisk record (geometry in reserved2)
+ *      - dispatches a background zero write for the full CDV data extent
+ *      - does NOT remove the entry from the list or decrement n_allocated —
+ *        the entry blocks reallocation until zeroing completes
+ *   4. Rewrites the allocator header.
+ *
+ * When the background zero finishes for each extent, the finalize callback
+ * writes a free ondisk record (NULL tpv_uuid), removes the entry from the list,
+ * decrements n_allocated and n_pending_zeroing, and triggers a header rewrite.
  *
  * Returns 0 on success.  On disk-resolve failure returns a negative errno.
- * Individual extent-record write failures are logged but do not abort the
- * remaining extents or the L1-zeroing step.
+ * Individual zero-dispatch failures are logged but do not abort remaining extents.
  *
  * Must be called from TOMA's single main thread (or with the topology lock held).
  */
