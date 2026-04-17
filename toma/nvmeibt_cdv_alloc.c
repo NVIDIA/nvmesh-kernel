@@ -613,18 +613,6 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 	alloc->ondisk_loaded = true;
 	alloc->scan_fresh_seen_once = false;  /* successful load; reset for future re-scans */
 
-	/*
-	 * Promote to ACTIVE if the scan succeeded while we were waiting for the
-	 * satellite to be open (Stage B of the satellite-attach handshake).  This
-	 * is what unblocks handle_cdv_alloc_extent from returning WRONG_GEN.
-	 */
-	if (alloc->state == NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH) {
-		alloc->state = NVMEIBT_CDV_ALLOC_STATE_ACTIVE;
-		N_If(cdv_alloc_state_active,
-		     "CDV-alloc: state->ACTIVE cdv=@STR gen=@LLU",
-		     e->cdv_uuid, alloc->allocator_generation);
-	}
-
 	N_If(cdv_scan_fin_done,
 	     "CDV-alloc: scan finalize cdv=@STR loaded @LLU extents",
 	     e->cdv_uuid, n_loaded);
@@ -640,6 +628,20 @@ out:
 	if (alloc) {
 		if (alloc->ondisk_loaded) {
 			alloc->scan_retry_delay_ms = 0;
+			/*
+			 * Promote to ACTIVE if the scan succeeded while we
+			 * were waiting for the satellite to be open (Stage B
+			 * of the satellite-attach handshake).  This unblocks
+			 * handle_cdv_alloc_extent from returning WRONG_GEN.
+			 * Placed here (rather than inline on the non-fresh
+			 * path) so fresh-CDV scans also promote.
+			 */
+			if (alloc->state == NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH) {
+				alloc->state = NVMEIBT_CDV_ALLOC_STATE_ACTIVE;
+				N_If(cdv_alloc_state_active,
+				     "CDV-alloc: state->ACTIVE cdv=@STR gen=@LLU",
+				     e->cdv_uuid, alloc->allocator_generation);
+			}
 		} else {
 			const char *me = nvmeibt_get_my_hostname();
 			bool am_allocator = me && me[0] &&
