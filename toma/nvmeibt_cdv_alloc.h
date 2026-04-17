@@ -282,6 +282,34 @@ int nvmeibt_cdv_alloc_get_allocator(const char *cdv_uuid,
 void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid);
 
 /*
+ * Wire payload for the leader → chosen-allocator unicast RAFT_MSG_CDV_ALLOC_NOTIFY.
+ * Fixed-size, packed; carried in raft_msg.persist_and_wire_buf.data[].
+ */
+struct nvmeibt_cdv_alloc_notify_payload {
+	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char     allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN];
+	uint64_t allocator_generation;
+} __attribute__((packed));
+
+/*
+ * nvmeibt_cdv_alloc_send_notify_to_elected — leader calls this after a
+ * successful nvmeibt_cdv_alloc_elect() (returns 1).  Sends RAFT_MSG_CDV_ALLOC_NOTIFY
+ * unicast to the chosen TOMA.  If the chosen TOMA is the leader itself, applies
+ * the notify locally instead (same effect without going through the wire).
+ */
+void nvmeibt_cdv_alloc_send_notify_to_elected(const char *cdv_uuid,
+					      const char *allocator_toma_id,
+					      uint64_t    allocator_generation);
+
+/*
+ * nvmeibt_cdv_alloc_handle_notify — receiver: called from the RAFT dispatch
+ * on RAFT_MSG_CDV_ALLOC_NOTIFY.  Applies the monotonicity guard, updates the
+ * local alloc entry, schedules the on-disk scan, persists the identity to the
+ * CDV header, and pushes CDV_ALLOCATOR_UPDATE to local registrants.
+ */
+void nvmeibt_cdv_alloc_handle_notify(const struct nvmeibt_cdv_alloc_notify_payload *payload);
+
+/*
  * nvmeibt_cdv_alloc_push_all_to_new_registrant — unicast CDV_ALLOCATOR_UPDATE
  * for every known elected CDV allocator to a single newly-registered client.
  *

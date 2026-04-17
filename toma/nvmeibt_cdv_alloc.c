@@ -30,6 +30,8 @@
 #include "vol/nvmeibt_block_device.h"	/* nvmeibt_block_device_get_block_device_by_id, nvmeibt_blkdev_is_being_deleted */
 #include "utils/nvmeibt_uuid.h"		/* nvmeibt_urn_uuid_str_to_union_uuid */
 #include "nvmeibt_wq.h"		/* struct nvmeibt_wq, nvmeibt_wq_addw */
+#include "nvmeibt_node.h"	/* nvmeibt_node_get_node_by_id, nvmeibt_node_name */
+#include "nvmeibt_raft.h"	/* nvmeibt_raft_send_cdv_alloc_notify */
 
 /* ── Global state ────────────────────────────────────────────────────────── */
 
@@ -1440,6 +1442,156 @@ void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx 
 	}
 }
 
+/*
+ * ── Leader → chosen-allocator unicast (identity propagation) ────────────
+ *
+ * After a successful election on the RAFT leader, the leader delivers the
+ * elected (allocator_toma_id, allocator_generation) to the chosen TOMA via a
+ * single unicast RAFT_MSG_CDV_ALLOC_NOTIFY.  Only the chosen TOMA holds CDV
+ * allocator state for that CDV; peer TOMAs are not informed.
+ *
+ * The chosen TOMA is by construction a first-pRAID data-segment owner, so:
+ *  - it has a live path to the CDV (cdvTomaAutoAttach attaches it), allowing
+ *    cdv_ondisk_scan and cdv_async_write_header to succeed;
+ *  - every client that attached the CDV is also registered with it (clients
+ *    register with every mirror replica owner), so a local push_to_registrants
+ *    fan-out covers all clients.
+ *
+ * Monotonicity is enforced at the receiver: accept only strictly-higher
+ * allocator_generation.  This keeps late or reordered deliveries safe.
+ */
+
+static struct nvmeibt_node *
+cdv_find_node_by_hostname(const char *hostname)
+{
+	struct nvmeibt_node *node;
+
+	if (!hostname || !hostname[0])
+		return NULL;
+
+	NVMEIB_HASH_FOREACH(node,
+			    nvmeibt_global_get_global()->nodes_hash_by_uuid) {
+		const char *name = nvmeibt_node_name(node);
+		if (name && strncmp(name, hostname, NVMEIBT_CDV_HOSTNAME_LEN) == 0)
+			return node;
+	}
+	return NULL;
+}
+
+void nvmeibt_cdv_alloc_handle_notify(const struct nvmeibt_cdv_alloc_notify_payload *payload)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char     toma_id[NVMEIBT_CDV_HOSTNAME_LEN];
+	uint64_t gen;
+	bool     am_new_allocator;
+
+	if (!payload)
+		return;
+
+	/* Defensive NUL-termination into locals. */
+	memcpy(cdv_uuid, payload->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN);
+	cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	memcpy(toma_id, payload->allocator_toma_id, NVMEIBT_CDV_HOSTNAME_LEN);
+	toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
+	gen = payload->allocator_generation;
+
+	alloc = find_or_create_alloc(cdv_uuid);
+	if (!alloc) {
+		N_Ef(cdv_notify_oom,
+		     "CDV-alloc: notify cdv=@STR find_or_create_alloc failed",
+		     cdv_uuid);
+		return;
+	}
+
+	/* Monotonicity guard: accept only strictly-higher generations. */
+	if (gen <= alloc->allocator_generation) {
+		N_Wf(cdv_notify_stale,
+		     "CDV-alloc: notify cdv=@STR stale gen=@LLU local=@LLU; ignoring",
+		     cdv_uuid, gen, alloc->allocator_generation);
+		return;
+	}
+
+	am_new_allocator = (toma_id[0] &&
+			    strncmp(toma_id, nvmeibt_get_my_hostname(),
+				    NVMEIBT_CDV_HOSTNAME_LEN) == 0);
+
+	strncpy(alloc->allocator_toma_id, toma_id,
+		NVMEIBT_CDV_HOSTNAME_LEN - 1);
+	alloc->allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
+	alloc->allocator_generation = gen;
+
+	N_If(cdv_notify_apply,
+	     "CDV-alloc: notify applied cdv=@STR toma=@STR gen=@LLU me=@BOOL",
+	     cdv_uuid, toma_id, gen, (int)am_new_allocator);
+
+	/*
+	 * Only the newly-elected allocator does the scan / header write / push.
+	 * If this notify reached us but we are not named as allocator, we still
+	 * bumped the local generation so subsequent ALLOC requests to us are
+	 * rejected with WRONG_GEN — but we don't own the CDV, so that state is
+	 * harmless and will be overwritten by the next notify.
+	 */
+	if (!am_new_allocator)
+		return;
+
+	/* Load extent state from the CDV on-disk header (backoff-retries). */
+	if (!alloc->ondisk_loaded)
+		cdv_ondisk_scan_async(cdv_uuid, alloc);
+
+	/* Persist the new identity to the CDV on-disk header (durability). */
+	cdv_async_write_header(alloc);
+
+	/* Deliver CDV_ALLOCATOR_UPDATE to all local registrants. */
+	nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
+}
+
+void nvmeibt_cdv_alloc_send_notify_to_elected(const char *cdv_uuid,
+					      const char *allocator_toma_id,
+					      uint64_t    allocator_generation)
+{
+	struct nvmeibt_cdv_alloc_notify_payload payload;
+	struct nvmeibt_node *dst_node;
+
+	if (!cdv_uuid || !allocator_toma_id || !allocator_toma_id[0]) {
+		N_Ef(cdv_notify_send_bad_args,
+		     "CDV-alloc: send_notify bad args cdv=@STR toma=@STR",
+		     cdv_uuid ? cdv_uuid : "(null)",
+		     allocator_toma_id ? allocator_toma_id : "(null)");
+		return;
+	}
+
+	memset(&payload, 0, sizeof(payload));
+	strncpy(payload.cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	strncpy(payload.allocator_toma_id, allocator_toma_id,
+		NVMEIBT_CDV_HOSTNAME_LEN - 1);
+	payload.allocator_generation = allocator_generation;
+
+	/* Short-circuit when the leader is itself the chosen allocator. */
+	if (strncmp(allocator_toma_id, nvmeibt_get_my_hostname(),
+		    NVMEIBT_CDV_HOSTNAME_LEN) == 0) {
+		N_If(cdv_notify_self,
+		     "CDV-alloc: notify self-apply cdv=@STR toma=@STR gen=@LLU",
+		     cdv_uuid, allocator_toma_id, allocator_generation);
+		nvmeibt_cdv_alloc_handle_notify(&payload);
+		return;
+	}
+
+	dst_node = cdv_find_node_by_hostname(allocator_toma_id);
+	if (!dst_node) {
+		N_Wf(cdv_notify_no_node,
+		     "CDV-alloc: notify cdv=@STR dst toma=@STR: node not found; "
+		     "receiver will resync on next elect",
+		     cdv_uuid, allocator_toma_id);
+		return;
+	}
+
+	N_If(cdv_notify_send,
+	     "CDV-alloc: unicast notify cdv=@STR toma=@STR gen=@LLU",
+	     cdv_uuid, allocator_toma_id, allocator_generation);
+	nvmeibt_raft_send_cdv_alloc_notify(dst_node, &payload);
+}
+
 /* ── One-time init / shutdown ────────────────────────────────────────────── */
 
 int nvmeibt_cdv_alloc_one_time_init(void)
@@ -1867,6 +2019,24 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 
 	memset(&resp, 0, sizeof(resp));
 	resp.req_id = req->req_id;
+
+	/*
+	 * Split-brain gate: an allocator that has lost RAFT quorum contact
+	 * must not serve ALLOC.  The chosen allocator's identity is only ever
+	 * bumped by a RAFT leader (unique per term), so a partitioned minority
+	 * can never have elected a newer allocator — if we're still cached as
+	 * allocator here but RAFT is no longer valid, we're the stale side.
+	 * Respond WRONG_GEN so the client retries; when the partition heals,
+	 * the leader's notify will carry a higher gen and we'll update.
+	 */
+	if (!nvmeibt_raft_is_raft_valid()) {
+		N_Wf(cdv_alloc_no_majority,
+		     "CDV-alloc: ALLOC cdv=@STR rejected: lost RAFT majority",
+		     cdv_uuid);
+		resp.status = NVMEIBT_CDV_ALLOC_WRONG_GEN;
+		resp.allocator_generation = 0;
+		goto send;
+	}
 
 	alloc       = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
 

@@ -1803,6 +1803,27 @@ void nvmeibt_topology_calc_topology(void)
 				} else if (nvmeibt_cdv_alloc_elect(cdv_uuid,
 								   candidates,
 								   n_candidates) > 0) {
+					/*
+					 * The leader holds the post-election identity only in its
+					 * local cdv_alloc_hash.  Deliver it to the chosen TOMA via
+					 * unicast RAFT_MSG_CDV_ALLOC_NOTIFY; that TOMA then writes
+					 * the CDV on-disk header and pushes to its local clients.
+					 * If the leader is itself the chosen TOMA, the helper
+					 * applies locally instead of sending.
+					 */
+					char my_toma_id[NVMEIBT_CDV_HOSTNAME_LEN] = {0};
+					uint64_t my_gen = 0;
+					if (nvmeibt_cdv_alloc_get_allocator(cdv_uuid,
+									    my_toma_id,
+									    &my_gen) == 0) {
+						nvmeibt_cdv_alloc_send_notify_to_elected(
+							cdv_uuid, my_toma_id, my_gen);
+					}
+					/*
+					 * Also push to any local registrants — covers the
+					 * single-node case and is a no-op when the local node
+					 * hosts no first-pRAID segs (hash is empty for this CDV).
+					 */
 					nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
 				}
 			}

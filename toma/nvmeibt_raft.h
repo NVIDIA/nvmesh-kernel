@@ -262,6 +262,12 @@ BOOL nvmeibt_raft_leader_is_peer_vote_recent(struct nvmeibt_raft_member *member)
 struct timespec nvmeibt_raft_get_next_timeout_timespec(void);
 int nvmeibt_raft_timeout_occurred(BOOL is_sufficient_time_gap_before_raft, bool is_forced_reelect);
 int nvmeibt_raft_handle_incoming_message(struct nvmeibt_big_msg *big_msg);
+
+struct nvmeibt_node;
+struct nvmeibt_cdv_alloc_notify_payload;
+int nvmeibt_raft_send_cdv_alloc_notify(struct nvmeibt_node *dst_node,
+				       const struct nvmeibt_cdv_alloc_notify_payload *payload);
+
 void nvmeibt_raft_activate(void);
 // void nvmeibt_raft_node_was_removed(struct nvmeibt_node *node);
 int nvmeibt_raft_one_time_init(void);
