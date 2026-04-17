@@ -890,7 +890,7 @@ static void cdv_zero_execute(struct nvmeibt_wq_entry *wq_entry)
 
 		if (NNVMEIBT_PWRITE(cdv_zero_wr, fd, zbuf, this_chunk,
 				    e->data_offset + written, 0ULL) < 0) {
-			N_Ef(cdv_zero_wr_err,
+			N_Ef(cdv_zero_wr_error,
 			     "CDV-zero: write failed cdv=@STR idx=@LLU offset=@LLU",
 			     e->cdv_uuid, e->extent_index, e->data_offset + written);
 			e->rv = -EIO;
