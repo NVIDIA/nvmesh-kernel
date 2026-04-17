@@ -835,156 +835,146 @@ struct nvmeibc_tpv {
 };
 ```
 
-### 3.4 Allocator State Persistence Format (L1/L2/L3 Tree in CDV\_extent[0])
+### 3.4 Allocator State Persistence Format (per-TPV L1/L2 Tree)
 
-TPV.allocator mapping state is stored centrally in CDV\_extent[0] — always at CDV byte offset `A`. This extent is reserved as the **L1 table** at CDV init and is never available for TPV data. Data CDV\_extents (CDV\_extent[1] onwards) contain **only user data**: no header, no map, no wasted bytes at offset 0.
+Each TPV owns a private 2-level mapping tree that is persisted inside CDV\_extents allocated to that TPV. There is **no CDV-wide metadata region** beyond the TOMA CDV.allocator area `[0, A)`; everything from `A` on is TPV-owned. Per-TPV ownership is required because different TPVs on the same CDV may use different `tpvExtentSizeKB` values (and therefore different slot sizes, L1/L2 fanout, etc.), so a single shared tree cannot encode all of them.
 
-$n_{\text{slots}} = \texttt{cdvExtentSizeMB} \times 1024 / \texttt{tpvExtentSizeKB}$ — number of TPV\_extent slots per data CDV\_extent. Because there is no per-extent header, all $n_{\text{slots}} \times (\texttt{tpvExtentSizeKB} \times 1024)$ bytes of each data CDV\_extent are available for data. Slot $s$ within data CDV\_extent $i$ occupies CDV bytes $[A + i \times E + s \times T,\; A + i \times E + (s+1) \times T)$ where $T = \texttt{tpvExtentSizeKB} \times 1024$.
+Let $T = \texttt{tpvExtentSizeKB} \times 1024$ (per-TPV slot size in bytes), $E = \texttt{cdvExtentSizeMB} \times 1024^2$ (CDV\_extent size in bytes), $A = \texttt{allocatorSizeGB} \times 1024^3$ (allocator area size in bytes, CDV-wide).
 
-#### Tree entry format
+$n_{\text{slots}} = E / T$ — slots per CDV\_extent. Slot $s$ within (1-based) data CDV\_extent $i$ occupies CDV bytes $[A + (i-1) \times E + s \times T,\; A + (i-1) \times E + (s+1) \times T)$.
 
-Every entry at every level is 16 bytes:
+#### Baseline: dedicated tree extent (historical — superseded by §3.4.1 and §3.4.2)
+
+The first implementation allocated a dedicated CDV\_extent ("tree extent") per TPV at first-write time. Slot 0 held the L1 table (with a `tpv_l1_header` for recovery identification); slots 1+ held L2 tables.
+
+This cost one full CDV\_extent of physical space per TPV regardless of TPV size — ~50% overhead for a small TPV. See §3.4.1 for the replacement.
+
+#### 3.4.1 Dynamic L2 placement — no dedicated tree extent
+
+Client-only change. The first CDV\_extent allocated to the TPV is a normal data extent. Its **slot 0** is reserved for the L1 table and its `tpv_l1_header`; all remaining $n_{\text{slots}} - 1$ slots are data slots entering `free_tpv_extents` alongside the rest of the TPV's free pool.
+
+L2 tables are allocated lazily from the same free pool any time `flush_state` needs to write an L1\_idx whose L2 slot has not been assigned yet. Each L2 table consumes exactly one TPV\_extent slot — on any CDV\_extent owned by the TPV.
+
+Each `nvmeibc_cdv_extent_ref` carries a per-slot usage bitmap:
 
 ```c
-struct tpv_tree_entry {
-    u64 extent_index;  // CDV_extent index of child table or data extent; 0 = null / not present
-    u64 debug_meta;    // sequence number, extent_type hint, reserved
+#define TPV_SLOT_DATA  0
+#define TPV_SLOT_L2    1
+
+struct nvmeibc_cdv_extent_ref {
+    u64           extent_index;
+    u64           allocated_count;     /* data + L2 slots */
+    unsigned long *slot_kind;          /* bitmap: 0 = data, 1 = L2 */
+    u64           l2_slot_count;       /* count of bits set in slot_kind */
+    /* ... */
 };
-#define TPV_TREE_NULL  0ULL  // null pointer; CDV_extent[0] is L1 root (never a child target)
 ```
 
-#### L1 table (CDV\_extent[0])
+Slot 0 of the extent holding L1 is marked separately (a dedicated `is_l1_extent` flag on the ref and `l1_slot_index == 0`) because it is pinned for the lifetime of the TPV.
 
-CDV\_extent[0] holds a flat array of $N_{L1} = E / 16$ entries ($E = \texttt{cdvExtentSizeMB} \times 1\,\text{MB}$), split into two halves:
+**Free-extent rule.** `CDV_FREE_EXTENT` is sent to TOMA only when the ref's data-slot count reaches zero **and** `l2_slot_count == 0` **and** `is_l1_extent == false`. A data-empty extent that still pins L2 tables stays attached and waits for the L2 tables to be relocated (compaction) or for the TPV to be deleted.
 
-- **First half** $L1[0 \,..\, N_{L1}/2)$ — each non-null entry points to an **L2 table** CDV\_extent. L2 entries are leaves: each points to a **data** CDV\_extent (2-level path — the common case).
-- **Second half** $L1[N_{L1}/2 \,..\, N_{L1})$ — each non-null entry points to an **L2a table** CDV\_extent. L2a entries each point to an **L3 table** CDV\_extent. L3 entries are leaves pointing to a data CDV\_extent (3-level path — rarely used).
+**First-write cost**: 1 CDV\_extent (down from 2). For a TPV that only ever has one mapped virtual extent, the L1 header, one L2 table, and the single data slot all live in the same CDV\_extent (slots 0, 1, and some slot ≥ 2 respectively).
 
-L2, L2a, and L3 tables are CDV\_extents allocated from the free pool on demand, tracked with `extent_type = CDV_EXTENT_L2 / CDV_EXTENT_L2A / CDV_EXTENT_L3` in `cdv_extent_md`. Each table is a flat array of $N = E / 16$ entries of the same 16-byte format.
+#### 3.4.2 Compact 8-byte tree entry — direct CDV byte offset
+
+Client-only change. The 16-byte `{extent_index, debug_meta}` entry is replaced by a single `u64 cdv_offset` holding the raw CDV byte offset of the referenced object (either a data slot or an L2 table).
+
+```c
+struct tpv_tree_entry { u64 cdv_offset; };   /* 0 = TPV_TREE_NULL (unmapped) */
+
+/* For an L1 entry pointing at an L2 table:
+ *     cdv_offset = A + (extent_idx - 1) * E + slot * T
+ * For an L2 leaf pointing at a data slot:
+ *     cdv_offset = A + (data_idx   - 1) * E + slot * T
+ */
+```
+
+0 is a safe null sentinel because a valid L1-entry or L2-leaf pointer always satisfies `cdv_offset >= A > 0`.
+
+Consequences:
+
+- $N_{L1} = (T - \texttt{sizeof}(\texttt{tpv\_l1\_header})) / 8$ (was $T/16$-ish)
+- $N_{L2} = T / 8$ (was $T/16$)
+- Max addressable virtual extents per 2-level tree quadruples.
+- `flush_state` encodes a single u64 per leaf; `load_state` decodes `extent_idx = (cdv_offset - A) / E + 1`, `slot = ((cdv_offset - A) % E) / T`.
+- The `debug_meta` field is retired; `/proc/extent_map` still prints the derived `extent_idx, slot`.
+
+The on-disk format changes break compatibility — `TPV_L1_VERSION` is bumped. Because TPV is not yet GA, existing dev volumes are reformatted rather than migrated.
+
+#### Combined tree layout (after both changes)
+
+```c
+#define TPV_L1_MAGIC    0x5450564C31544142ULL   /* "TPVL1TAB" */
+#define TPV_L1_VERSION  2                       /* bumped by §3.4.2 */
+
+struct tpv_l1_header {                          /* 64 bytes, slot 0 of L1 extent */
+    u64 magic;
+    u64 version;
+    u8  tpv_uuid[16];
+    u64 l1_extent_index;                        /* CDV_extent holding this L1 */
+    u64 n_l2_tables_used;                       /* active L2 tables */
+    u8  reserved[16];
+};
+
+struct tpv_tree_entry { u64 cdv_offset; };      /* 8 bytes */
+```
+
+#### Address translation (both changes applied)
+
+For virtual extent index $V$:
+
+$$
+\begin{aligned}
+L1_{\text{idx}} &= \lfloor V / N_{L2} \rfloor \\
+L2_{\text{idx}} &= V \bmod N_{L2} \\
+\texttt{off}_{L2} &= L1[L1_{\text{idx}}].\texttt{cdv\_offset} \\
+\texttt{off}_{\text{data}} &= L2[L2_{\text{idx}}].\texttt{cdv\_offset}
+\end{aligned}
+$$
+
+where $N_{L2} = T / 8$. `cdv_offset == 0` means the entry is null (unmapped virtual range for leaves; absent L2 table for L1 entries). Recovering `{extent_idx, slot}` from a non-null `cdv_offset`: `extent_idx = (cdv_offset − A) / E + 1`, `slot = ((cdv_offset − A) % E) / T`.
 
 ```mermaid
 graph TD
-    L1["CDV_extent[0]: L1 Table\nN_L1 = E / 16 entries (16 bytes each)\nFirst half -> L2 tables (2-level, common)\nSecond half -> L2a tables (3-level, rare)"]
+    L1["L1 table (slot 0 of the first TPV-owned CDV_extent)\nheader + N_L1 entries of 8 bytes each"]
+    L2_a["L2 table (any TPV-owned slot, tracked in cdv_extent_ref.slot_kind)"]
+    L2_b["L2 table (any other TPV-owned slot)"]
+    DATA_a[("Data slot (T bytes)")]
+    DATA_b[("Data slot (T bytes)")]
 
-    subgraph two_level["2-level path (common case)"]
-        L2_0["L2 Table 0\nN_L2 = E/16 leaves\neach leaf -> data CDV_extent"]
-        L2_1["L2 Table 1"]
-        L2_dots["..."]
-    end
-
-    subgraph three_level["3-level path (overflow)"]
-        L2a["L2a Table\nN_L2a = E/16 entries\neach entry -> L3 table"]
-        L3["L3 Table\nN_L3 = E/16 leaves\neach leaf -> data CDV_extent"]
-    end
-
-    DATA1[("Data CDV_extent\n(user data only, no headers)")]
-    DATA2[("Data CDV_extent")]
-    DATA3[("Data CDV_extent")]
-
-    L1 -->|"L1[0]"| L2_0
-    L1 -->|"L1[1]"| L2_1
-    L1 -->|"..."| L2_dots
-    L1 -->|"L1[N_L1/2]"| L2a
-    L2a --> L3
-    L2_0 -->|"leaf"| DATA1
-    L2_1 -->|"leaf"| DATA2
-    L3 -->|"leaf"| DATA3
+    L1 -->|"L1[i].cdv_offset"| L2_a
+    L1 -->|"L1[j].cdv_offset"| L2_b
+    L2_a -->|"L2[k].cdv_offset"| DATA_a
+    L2_b -->|"L2[m].cdv_offset"| DATA_b
 ```
 
-*Figure 2: L1/L2/L3 mapping tree structure. CDV_extent[0] is the permanent L1 root. A 2-level lookup covers all realistic CDV sizes. The 3-level path (second half of L1) is an overflow for extreme configurations. Data extents contain no embedded metadata.*
-
-#### Address translation
-
-The tree maps a **group index** $G$ (group of $n_{\text{slots}}$ consecutive virtual TPV\_extents) to the CDV\_extent index of the data extent holding those slots. For virtual extent index $V$:
-
-$$
-\begin{aligned}
-G &= \lfloor V / n_{\text{slots}} \rfloor \\
-\text{slot} &= V \bmod n_{\text{slots}}
-\end{aligned}
-$$
-
-**2-level path** $(G < N_{L1}/2 \times N_{L2})$:
-
-$$
-\begin{aligned}
-L1_{\text{idx}} &= \lfloor G / N_{L2} \rfloor \quad (\text{must be} < N_{L1}/2) \\
-L2_{\text{idx}} &= G \bmod N_{L2} \\
-\text{data\_idx} &= L1[L1_{\text{idx}}].L2[L2_{\text{idx}}].\texttt{extent\_index} \quad (0 = \text{unmapped}) \\
-\text{phys\_offset} &= A + \text{data\_idx} \times E + \text{slot} \times T
-\end{aligned}
-$$
-
-**3-level path** $(G \geq N_{L1}/2 \times N_{L2})$:
-
-$$
-\begin{aligned}
-G' &= G - N_{L1}/2 \times N_{L2} \\
-L1_{\text{idx}} &= N_{L1}/2 + \lfloor G' / (N_{L2a} \times N_{L3}) \rfloor \\
-L2a_{\text{idx}} &= \lfloor G' / N_{L3} \rfloor \bmod N_{L2a} \\
-L3_{\text{idx}} &= G' \bmod N_{L3} \\
-\text{data\_idx} &= L1[L1_{\text{idx}}].L2a[L2a_{\text{idx}}].L3[L3_{\text{idx}}].\texttt{extent\_index} \\
-\text{phys\_offset} &= A + \text{data\_idx} \times E + \text{slot} \times T
-\end{aligned}
-$$
-
-```mermaid
-flowchart TD
-    V["Virtual extent index V"]
-    G_calc["G = floor(V / n_slots)\nslot = V mod n_slots"]
-    V --> G_calc
-
-    G_calc --> path_check{"G < N_L1/2 * N_L2 ?"}
-
-    path_check -->|"Yes: 2-level (common)"| two["L1_idx = G / N_L2\nL2_idx = G mod N_L2\ndata_idx = L1[L1_idx].L2[L2_idx].extent_index"]
-    path_check -->|"No: 3-level (overflow)"| three["G' = G - N_L1/2 * N_L2\nL1_idx = N_L1/2 + G' / (N_L2a * N_L3)\nL2a_idx = (G' / N_L3) mod N_L2a\nL3_idx = G' mod N_L3\ndata_idx = L1[...].L2a[...].L3[...].extent_index"]
-
-    two --> null_check{"data_idx == 0 ?\n(null = unmapped)"}
-    three --> null_check
-
-    null_check -->|"Yes: unmapped"| unmapped{"bio operation?"}
-    null_check -->|"No: mapped"| mapped["phys_offset = A + data_idx * E + slot * T\nsubmit bio to CDV block layer"]
-
-    unmapped -->|"READ"| zero["complete with zero pages\n(no CDV IO)"]
-    unmapped -->|"WRITE"| alloc["allocate new CDV_extent\ninstall leaf, then map and submit"]
-```
-
-*Figure 3: Virtual-to-physical address translation. Group G maps n_slots consecutive virtual extents to a single data CDV_extent. Null leaves (unmapped) return zeroes on read and trigger CDV_extent allocation on write.*
-
-A null leaf (`extent_index == 0`) means those $n_{\text{slots}}$ virtual extents are unmapped: reads return zeroes; no physical space is consumed.
-
-#### Capacity
-
-| $E$ (CDV\_extent size) | $N_{L1}/2$ | $N_{L2}$ | 2-level data extent groups | 2-level TPV\_extents (at 512 KB) |
-|---|---|---|---|---|
-| 64 MB | 2 M | 4 M | $8 \times 10^{12}$ | $8 \times 10^{12} \times n_{\text{slots}}$ |
-| 1 GB | 33.5 M | 67 M | $2.2 \times 10^{15}$ | effectively unbounded |
-
-The 2-level path covers any realistic CDV size. The 3-level path is a safety overflow for extreme configurations.
+*Figure 2: Post-change tree layout. The L1 table lives in slot 0 of the first data extent allocated to the TPV; L2 tables are ordinary T-byte slots scattered across any TPV-owned CDV\_extents; both kinds of entries are 8-byte CDV byte offsets.*
 
 #### Reconstruction at attach time (`nvmeibc_tpv_persist.c`)
 
 ```c
 // nvmeibc_tpv_load_state():
 //
-// 1. CDV is attached (hidden). Read CDV_extent[0] (L1 table) into RAM.
-// 2. Walk all non-null L1 first-half entries (2-level):
-//    For each L1[L1_idx] with extent_index != 0:
-//      a. Read the L2 table CDV_extent into RAM.
-//      b. For each L2[L2_idx] with extent_index != 0 (= data_idx):
-//           G = L1_idx * N_L2 + L2_idx
-//           For slot s in [0, n_slots):
-//             V = G * n_slots + s
-//             phys_offset = A + data_idx * E + s * T
-//             xa_store(&allocator->extent_map, V, phys_offset)
-//           Add data CDV_extent reference to cdv_extent_list (allocated_count = n_slots)
-//         Null L2 slots add the corresponding (data_idx, slot) pairs to free_tpv_extents
-//         once the data CDV_extent arrives (on CDV_ALLOC response).
-// 3. Walk L1 second-half entries (3-level) analogously via L2a → L3.
-// 4. Open IO gates.
+// 1. Query TOMA via CDV_LIST_EXTENTS to get all CDV_extents owned by this TPV.
+// 2. For each extent in the list, read slot 0 and probe for (magic, tpv_uuid).
+//    The matching extent is the L1 extent; its header gives n_l2_tables_used.
+// 3. Walk L1: for each non-null entry:
+//      off_L2 = L1[i].cdv_offset
+//      Read T bytes at CDV offset off_L2 → L2 table.
+//      Mark the (extent_idx, slot) containing that L2 as TPV_SLOT_L2 in cdv_extent_ref.
+//      For each non-null L2 leaf:
+//          V          = i * N_L2 + j
+//          phys       = L2[j].cdv_offset
+//          (ext, slot)= decode(phys)
+//          xa_store(&alloc->extent_map, V, {phys_offset=phys, cdv_extent_index=ext})
+//          Mark (ext, slot) TPV_SLOT_DATA in that cdv_extent_ref.
+// 4. For each TOMA-reported extent, any slot not marked L1/L2/data goes into
+//    free_tpv_extents.
+// 5. Open IO gates.
 ```
 
-On flush: rewrite only the modified L2/L2a/L3 CDV\_extent pages. The L1 CDV\_extent (CDV\_extent[0]) is rewritten only when a new L2/L2a pointer is first installed.
+On flush: rewrite only modified L2 tables; rewrite the L1 extent only when L1 entries or the header change (e.g. a new L2 table is allocated).
 
 ### 3.5 IO Path
 
