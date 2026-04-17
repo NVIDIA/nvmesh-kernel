@@ -1669,7 +1669,8 @@ static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
 
 int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 			    const char **candidates,
-			    int n_candidates)
+			    int n_candidates,
+			    uint64_t *out_proposed_gen)
 {
 	struct nvmeibt_cdv_alloc *alloc;
 	const char *chosen;
@@ -1703,6 +1704,8 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 				 */
 				if (!alloc->ondisk_loaded)
 					cdv_ondisk_scan_async(cdv_uuid, alloc);
+				if (out_proposed_gen)
+					*out_proposed_gen = alloc->allocator_generation;
 				return 0;   /* 0 = sticky, no push needed */
 			}
 		}
@@ -1721,7 +1724,7 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 	}
 
 	N_If(cdv_alloc_elect_new,
-	     "CDV-alloc: elect cdv=@STR old=@STR new=@STR gen @LLU -> @LLU",
+	     "CDV-alloc: elect cdv=@STR old=@STR new=@STR gen @LLU -> @LLU (proposed)",
 	     cdv_uuid,
 	     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(none)",
 	     chosen,
@@ -1729,7 +1732,17 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 
 	strncpy(alloc->allocator_toma_id, chosen, NVMEIBT_CDV_HOSTNAME_LEN - 1);
 	alloc->allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
-	alloc->allocator_generation++;
+
+	/*
+	 * DO NOT bump alloc->allocator_generation here.  handle_notify is the
+	 * sole writer; it commits the proposed gen only after its monotonicity
+	 * guard accepts the notify.  Bumping here would cause the self-apply
+	 * path (leader is also the chosen allocator) to see gen == local and
+	 * reject its own notify as stale, which silently skips Stage A
+	 * (attachSatelliteRequest) of the satellite-attach handshake.
+	 */
+	if (out_proposed_gen)
+		*out_proposed_gen = alloc->allocator_generation + 1;
 
 	/*
 	 * Post-satellite-migration: scan + header-write are NOT done here.
@@ -2213,6 +2226,19 @@ void nvmeibt_cdv_alloc_send_notify_to_elected(const char *cdv_uuid,
 	     "CDV-alloc: unicast notify cdv=@STR toma=@STR gen=@LLU",
 	     cdv_uuid, allocator_toma_id, allocator_generation);
 	nvmeibt_raft_send_cdv_alloc_notify(dst_node, &payload);
+
+	/*
+	 * Advance leader's local allocator_generation to the proposed value now
+	 * that the notify is in flight.  elect() deliberately does not mutate
+	 * allocator_generation (handle_notify is the sole writer), so without
+	 * this commit the leader's local gen would stay at its pre-election
+	 * value.  The next re-election driven by this leader would then propose
+	 * the same gen it just sent, and the newly-chosen allocator's
+	 * handle_notify monotonicity guard would reject it — silently skipping
+	 * Stage A.  The self-apply branch above does not need this: its
+	 * handle_notify call commits the same value via the guarded write.
+	 */
+	nvmeibt_cdv_alloc_set_generation(cdv_uuid, allocator_generation);
 }
 
 /* ── One-time init / shutdown ────────────────────────────────────────────── */

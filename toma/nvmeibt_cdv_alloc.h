@@ -313,18 +313,28 @@ void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation)
  * This ensures the CDV alloc hash entry is always populated after startup.
  *
  * Election rule: if the current allocator is in @candidates, keep it (sticky)
- * and return 0.  Otherwise pick one from @candidates at random, increment
- * allocator_generation, and return 1 (newly elected — caller should push
+ * and return 0.  Otherwise pick one from @candidates at random, write the
+ * chosen allocator_toma_id, and return 1 (newly elected — caller should push
  * CDV_ALLOCATOR_UPDATE to registrants).
+ *
+ * allocator_generation is NOT mutated by elect.  The proposed new generation
+ * is returned via @out_proposed_gen; the caller passes it to
+ * nvmeibt_cdv_alloc_send_notify_to_elected, whose handle_notify path is the
+ * sole writer that commits allocator_generation after its monotonicity guard.
+ * This keeps the guard single-writer so the leader-is-also-allocator
+ * self-apply case does not race itself.
  *
  * The on-disk extent records are scanned asynchronously on a worker thread
  * whenever ondisk_loaded is false, regardless of whether the sticky rule
  * fired.  If the disk I/O path is not yet ready, the scan is deferred and
  * retried on the next call (e.g. next heartbeat).
  *
- * @cdv_uuid:       CDV UUID string.
- * @candidates:     Array of TOMA node hostname strings (first-pRAID RW nodes).
- * @n_candidates:   Number of entries in @candidates.
+ * @cdv_uuid:          CDV UUID string.
+ * @candidates:        Array of TOMA node hostname strings (first-pRAID RW nodes).
+ * @n_candidates:      Number of entries in @candidates.
+ * @out_proposed_gen:  On return: proposed new generation to carry in the
+ *                     notify.  Populated on both sticky (current gen) and
+ *                     newly-elected (current gen + 1) returns.  May be NULL.
  *
  * Returns  1 if a new allocator was elected (push_to_registrants needed),
  *          0 if the current allocator is sticky (no push needed),
@@ -332,7 +342,8 @@ void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation)
  */
 int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 			    const char **candidates,
-			    int n_candidates);
+			    int n_candidates,
+			    uint64_t *out_proposed_gen);
 
 /*
  * nvmeibt_cdv_alloc_get_allocator — retrieve the current allocator identity

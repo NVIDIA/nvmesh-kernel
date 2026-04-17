@@ -1800,24 +1800,31 @@ void nvmeibt_topology_calc_topology(void)
 					N_Wf(cdv_alloc_elect_no_owners,
 					     "CDV-alloc: first pRAID @UUID_LE has no resolvable segment owners; skipping elect",
 					     nvmeibt_praid_UUID(praid));
-				} else if (nvmeibt_cdv_alloc_elect(cdv_uuid,
-								   candidates,
-								   n_candidates) > 0) {
+				} else {
+					uint64_t proposed_gen = 0;
+					int elect_rv = nvmeibt_cdv_alloc_elect(cdv_uuid,
+									       candidates,
+									       n_candidates,
+									       &proposed_gen);
+					if (elect_rv > 0) {
 					/*
-					 * The leader holds the post-election identity only in its
-					 * local cdv_alloc_hash.  Deliver it to the chosen TOMA via
-					 * unicast RAFT_MSG_CDV_ALLOC_NOTIFY; that TOMA then writes
-					 * the CDV on-disk header and pushes to its local clients.
-					 * If the leader is itself the chosen TOMA, the helper
-					 * applies locally instead of sending.
+					 * The leader has proposed an allocator; the chosen TOMA
+					 * commits the new generation and runs Stage A of the
+					 * satellite-attach handshake.  Deliver the proposal via
+					 * unicast RAFT_MSG_CDV_ALLOC_NOTIFY; if the leader is
+					 * itself the chosen TOMA, the helper applies locally
+					 * (through handle_notify) instead of sending.  The
+					 * proposed gen is passed directly — elect does not mutate
+					 * alloc->allocator_generation, so get_allocator would
+					 * still return the old value here.
 					 */
 					char my_toma_id[NVMEIBT_CDV_HOSTNAME_LEN] = {0};
-					uint64_t my_gen = 0;
+					uint64_t cur_gen = 0;
 					if (nvmeibt_cdv_alloc_get_allocator(cdv_uuid,
 									    my_toma_id,
-									    &my_gen) == 0) {
+									    &cur_gen) == 0) {
 						nvmeibt_cdv_alloc_send_notify_to_elected(
-							cdv_uuid, my_toma_id, my_gen);
+							cdv_uuid, my_toma_id, proposed_gen);
 					}
 					/*
 					 * Also push to any local registrants — covers the
@@ -1825,6 +1832,7 @@ void nvmeibt_topology_calc_topology(void)
 					 * hosts no first-pRAID segs (hash is empty for this CDV).
 					 */
 					nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
+					}
 				}
 			}
 		}
