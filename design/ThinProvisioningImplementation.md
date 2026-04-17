@@ -902,6 +902,23 @@ Consequences:
 
 The on-disk format changes break compatibility — `TPV_L1_VERSION` is bumped. Because TPV is not yet GA, existing dev volumes are reformatted rather than migrated.
 
+#### 3.4.3 Partial-page L1/L2 flush — 4 KB writes instead of full T-byte rewrites
+
+Client-only change.  Today `nvmeibc_tpv_flush_state()` rebuilds each touched table in a vmalloc'd buffer and writes the entire T-byte slot back to CDV — a single 16-byte (or 8-byte post-§3.4.2) leaf change triggers a T-byte write.  For T = 64 KB that is a 4096× amplification on the L2 write plus another T-byte L1 write whenever a new L1 index becomes non-null.  For a 4 KB data write to an unmapped extent the worst-case metadata cost is ~2 × T per leaf.
+
+The CDV block device sector is 4 KB.  An L2 page of 4 KB covers `4096 / sizeof(entry)` leaves (256 with 16-byte entries, 512 with 8-byte entries).  The fix is to write only the 4 KB pages that actually changed:
+
+1. **Per-table dirty-page bitmap.**  Attach a small `unsigned long *dirty_pages` bitmap (`ceil(T / 4096)` bits, typically 16 bits for T = 64 KB) to each in-memory L2 slot.  Maintain a sibling bitmap for the L1 extent's slot 0.
+2. **Allocator sets the bit.**  Every `alloc_extent` / `free_extent` that changes leaf `L2[j]` sets bit `j × sizeof(entry) / 4096` in the owning L2's `dirty_pages`.  Creating a new L2 table (persist_get_or_alloc_l2_phys) sets the bit for the page holding `L1[L1_idx]` in the L1 dirty bitmap.  A header-field change (`n_l2_tables_used`) sets bit 0 of the L1 dirty bitmap.
+3. **Flush writes only dirty pages.**  `flush_state` iterates each L1/L2 table, performs a coalesced 4 KB-page write per set bit (or merges adjacent set bits into a single bio), then clears the bitmap on successful write.
+4. **Full-rewrite paths untouched.**  First-ever write of a new L2 table still writes the full T bytes (bitmap starts all-ones for a freshly allocated L2 slot).  The cache-cold `load_state` reads full T-byte buffers — dirty tracking is flush-side only.
+
+Write amplification drops from ~2 × T to 4–8 KB of metadata per 4 KB data write to an unmapped extent — the metadata budget is now proportional to the sector size, not the TPV extent size.
+
+Crash-consistency is unchanged: a torn 4 KB write leaves some leaves stale but every individual entry fits inside a single 4 KB page, so no entry is split across a write boundary.  Ordering (L2 before L1 pointer update; data before L2 in sync_flush mode) is preserved by the per-table dirty tracking — we still flush modified L2 pages before rewriting the L1 pointer that references them.
+
+Mostly orthogonal to §3.4.1 and §3.4.2.  Best landed after §3.4.2 so the dirty-page bookkeeping is written once against the final entry size.
+
 #### Combined tree layout (after both changes)
 
 ```c
