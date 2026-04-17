@@ -102,7 +102,7 @@ static inline u64 persist_n_l1(const struct nvmeibc_tpv_allocator *a)
 	       sizeof(struct tpv_tree_entry);
 }
 
-/* Number of L2 entries per table = T / 16. */
+/* Number of L2 entries per table = T / sizeof(tpv_tree_entry) = T / 8. */
 static inline u64 persist_n_l2(const struct nvmeibc_tpv_allocator *a)
 {
 	return persist_slot_bytes(a) / sizeof(struct tpv_tree_entry);

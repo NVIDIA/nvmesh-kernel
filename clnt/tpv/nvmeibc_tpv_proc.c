@@ -170,44 +170,59 @@ static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
 /* ── tpv_extent_map fill ────────────────────────────────────────────────── */
 
 /*
- * Dumps every mapped virtual extent from the xarray.  Uses xa_for_each under
- * rcu_read_lock so that individual entries can be observed without holding
- * alloc->lock across the entire (potentially large) traversal.
+ * Dumps every mapped virtual extent from the xarray, annotated with its
+ * position in the on-disk L1/L2 tree and whether it has been persisted.
+ *
+ * For virtual extent index V:
+ *   L1_idx = V / N_L2    (which L2 table covers this extent)
+ *   L2_idx = V % N_L2    (slot within that L2 table)
+ *
+ * "persisted" indicates whether flush_state has written this mapping to CDV.
+ * Dirty entries (persisted=no) are volatile and would be lost on crash.
  *
  * Format per line:
- *   virt_idx  phys_offset_hex  cdv_extent_index
+ *   virt_idx  l1_idx  l2_idx  phys_offset_hex  persisted
  */
 static ssize_t tpv_proc_tpv_extent_map_fill(void *arg, char *buf, size_t len)
 {
 	struct nvmeibc_tpv           *tpv   = arg;
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
 	struct nvmeibc_tpv_extent_entry *entry;
+	u64 n_l2, n_persisted = 0, n_dirty = 0;
 	unsigned long idx;
 	ssize_t count = 0;
-	u64 n = 0;
 
 #define BUF_ADD(...) count += scnprintf(buf + count, len - count, __VA_ARGS__)
 
-	BUF_ADD("%-16s  %-18s  %s\n", "virt_idx", "phys_offset", "cdv_extent_idx");
+	/* N_L2 entries per L2 table = T / sizeof(tpv_tree_entry) = T / 8 */
+	n_l2 = ((u64)alloc->tpv_extent_size_kb << 10) / sizeof(struct tpv_tree_entry);
+
+	BUF_ADD("%-16s  %-8s  %-8s  %-18s  %s\n",
+		"virt_idx", "l1_idx", "l2_idx", "phys_offset", "persisted");
 
 	rcu_read_lock();
 	xa_for_each(&alloc->extent_map, idx, entry) {
-		if (count + 80 >= (ssize_t)len) {
-			/*
-			 * Buffer headroom exhausted.  Report truncation and stop.
-			 * The user can use a larger proc read or dump in sections.
-			 */
-			BUF_ADD("... (truncated at %llu entries; buffer too small)\n", n);
+		if (count + 96 >= (ssize_t)len) {
+			BUF_ADD("... (truncated at %llu entries; buffer too small)\n",
+				n_persisted + n_dirty);
 			break;
 		}
-		BUF_ADD("%-16lu  0x%016llx  %llu\n",
-			idx, entry->phys_offset, entry->cdv_extent_index);
-		n++;
+		BUF_ADD("%-16lu  %-8llu  %-8llu  0x%016llx  %s\n",
+			idx, (u64)idx / n_l2, (u64)idx % n_l2,
+			entry->phys_offset,
+			entry->persisted ? "yes" : "no");
+		if (entry->persisted)
+			n_persisted++;
+		else
+			n_dirty++;
 	}
 	rcu_read_unlock();
 
-	if (n == 0)
+	if (n_persisted + n_dirty == 0)
 		BUF_ADD("(empty)\n");
+	else
+		BUF_ADD("[%llu entries: %llu persisted, %llu dirty]\n",
+			n_persisted + n_dirty, n_persisted, n_dirty);
 
 #undef BUF_ADD
 	return count;
