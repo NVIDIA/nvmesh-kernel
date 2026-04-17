@@ -204,7 +204,7 @@ static int cdv_worker_open_cdv_fd_for_zeroing(struct nvmeibt_cdv_alloc *alloc)
 	if (!alloc->dev_path[0])
 		return -ENODEV;
 
-	alloc->cdv_fd = NNVMEIBT_OPEN_LOCAL_DISK_WRITE(cdv_wq_vol_open,
+	alloc->cdv_fd = NNVMEIBT_OPEN_LOCAL_DISK_WRITE(cdv_wq_cdv_open,
 							alloc->dev_path);
 	return alloc->cdv_fd;
 }
@@ -621,7 +621,7 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 	if (alloc->state == NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH) {
 		alloc->state = NVMEIBT_CDV_ALLOC_STATE_ACTIVE;
 		N_If(cdv_alloc_state_active,
-		     "CDV-alloc: state→ACTIVE cdv=@STR gen=@LLU",
+		     "CDV-alloc: state->ACTIVE cdv=@STR gen=@LLU",
 		     e->cdv_uuid, alloc->allocator_generation);
 	}
 
@@ -984,7 +984,7 @@ static void cdv_zero_execute(struct nvmeibt_wq_entry *wq_entry)
 			N_Ef(cdv_zero_post_migration_warn,
 			     "CDV-zero: invoked but CDV is no longer auto-attached to TOMA "
 			     "after the satellite-volume migration; freed extents will stay "
-			     "in NEEDS_ZEROING and not be reused.  See ThinProvisioning §3.9.  "
+			     "in NEEDS_ZEROING and not be reused.  See ThinProvisioning s3.9.  "
 			     "First occurrence cdv=@STR idx=@LLU",
 			     e->cdv_uuid, e->extent_index);
 		}
