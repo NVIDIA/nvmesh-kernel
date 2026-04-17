@@ -401,6 +401,7 @@ extern int64_t udp_max_header_length;
 extern int64_t nvmeibt_kafka_get_offset_timeout_secs;
 extern int64_t recovery_timeout_wait_client_sec;
 extern int64_t nvmeibt_topology_freeze_topo;
+extern int64_t nvmeibt_cdv_extent_zero_on_free;
 #ifdef TOMA_IB_ROCE
 extern int64_t ibud_enable_periodic_traces;
 #endif
@@ -460,6 +461,8 @@ struct oper_param_t {
 				NULL, nvmeibt_binary_tracing_set_tracer_debug_level, nvmeibt_binary_tracing_get_tracer_debug_level},
 		{"freeze_topology",									0,
 				&nvmeibt_topology_freeze_topo, NULL, NULL},
+		{"cdv_extent_zero_on_free",							CDV_EXTENT_ZERO_ON_FREE_DEFAULT,
+				&nvmeibt_cdv_extent_zero_on_free, NULL, NULL},
 #ifdef TOMA_IB_ROCE
 		{"enable_networking_periodic_traces",				ENABLE_NETWORKING_PERIODIC_TRACES_DEFAULT,
 			&ibud_enable_periodic_traces, NULL, NULL},

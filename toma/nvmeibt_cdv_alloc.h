@@ -163,6 +163,19 @@ struct nvmeibt_cdv_alloc {
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
 };
 
+/* ── Runtime config ─────────────────────────────────────────────────────────
+ *
+ * cdv_extent_zero_on_free — if non-zero, CDV data extents freed by a deleted
+ * TPV are zeroed (background WQ) before being made available for reuse.
+ * Default 0 (zero-on-free disabled): extents are freed immediately.  The
+ * NEEDS_ZEROING on-disk bit is still honored on restart regardless of this
+ * flag, so toggling it off after a restart will not strand extents that were
+ * marked for zeroing while it was on.
+ *
+ * Exposed via toma_rpc as the "cdv_extent_zero_on_free" parameter.
+ */
+extern int64_t nvmeibt_cdv_extent_zero_on_free;
+
 /* ── One-time init / shutdown ────────────────────────────────────────────── */
 
 /*

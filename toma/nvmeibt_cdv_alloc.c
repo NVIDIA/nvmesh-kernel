@@ -33,10 +33,21 @@
 #include "nvmeibt_node.h"	/* nvmeibt_node_get_node_by_id, nvmeibt_node_name */
 #include "nvmeibt_raft.h"	/* nvmeibt_raft_send_cdv_alloc_notify */
 
+/* ── Forward declarations ────────────────────────────────────────────────── */
+
+static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc);
+static void cdv_publish_alloc_stats(struct nvmeibt_cdv_alloc *alloc);
+
 /* ── Global state ────────────────────────────────────────────────────────── */
 
 /* cdv_uuid (ASCII string) → nvmeibt_cdv_alloc * */
 static struct nvmeib_hash_table *cdv_alloc_hash;
+
+/*
+ * Runtime config — see nvmeibt_cdv_alloc.h for semantics.
+ * Registered in oper_params[] (nvmeibt_debug.c) as "cdv_extent_zero_on_free".
+ */
+int64_t nvmeibt_cdv_extent_zero_on_free = CDV_EXTENT_ZERO_ON_FREE_DEFAULT;
 
 /* ── Per-CDV I/O infrastructure ─────────────────────────────────────────── */
 
@@ -2165,7 +2176,7 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 {
 	struct nvmeibt_cdv_alloc        *alloc;
 	struct nvmeibt_cdv_extent_entry *entry;
-	uint64_t n_queued = 0;
+	uint64_t n_released = 0;
 
 	/* ── 1. Find or create the per-CDV allocator; ensure I/O WQ ── */
 	alloc = find_or_create_alloc(cdv_uuid);
@@ -2191,40 +2202,71 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	}
 
 	/*
-	 * ── 2. Mark extents NEEDS_ZEROING + dispatch background zero ──
+	 * ── 2. Release extents ──
 	 *
-	 * Do NOT remove entries from the list or decrement n_allocated here.
-	 * The entry stays in place (blocking reallocation) until the background
-	 * zero completes and cdv_zero_finalize removes it.
+	 * Two modes, chosen by the cdv_extent_zero_on_free TOMA config param:
+	 *
+	 *   zero-on-free OFF (default): write a free ondisk record, remove the
+	 *       in-memory entry, decrement n_allocated.  Fast path; data on the
+	 *       CDV remains until overwritten by the next TPV that allocates
+	 *       the slot.
+	 *
+	 *   zero-on-free ON: mark the entry needs_zeroing, persist an
+	 *       ALLOCATED|NEEDS_ZEROING ondisk record with geometry, dispatch a
+	 *       background zero write.  The entry stays in alloc->extents
+	 *       (blocking reallocation) until cdv_zero_finalize removes it.
+	 *
+	 * NEEDS_ZEROING on-disk records from a previous zero-on-free-ON era are
+	 * always honored on scan, regardless of the current flag.
 	 */
-	XDLIST_FOREACH(entry, &alloc->extents) {
-		if (strncmp(entry->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0)
-			continue;
-		if (entry->needs_zeroing)
-			continue;   /* already queued (e.g. duplicate Kafka delivery) */
+	if (nvmeibt_cdv_extent_zero_on_free) {
+		XDLIST_FOREACH(entry, &alloc->extents) {
+			if (strncmp(entry->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0)
+				continue;
+			if (entry->needs_zeroing)
+				continue;   /* already queued (e.g. duplicate Kafka delivery) */
 
-		entry->needs_zeroing = true;
-		alloc->n_pending_zeroing++;
+			entry->needs_zeroing = true;
+			alloc->n_pending_zeroing++;
 
-		cdv_async_write_record_needs_zeroing(alloc, entry->extent_index,
-						     tpv_uuid,
-						     allocator_size_gb,
-						     cdv_extent_size_mb);
+			cdv_async_write_record_needs_zeroing(alloc, entry->extent_index,
+							     tpv_uuid,
+							     allocator_size_gb,
+							     cdv_extent_size_mb);
 
-		cdv_dispatch_zero_extent(alloc, entry->extent_index,
-					 tpv_uuid,
-					 allocator_size_gb,
-					 cdv_extent_size_mb);
-		n_queued++;
+			cdv_dispatch_zero_extent(alloc, entry->extent_index,
+						 tpv_uuid,
+						 allocator_size_gb,
+						 cdv_extent_size_mb);
+			n_released++;
+		}
+	} else {
+		XDLIST_FOREACH_SAFE(entry, &alloc->extents) {
+			if (strncmp(entry->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0)
+				continue;
+			if (entry->needs_zeroing)
+				continue;   /* already in the pending-zero flow; let it finish */
+
+			cdv_async_write_record(alloc, entry->extent_index, NULL);
+
+			XDLIST_ELEM_DEL(&alloc->extents, entry);
+			alloc->n_allocated--;
+			NNVMEIBT_BM_FREE(cdv_free_all_entry, entry);
+			n_released++;
+		}
 	}
 
-	/* ── 3. Rewrite header (extent count unchanged; records updated) ── */
-	if (n_queued > 0)
+	/* ── 3. Rewrite header (extent count may have changed) ── */
+	if (n_released > 0)
 		cdv_async_write_header(alloc);
 
+	if (!nvmeibt_cdv_extent_zero_on_free)
+		cdv_maybe_warn_capacity(alloc);  /* may clear the warning flag */
+
 	N_If(cdv_free_all_done,
-	     "CDV-alloc: free_all cdv=@STR tpv=@STR queued_for_zero=@LLU pending=@LLU total=@LLU",
-	     cdv_uuid, tpv_uuid, n_queued, alloc->n_pending_zeroing, alloc->n_allocated);
+	     "CDV-alloc: free_all cdv=@STR tpv=@STR released=@LLU zero_on_free=@LLU pending_zero=@LLU total=@LLU",
+	     cdv_uuid, tpv_uuid, n_released, nvmeibt_cdv_extent_zero_on_free,
+	     alloc->n_pending_zeroing, alloc->n_allocated);
 
 	return 0;
 }

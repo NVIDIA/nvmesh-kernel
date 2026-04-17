@@ -42,7 +42,7 @@ Authoritative merged document. Supersedes ThinProvisioningImplementation1.md and
 15. **RAID level for CDVs**: No restriction. User chooses RAID level freely (EC is recommended but not enforced by the UI or backend).
 16. **REST API for CDV/TPV creation**: Both CDV and TPV creation reuse `POST /volumes/save` with `volumeClass` and the appropriate config sub-object in the payload. The backend `createVolume` handler branches on `volumeClass`.
 17. **TOMA zeroing IO path**: The background zeroing worker issues zero-writes via the normal TOMA IO path to the EC volume. No special block-zero command path is needed.
-18. **Encryption scope**: No CDV-level encryption. Encryption is handled at the TPV level. If there is a TPV-layer rekey, zero-on-free on TPV delete is not formally required. Leaving it as always zero for now.
+18. **Encryption scope & zero-on-free default**: No CDV-level encryption. Encryption is handled at the TPV level; a TPV-layer rekey makes stale data at the CDV physical offsets cryptographically unreadable to the next TPV that allocates the slot. Zero-on-free on TPV delete is therefore not required for the typical encrypted deployment and is **disabled by default**. It can be enabled per-TOMA via the `cdv_extent_zero_on_free` runtime config parameter (`toma_rpc config set cdv_extent_zero_on_free 1`) for unencrypted or stricter-isolation deployments. See §3.9 for the release-path details.
 
 ---
 
@@ -1132,7 +1132,7 @@ When `cdv_alloc_work` fires (see §2.8 for message structs):
 
 When returning a CDV\_extent (all TPV\_extents freed): send `NVMEIBC_MA_CDV_FREE_EXTENT`.
 
-> **Security note (open item — needs security review):** The current kernel implementation sends `CDV_FREE_EXTENT` to TOMA without zeroing the physical CDV data first. The physical blocks remain intact on the CDV until TOMA's background zeroing worker clears them (if that path is implemented). On DISCARD (TRIM) the TPV immediately unmaps the virtual extent (so reads return zeros from the zero-fill path), but the stale data is visible at the CDV physical offset until zeroed. This must be reviewed with the security team to confirm whether the TOMA-side zeroing-before-reuse guarantee is sufficient, or whether the client must issue zero-writes before sending `CDV_FREE_EXTENT`.
+> **Security note:** `CDV_FREE_EXTENT` from the client, and `CDVAllocatorFreeAll` from management on TPV delete, both invoke the TOMA-side release path described in §3.9. On DISCARD (TRIM) the TPV immediately unmaps the virtual extent so reads from the TPV return zeros from the zero-fill path, independent of what is on the CDV. Whether the underlying CDV blocks are scrubbed before reuse is controlled by the `cdv_extent_zero_on_free` TOMA runtime config (Architecture Decision #18); by default the blocks are not rewritten and are overwritten only when the next TPV allocates that slot. This is acceptable for the default deployment assumption that TPVs are encrypted, rendering stale data cryptographically unreadable after rekey. Operators with a different threat model should enable `cdv_extent_zero_on_free`.
 
 ### 3.8 Attach / Detach
 
@@ -1155,12 +1155,15 @@ When returning a CDV\_extent (all TPV\_extents freed): send `NVMEIBC_MA_CDV_FREE
 
 From management (no client attach needed):
 1. Verify `tpvConfig.exclusiveClient === null`.
-2. Send `CDVAllocatorFreeAll(cdvUUID, tpvUUID)` to TOMA.
-3. TOMA scans `extent_md`, sets `NEEDS_ZEROING` on all matching extents, clears `tpv_uuid`.
-4. TOMA's background zeroing worker zeros each extent before resetting the free bit.
-5. Management deletes TPV record and decrements `CDV.tpvCount`.
+2. Send `CDVAllocatorFreeAll(cdvUUID, tpvUUID, allocatorSizeGB, cdvExtentSizeMB)` to TOMA.
+3. TOMA iterates its in-memory allocator for this CDV and releases every extent owned by `tpvUUID`. The release path is gated by the `cdv_extent_zero_on_free` TOMA runtime config parameter (registered in `oper_params[]`, settable via `toma_rpc`):
+   - **`cdv_extent_zero_on_free = 0` (default):** TOMA writes a free on-disk record for each extent, removes it from the allocator's in-memory list, and decrements `n_allocated`. The CDV physical blocks are not rewritten; stale data remains visible at those offsets until the next allocation overwrites them.
+   - **`cdv_extent_zero_on_free != 0`:** TOMA persists an `ALLOCATED|NEEDS_ZEROING` record (geometry carried in the record's `reserved2` area, not CRC-covered), dispatches a background zero write (1 MiB chunks on the per-CDV I/O work queue), and leaves the entry in the allocator's extent list — blocking reallocation of that slot. When the zero completes, `cdv_zero_finalize` writes a free record, removes the entry, and decrements `n_allocated` and `n_pending_zeroing`.
+4. Management deletes the TPV record and decrements `CDV.tpvCount`.
 
-Zero-on-free prevents stale-data exposure. There is no CDV-level encryption; encryption is at the TPV level. Zero-on-free is always required until TPV-level rekeying can be confirmed (see Architecture Decision #17).
+`NEEDS_ZEROING` on-disk records are honored on allocator scan regardless of the current flag value, so toggling `cdv_extent_zero_on_free` off does not strand extents that were previously marked for zeroing.
+
+There is no CDV-level encryption; encryption is at the TPV level (see Architecture Decision #18). `cdv_extent_zero_on_free` therefore defaults to **off** — operators who need stale-data scrubbing for an untrusted-multi-tenant deployment can opt in via `toma_rpc config set cdv_extent_zero_on_free 1`.
 
 ### 3.10 TPV Grow
 
