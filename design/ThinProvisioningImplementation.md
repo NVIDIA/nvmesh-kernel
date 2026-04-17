@@ -3925,3 +3925,121 @@ Append:
 - **CDV create required**: Server requires `capacity` and `cdvConfig.cdvExtentSizeMB`. Consider a template entry.
 - **`_get_filter` prepend order**: `[MongoObj('volumeClass', ...)] + super()._get_filter(...)` — the volumeClass filter comes first; the server ANDs all filter objects, so order doesn't affect correctness.
 
+---
+
+## Part 14 — CSI Driver TPV Orchestration
+
+### 14.1 Overview
+
+`nvmesh-csi-driver` (Python, CSI gRPC) gains the ability to provision and attach TPVs to Kubernetes Pods. CDV lifecycle stays out of the CSI driver entirely — CDVs are created and operated by cluster admins via the GUI/CLI; the CSI driver only consumes them.
+
+Two-phase rollout:
+
+- **Phase A (MVP) — named CDV.** StorageClass parameters pin each TPV to a specific, admin-pre-created CDV by name. Minimal surface, shippable first.
+- **Phase B — regex-matched CDV pool.** StorageClass declares a pool via a name regex; the driver selects a CDV on each `CreateVolume` based on `tpvCount < maxTPVs` and free capacity. Phase A is folded into Phase B as the trivial single-match regex.
+
+Snapshot/clone and auto-create-CDV are explicitly out of scope.
+
+### 14.2 StorageClass Parameters
+
+| Parameter | Phase | Required | Purpose |
+|---|---|---|---|
+| `volumeClass` | A | yes | Must be `TPV`. Absent or `REGULAR` → today's regular-volume path. |
+| `cdvName` | A | one of two | Exact CDV name (Phase A). |
+| `cdvNameRegex` | B | one of two | JavaScript-compatible regex matched against CDV `name` (Phase B). Mutually exclusive with `cdvName`. |
+| `tpvExtentSizeKB` | A | optional | Power-of-2, [64, 65536]. Default from driver config. Must satisfy `tpvExtentSizeKB ≤ parent.cdvExtentSizeMB × 1024`. |
+| `maxVirtualSizeGB` | A | optional | Hard ceiling for future `ControllerExpandVolume`. Default from driver config. |
+
+Access mode: `SINGLE_NODE_WRITER` only. The driver rejects `MULTI_NODE_*` with CSI `InvalidArgument` before hitting management, to match TPV's `exclusiveClient` semantics.
+
+Topology: the driver's existing `ZoneTopologyFetcher` is used to filter CDV candidates by zone, and the TPV's `accessible_topology` on the returned `Volume` is set to the chosen CDV's zone.
+
+### 14.3 Management API — No Server-Side Enhancement Needed for MVP
+
+The existing `GET /volumes/all/:page/:count?filter=<JSON>` route (`nvmesh-management/routes/volumes.js:108`, backed by `volumeModule.getAllVolumes` at `modules/volume.js:44`) passes the decoded JSON filter directly into the MongoDB aggregation `$match` stage. MongoDB natively supports `$regex`, so the CSI driver can request:
+
+```http
+GET /volumes/all/0/0?filter={"volumeClass":"CDV","name":{"$regex":"^pool-gold-"}}
+             &projection={"_id":1,"name":1,"cdvConfig":1,"tpvCount":1,"chunks.zone":1,"status":1,"health":1}
+             &sort={"tpvCount":1}
+```
+
+and get back the candidate CDVs already filtered and sorted server-side. Fields not expressible in Mongo (e.g. free-capacity ratio derived from TOMA events) are post-filtered in the driver.
+
+**Pool-selection policy in the driver (Phase B):**
+
+1. Issue the `/volumes/all` query above with the user-supplied regex.
+2. Drop CDVs whose `tpvCount ≥ cdvConfig.maxTPVs`, whose `status` is not `online`, or whose zone is excluded by topology constraints.
+3. Prefer CDVs not currently in capacity warning (see `TOMAToManagement_TP.cdvCapacityWarning` in Part 1).
+4. Pick the remaining CDV with the lowest `tpvCount` (load-spreading). Ties: lowest `_id` (deterministic).
+
+**Considered but rejected — new server endpoint `GET /volumes/cdvs?pool=<regex>`:** adds surface, duplicates existing filter semantics, and delivers nothing the Mongo filter doesn't already give us. Skip it.
+
+**Possible future optimization (not now):** if the `{volumeClass, name}` compound query becomes hot, add a Mongo index. Measured on realistic CDV counts first; don't add index bloat speculatively.
+
+**Security note:** `/volumes/all` is behind authenticated session middleware but not `isAdminRole`. A client-supplied regex is a mild ReDoS vector against MongoDB. The CSI driver uses a service account that is already trusted; no change required. If the endpoint is ever exposed more broadly, add regex length + complexity limits in the route.
+
+### 14.4 CSI Driver File Changes
+
+| File | Change |
+|---|---|
+| `driver/nvmesh_mgmt_api.py` | Add `list_cdvs(name_regex, zone=None, projection=…)`, `create_tpv(...)`, `extend_tpv(uuid, gb)`, `delete_tpv(uuid)`, `get_volume_class(volume_id)`. |
+| `driver/controller_service.py` | Branch on `volumeClass` in `CreateVolume`, `ControllerExpandVolume`, `DeleteVolume`. Pre-check `tpvConfig.exclusiveClient` in `ControllerPublishVolume`. |
+| `driver/topology_service.py` | Expose `zones_matching(topology_requirement)` helper reused by the pool selector. |
+| `driver/consts.py` | Add `VOLUME_CLASS_TPV/CDV/REGULAR`, extent-size bounds, parameter-name constants. |
+| `driver/config.py` | Add `TPV_DEFAULT_EXTENT_KB`, `TPV_DEFAULT_MAX_VIRTUAL_GB`. |
+| `deploy/kubernetes/helm/.../templates/storageclass.yaml` | Add example TPV StorageClass (`volumeClass: TPV`, `cdvNameRegex: "^pool-"`). |
+| `test/integration/` | New cases: TPV create/attach/detach/extend/delete; pool with 0 matches → `ResourceExhausted`; access-mode rejection; expand past `maxVirtualSizeGB` → `OutOfRange`. |
+
+### 14.5 Controller RPC Changes (detail)
+
+**`CreateVolume`:**
+
+```
+if params.volumeClass == TPV:
+    candidates = mgmt.list_cdvs(name_regex=params.cdvNameRegex or f"^{params.cdvName}$",
+                                zone=pick_zone(req.accessibility_requirements))
+    cdv = pool_selector(candidates)          # §14.3
+    if cdv is None:
+        raise CsiError(ResourceExhausted, "no eligible CDV matches pool")
+    validate_extent_size(params.tpvExtentSizeKB, cdv.cdvConfig.cdvExtentSizeMB)
+    tpv = mgmt.create_tpv(name=req.name,
+                          cdv_uuid=cdv._id,
+                          virtual_size_gb=ceil_gib(req.capacity_range),
+                          tpv_extent_kb=params.tpvExtentSizeKB or cfg.default,
+                          max_virtual_gb=params.maxVirtualSizeGB or cfg.default)
+    ctx = {"volumeClass": "TPV", "cdvUuid": cdv._id, "cdvName": cdv.name, ...}
+    return Volume(..., accessible_topology=[{zone: cdv.zone}], volume_context=ctx)
+else:
+    # existing path, unchanged
+```
+
+**`ControllerPublishVolume`:** no new management call. Pre-check `tpvConfig.exclusiveClient` and fail-fast with CSI `FAILED_PRECONDITION` if already claimed by a different node. The existing `/clients/attach` call is unchanged — management's `attachTPV()` (`modules/client.js`) internally performs the two-phase CDV-hidden + TPV-exclusive attach. **Do not** have the CSI driver attach the CDV directly; that path is reserved for `cdvTomaAutoAttach.js` and `/clients/attach` rejects CDVs from external callers.
+
+**`ControllerUnpublishVolume`:** unchanged. Management's `detachTPV()` handles CDV ref-count decrement and conditional CDV detach.
+
+**`ControllerExpandVolume`:** branch to `POST /volumes/tpv/extend` for `volumeClass == TPV`. Virtual-only expansion; no physical provisioning. Reject with `OutOfRange` if `newSize > tpvConfig.maxVirtualSizeGB`.
+
+**`DeleteVolume`:** branch to `POST /volumes/tpv/delete` for TPVs. Management enforces "must be detached"; the driver surfaces any resulting error as CSI `FailedPrecondition`.
+
+### 14.6 Node RPC Changes
+
+None. A TPV presents as an ordinary NVMesh block device after attach; mount, format, `NodeGetVolumeStats`, and `NodeExpandVolume` all work unchanged. Filesystem resize after `ControllerExpandVolume` exercises the existing `NodeExpandVolume` path — which re-reads the block device size from sysfs — and is expected to work because the kernel client's `extendTPV` updates the gendisk capacity in-place.
+
+### 14.7 Capacity Warnings Surfaced to Kubernetes
+
+The CSI driver cannot subscribe to the Kafka `CDVCapacityWarning` topic directly. Instead, the driver's existing management-WebSocket client (`mgmt_websocket_client.py`) already receives CDV state updates; extend the subscriber to watch the `capacityWarning` field and, when set, emit a Kubernetes `Event` of type `Warning` on each PVC whose `volume_context.cdvUuid` points at the affected CDV. No new RPC surface; reuses the `kubernetes` client already imported by the driver.
+
+### 14.8 Immutability and ModifyVolume
+
+`ControllerModifyVolume` (CSI 1.10+): accept only `description`. Every `tpvConfig` field except `maxVirtualSizeGB` (settable via `/volumes/tpv/update`) is immutable and must be rejected with `InvalidArgument`. `cdvConfig` is fully immutable.
+
+### 14.9 Known Pitfalls
+
+- **Reference-ID namespace:** do not generate `tpv:<uuid>` reference IDs in the CSI driver. Management constructs those internally in `attachTPV()`; the driver passes its own CSI reference ID exactly as it does for regular volumes.
+- **CDV auto-managed attach:** management's `/clients/attach` rejects direct CDV attach requests (`volumeClass === 'CDV'` → error). The CSI driver must never issue one — that path belongs to `cdvTomaAutoAttach.js` only.
+- **Extent-size compatibility:** `tpvExtentSizeKB` must be a power of two and ≤ `cdvExtentSizeMB × 1024`. Validate client-side to produce a clean CSI `InvalidArgument` rather than a generic 500 from management.
+- **Access-mode coercion:** some CSI consumers pass `MULTI_NODE_READER_ONLY` for read workloads. Do not silently downgrade — reject, because a second reader would violate `exclusiveClient` and succeed only sporadically depending on management race windows.
+- **Pool empty result:** zero candidates after filtering → `ResourceExhausted` (retriable by k8s), not `FailedPrecondition`. Admin action (extending the pool) resolves it without manifest changes.
+- **WebSocket vs. REST consistency:** the pool selector reads CDV state via REST; the capacity-warning watcher reads via WebSocket. Treat WebSocket as the source of truth for `capacityWarning` (more timely) and REST for `tpvCount` (authoritative counter). Do not cross-reconcile on every `CreateVolume` — the small race window is harmless because management re-validates `tpvCount < maxTPVs` server-side.
+
