@@ -30,7 +30,7 @@ Authoritative merged document. Supersedes ThinProvisioningImplementation1.md and
 7. **MongoDB modeling**: Extend existing `volumes` collection; no new collections.
 8. **CDV\_extent allocation requests**: Client → TOMA allocator via the per-disk ADMIN channel (new opcode). TOMA notifies management only when CDV reaches 90% capacity via existing TOMA→management Kafka path.
 9. **TPV.allocator state persistence**: Centralized in CDV\_extent[0] (the first data CDV\_extent, at CDV byte offset `A`), which is reserved at CDV init as the **L1 table**. The L1 table is a flat array of 16-byte entries (8B `extent_index` pointer + 8B `debug_meta`). The first half of the L1 table points to **L2 tables**; each L2 entry is a leaf pointing to a data CDV\_extent (2-level path, common case). The second half of L1 points to **L2a tables**, each of whose entries points to an **L3 table**, whose leaves point to data CDV\_extents (3-level path, rarely needed). L2/L2a/L3 tables are CDV\_extents allocated from the pool when first needed. Data CDV\_extents contain **no per-extent metadata** — all virtual→physical mapping lives in the tree. TPV UUID is the sole identifier for TOMA-side ownership tracking (`cdv_extent_md`).
-10. **Allocator identity**: RAFT-committed `(allocator_toma_id, allocator_generation)` in CDV volume metadata. Propagated to clients via the CDV topology push that TOMAs already send. Allocator role is sticky — does not change with RAFT leader elections, only when the current allocator TOMA leaves the RAFT group.
+10. **Allocator identity**: `(allocator_toma_id, allocator_generation)` are two fields carried in the existing RAFT-replicated pRAID topology record (the CDV's first-pRAID `topo_ctx`). They reach every TOMA through the standard `AppendEntries` → follower-apply pipeline — no parallel channel, no custom retry. Further propagation to clients uses the CDV topology push TOMAs already send. Allocator role is sticky — changes only when the current TOMA leaves the RAFT group, not on RAFT leader rotation. See §2.6 and `EmbedAllocatorInRaft.md`.
 11. **New allocator selection rule**: Chosen from TOMAs hosting a RW-enabled disk segment in the CDV's first pRAID. One candidate → chosen by default. Multiple candidates → chosen at random by the RAFT leader (avoids bias).
 12. **Allocation transactionality**: Allocator writes `cdv_extent_md` durably to CDV disk **before** sending the allocation response (write-before-respond). Generation fencing discards stale-generation responses on the client.
 13. **CDV attach/detach lifecycle — auto-managed only**: CDV attachments are exclusively auto-managed by management; `POST /clients/attach` and `POST /clients/detach` reject CDV volumes with an error. Two independent reasons trigger CDV attachment to a node; both must be absent before the CDV is detached:
@@ -669,92 +669,72 @@ The client stores `(allocator_toma_id, allocator_generation)` in its `nvmeibc_tp
 
 ### 2.6 Allocator Election and Identity Propagation
 
-Election and identity propagation are split into two mechanisms: the RAFT leader decides; a targeted unicast then informs the elected TOMA so it can take the role locally. The identity is not replicated through RAFT `AppendEntries`; monotonicity is enforced by the combination of single-leader-per-term and an acceptance guard on the receiver.
+**Allocator identity is two fields on the RAFT-replicated first-pRAID topology record.** `allocator_toma_id` and `allocator_generation` are added to `nvmeibt_praid_topo_ctx` (and its wire/persist analog `nvmeibt_praid_serialized_topo`), travel in the TOPO TLV of the existing `AppendEntries` commit path, and are applied on every TOMA through the standard `applied_praid_lot` update. There is no parallel message and no custom retry logic.
 
 **Election (RAFT leader only):**
-1. `nvmeibt_topology_calc_topology()` runs only on the RAFT leader. For every CDV pRAID whose `stripe_idx == 0` and that is `PRAID_REGISTRANTS_SYNC_CMD_STABLE`, the leader builds a candidate list from the distinct owner hostnames of the pRAID's data disk segments (`praid_mgmt.topo_segs[] → seg_mgmt.its_disk->its_node_config`). Candidates are the only TOMAs that are guaranteed to host a live path to the CDV data and thus can write the allocator area.
-2. `nvmeibt_cdv_alloc_elect(cdv_uuid, candidates, n_candidates)`:
-   - If an existing `allocator_toma_id` is still in the candidate list → sticky, return 0.
-   - Otherwise pick one candidate (deterministic-hash or random tie-break), increment `allocator_generation`, return 1.
-3. On return value 1 the leader sends a **unicast** `CDV_ALLOCATOR_NOTIFY` message carrying `{cdv_uuid, allocator_toma_id, allocator_generation}` to the chosen TOMA. If the chosen TOMA is the leader itself, the leader skips the send and invokes the receive handler locally.
+1. `nvmeibt_topology_calc_topology()` runs only on the leader. For every CDV pRAID with `stripe_idx == 0` and `PRAID_REGISTRANTS_SYNC_CMD_STABLE`, the leader builds a candidate list from alive RAFT members (the current candidate source is segment owners; the migration to RAFT members is tracked separately and does not affect this design).
+2. `cdv_alloc_elect(cdv_uuid, candidates, out_new_identity)`:
+   - Current `allocator_toma_id` still in candidates → sticky, no mutation.
+   - Otherwise pick one candidate (random tie-break) → stage `(new_toma_id, current_gen + 1)` into `calculated_praid_lot.topo_ctx`.
+3. The staged `calculated_praid_lot` is promoted to `baseline_praid_lot` via the existing `nvmeibt_praid_leader_we_have_a_new_baseline()`, serialized into `praid_wire_topo`, shipped in the next `AppendEntries`, and — on majority-ack — applied on every follower's `applied_praid_lot`.
 
-**Identity propagation — recipient side (the newly-elected allocator):**
-1. `find_or_create_alloc(cdv_uuid)` in the local `cdv_alloc_hash`.
-2. **Monotonicity guard:** accept only if `incoming_gen > alloc->allocator_generation`. Lower or equal generations are ignored (protects against reordered broadcasts, late duplicates, and stale partitioned leaders that come back).
-3. Set `(allocator_toma_id, allocator_generation)` on the local `alloc`.
-4. Schedule `cdv_ondisk_scan_async()` to load extent state from the CDV header (with the 100 ms → 1 s backoff retry when the CDV block device is not yet online).
-5. `cdv_async_write_header()` — persist the new identity into the CDV on-disk header. This is the durable source of truth that survives full cluster restart and is readable by any TOMA that re-attaches the CDV.
-6. `nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid)` locally — iterate the local `seg_active->active_registrants_hash` on this TOMA and deliver `CDV_ALLOCATOR_UPDATE` to every registered client. Because the allocator is by construction a first-pRAID data-segment owner, every client that has the CDV attached is registered with it (RAID-1 clients register with every replica host), so one local fan-out covers all clients.
+**Identity apply — every TOMA, leader and followers:**
+1. In the topology-apply hook for the CDV pRAID (`update_applied_topology` path), diff `applied_praid_lot.topo_ctx.allocator_*` against the previously applied values for this pRAID.
+2. Generation increased and `allocator_toma_id == my_hostname`, local state not `ACTIVE`:
+   - Transition `cdv_alloc_hash[cdv_uuid]` to `AWAITING_SATELLITE_ATTACH`.
+   - Fire `cdv_send_attach_satellite_request()` — Stage A of the satellite-attach handshake (§1.5.4.4).
+3. Generation increased and `allocator_toma_id != my_hostname`, previous was this node:
+   - Demote: transition to `NOT_ALLOCATOR`, drain the I/O WQ, close cached fds, clear satellite state.
+4. Generation unchanged, or `allocator_toma_id` points elsewhere and was already not us: no-op.
 
-Peer TOMAs that are neither the leader nor the allocator receive no message and hold no CDV alloc state for that CDV. This keeps the propagation cost at **one unicast per election** regardless of cluster size, and prevents the need to attach CDVs to non-allocator TOMAs.
+Because this hook runs inside the deterministic, linearized topology-apply path — which every TOMA traverses for every committed topology change and which is replayed on restart — every TOMA converges on the same allocator identity at the same committed log index.
+
+**Client propagation is unchanged** (§2.5). When a TOMA serving a client applies the new topology, it pushes the updated `(allocator_toma_id, allocator_generation)` to its subscribed clients as part of the existing CDV topology push.
 
 ```mermaid
 sequenceDiagram
     participant L as RAFT Leader TOMA
-    participant A as Chosen Allocator TOMA<br/>(first-pRAID data owner)
-    participant D as CDV on-disk header<br/>(/dev/nvmesh/<cdv>)
+    participant F as Followers (incl. elected allocator)
+    participant M as Management
     participant C as Client
 
-    Note over L: calc_topology for first-pRAID, stable, is_cdv
-    L->>L: build candidates from<br/>topo_segs[]->its_disk->its_node_config
-    L->>L: cdv_alloc_elect(cdv_uuid, candidates)
-    alt sticky (returns 0)
-        L-->>L: no-op
-    else new elect (returns 1)
-        L->>L: alloc.toma_id = chosen<br/>alloc.generation++
-        L->>A: CDV_ALLOCATOR_NOTIFY<br/>{cdv_uuid, toma_id, gen}
-        Note over A: monotonicity guard:<br/>accept iff gen > local.gen
-        A->>A: find_or_create_alloc<br/>set (toma_id, gen)
-        A->>A: schedule cdv_ondisk_scan_async<br/>(100ms → 1s backoff)
-        A->>D: cdv_async_write_header<br/>(durable identity)
-        A->>C: CDV_ALLOCATOR_UPDATE<br/>(via push_to_registrants)
-        Note over C: tpv->allocator_toma_id set<br/>load_state unblocks
-        C->>A: CDV_ALLOC_EXTENT
-        Note over A: handle_cdv_alloc_extent checks:<br/>1. toma_id == me<br/>2. raft_has_majority()
-        A-->>C: CDV_ALLOC_OK | WRONG_GEN
+    Note over L: topology_calc_topology → cdv_alloc_elect
+    L->>L: calculated_praid_lot.topo_ctx.<br/>allocator_toma_id = chosen<br/>allocator_generation++
+    L->>F: AppendEntries (TOPO TLV carries<br/>new allocator fields)
+    F->>F: persist + apply<br/>(applied_praid_lot)
+    F-->>L: ACK (majority commits)
+
+    Note over F: topology-apply hook on every TOMA
+    rect rgb(240,240,240)
+        Note over F: On the elected TOMA only:<br/>state → AWAITING_SATELLITE_ATTACH
+        F->>M: attachSatelliteRequest (Stage A)
+        M-->>F: attachSatelliteResponse (Stage B)
+        F->>F: scan satellite; state → ACTIVE
     end
+
+    F->>C: CDV topology push (new allocator + gen)
+    C->>F: CDV_ALLOC_EXTENT
+    F-->>C: CDV_ALLOC_OK | WRONG_GEN
 ```
 
-*Figure 9: Election and identity propagation. The leader's unicast is the only inter-TOMA message; peer TOMAs not chosen as allocator are not involved. The CDV on-disk header is the durable tie-breaker across full cluster restart.*
+*Figure 9: Election and identity propagation via RAFT topology. The leader writes the new `(allocator_toma_id, allocator_generation)` into the same topology record that carries every other pRAID state change. RAFT delivers it to every follower reliably and in log order. The elected allocator detects its new role inside the apply hook and fires Stage A of the satellite-attach handshake.*
 
-**Split-brain protection (serve-side gate):** `handle_cdv_alloc_extent()` checks `nvmeibt_raft_has_majority()` before allocating. An allocator that has lost RAFT quorum contact — for example, because it is isolated in a minority partition — rejects ALLOC requests with `WRONG_GEN` until it rejoins, even if its local `allocator_toma_id` still names itself. Combined with:
-- monotonic `allocator_generation` incremented only by a RAFT leader (and only one leader per term can commit anything RAFT-visible);
-- the receiver-side monotonicity guard;
-- the fact that a partitioned minority cannot elect a RAFT leader and therefore cannot bump the generation;
+**Correctness and failure modes.**
+- **Delivery reliability is RAFT's.** Once committed, the log entry is delivered to every follower; a disconnected follower catches up on reconnect. The "unicast was dropped and Stage A never fired" failure mode that motivated this design cannot occur: either the entry is committed and every follower eventually applies it, or it is not committed and no TOMA acts on it.
+- **Monotonicity is by log order.** Only the leader writes `allocator_generation`, as part of the atomic topology commit. Followers apply in log order; a late-arriving older-generation entry is impossible.
+- **Cold start.** After a full cluster restart the first elected leader runs `calc_topology` and re-writes the identity if needed. The newly-elected allocator's first topology-apply delivers the committed identity and fires Stage A normally — no special recovery path.
+- **Split-brain.** A partitioned minority TOMA cannot commit new topology entries; `handle_cdv_alloc_extent` fails the `nvmeibt_raft_has_majority()` gate (§2.7). The satellite's EXCLUSIVE_READ_WRITE hold (§1.5.4.8) blocks any residual data write from a stale allocator.
 
-this ensures the cluster never has two TOMAs both actively serving ALLOC as allocator with the same generation.
+**Re-election on allocator departure** is mechanically identical to the initial election, driven by the RAFT-member candidate set: when the old allocator leaves the RAFT group, the sticky rule no longer matches, a new candidate is picked, `allocator_generation++` is staged into `calculated_praid_lot.topo_ctx`, and the commit propagates to every TOMA. The old allocator — if it comes back later — receives the higher-generation entry through catch-up replication and demotes itself in the same topology-apply hook.
 
-**Cold recovery after full cluster restart:** each TOMA's in-memory `cdv_alloc_hash` starts empty. The first post-restart RAFT leader runs `calc_topology` for stable CDV pRAIDs and `elect()` as above. `elect()`'s sticky rule only applies to the leader's own in-memory state (which is empty at this moment), so the first call always picks fresh and sends `CDV_ALLOCATOR_NOTIFY`. The elected allocator's scan reads the CDV on-disk header, finds the pre-restart `allocator_generation`, and advances from there (the receiver takes `max(incoming_gen, header_gen) + 0` — header load is after the notify application).
+**What this supersedes.** The following mechanisms from earlier iterations of this design collapse into the single RAFT-replicated field and the single topology-apply hook:
+- `RAFT_MSG_CDV_ALLOC_NOTIFY` unicast and `nvmeibt_raft_send_cdv_alloc_notify` / `handle_notify` plumbing.
+- `nvmeibt_cdv_alloc_send_notify_to_elected` + the `cdv_alloc_set_generation` post-send call introduced to patch a self-apply race.
+- `cdv_alloc_elect`'s `out_proposed_gen` out-param (introduced by commit `0f4db106` to preserve `handle_notify` as the sole generation writer).
+- The receive-side monotonicity guard in `handle_notify`.
+- The cold-recovery contract that elect()'s sticky rule might be invoked against an empty local state after full-cluster restart — the RAFT-committed identity makes the bootstrap explicit.
 
-**Re-election on allocator departure:**
-1. RAFT detects the old allocator has left the group.
-2. Next `calc_topology` on the RAFT leader rebuilds candidates excluding the departed TOMA; sticky rule no longer matches → new pick, `allocator_generation++`, unicast `CDV_ALLOCATOR_NOTIFY` to the new allocator.
-3. New allocator runs the recipient-side steps above; `cdv_async_write_header()` bumps the on-disk generation so any stragglers converge on the next scan.
-4. The old allocator, if it comes back, finds its in-memory generation is behind the on-disk header, steps down, and stops serving. If it is still partitioned, the `has_majority` gate already keeps it silent.
-
-```mermaid
-sequenceDiagram
-    participant R as RAFT Group
-    participant OA as Old Allocator TOMA
-    participant NA as New Allocator TOMA
-    participant C as Storage Client
-
-    OA--xR: departure detected (failure or eviction)
-    R->>R: select new allocator from first-pRAID TOMAs
-    R->>NA: commit: new allocator_toma_id, allocator_generation++
-    NA->>NA: cdv_allocator_cold_recovery()
-    Note over NA: read cdv_extent_md array, rebuild free_bitmap
-    Note over NA: orphaned extents (DATA but no tree leaf) flagged for NVCK
-    R->>C: CDV topology push (new allocator_toma_id + generation)
-    C->>C: update allocator identity in nvmeibc_tpv
-    Note over C: discard any in-flight responses with old generation
-    C->>NA: CDV_ALLOC_EXTENT (with new generation)
-    NA-->>C: cdv_alloc_resp (OK)
-```
-
-*Figure 8: Allocator re-election via RAFT. Allocator identity is sticky — changes only on TOMA departure, not on RAFT leader rotation. The new allocator completes cold recovery before serving requests. Clients fence stale responses by generation.*
-
-**Why first pRAID?** The allocator must read and write the CDV's allocator area (first `allocatorSizeGB` GB). A TOMA hosting a RW-enabled segment of the first pRAID is guaranteed to have a live path to that data.
+Detailed migration plan, code-changes-by-file, and phased delivery are in `EmbedAllocatorInRaft.md`.
 
 ### 2.7 Allocation Transactionality and Split-Brain Protection
 
