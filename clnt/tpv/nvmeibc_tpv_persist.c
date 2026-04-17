@@ -6,22 +6,20 @@
 /*
  * nvmeibc_tpv_persist.c — TPV allocator persistence: per-TPV L1/L2 tree.
  *
- * Each TPV stores its own mapping tree in a dedicated "tree extent" — one
- * of the CDV_extents allocated to this TPV.  Slot 0 of the tree extent
- * holds the L1 table (with a tpv_l1_header for identification); slots 1+
- * hold L2 tables allocated on demand.
+ * Each TPV stores its own mapping tree across the CDV_extents allocated to
+ * it.  Slot 0 of the "L1 extent" (the first CDV_extent allocated to this
+ * TPV) holds the L1 table (with a tpv_l1_header for identification).  L2
+ * tables are placed lazily in any TPV-owned slot by nvmeibc_tpv_flush_state().
  *
- * L1 entries point to L2 tables within the tree extent.  L2 leaf entries
- * record per-virtual-extent mappings (cdv_extent_index + slot).
- * Address translation (2-level):
+ * L1 and L2 entries share the same 8-byte format: a single u64 holding the
+ * raw CDV byte offset of the referenced object.  0 means unmapped.
+ * Address translation (2-level, TPV_L1_VERSION 2):
  *
  *   L1_idx = V / N_L2;  L2_idx = V % N_L2
- *   data_idx = L2[L2_idx].extent_index  (0 = unmapped)
- *   slot     = L2[L2_idx].debug_meta
- *   phys_offset = A + data_idx × E + slot × T
+ *   phys_offset = L2[L2_idx].cdv_offset   (0 = unmapped)
  *
  * Entry points:
- *   nvmeibc_tpv_load_state()  — attach: CDV_LIST_EXTENTS → find tree extent
+ *   nvmeibc_tpv_load_state()  — attach: CDV_LIST_EXTENTS → find L1 extent
  *                                 → read L1/L2 → populate xarray.
  *   nvmeibc_tpv_flush_state() — write current xarray into L1/L2 tree on CDV.
  *   nvmeibc_tpv_persist_work_fn()  — deferred background flush.
@@ -129,15 +127,6 @@ static inline u64 persist_phys_of(const struct nvmeibc_tpv_allocator *a,
 	return persist_alloc_bytes(a) +
 	       (cdv_extent_index - 1) * persist_extent_bytes(a) +
 	       slot * persist_slot_bytes(a);
-}
-
-/* Reconstruct slot number from phys_offset and 1-based CDV extent index. */
-static inline u64 persist_slot_of(const struct nvmeibc_tpv_allocator *a,
-				   u64 phys_offset, u64 cdv_extent_index)
-{
-	u64 base = persist_alloc_bytes(a) +
-		   (cdv_extent_index - 1) * persist_extent_bytes(a);
-	return (phys_offset - base) / persist_slot_bytes(a);
 }
 
 /*
@@ -279,9 +268,6 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		u64 V       = idx;
 		u64 l1_idx  = V / N_L2;
 		u64 l2_idx  = V % N_L2;
-		u64 data_idx = entry->cdv_extent_index;
-		u64 slot_in_ext = persist_slot_of(alloc, entry->phys_offset,
-						  data_idx);
 
 		if (unlikely(l1_idx >= N_L1)) {
 			_NW(tpv_flush_l1_overflow,
@@ -297,7 +283,6 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 			 */
 			if (prev_l1_idx != (u64)-1) {
 				u64 l2_phys;
-				u64 l2_ext, l2_slot;
 
 				rcu_read_unlock();
 
@@ -324,11 +309,8 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 					goto out;
 				}
 
-				/* Set L1 entry: encode (extent, slot) of L2. */
-				persist_decode_phys(alloc, l2_phys,
-						    &l2_ext, &l2_slot);
-				l1_entries[prev_l1_idx].extent_index = l2_ext;
-				l1_entries[prev_l1_idx].debug_meta   = l2_slot;
+				/* Set L1 entry: CDV byte offset of the L2 table. */
+				l1_entries[prev_l1_idx].cdv_offset = l2_phys;
 
 				rcu_read_lock();
 			}
@@ -338,16 +320,14 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 			prev_l1_idx = l1_idx;
 		}
 
-		/* Set L2 leaf entry: cdv_extent_index + slot within it. */
-		l2[l2_idx].extent_index = data_idx;
-		l2[l2_idx].debug_meta   = slot_in_ext;
+		/* L2 leaf entry: raw CDV byte offset of the data slot. */
+		l2[l2_idx].cdv_offset = entry->phys_offset;
 	}
 	rcu_read_unlock();
 
 	/* Flush the last L2 table. */
 	if (prev_l1_idx != (u64)-1) {
 		u64 l2_phys;
-		u64 l2_ext, l2_slot;
 
 		rv = persist_get_or_alloc_l2_phys(tpv, prev_l1_idx, &l2_phys);
 		if (rv) {
@@ -369,9 +349,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 			goto out;
 		}
 
-		persist_decode_phys(alloc, l2_phys, &l2_ext, &l2_slot);
-		l1_entries[prev_l1_idx].extent_index = l2_ext;
-		l1_entries[prev_l1_idx].debug_meta   = l2_slot;
+		l1_entries[prev_l1_idx].cdv_offset = l2_phys;
 	}
 
 	/*
@@ -386,11 +364,10 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 
 		xa_for_each(&alloc->l1_to_l2_phys, li, slot_p) {
 			u64 l2_phys = (u64)xa_to_value(slot_p);
-			u64 l2_ext, l2_slot;
 
 			if (li >= N_L1)
 				continue;
-			if (l1_entries[li].extent_index != TPV_TREE_NULL)
+			if (l1_entries[li].cdv_offset != TPV_TREE_NULL)
 				continue;	/* already set in the loop above */
 
 			if (tpv_is_detaching(tpv)) {
@@ -406,9 +383,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 				goto out;
 			}
 
-			persist_decode_phys(alloc, l2_phys, &l2_ext, &l2_slot);
-			l1_entries[li].extent_index = l2_ext;
-			l1_entries[li].debug_meta   = l2_slot;
+			l1_entries[li].cdv_offset = l2_phys;
 		}
 	}
 
@@ -715,11 +690,11 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		struct persist_load_extent *l2_le;
 		u64 j;
 
-		if (l1_entries[i].extent_index == TPV_TREE_NULL)
+		if (l1_entries[i].cdv_offset == TPV_TREE_NULL)
 			continue;
 
-		l2_extent_idx = l1_entries[i].extent_index;
-		l2_slot       = l1_entries[i].debug_meta;
+		l2_phys = l1_entries[i].cdv_offset;
+		persist_decode_phys(alloc, l2_phys, &l2_extent_idx, &l2_slot);
 
 		/*
 		 * Under dynamic L2 placement, L1 entries may point at any
@@ -743,8 +718,6 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 				continue;
 			}
 		}
-
-		l2_phys = persist_phys_of(alloc, l2_extent_idx, l2_slot);
 
 		/*
 		 * Record L1→L2 location (phys offset).  flush_state will reuse
@@ -782,14 +755,16 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 
 		/* Walk L2 entries (per-virtual-extent leaves). */
 		for (j = 0; j < N_L2; j++) {
-			u64 data_idx = l2[j].extent_index;
-			u64 slot_in  = l2[j].debug_meta;
-			u64 V, phys;
+			u64 data_phys = l2[j].cdv_offset;
+			u64 data_idx, slot_in;
+			u64 V;
 			struct nvmeibc_tpv_extent_entry *ee;
 			struct persist_load_extent *le;
 
-			if (data_idx == TPV_TREE_NULL)
+			if (data_phys == TPV_TREE_NULL)
 				continue;
+
+			persist_decode_phys(alloc, data_phys, &data_idx, &slot_in);
 
 			/* Sanity: L2 leaf must reference an extent that
 			 * TOMA says belongs to us. */
@@ -811,15 +786,14 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 				}
 			}
 
-			V    = i * N_L2 + j;
-			phys = persist_phys_of(alloc, data_idx, slot_in);
+			V = i * N_L2 + j;
 
 			ee = kzalloc(sizeof(*ee), GFP_NOIO);
 			if (!ee) {
 				rv = -ENOMEM;
 				goto out_free;
 			}
-			ee->phys_offset      = phys;
+			ee->phys_offset      = data_phys;
 			ee->cdv_extent_index = data_idx;
 			ee->persisted        = true;
 

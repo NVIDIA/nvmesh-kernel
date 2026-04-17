@@ -296,10 +296,12 @@ struct nvmeibc_tpv {
 /* ── L1/L2 tree on-disk entry format ────────────────────────────────────── */
 
 /*
- * Every entry at every level (L1, L2) is 16 bytes.
- * extent_index == TPV_TREE_NULL means the slot is empty / not present.
- * CDV_extent index 0 is never allocated by TOMA (it is the TOMA allocator
- * area's own L1), so 0 is a safe null sentinel.
+ * Every entry at every level (L1, L2) is 8 bytes — a raw CDV byte offset.
+ * cdv_offset == TPV_TREE_NULL (0) means the entry is empty / not present.
+ * Valid entries always satisfy cdv_offset >= A > 0 in production (A defaults
+ * to 1 GiB), and A == 0 is permitted only in unit tests that never store a
+ * leaf at CDV byte 0 (slot 0 of the L1 extent holds the L1 header, not a
+ * leaf target).
  *
  * L1/L2 tree model (dynamic L2 placement):
  *   Each TPV has a private L1 table stored in slot 0 of the "L1 extent"
@@ -307,20 +309,22 @@ struct nvmeibc_tpv {
  *   arbitrary TPV-owned slots allocated lazily from the free pool by
  *   nvmeibc_tpv_flush_state().  Data slots live in all remaining slots.
  *
- *   L1 entries:    extent_index = CDV_extent holding the L2 table,
- *                  debug_meta   = slot within that extent
- *   L2 leaf entries: extent_index = data CDV_extent index,
- *                    debug_meta   = slot within that CDV_extent
+ *   L1 entry:       cdv_offset = CDV byte offset of the L2 table slot
+ *                              = A + (extent_idx - 1) * E + slot * T
+ *   L2 leaf entry:  cdv_offset = CDV byte offset of the data slot
+ *                              = A + (data_idx - 1) * E + slot * T
  *
  *   Address translation (2-level):
  *     L1_idx = V / N_L2;  L2_idx = V % N_L2
- *     data_idx = L2[L2_idx].extent_index
- *     slot     = L2[L2_idx].debug_meta
- *     phys_offset = A + (data_idx - 1) * E + slot * T
+ *     phys_offset = L2[L2_idx].cdv_offset
+ *
+ *   Inverse (used by load_state and /proc for debug):
+ *     off     = cdv_offset - A
+ *     extent  = off / E + 1   (1-based)
+ *     slot    = (off % E) / T
  */
 struct tpv_tree_entry {
-	u64 extent_index;		/* CDV_extent index of child table or data extent */
-	u64 debug_meta;			/* L1: slot of L2 within extent_index; L2 leaf: slot of data */
+	u64 cdv_offset;			/* raw CDV byte offset; 0 = unmapped */
 };
 
 #define TPV_TREE_NULL  0ULL
@@ -328,7 +332,7 @@ struct tpv_tree_entry {
 /* ── L1 table on-disk header (first 64 bytes of L1 extent slot 0) ───── */
 
 #define TPV_L1_MAGIC		0x5450564C31544142ULL	/* "TPVL1TAB" */
-#define TPV_L1_VERSION		1
+#define TPV_L1_VERSION		2			/* bumped for 8-byte tree entries */
 
 struct tpv_l1_header {
 	u64 magic;			/* TPV_L1_MAGIC */
