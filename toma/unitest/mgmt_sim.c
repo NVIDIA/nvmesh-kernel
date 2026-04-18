@@ -462,10 +462,15 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 		struct mm_json_elem *segments = json_get_dict_value(entry, "segments");
 		const char *uuid = json_get_dict_str(entry, "uuid", NULL);
 		struct sb_praid_topo *pr = sb_cluster_get_topo_prd_ptr_from_uuid(m->cfg, uuid);
-		const int n_segs = pr->cfg->D + pr->cfg->P;
-		BUG_ON(!segments || (segments->type != JSON_E_ARRAY) || (segments->array.len != n_segs));
+		/* Accept any number of segments up to praid capacity -- eviction adds
+		 * a replacement before the deprecated slot is removed, so reports
+		 * can temporarily carry more than D+P entries. */
+		int n_reported;
+		BUG_ON(!segments || (segments->type != JSON_E_ARRAY));
+		n_reported = segments->array.len;
+		BUG_ON(n_reported > (int)ARRAY_SIZE(pr->cfg->segs));
 		__mongodb_insert_praid_hdr(pr, entry);
-		for (int j = 0; j < n_segs; j++)
+		for (int j = 0; j < n_reported; j++)
 			__mongodb_insert_praid_seg(m->cfg, segments->array.elements[j]);
 
 		if (&m->cfg->vols[1].topo_chunks[0].raids[0] == pr) {
@@ -475,7 +480,7 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 			v_r1_found = true;
 
 			/* Check if all segments have status "deprecated" */
-			for (int j = 0; (j < n_segs) && all_deprecated; j++)
+			for (int j = 0; (j < n_reported) && all_deprecated; j++)
 				all_deprecated &= (pr->segs[j].status == mdb_seg_dep);
 			if (all_deprecated) {
 				m->v_r1_praid_deprecated = true;
