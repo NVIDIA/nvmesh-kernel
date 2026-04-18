@@ -52,6 +52,24 @@ void mgmt_sim_send_volume_update(int vol_idx, int version,
 /** Clear cached condition flags derived from V_R1 pRaidReports so a
  *  subsequent scenario phase starts from a known baseline. */
 void mgmt_sim_reset_v_r1_report_state(void);
+
+/** Per-segment snapshot extracted from the latest updatePRaidReport for V_R1. */
+struct mgmt_sim_praid_report_seg {
+	u32  uuid;
+	char status[32];		// "normal" | "deprecated" | "replacement" | "under_recovery" | ...
+	char vitality[16];		// "up" | "down"
+};
+
+struct mgmt_sim_praid_report_snapshot {
+	int n_segments;
+	struct mgmt_sim_praid_report_seg segs[12];		// NVMEIBT_MAX_N_SEGMENTS_IN_PRAID
+	bool was_under_recovery_witnessed;				// latches on first observation; cleared only by reset
+};
+
+/** Live view of the latest V_R1 pRaidReport.  Each new report overwrites
+ *  the per-segment array, except for was_under_recovery_witnessed which
+ *  latches so scenarios can assert on transient states. */
+const struct mgmt_sim_praid_report_snapshot *mgmt_sim_get_v_r1_report(void);
 void mgmt_sim_send_praid_report_req(const u32 praid_uuid);
 void mgmt_sim_send_volume_exclusive_attach_notify(const u32 volume_uuid);
 void mgmt_sim_send_disk_report_req(const u32 disk_idx);

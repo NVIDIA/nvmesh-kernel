@@ -86,6 +86,7 @@ struct mgmt_sim_state {
 	bool v_r1_praid_deprecated;             /* updatePRaidReport shows all V_R1 segs "deprecated" */
 	bool v_r1_delete_completed_sent;        /* deleteVolumeCompleted was sent */
 	bool v_r1_praid_absent_from_report;     /* praid report received without V_R1 (garbage collected) */
+	struct mgmt_sim_praid_report_snapshot v_r1_report;	/* populated from each V_R1 pRaidReport */
 };
 
 static struct mgmt_sim_state *g_mgmt_sim = NULL;
@@ -476,8 +477,25 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 		if (&m->cfg->vols[1].topo_chunks[0].raids[0] == pr) {
 			const struct sb_volume_conf* V = &m->cfg->vols[1];
 			bool all_deprecated = true;
+			const int cap = (int)ARRAY_SIZE(m->v_r1_report.segs);
 			m->v_r1_praid_reported = true;
 			v_r1_found = true;
+
+			/* Mirror this report's segments into the public snapshot.
+			 * Per-segment fields overwrite; was_under_recovery_witnessed latches. */
+			m->v_r1_report.n_segments = 0;
+			for (int j = 0; j < n_reported && j < cap; j++) {
+				struct mm_json_elem *js = segments->array.elements[j];
+				struct mgmt_sim_praid_report_seg *out = &m->v_r1_report.segs[m->v_r1_report.n_segments++];
+				const char *uuid_s = json_get_dict_str(js, "segmentID", "0");
+				unsigned u = 0;
+				sscanf(uuid_s, "%x", &u);
+				out->uuid = (u32)u;
+				nvmeibt_strlcpy(out->status,   json_get_dict_str(js, "status",   "unknown"), sizeof(out->status));
+				nvmeibt_strlcpy(out->vitality, json_get_dict_str(js, "vitality", "unknown"), sizeof(out->vitality));
+				if (strncmp(out->status, "under_", 6) == 0)
+					m->v_r1_report.was_under_recovery_witnessed = true;
+			}
 
 			/* Check if all segments have status "deprecated" */
 			for (int j = 0; (j < n_reported) && all_deprecated; j++)
@@ -538,6 +556,11 @@ void mgmt_sim_reset_v_r1_report_state(void) {
 	m->v_r1_seg_zeroing_progress_seen = false;
 	m->v_r1_praid_deprecated = false;
 	m->v_r1_praid_absent_from_report = false;
+	memset(&m->v_r1_report, 0, sizeof(m->v_r1_report));
+}
+
+const struct mgmt_sim_praid_report_snapshot *mgmt_sim_get_v_r1_report(void) {
+	return &g_mgmt_sim->v_r1_report;
 }
 
 
