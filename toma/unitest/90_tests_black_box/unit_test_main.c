@@ -199,6 +199,25 @@ static void scenario_evict_rebuild_r1(void) {
 	 *   (c) leader keep-alive
 	 * [REAL]    toma leader receives (effects observed in Phase 2).
 	 * ==================================================================== */
+	mgmt_sim_reset_v_r1_report_state();
+	SCENARIO_PRINT(__AUTOID__, "Phase 1: updateVolume v2 with replacement segment");
+	{
+		static const struct mgmt_sim_vol_seg_update evict_segs[] = {
+			{ .seg_idx = 0, .praid_idx = 0, .status = "markedForRebuild_old" },
+			{ .seg_idx = 1, .praid_idx = 1, .status = "normal" },
+			{ .seg_idx = 2, .praid_idx = 2, .status = "normal" },
+			{ .seg_idx = 3, .praid_idx = 0, .status = "markedForRebuild" },
+		};
+		mgmt_sim_send_volume_update(1, 2, "online", "markedForRebuild",
+			evict_segs, (int)ARRAY_SIZE(evict_segs));
+	}
+	yield();
+
+	SCENARIO_PRINT(__AUTOID__, "Phase 1: HW cfg marking seg[0] disk OOS");
+	sb_cluster_get_conf()->live->disks[1].is_out_of_service = true;
+	mgmt_sim_send_msg_latest_hw_config();
+	yield();
+	mgmt_sim_send_leader_keep_alive();
 
 	/* ====================================================================
 	 * PHASE 2 -- Toma reports replacement topology; verify
