@@ -849,95 +849,154 @@ In `toma/nvmeibt_recovery.c`:
 - After EC recovery completes, before IO gates open: call `cdv_allocator_cold_recovery(cdv_uuid)`.
 - Background scrubbing: skip unallocated extents by checking `free_bitmap[extent_idx]`.
 
-### 2.10 TPV Preemption via CDV Preemption (CRITICAL GAP)
+### 2.10 Per-Client CDV Preemption
 
 #### 2.10.1 The actual problem
 
-A TPV is a virtual volume with no storage of its own. All TPV data writes land on the underlying **CDV**. Consequently, fencing a TPV from a misbehaving client at the TPV layer would be ineffective: the client can no longer be told "stop writing to TPV X" in any meaningful way — it can only be told "stop writing to the CDV." Any force-detach of a TPV from a client must therefore translate into a **preemption of that client's CDV attachment**, using the standard NVMesh preemption mechanism described in §1.5.2.
+A TPV is a virtual volume with no storage of its own. All TPV data writes land on the underlying **CDV**, which is attached `SHARED_READ_WRITE` to potentially many TPV clients at once. Consequently, fencing a TPV from a misbehaving client at the TPV layer is ineffective: once the client has populated its TPV `extent_map` with (virt_idx → CDV physical offset) entries, bio forwarding in `nvmeibc_tpv_cdv_submit_bio` sends writes directly from the client to CDV segments over RDMA, not through TOMA. The only way to stop a stale client's writes is to fence **that client specifically** from the CDV, without disturbing the other `SHARED` holders.
 
-The earlier version of this section proposed a bespoke "per-TPV fencing cookie" stored in the CDV allocator header and validated by TOMA on every ALLOC request. That design fenced the *allocation control path* but not the *data path* — the stale client could still issue RDMA writes to CDV extents it had already mapped in its TPV extent_map, because those writes go directly from client to CDV segments, not through TOMA. The design is therefore replaced.
+The earlier version of this section proposed a per-TPV fencing cookie validated by TOMA on allocation requests. That design fenced the allocation control path but not the data path — the stale client's already-mapped CDV writes were not affected. The subsequent P1/P2/P3 triad (volume-wide preempt with survivor auto-reattach; per-registrant threshold as a hot-path admission gate; parallel revoke message) proposed various ways to bridge that gap, each with significant costs. This section replaces all of them. See `TPV_PerClientCDVPreemption.md` for the full execution plan.
 
-#### 2.10.2 Intended flow
+#### 2.10.2 Design — two orthogonal primitives
 
-When a TPV's exclusive holder becomes non-responsive and must be displaced:
+Per-client CDV preemption is expressed as two primitives that compose but do not overlap:
 
-1. Management detects the need to preempt (new attach request with `preempt=true`, or stale-client cleanup, or involuntary detach — same paths as today).
-2. Management **preempts the stale client's CDV attachment**, not the TPV attachment: bumps `cdv.reservation.version`, publishes `ReservationModeChange` to every TOMA serving the CDV, and pushes the new version to every non-preempted client attached to the CDV via the existing topology mechanism.
-3. The stale client's subsequent CDV RDMA writes carry the old version and are rejected at the target per §1.5.2. The client eventually observes I/O errors, marks the CDV `NCBD_PREEMPTED`, and stops issuing I/O.
-4. Management clears `tpvConfig.exclusiveClient`, removes the `tpv:<tpvUUID>` reference on the stale client's CDV attachment, and (if no other `tpv:*` references remain) removes the CDV attachment record — exactly as today.
-5. The new client then attaches the TPV and the CDV cleanly.
+**Primitive A — CDV admission floor.** A monotonic `u64` maintained by management on every CDV, replicated to every TOMA serving that CDV's segments. Semantics: every incoming `REGISTER` against a CDV segment is rejected at registration time if the client's `reservation_mode_version` is below the CDV's current floor. Existing registrants at older versions are not affected — the floor is an additive admission gate, not a segment-transition marker. In particular, the floor does not interact with `seg_active->active_reservation_mode_version` or `seg_active->highest_reservation_mode_version` (`toma/nvmeibt_seg_active.h:148-151`) and does not put the segment into the "rejecting" state described at `toma/nvmeibt_register.c:1015-1031`.
 
-This reuses the preemption mechanism at its native granularity and closes the data-path fencing hole the cookie design would have left open.
+**Primitive B — targeted registrant termination.** A new Kafka message `ManagementToTOMA.preemptClientFromCDV(clientID, cdvUUID, newFloor)`. The TOMA handler, under the per-CDV lock, does exactly two things in order:
 
-#### 2.10.3 Critical gap — per-client CDV preemption on a SHARED_READ_WRITE volume
+1. Raise the CDV's local admission floor to `newFloor`.
+2. Locate the client's active registrant on every segment of the CDV and terminate it via the existing `nvmeibt_register_terminate_reg_ctx` path. Drain in-flight I/O as that path already does for EXCLUSIVE preempts.
 
-The CDV is attached `SHARED_READ_WRITE` by potentially many TPV clients. We need to preempt *one* of them (the stale holder of some TPV) while leaving the others untouched. **Today's mechanism does not support this.** Code investigation (`nvmesh-management/modules/client.js:1510, 1955, 2905-2951, 3513-3539`, `toma/nvmeibt_seg_active.h:148`, `toma/nvmeibt_register.c:1015-1031, 2552`, `clnt/nvmeibc_block.c:1079-1091`) found:
+TOMA ACKs back to management on a new `TOMAToManagement.preemptClientFromCDVResponse` after both steps complete. The order (floor first, then termination) matters — see §2.10.4.
 
-- `reservation.version` is bumped volume-wide.
-- Target-side `active_reservation_mode_version` is per-segment, with **zero per-client context** in the I/O admission comparison. A version bump that reaches the target rejects every client whose register is still at the old version, not just the intended one.
-- `ReservationModeChange` Kafka messages are only sent on transitions to `NONE`, not during preempt. The current preempt-on-exclusive safety comes from the new attacher's **register** request carrying the new version, bumping `highest_reservation_mode_version` at the target — a flow that has no analogue when no new attach is happening.
-- Preempted clients receive status `'P'` on the next I/O response, enter `NCBD_PREEMPTED`, stop issuing I/O, and wait for management-driven `DetachVolumes` to recover. No auto-reattach.
-- No existing test exercises "preempt one SHARED client, keep another SHARED client alive" on the same volume.
+Both primitives are CDV-specific. Non-CDV volumes (including the allocator satellite `<CDV>-mgmt`, which has its own `EXCLUSIVE_READ_WRITE` reservation semantics per §1.5) do not have an admission floor and do not accept `preemptClientFromCDV`.
 
-Three candidate designs for closing this gap. **This list is not exhaustive; better options should be explored before implementation commits.** Each has open questions that need answers in its own right.
+#### 2.10.3 Protocol
 
-##### Option P1 — Management-layer only, with survivor auto-reattach
+**CDV creation.** The CDV document gains `cdvConfig.admissionFloor: u64` (default 0). Floor 0 is the sentinel "no gate" — matches pre-feature behavior.
 
-Lift the current restriction that `ReservationModeChange` is only sent on transitions to NONE: emit it during preempt too. On TPV force-detach:
+**Normal client attach.** `client.js:attachTPV` stamps the outgoing `AttachVolumes` message for the hidden CDV with `reservationModeVersion = cdv.cdvConfig.admissionFloor`. The client's subsequent `REGISTER` carries that value and is admitted.
 
-1. Management bumps the CDV's `reservation.version` and publishes `ReservationModeChange` to every TOMA of the CDV.
-2. Management removes the stale client's `(client, CDV)` attachment from Mongo (strips all `tpv:*` references, detaches CDV).
-3. Targets raise `highest_reservation_mode_version`. Every stale-version register becomes non-registrable; in-flight I/O from anyone at the old version gets `'P'`.
-4. Survivor clients go through `NCBD_PREEMPTED` transiently and auto-reattach at the new version. This path does not exist today and must be built: on `'P'`, a survivor consults management ("am I still a valid attachment?") and, if yes, detaches and re-attaches the CDV + TPVs without operator intervention.
+**Preempt flow.**
 
-*Pros:* Minimal target-side surgery. Reuses the existing `'P'` path. Keeps the reservation-version contract intact.
+1. Management detects the need to evict `clientA` from `cdvC` (TPV force-detach, stale-client cleanup, involuntary-detach path).
+2. Management atomically (a) sets `cdvC.cdvConfig.admissionFloor = floor + 1`, (b) writes `EVICTING` into `client[clientA].attachments[cdvC].action` — reusing the existing `ATTACHING`/`DETACHING` state enum (`consts.volumeAttachmentActions`).
+3. Management publishes `preemptClientFromCDV(clientA, cdvC, newFloor)` on every `TOMA_COMMANDS` topic for the zones hosting `cdvC`'s pRaids.
+4. Each TOMA processes the message: raise floor, terminate `clientA`'s registrants on every local CDV segment, drain, ACK.
+5. Management collects ACKs fan-in (same pattern as `sendReservationModeChangeMessageToAllTargets` in `client.js:1511`). Once every TOMA has ACKed, management clears the `EVICTING` action, removes the `(clientA, cdvC)` Mongo attachment entry (stripping all `tpv:*` references), and clears `exclusiveClient` on every TPV `clientA` previously held on `cdvC`.
+6. New TPV assignments proceed. Client B attaches TPV X; its hidden CDV attach is stamped with the new floor; registration succeeds.
 
-*Cons:* Every preempt causes a transient I/O stall for *all* survivor clients on the CDV. Survivor auto-reattach is a new client-kernel code path with its own correctness concerns (idempotency, fencing, dirty state). Bounded but non-zero user-visible impact on every force-detach event.
+**Re-admission flow for a cooperative evicted client.**
 
-*Open questions:* Can the auto-reattach re-establish TPV state without a user-visible I/O error? How long does the stall last under load? Does anything in the block layer break when `NCBD_PREEMPTED` is used as a transient state rather than a terminal one?
+1. `clientA`'s kernel observes registration failure (reason `NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR`) or an in-flight `'P'` status on the CDV. Device enters `NCBD_PREEMPTED`. Per §3.8.1 (new), every TPV whose `cdv_vol` points to this CDV is torn down: `extent_map`s discarded, `cdv_alloc_work` cancelled, `gendisk` unregistered. This is the **cleanup barrier** — no stale CDV offsets remain in kernel memory.
+2. `clientA` contacts management to re-attach a TPV on `cdvC` (via the normal attach path; no new RPC).
+3. Management's attach gate refuses if `client[clientA].attachments[cdvC].action == 'EVICTING'` (eviction still in flight). The client retries.
+4. Once eviction has cleared, management re-admits `clientA` normally, stamping the current floor on the new attach. If the TPV `clientA` was using has been reassigned to `clientB`, management refuses that TPV specifically (`exclusiveClient != null` for someone else) — but a fresh TPV attach for the same `clientA` on the same CDV is fine.
 
-##### Option P2 — Per-client register version at the target
+#### 2.10.4 Correctness walkthrough
 
-Extend `active_registrant` with a per-registrant `registrant_reservation_version`, and change the I/O-admission comparison to reject a registrant only if its own recorded version is below a per-registrant threshold that management can raise selectively. Preempting one client then means: bump the threshold for that registrant only; leave all others alone.
+Three paths a stale client might try to keep writing.
 
-*Pros:* No stall on survivor clients. Clean model — per-client preemption becomes a first-class primitive and is useful beyond thin provisioning.
+**Path 1 — raw RDMA writes without re-registering.** The target validates `reg_ctx` on every I/O request; with the `reg_ctx` terminated, writes are rejected at the registrant-lookup check that already exists. No new mechanism needed.
 
-*Cons:* Real target-side change in the I/O hot path. New state in `active_registrants_hash`. New message type from management to target ("raise registrant X's threshold"). Ripples into mNDU compatibility, simulator coverage, recovery paths, and every place that reads `active_reservation_mode_version` today.
+**Path 2 — direct retry REGISTER with the cached old version.** The client bypasses management and sends `REGISTER` to TOMA at its cached version V. The new admission-floor predicate (inserted in `handle_register_registrant_on_disk_segment` at `toma/nvmeibt_register.c:2539`, before `is_valid_register_req`) compares V against the per-CDV floor. V < V+1 → rejected with reason `BELOW_CDV_FLOOR`. No corresponding target-side client-identity state is needed; the floor is sufficient because the only path to a fresh (current) version is management.
 
-*Open questions:* Where exactly in the I/O admission path does this predicate live? Is the per-registrant threshold durable (RAFT-replicated) or soft? What happens on TOMA failover?
+**Path 3 — ask management for a new attach.** Gated by the `EVICTING` action in the client's attachment record. Management refuses re-admission while the eviction is in flight, and after eviction completes, `clientA` no longer holds any TPV on `cdvC` whose `extent_map` could be abused — it is just a new attacher.
 
-##### Option P3 — Direct client-revoke message
+**The handler step order matters.** If TOMA terminated the `reg_ctx` before raising the floor, a `clientA` `REGISTER` retry landing in the window between those two steps would be admitted at the old version, re-establishing the stale registrant. Raising the floor first closes that window; the per-CDV handler lock serializes the handler against concurrent `REGISTER` paths on the same CDV.
 
-Bypass the reservation-version machinery entirely for this case. Add a new Kafka message `RevokeClientFromVolume(clientID, volumeUUID)` to TOMA. Handler removes that specific entry from the volume's `active_registrants`, so subsequent I/O from that client (or that client's re-register) is refused until management re-admits.
+**Survivor impact.** Client C holds TPV Y on the same CDV `cdvC` at version V. During and after `clientA`'s eviction: no `ReservationModeChange` fires for the CDV, no segment `highest_reservation_mode_version` bump occurs (the gate at `register.c:1020` is never tripped), no `is_seg_active_reservation_mode_version_registrable` rejection for C's I/O. C's writes continue at line rate. C's cached `reservation_mode_version = V` is stale relative to the floor, but stale-version **existing** registrants are explicitly grandfathered — only **new** `REGISTER`s are gated. C only learns the new floor if it disconnects and re-attaches, at which point management stamps it.
 
-*Pros:* Narrow surgical change. Reservation versions and their invariants remain untouched. No survivor stall. Composable with future work.
+**Failover.** The admission floor lives in Mongo on the CDV document — durable by construction. TOMAs hold it only in memory. On TOMA cold start, the floor arrives as part of the standard CDV metadata delivery (topology push from the RAFT leader, seeded from management). No per-client state survives failover because none is kept. If a registrant was terminated and the TOMA then fails over before the client has retried, the new primary simply has no record of the client — which is the correct state, since the client's `reg_ctx` was terminated by design.
 
-*Cons:* Introduces a second admission concept parallel to reservation versions — two mechanisms doing overlapping jobs. Subtle interactions with normal detach/reattach and with stale-client cleanup (`removeAlreadyDetachedAttachments`) need to be worked out so that a revoked client cannot silently re-attach through a different code path. Requires the target to know how to surface a revocation to the affected client (probably via existing `'P'`-style response or a new status code).
+**Concurrent evictions.** Two operators issue `preemptClientFromCDV` for two different clients (A and B) on the same CDV. Management serializes per-CDV via the existing CDV lock (`lockUtils` in `modules/`). Floor advances V → V+1 (evict A) → V+2 (evict B). Both clients retry and are gated by the corresponding floor. No interaction.
 
-*Open questions:* How does the revoked client learn it was revoked in a way distinguishable from a general I/O error? Is `active_registrants` the right level, or should revocation live at a higher level so it survives re-register storms?
+#### 2.10.5 Implementation surface
 
-##### Summary
+**Management (`nvmesh-management`)**
 
-| | Target-side change | Survivor impact | Novelty in admission path |
-|---|---|---|---|
-| P1 | none | transient stall + auto-reattach | new client-kernel path, not target |
-| P2 | significant (per-registrant state + predicate) | none | new first-class primitive |
-| P3 | moderate (new message, new removal path) | none | parallel admission concept |
+- Schema: `cdvConfig.admissionFloor: Number`, default 0 on the CDV document (`models/volume.js`, `validationSchemes/definitions/volume.js`). Immutable through user REST paths.
+- `client.js:attachTPV`: stamp `reservationModeVersion` on the CDV `AttachVolumes` payload from `cdv.cdvConfig.admissionFloor`.
+- New `volume.js:preemptClientFromCDV(cdvUUID, clientID, cb)`: increments floor, marks `EVICTING`, publishes Kafka fan-out, waits for ACKs, clears state, clears `exclusiveClient` on the client's TPVs on this CDV. Uses the existing per-CDV lock.
+- New Kafka consumer for `preemptClientFromCDVResponse` (ACK aggregation).
+- New Kafka message definitions: `models/kafkaMessages/PreemptClientFromCDV.js`, `PreemptClientFromCDVResponse.js`.
+- Attach-path gate in `client.js:attachTPV`: refuse with `CLIENT_EVICTING_FROM_CDV` system message if the client has `EVICTING` on the CDV's attachment entry.
+- Extend `consts.volumeAttachmentActions` with `EVICTING`.
+- `handleAttachSatelliteRequest` (§1.5 / Phase 2) is unchanged — satellite reservation is separate from CDV admission floor.
+- Hook into the existing TPV force-detach path and `removeAlreadyDetachedAttachments` stale-client cleanup: both call `preemptClientFromCDV` before clearing `exclusiveClient`.
 
-**Before committing to any of P1/P2/P3, we should explicitly look for better options.** Possibilities worth investigating include: leveraging MCS re-attach semantics already present in the NDU/hot-upgrade code paths (Part 11) to preempt without a `'P'` transition; per-attachment rather than per-registrant version tracking if `active_registrants_hash` already carries enough to do so cheaply; or an entirely management-layer approach that simply treats a force-detached TPV's CDV references as stale and lets the normal stale-client cleanup path do the work (if the cleanup path can be made authoritative on its own).
+**TOMA (`nvmesh-kernel/toma`)**
 
-**Until this gap is closed, the design has a known correctness hole:** a stale TPV client that ignores `DetachVolumes` can continue issuing RDMA writes to CDV extents it has already mapped, with no mechanism in place to stop it at the target. The satellite-volume work (§1.5) closes the allocator-side stale-writer hole; this section closes the client-side one. Both are required for the thin-provisioning feature to be correct under adversarial or buggy-client conditions.
+- Per-CDV state extended with `u64 admission_floor`. Location TBD: extend `nvmeibt_cdv_alloc` entry and ensure it is created eagerly on CDV topology arrival (today it is created lazily by the first `CDV_ALLOC_EXTENT`); or add a sibling per-CDV hash keyed by CDV UUID populated at CDV attach time. Eager creation is preferred for locality with the existing CDV bookkeeping.
+- New Kafka handler for `preemptClientFromCDV` in `nvmeibt_kafka.c`:
+  1. Look up CDV state under per-CDV handler lock.
+  2. `cdv->admission_floor = newFloor`.
+  3. For each segment of the CDV on this TOMA: locate `active_registrants` matching `clientID`; call `nvmeibt_register_terminate_reg_ctx` with `is_deleting_seg_active = false`.
+  4. On handler exit (after drain machinery completes), publish `preemptClientFromCDVResponse`.
+- New predicate in `handle_register_registrant_on_disk_segment` (`nvmeibt_register.c:2539`), inserted before the existing `is_valid_register_req` check:
+  ```c
+  if (nvmeibt_seg_active_is_cdv(seg_active)) {
+      u64 floor = nvmeibt_cdv_get_admission_floor(seg_active);
+      if (incoming_reg_ctx->reservation_mode_version < floor) {
+          reg_refusal_reason = NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR;
+          goto reject;
+      }
+  }
+  ```
+- Floor seeding on CDV topology arrival: the CDV-metadata message from management (same channel that already delivers CDV parameters) carries `admission_floor`; handler stores it.
+- Extend `enum NVMEIBT_CLIENT_TR_REASON` with `NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR`. mNDU feature-compatibility gate on the new message and reason code.
 
-#### 2.10.4 Superseded
+**Client kernel (`nvmesh-kernel/clnt`)**
 
-The following are no longer part of the design:
+- Extend CDV attach path to propagate `reservation_mode_version` from the management payload into the `REGISTER` header (existing field at `toma/clnt/nvmeibt_client_protocol.h:389`).
+- On CDV device entering `NCBD_PREEMPTED` (`clnt/nvmeibc_block.c:1079`), tear down every TPV whose `cdv_vol` points to this CDV. New hook in `clnt/tpv/nvmeibc_tpv.c`: `nvmeibc_tpv_handle_cdv_preempted(struct nvmeibc_volume *cdv)` walks the per-CDV TPV list and calls the existing `nvmeibc_tpv_detach` path for each. This is the cleanup barrier that makes Path 2 / Path 3 safety arguments valid. Without it, `extent_map`s remain in memory and a re-attached client could theoretically replay them.
+- No new client-to-management RPC: a `REGISTER` failure with `BELOW_CDV_FLOOR` is treated like `NCBD_PREEMPTED` — device teardown plus reliance on the existing management-driven re-attach flow.
 
-- Per-TPV fencing cookie table in the CDV allocator header.
-- `ForceDetachTPV` Kafka message as a distinct mechanism.
-- TOMA-side revocation of CDV segment registrations for a stale client.
-- Client-side cookie presentation in `CDV_ALLOC_EXTENT` requests.
+**Satellite allocator volume**
 
-All of these are replaced by the single "preempt the CDV from the stale client" flow above.
+Unaffected. The satellite's `EXCLUSIVE_READ_WRITE` reservation is per-volume and uses the existing `reservation.version` machinery (§1.5). CDV admission floor and satellite reservation are orthogonal: a CDV allocator re-election changes the satellite's reservation version; a TPV-client eviction changes the CDV's admission floor. Neither requires coordination with the other.
+
+#### 2.10.6 Testing
+
+**Unit tests (management).**
+
+- `test/testThinProvisioning.js` — new `describe('CDV preempt client')` block:
+  - Floor initialized to 0 on CDV create; stamped on every CDV `AttachVolumes` message.
+  - `preemptClientFromCDV` bumps floor exactly once, marks `EVICTING`, clears on ACK.
+  - Double-preempt of the same client is a no-op (idempotent by floor monotonicity).
+  - Attach request during `EVICTING` is refused with `CLIENT_EVICTING_FROM_CDV`.
+  - ACK timeout scenario — management retries the Kafka fan-out; idempotent handler.
+
+**Integration tests (kernel + management).**
+
+- Two TPV clients on one CDV, each doing I/O at ~100 MB/s. Evict one. Assert: evicted client's I/O stops within 50 ms; surviving client's I/O shows zero interruption in latency histograms.
+- Evict a client that is offline (Kafka unreachable): floor bump and Mongo state advance; on client reconnect, registration is rejected with `BELOW_CDV_FLOOR`; client kernel tears down; operator flow proceeds.
+- Force-reassign TPV X from client A to client B. Assert: B can write to X with no observable race; A's TPV X device is absent after teardown; A's CDV `NCBD_PREEMPTED`.
+
+**Adversarial tests.**
+
+- Client A ignores `DetachVolumes`, continues to retry `REGISTER` with cached old version. Assert every retry is rejected with `BELOW_CDV_FLOOR`.
+- Client A, after eviction, calls `nvmeibc_tpv_cdv_submit_bio` via the `unitest` harness with raw CDV offsets bypassing the TPV layer. Assert all bios fail at target registrant-lookup.
+- Client A attempts re-attach during the `EVICTING` window. Assert refusal; assert admission after `EVICTING` clears.
+
+**Failover tests.**
+
+- TOMA failover mid-eviction: old primary ACKed floor bump and started drain when it died. New primary is re-seeded from management's CDV metadata (floor is current) and has no `reg_ctx` for the evicted client (since the client was terminated and cannot re-register). Assert no replay of stale I/O.
+- Management failover mid-eviction: `EVICTING` state persists in Mongo; new management instance observes it and resumes the fan-out.
+
+#### 2.10.7 Superseded
+
+The following alternatives are retired and must not resurface in downstream design work without explicit reopening of the tradeoff:
+
+- Per-TPV fencing cookie in the CDV allocator header (fences the control path only, not the data path).
+- `ForceDetachTPV` Kafka message as a distinct primitive (replaced by `preemptClientFromCDV` which reuses the preempt semantic at the correct granularity).
+- TOMA-side revocation of CDV segment registrations for a stale client as a bespoke mechanism (replaced by the generic registrant-termination path plus admission floor).
+- Client-side cookie presentation in `CDV_ALLOC_EXTENT` requests (unnecessary once the data path is fenced by registrant termination).
+- **Option P1** (volume-wide preempt with survivor auto-reattach): unnecessary survivor stall and novel client-kernel auto-reattach state machine.
+- **Option P2** (per-registrant admission threshold in the I/O hot path): changes the hot-path predicate; excessive risk for a rare control-plane event.
+- **Option P3** (`RevokeClientFromVolume` as a parallel admission concept): introduces a second admission mechanism alongside reservation versions; the admission-floor approach achieves the same effect as a natural extension of the existing version check.
+- Per-(client, CDV) `evictedVersions` map in Mongo: not needed; the admission floor plus `reg_ctx` termination are sufficient, and the floor's monotonic bump guarantees no re-admission of a stale client without management.
 
 ### 2.11 NVCK Support
 
@@ -2719,7 +2778,121 @@ Add an `Encryption` column to the `ThinProvisioning.jsx` table:
 },
 ```
 
-### 5.12 Implementation Steps
+### 5.12 CLI Changes (`nvmesh-infra/xlro/tools/cli`)
+
+The CLI is declarative: TPV commands are generated from `xlro/core/entities/rest.yaml` by the auto-generation framework in `rest_click.py`/`rest_custom.py`. Encryption on regular volumes (`Volume` entity, API version 8, `rest.yaml:787`) already exposes `isEncrypted`/`encryption` in `create.params` plus `initEncryption`, `addPassphrase`, `deletePassphrase`, `rotatePassphrase` ops. The TPV entity (`rest.yaml:1265`) does **not** inherit these and must be extended explicitly.
+
+#### 5.12.1 Create-time parameters
+
+Add `isEncrypted` and `encryption` to the `TPV.ops.create.params` list so `nvmesh tpv create --is-encrypted --encryption-header-size 16 …` is accepted:
+
+```yaml
+TPV:
+  …
+  ops:
+    create:
+      params:
+        - capacity
+        - tpvConfig
+        - isEncrypted           # ← add
+        - encryption            # ← add (nested: encryption.headerSize)
+```
+
+The Pydantic/SdkObject expansion in `rest_click.RestGroup` will turn `encryption` into `--encryption-header-size`.
+
+#### 5.12.2 Encryption operations on the TPV entity
+
+`Volume.ops.{initEncryption,addPassphrase,deletePassphrase,rotatePassphrase}` already exist and target `POST /volumes/<op>`, which — after the §5.9 change — handles TPVs identically to regular volumes. Two viable options:
+
+- **Option A (minimal, recommended):** rely on `nvmesh volume initEncryption <tpv_name> …` etc. Volume ops don't filter by `volumeClass`, and management routes by `_id`/`uuid`. Pro: zero CLI work. Con: poor discoverability — a TPV-focused user won't find the commands under `nvmesh tpv`.
+
+- **Option B (preferred for UX):** duplicate the four encryption ops under `TPV.ops` using the same payload templates as `Volume.ops`. Since the route is shared (`route: volumes` is inherited at the entity level), the payloads and wait logic are copy-paste from `Volume.ops.initEncryption` etc. Adds ~60 lines to `rest.yaml`, no code changes to `rest_custom.py`.
+
+This plan assumes **Option B** for symmetry with the `Volumes.jsx`/`ThinProvisioning.jsx` UI split.
+
+#### 5.12.3 Display fields
+
+Extend `TPV.display` (`rest.yaml:1273`) with `isEncrypted` and `encryption` so `nvmesh tpv show` surfaces init state and command status (consumed from `encryption.isInitialized` and `encryption.command.status` in the management DB).
+
+#### 5.12.4 Golden files
+
+- `current.api` — append the new TPV sub-commands and their parameters (auto-regenerated by running the CLI snapshot tool after `rest.yaml` changes).
+- `current.display` — append the new TPV display fields.
+
+Both files live under `nvmesh-infra/xlro/tools/cli/` and are verified in CI.
+
+#### 5.12.5 SDK
+
+No changes. The `Volume`/`TPV` SdkObject classes under `xlro/core/entities/` already inherit `isEncrypted`, `encryption`, and the passphrase fields from the common volume schema. `TPV._get_filter` continues to inject `volumeClass: 'TPV'` and is unaffected.
+
+### 5.13 CSI Driver Changes (`nvmesh-csi-driver`)
+
+The CSI driver's `_do_create_tpv()` (`driver/controller_service.py:245`) branches early from `do_create_volume()` at line 114 and therefore **never reaches** the `isEncrypted` handling at line 152. Two distinct gaps must be closed.
+
+#### 5.13.1 StorageClass parameter parsing
+
+The regular-volume path parses `encryption: dmcrypt` and `encryption.headerSize` in `_handle_volume_req_parameters()` (lines 476–484) before constructing the `NVMeshVolume`. This is not invoked for TPVs. Add equivalent parsing in `_do_create_tpv()` after the existing `_parse_tpv_params()` call:
+
+```python
+if parameters.get("encryption") == "dmcrypt":
+    tpv.isEncrypted = True
+    if "encryption.headerSize" in parameters:
+        tpv.encryption = {"headerSize": int(parameters["encryption.headerSize"])}
+```
+
+Unknown `encryption` values should log a warning and continue unencrypted, matching line 481.
+
+#### 5.13.2 Post-create init-encryption call
+
+Immediately after `NVMeshMgmtAPI.create_tpv()` succeeds (line 280) and `volume_uuid` is resolved, invoke the same init-encryption flow used by regular volumes, with TPV-aware rollback:
+
+```python
+if getattr(tpv, "isEncrypted", None) and volume_api.apiVersion >= Consts.ApiVersion.API_VERSION_9:
+    try:
+        self.init_encrypted_volume(secrets, zone, volume_context, log)
+    except Exception as ex:
+        log.error(f"Failed to initialize encryption for TPV {nvmesh_vol_name}; rolling back. Error: {ex}")
+        NVMeshMgmtAPI.delete_tpv(volume_api, nvmesh_vol_name, zone, log, …)
+        raise
+```
+
+`volume_context` must be constructed **before** this call (not at line 294), because `init_encrypted_volume` reads `volume_name` and `volume_uuid` from it. The existing `init_encrypted_volume()` body (lines 173–186) works unchanged: it polls management for `isInitialized`-required state, calls `POST /volumes/initEncryption`, then waits for `isReady`. Management's TOMA selection (`chooseTOMAForTPVEncryption`, §5.6) transparently picks a CDV-attached TOMA.
+
+#### 5.13.3 Rollback path
+
+`NVMeshMgmtAPI.delete_volume` (line 159) uses the regular `/volumes` delete route and won't work on a TPV — TPV delete must go through `POST /volumes/tpv/delete` (see §3.x). Ensure `nvmesh_mgmt_api.py` exposes a `delete_tpv(...)` helper that posts to the correct route, and call it from the rollback branch above. The existing `NVMeshMgmtAPI.create_tpv` already does the symmetric mapping.
+
+#### 5.13.4 Secrets plumbing
+
+`init_encrypted_volume` pulls the passphrase from the CSI `secrets` field via `secret_manager.get_passphrase()`. The `secrets` object is already captured at the top of `do_create_volume` (line 107) but is **not** passed to `_do_create_tpv()` today. Extend the signature of `_do_create_tpv()` to accept `secrets` and thread it through from line 115.
+
+#### 5.13.5 StorageClass documentation
+
+Update `deploy/kubernetes/helm/.../templates/storageclass.yaml` with an example encrypted-TPV `StorageClass`:
+
+```yaml
+parameters:
+  volumeClass: TPV
+  cdvNameRegex: "^pool-gold-"
+  encryption: dmcrypt
+  encryption.headerSize: "16"
+  csi.storage.k8s.io/node-publish-secret-name: nvmesh-tpv-secret
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+```
+
+#### 5.13.6 Node-side LUKS open
+
+`node_service.py` gates LUKS open on `is_encrypted_volume = "encryption" in volume.metadata` (line 755). Because `volume_context` in `_do_create_tpv()` already copies `reqDict["parameters"]` (line 305), the `encryption: dmcrypt` parameter propagates through to node-stage/publish unchanged — **no node-side code changes required**.
+
+#### 5.13.7 Integration tests
+
+Add to `test/integration/`:
+
+- `test_encrypted_tpv_create.py` — StorageClass with `volumeClass: TPV` + `encryption: dmcrypt` → PVC bound, TPV `isReady: true`, LUKS header present on first CDV extent.
+- `test_encrypted_tpv_rollback.py` — force `init_encrypted_volume` failure (invalid secret) → CSI returns error, TPV is deleted via `/volumes/tpv/delete`, no orphan CDV extent.
+- `test_encrypted_tpv_attach.py` — attach encrypted TPV → `/dev/mapper/…` exists on the node, file I/O succeeds, detach cleans up the dm-crypt device.
+
+### 5.14 Implementation Steps
 
 #### Phase 1 — Management Backend (can be developed and tested independently)
 
@@ -2784,14 +2957,47 @@ Add an `Encryption` column to the `ThinProvisioning.jsx` table:
 - Verify dm-linear device created, cryptsetup executed, device cleaned up
 - Verify response Kafka message with correct result code
 
-#### Phase 4 — End-to-end
+#### Phase 4 — CLI
 
-**Step 11: Full flow test**
-- Create CDV → create encrypted TPV → Init Encryption → verify LUKS header on CDV extent
+**Step 11: TPV entity encryption params and ops** (`nvmesh-infra/xlro/core/entities/rest.yaml`)
+- Add `isEncrypted`, `encryption` to `TPV.ops.create.params`
+- Duplicate `initEncryption`, `addPassphrase`, `deletePassphrase`, `rotatePassphrase` ops from `Volume.ops` into `TPV.ops` (payloads are identical — the route `/volumes/<op>` is shared)
+- Extend `TPV.display` with `isEncrypted` and `encryption`
+- Regenerate `current.api` and `current.display` golden files
+
+**Step 12: CLI smoke test**
+- `nvmesh tpv create --is-encrypted --encryption-header-size 16 --cdv <cdv> --capacity …` → verify payload includes `isEncrypted: true`
+- `nvmesh tpv initEncryption <tpv> --passphrase … --slot 1` → verify `/volumes/initEncryption` POST
+- `nvmesh tpv show <tpv>` → verify encryption status column appears
+
+#### Phase 5 — CSI Driver
+
+**Step 13: StorageClass parameter parsing** (`driver/controller_service.py`)
+- Thread `secrets` from `do_create_volume` into `_do_create_tpv`
+- Parse `encryption: dmcrypt` and `encryption.headerSize` after `_parse_tpv_params`; set `tpv.isEncrypted` and `tpv.encryption`
+
+**Step 14: Post-create init-encryption call** (`driver/controller_service.py`)
+- Build `volume_context` before the encryption branch (move up from line 294)
+- After `create_tpv()` succeeds, call `init_encrypted_volume(secrets, zone, volume_context, log)` if `tpv.isEncrypted` and `apiVersion >= API_VERSION_9`
+- On failure, call a new `NVMeshMgmtAPI.delete_tpv()` helper (not `delete_volume`) and re-raise
+
+**Step 15: Management API helper** (`driver/nvmesh_mgmt_api.py`)
+- Add `delete_tpv(volume_api, name, zone, log, backoff)` that POSTs `/volumes/tpv/delete`; mirror the retry/backoff shape of `delete_volume`
+
+**Step 16: StorageClass example and docs** (`deploy/kubernetes/helm/.../templates/storageclass.yaml`)
+- Add an encrypted-TPV `StorageClass` example with `encryption: dmcrypt` and secret references
+
+**Step 17: CSI integration tests** (`test/integration/`)
+- `test_encrypted_tpv_create.py`, `test_encrypted_tpv_rollback.py`, `test_encrypted_tpv_attach.py` (scope in §5.13.7)
+
+#### Phase 6 — End-to-end
+
+**Step 18: Full flow test**
+- Create CDV → create encrypted TPV (via UI / CLI / CSI, one scenario per interface) → Init Encryption → verify LUKS header on CDV extent
 - Add/Rotate/Delete passphrase → verify each command lifecycle
-- Error scenarios: TOMA down, CDV full, concurrent encryption attempts
+- Error scenarios: TOMA down, CDV full, concurrent encryption attempts, CSI rollback on passphrase fetch failure
 
-### 5.13 Risks and Open Questions
+### 5.15 Risks and Open Questions
 
 1. **First-extent pre-allocation timing**: The `createTPV()` function currently runs entirely within management. Adding an IB admin message (`CDV_ALLOC_EXTENT`) to the creation path introduces an async dependency on TOMA availability. If TOMA is down, encrypted TPV creation fails. Mitigation: document this requirement; the user can retry once TOMA is up.
 
