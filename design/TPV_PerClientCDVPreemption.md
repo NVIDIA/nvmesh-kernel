@@ -15,11 +15,11 @@ Combined, these fence one client from a `SHARED_READ_WRITE` CDV without disturbi
 
 | Phase | Steps | Scope |
 |---|---|---|
-| 1 — Management schema & attach-path stamping | 1–3 | `cdvConfig.admissionFloor` on the CDV doc, `attachTPV` stamps `reservationModeVersion`, `volumeAttachmentActions.EVICTING` |
+| 1 — Management schema & attach-path stamping | 1–3 | `cdvConfig.admissionFloor` on the CDV doc, `attachTPV` EVICTING gate + floor stamping, `volumeAttachmentActions.EVICTING` |
 | 2 — Kafka plumbing                          | 4–6 | New `PreemptClientFromCDV` + response messages, ACK aggregation, Kafka-router wiring |
-| 3 — TOMA admission floor & handler          | 7–10 | Eager per-CDV state, floor seeding, `preemptClientFromCDV` handler, new `REGISTER` predicate + reason code |
+| 3 — TOMA admission floor & handler          | 7–10 | Eager per-CDV state, dual-path floor seeding, `preemptClientFromCDV` handler, new `REGISTER` predicate + reason code |
 | 4 — Client kernel cleanup barrier           | 11–13 | Propagate `reservation_mode_version` on CDV attach, teardown TPVs on `NCBD_PREEMPTED`, handle `BELOW_CDV_FLOOR` |
-| 5 — Management preempt flow                 | 14–16 | `preemptClientFromCDV(cdv, client)`, hook into force-detach + stale-client cleanup, attach-gate during `EVICTING` |
+| 5 — Management preempt flow                 | 14–16 | `preemptClientFromCDV(cdv, client)`, hook into force-detach, stale-client cleanup, and attach-with-preempt |
 | 6 — mNDU + CLI + CSI surface                | 17–19 | interop-db gate, `nvmesh client preempt-from-cdv`, CSI no-op audit |
 | 7 — Testing & stabilization                 | 20–23 | Unit, integration, adversarial, failover; feature-flag flip |
 
@@ -38,19 +38,50 @@ Phases 1–3 can run largely in parallel (different sub-repos). Phase 4 depends 
 
 ### Step 2. Attach-path stamping — `nvmesh-management/modules/client.js:attachTPV` (line 5049)
 
-On the two-phase attach, the hidden CDV `AttachVolumes` payload must carry `reservationModeVersion = cdv.cdvConfig.admissionFloor`:
+Two sub-steps, in order. Both are required: the gate prevents handing out a stale-possible floor to a client that is still being evicted; the stamping gives the TOMA the authoritative value it will enforce on the resulting `REGISTER`.
+
+**Sub-step 2a — EVICTING gate.** At the top of `attachTPV`, after `loadTPVAndCDV` resolves `cdv`, refuse the attach before any Kafka goes out if the client has an in-flight eviction on this specific CDV:
 
 ```js
-// Phase 1 of attachTPV: hidden CDV attach
-const attachCDVPayload = {
-    // … existing fields …
-    reservationModeVersion: cdv.cdvConfig.admissionFloor || 0,
-};
+// Runs before attachCDV in the async.series above.
+function checkNotEvictingFromCDV(cb) {
+    clientCollection.findOne({ _id: clientID }, { projection: { attachments: 1 } }, (err, client) => {
+        if (err) return cb(new MongoError(err).log());
+        const evicting = (client.attachments || []).some(a =>
+            a.volumeID === cdv._id &&
+            a.action === consts.volumeAttachmentActions.EVICTING);
+        if (evicting) {
+            return cb(new SystemMessage(systemMessages.CLIENT_EVICTING_FROM_CDV)
+                .addInfo(Entities.Client.ID, clientID)
+                .addInfo(Entities.Volume.ID, cdv._id));
+        }
+        cb();
+    });
+}
 ```
 
-Verify that the `AttachVolumes` Kafka message already has a `reservationModeVersion` slot on the per-volume entry (it does — used today for existing preempt flow). If absent on the CDV branch specifically, extend the message builder.
+The check is per-`(client, CDV)` — an EVICTING state on a different CDV does not block attaches to unrelated CDVs. The error is retriable: the client retries once the eviction clears (Step 14 `cleanupDB`).
 
-The TPV (phase 2) entry is unaffected — TPVs are not CDV segments, they have no admission floor of their own.
+This sub-step is the single source of truth for "refuse during eviction." The attach-path gate discussed later in Step 15 bullet 3 is removed in favor of this placement, because the check must happen *before* floor stamping — otherwise a client whose eviction completes between gate-check and floor-stamp could be handed the new floor and race the cleanup.
+
+**Sub-step 2b — Floor stamping.** Once the gate passes, the hidden CDV `AttachVolumes` payload carries `reservationModeVersion = cdv.cdvConfig.admissionFloor`:
+
+```js
+// attachCDV in attachTPV: stamp the current floor on the CDV attach.
+scope.attachVolumes(clientID, clientUUID, [{
+    uuid: cdv.uuid,
+    name: cdv._id,
+    referenceID: `tpv:${tpv.uuid}`,
+    reservation: {
+        mode: consts.reservationModeNames.SHARED_READ_WRITE,
+        version: cdv.cdvConfig.admissionFloor || 0,     // NEW: stamp floor
+    },
+}], () => cb());
+```
+
+The `reservation.version` field on an `AttachVolumes` entry already exists and flows through `enrichAttachRequestVolume` / `setVolumeReservation` (`client.js:2383, 2393`) to the Kafka `AttachVolumes` payload and onward to the client kernel's `REGISTER` header. Verify end-to-end (there is already test coverage for the preempt flow on regular volumes; extend it to CDV attaches).
+
+The TPV (phase 2) entry is unaffected — TPVs are not CDV segments and have no admission floor of their own.
 
 ### Step 3. `EVICTING` state — `nvmesh-management/consts.js`
 
@@ -141,14 +172,30 @@ Today `nvmeibt_cdv_alloc` is created lazily on the first `CDV_ALLOC_EXTENT`. Cha
 
 ### Step 8. Floor seeding on CDV topology arrival
 
-Extend the CDV-metadata topology message (management → TOMA) with `admission_floor`. On receipt:
+Two seeding paths, either of which is sufficient. This removes any ordering dependency between topology push and client `REGISTER` arrival.
+
+**Path A (primary) — CDV-metadata topology message.** Extend the management → TOMA CDV-metadata push with `admission_floor`. On receipt:
 
 ```c
-cdv->admission_floor = msg.admission_floor;
+cdv->admission_floor = max_t(u64, cdv->admission_floor, msg.admission_floor);
 cdv->admission_floor_seeded = true;
 ```
 
-If the topology push arrives while `nvmeibt_cdv_alloc` does not yet exist (rare), allocate and seed atomically under the per-CDV lock.
+Uses `max_t` rather than plain assignment so this path is safe to interleave with the `preemptClientFromCDV` handler (Step 9) which also raises the floor.
+
+**Path B (fallback) — first `AttachVolumes` for the CDV.** A client's hidden-CDV attach can race ahead of the topology push: the MCS `AttachVolumes` message arrives at TOMA before the CDV-metadata push on this node. To avoid rejecting the first `REGISTER` for lack of a seeded floor, piggyback on `AttachVolumes`:
+
+```c
+// In the CDV attach branch of the AttachVolumes handler:
+if (!cdv->admission_floor_seeded) {
+    cdv->admission_floor = attach_msg.reservation.version;
+    cdv->admission_floor_seeded = true;
+}
+```
+
+This is safe because `AttachVolumes` carries management's authoritative floor (Step 2b). If the CDV-metadata push later arrives with the same or newer value, the `max_t` in Path A keeps state monotonic; an older value is ignored.
+
+If `nvmeibt_cdv_alloc` does not yet exist on this TOMA when either path fires, allocate and seed atomically under the per-CDV lock.
 
 ### Step 9. `preemptClientFromCDV` handler — `nvmesh-kernel/toma/nvmeibt_kafka.c`
 
@@ -316,13 +363,11 @@ Three call sites / changes:
 
 2. **Stale-client cleanup** (`client.js:removeAlreadyDetachedAttachments`, line 138): when the path identifies a client that has been gone long enough to warrant full cleanup, and any of its CDV attachments hold `tpv:*` references, call `preemptClientFromCDV` per (client, CDV) pair instead of falling through to the existing "just remove the attachment" cleanup. This closes the Path 1 data-path hole for the stale-client case (not just the operator-initiated case).
 
-3. **Attach-path gate** (`client.js:attachTPV`, line 5049): at the top, before the two-phase attach machinery, refuse with system message `CLIENT_EVICTING_FROM_CDV` if:
-   ```js
-   client.attachments.some(a =>
-       a.volumeID === cdv._id &&
-       a.action === consts.volumeAttachmentActions.EVICTING)
-   ```
-   Produces a retriable error — the client retries after the eviction clears.
+3. **Attach-with-preempt** (`client.js` caller of `attachTPV` with `reservation.preempt === PREEMPT`, line 2403 / 3516): today's path bumps the CDV's `reservation.version` volume-wide via the register-side bump at the new attacher's `REGISTER`, disturbing every survivor on the CDV. Replace with the narrow primitive: before the new client's `attachTPV` runs, call `preemptClientFromCDV(cdv, previousHolderClientID)` — where `previousHolderClientID` is read from `tpv.tpvConfig.exclusiveClient` on the target TPV. Once the per-client preempt clears, the new attach proceeds through Step 2 and stamps the current floor on the incoming client's CDV attach. No survivor impact, no `reservation.version` bump on the CDV.
+
+   Keep the existing `reservation.preempt` flag semantics on the API surface for backward compatibility; the management-side implementation changes but the REST contract does not.
+
+The attach-path EVICTING gate lives in Step 2a, not here — it must run before floor stamping, not alongside these eviction-initiating paths.
 
 ### Step 16. Admin REST surface — `nvmesh-management/routes/clients.js`
 
@@ -429,34 +474,59 @@ While the flag is off:
 
 ## Risks and open questions
 
-1. **Eager vs. lazy TOMA CDV state (Step 7).** Eager creation is preferred but may require a non-trivial plumbing change on every TOMA's CDV-arrival path. If the prototype shows this is expensive, fall back to a sibling hash; cost is one extra lookup per `REGISTER` on a CDV segment. Decide after prototyping Step 7.
+### 1. Eager vs. lazy TOMA CDV state (Step 7)
 
-2. **Floor seeding race on hidden-CDV attach.** A client's hidden CDV attach triggers a `REGISTER` before the topology push that carries `admission_floor` has reached this TOMA. Mitigation: the management-side `AttachVolumes` message already carries the target floor per Step 2; the TOMA can seed `admission_floor` opportunistically from the first `AttachVolumes` for the CDV if `admission_floor_seeded == false`. Verify this path in Step 10.
+The admission floor must be readable on **every** TOMA that serves a CDV segment, and readable at `REGISTER` time — which is the first interaction a new client has with the CDV. This has no analogue in the current code.
 
-3. **Existing registrants grandfathered.** A client already attached at version V, never reattached, remains admissible even after the floor bumps beyond V. This is deliberate (survivor-immunity invariant) but means a cooperative client does not learn about the new floor until it naturally disconnects. **Question:** should we add a slow path that re-stamps survivors on the next admin-initiated event (e.g., a background sweep)? Proposed: no. Any need to bump all survivors is exactly the volume-wide preempt case, which we already support via the existing `ReservationModeChange` mechanism.
+**Today's state (baseline).** `nvmeibt_cdv_alloc` — the only per-CDV state on TOMA — is created lazily on the first `CDV_ALLOC_EXTENT` IB admin message from a client. Before that first allocation arrives, there is no per-CDV state on the TOMA at all. Two consequences:
 
-4. **Concurrent evictions on one CDV.** Handled by the per-CDV lock (§2.10.4) plus monotonic floor. Verify in Step 20 unit tests.
+- The CDV-metadata topology push (management → TOMA) that runs today alongside `cdvTomaAutoAttach.js` does not create or update per-CDV state on the TOMA. It's consumed only for segment-level bookkeeping (first-pRAID composition, etc.).
+- `REGISTER` for a CDV segment today has no CDV-level state to consult. The existing admission predicate in `nvmeibt_register.c` operates on `seg_active` alone.
 
-5. **Attach-with-preempt interaction.** `attachTPV(preempt=true)` today bumps `cdv.reservation.version` and disturbs every survivor. **Question:** should this path switch to the narrow per-client primitive too? Proposed: yes, as a follow-on after Phase 7 stabilizes. Minimal risk, but the behavior change deserves its own validation window. Tracked separately.
+Both of these must change for the admission floor to work as specified.
 
-6. **CDV deletion while `EVICTING` is in flight.** CDV delete path must either wait for eviction to clear or cancel it cleanly. Proposed: refuse CDV delete while any client's attachment on it has `action === 'evicting'`. Operator resolves by waiting or via a new admin endpoint for manually clearing stuck state (out of scope for Phase 7; file as follow-on).
+**Option A — eager per-CDV state.** Extend `nvmeibt_cdv_alloc` creation from "lazy on first alloc request" to "eager on CDV topology arrival." Concretely, when the CDV topology/metadata message is processed on any TOMA (leader or follower), the handler creates or updates the `nvmeibt_cdv_alloc` entry with the current `admission_floor` and the existing CDV geometry fields. The rest of the struct (extent list, allocator generation, pending-return list, etc.) remains populated only when this TOMA is the active allocator.
 
-7. **Admission-floor overflow.** `u64` floor with one bump per eviction-event per CDV. At one eviction per second: 584 billion years before wraparound. Not a concern; no wraparound logic needed.
+- **Pro:** one per-CDV struct per TOMA; the admission floor sits next to the existing CDV geometry; no separate hash to maintain.
+- **Con:** more invasive — the topology handler on each TOMA needs a per-CDV hook it currently lacks. Touches `nvmeibt_cdv_alloc.c`, the topology-message handler in `nvmeibt_kafka.c` (or wherever the management → TOMA CDV metadata is parsed today), and any cold-start scan that rebuilds per-CDV state.
+- **Invariant:** an `nvmeibt_cdv_alloc` entry where this TOMA is not the allocator holds only the floor (and the geometry already pushed by topology), not the extent list or generation. No risk of "fake allocator" because `handle_cdv_alloc_extent` is gated on `nvmeibt_raft_is_raft_valid()` per the existing allocator design.
 
-8. **Kafka-replay idempotency.** TOMA handler is idempotent (floor uses `max`, register-lookup returns NULL for already-terminated client). Management retry path is idempotent (floor write uses `$max`). Verify no other code path re-reads `admissionFloor` with `$inc` semantics.
+**Option B — sibling hash `nvmeibt_cdv_state`.** Leave `nvmeibt_cdv_alloc` lazy. Introduce a second per-CDV hash keyed by `cdv_uuid`, populated eagerly on CDV topology arrival and holding `{admission_floor, admission_floor_seeded}` plus any future non-allocator per-CDV state. Every `REGISTER` on a CDV segment does one extra hash lookup.
 
-9. **`cdvTomaAutoAttach.js` interaction.** When the last `tpv:*` reference is removed during eviction cleanup (Step 14 `cleanupDB`), `cdvTomaAutoAttach` may choose to detach the CDV from the TOMA entirely. Verify this does not race with an in-flight `preemptClientFromCDV` handler on the same TOMA. The per-CDV lock in management serializes the outer flow; the TOMA handler runs to completion before ACKing, after which the DB cleanup proceeds. Safe, but cover with a targeted integration test.
+- **Pro:** narrow code change — new file, new hash, one new lookup site. Does not disturb the lazy allocator semantics.
+- **Con:** two per-CDV hashes. Future additions to per-CDV state have to choose between them, and the choice is not load-bearing — it creates the kind of drift that accumulates into maintenance debt.
 
-10. **Observability.** Add:
-    - `/proc/nvmeibt/cdv/<uuid>/admission_floor` on TOMA.
-    - `nvmesh cdv show <cdv>` (CLI) displays `admissionFloor` in the `cdvConfig` block.
-    - Management UI (`Volumes.jsx` CDV detail panel) surfaces preempt history: timestamp, preempted client, reason, floor transition.
-    - Trace tags: `_NI` on `preemptClientFromCDV` receipt; `_NW` on `BELOW_CDV_FLOOR` rejection; `_NE` on termination failure.
+**Decision criterion.** Prototype Option A in a short spike. If the spike shows the topology-handler change requires more than ~200 LoC of new plumbing across more than two files, fall back to Option B. The `REGISTER`-path cost of Option B is one hash lookup (not a linked-list walk, not a lock roundtrip), which is invisible in profile; the real cost is maintenance.
 
-11. **Naming review** — explicit flag-for-review items from the §2.10 author:
-    - `cdvConfig.admissionFloor` namespaces clearly as CDV-specific. Alternative: top-level `cdv.admissionFloor` since it's not user-facing config.
-    - Per-CDV state location on TOMA — eager extension of `nvmeibt_cdv_alloc` preferred, sibling hash is a one-paragraph swap.
-    - Reason code `NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR` — happy to rename if a better convention exists in the TR-reason enum.
+**Orthogonal consideration — RAFT replication.** The admission floor itself is sourced from management, not RAFT. It does **not** need RAFT consensus to be correct: every TOMA gets the same value from the same Kafka topology push, and on leader failover the new leader rereads the CDV document from Mongo at management's request. RAFT is not a dependency of the floor. The existing `nvmeibt_cdv_alloc_notify` RAFT-unicast mechanism (for allocator identity) is unrelated and should not be pressed into service for the floor.
+
+### 2. Existing registrants grandfathered
+
+A client already attached at floor V, never reattached, remains admissible after the floor bumps past V. This is the survivor-immunity invariant (§2.10.4) and is deliberate.
+
+A cooperative client that wants to learn the current floor contacts management via the normal attach/refresh path; management stamps the current floor on the next `AttachVolumes`. No background sweep is required. If a future feature needs to bump all survivors, the existing volume-wide `ReservationModeChange` mechanism handles that case — it is not a job for the per-client primitive.
+
+### 3. Concurrent evictions on one CDV
+
+Handled by the per-CDV lock (§2.10.4) plus monotonic floor. Verify in Step 20 unit tests.
+
+### 4. CDV deletion while `EVICTING` is in flight
+
+Follow the same policy NVMesh applies today to regular-volume deletion in degraded / offline / mid-operation states: no blanket block, operator responsibility. Concretely: a CDV delete issued while any of its attachments has `action === 'evicting'` is permitted if the regular-volume delete path in the same scenario would permit it. Left open until the broader "delete while in-flight op" policy for TPV / CDV is pinned down.
+
+### 5. Kafka-replay idempotency
+
+TOMA handler is idempotent (floor uses `max`, register-lookup returns NULL for already-terminated client). Management retry path is idempotent (floor write uses `$max`). Verify no other code path re-reads `admissionFloor` with `$inc` semantics.
+
+### 6. `cdvTomaAutoAttach.js` interaction
+
+When the last `tpv:*` reference is removed during eviction cleanup (Step 14 `cleanupDB`), `cdvTomaAutoAttach` may detach the CDV from the TOMA entirely. Verify this does not race with an in-flight `preemptClientFromCDV` handler on the same TOMA. The per-CDV lock in management serializes the outer flow; the TOMA handler runs to completion before ACKing, after which the DB cleanup proceeds. Safe, but cover with a targeted integration test.
+
+### 7. Observability
+
+- `nvmesh cdv show <cdv>` (CLI) displays `admissionFloor` in the `cdvConfig` block.
+- Management UI (`Volumes.jsx` CDV detail panel) surfaces preempt history: timestamp, preempted client, reason, floor transition.
+- Trace tags: `_NI` on `preemptClientFromCDV` receipt; `_NW` on `BELOW_CDV_FLOOR` rejection; `_NE` on termination failure.
 
 ---
 
