@@ -163,6 +163,16 @@ void scenario_attach_good_path_io_detach_on_volume(int v) {
 	}
 }
 
+/* Well-known V_R1 UUIDs for the eviction scenario. The sandbox encodes UUIDs
+ * as 0xbdV0CRS (V=vol_idx+1, C=chunk+1, R=raid+1, S=seg+1) -- see
+ * mongodb_simu.c. Naming by *role* (evicted / surviving / replacement) keeps
+ * the scenario reading like a story rather than chasing array indices. */
+#define V_R1_PRAID_UUID            0xbd020110u
+#define V_R1_EVICTED_SEG_UUID      0xbd020111u   /* node 0 disk 1 */
+#define V_R1_SURVIVOR1_SEG_UUID    0xbd020112u   /* node 1 disk 0 */
+#define V_R1_SURVIVOR2_SEG_UUID    0xbd020113u   /* node 1 disk 1 */
+#define V_R1_REPLACEMENT_SEG_UUID  0xbd020114u   /* node 2 disk 0 (dormant fixture, promoted in Phase 1) */
+
 /* Locate the segment in the V_R1 snapshot by u32 uuid, or -1 if absent. */
 static int __rpt_find_seg(const struct mgmt_sim_praid_report_snapshot *r, u32 uuid) {
 	for (int i = 0; i < r->n_segments; i++)
@@ -175,19 +185,18 @@ static int __rpt_find_seg(const struct mgmt_sim_praid_report_snapshot *r, u32 uu
  * as deprecated + the replacement as "replacement" in the latest V_R1 report. */
 static bool evict_replacement_reported(void) {
 	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
-	const struct sb_praid_conf *pr = &sb_cluster_get_const_conf()->vols[1].chunks[0].raids[0];
-	int old_i = __rpt_find_seg(r, pr->segs[0].uuid);
-	int rep_i = __rpt_find_seg(r, pr->segs[3].uuid);
+	int old_i = __rpt_find_seg(r, V_R1_EVICTED_SEG_UUID);
+	int rep_i = __rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID);
 	return r->n_segments == 4
 		&& old_i >= 0 && strcmp(r->segs[old_i].status, "deprecated")  == 0
 		&& rep_i >= 0 && strcmp(r->segs[rep_i].status, "replacement") == 0;
 }
 
-/* Phase-2 verification: additionally, seg[3]'s vitality is "up" (peer node 2
- * has surfaced it in its ACT_TOPO reply). */
+/* Phase-2 verification: additionally, the replacement's vitality is "up"
+ * (peer node 2 has surfaced it in its ACT_TOPO reply). */
 static bool evict_replacement_up(void) {
 	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
-	int rep_i = __rpt_find_seg(r, sb_cluster_get_const_conf()->vols[1].chunks[0].raids[0].segs[3].uuid);
+	int rep_i = __rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID);
 	return evict_replacement_reported()
 		&& rep_i >= 0 && strcmp(r->segs[rep_i].vitality, "up") == 0;
 }
@@ -199,12 +208,11 @@ static bool evict_under_recovery(void) {
 }
 
 /* Phase-6 verification: recovery actually happened AND the praid converged back
- * to 3 normal segments, with seg[3] (the replacement) present. */
+ * to 3 normal segments, with the replacement present. */
 static bool evict_rebuild_complete(void) {
 	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
-	const struct sb_praid_conf *pr = &sb_cluster_get_const_conf()->vols[1].chunks[0].raids[0];
 	if (!r->was_under_recovery_witnessed || r->n_segments != 3) return false;
-	if (__rpt_find_seg(r, pr->segs[3].uuid) < 0) return false;
+	if (__rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID) < 0) return false;
 	for (int i = 0; i < r->n_segments; i++)
 		if (strcmp(r->segs[i].status, "normal") != 0)
 			return false;
@@ -349,17 +357,15 @@ static void scenario_evict_rebuild_r1(void) {
 	 * [REAL]    no action this phase (Phase 6 observes the effects once
 	 *           the next ACT_TOPO reply is processed).
 	 * ==================================================================== */
-	SCENARIO_PRINT(__AUTOID__, "Phase 5: forcing OWNER_RECOVERER_DONE on node 1's seg[1] and seg[2]");
+	SCENARIO_PRINT(__AUTOID__, "Phase 5: forcing OWNER_RECOVERER_DONE on node 1's surviving mirrors");
 	{
-		struct sb_cluster_conf     *cfg = sb_cluster_get_conf();
-		const struct sb_praid_conf *pr  = &cfg->vols[1].chunks[0].raids[0];
-		struct peer_toma_simu      *p1  = cfg->nodes[1].peer;
+		struct peer_toma_simu *p1 = sb_cluster_get_conf()->nodes[1].peer;
 		peer_toma_simu_set_seg_inject(p1, &(struct toma_simu_inject_seg_state_t){
-			.uuid = pr->segs[1].uuid,
+			.uuid = V_R1_SURVIVOR1_SEG_UUID,
 			.dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
 		});
 		peer_toma_simu_set_seg_inject(p1, &(struct toma_simu_inject_seg_state_t){
-			.uuid = pr->segs[2].uuid,
+			.uuid = V_R1_SURVIVOR2_SEG_UUID,
 			.dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
 		});
 	}
