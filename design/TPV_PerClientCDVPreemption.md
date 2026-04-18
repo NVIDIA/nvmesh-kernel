@@ -19,7 +19,7 @@ Combined, these fence one client from a `SHARED_READ_WRITE` CDV without disturbi
 | 2 — Kafka plumbing                          | 4–6 | New `PreemptClientFromCDV` + response messages, ACK aggregation, Kafka-router wiring |
 | 3 — TOMA admission floor & handler          | 7–10 | Eager per-CDV state, dual-path floor seeding, `preemptClientFromCDV` handler, new `REGISTER` predicate + reason code |
 | 4 — Client kernel cleanup barrier           | 11–13 | Propagate `reservation_mode_version` on CDV attach, teardown TPVs on `NCBD_PREEMPTED`, handle `BELOW_CDV_FLOOR` |
-| 5 — Management preempt flow                 | 14–16 | `preemptClientFromCDV(cdv, client)`, hook into force-detach, stale-client cleanup, and attach-with-preempt |
+| 5 — Management preempt flow                 | 14–16 | `preemptClientFromCDV(cdv, client)` + reaper for stuck `EVICTING` state; hook into force-detach, stale-client cleanup, and attach-with-preempt |
 | 6 — mNDU + CLI + CSI surface                | 17–19 | interop-db gate, `nvmesh client preempt-from-cdv`, CSI no-op audit |
 | 7 — Testing & stabilization                 | 20–23 | Unit, integration, adversarial, failover; feature-flag flip |
 
@@ -162,13 +162,21 @@ Route `preemptClientFromCDVResponse` to the new consumer in `client.js:handlePre
 Extend `struct nvmeibt_cdv_alloc` with:
 
 ```c
-u64  admission_floor;          // NEW
-bool admission_floor_seeded;   // NEW
+u64           admission_floor;          // NEW
+bool          admission_floor_seeded;   // NEW
+struct mutex  handler_lock;             // NEW — see Lock ordering below
 ```
 
 Today `nvmeibt_cdv_alloc` is created lazily on the first `CDV_ALLOC_EXTENT`. Change to **eager** creation on CDV topology arrival (the path that today delivers `cdv_extent_size_mb`, `allocator_size_gb`, etc., for CDV bookkeeping). This places the admission floor in the same struct as the rest of the CDV's per-TOMA metadata.
 
 - If eager creation turns out to be too invasive (e.g., the CDV-arrival path does not currently have a per-CDV hook on every TOMA, only on the allocator TOMA), fall back to a sibling hash `nvmeibt_cdv_state` keyed by `cdv_uuid`, populated from the same topology message. Cost: one extra hash lookup per `REGISTER` on a CDV segment. Prototype before committing.
+
+**Lock ordering invariant.** The new per-CDV `handler_lock` is acquired **before** any per-`seg_active` lock on every code path that takes both. Specifically:
+
+- Step 9 handler: `handler_lock` → per-segment lock (inside `nvmeibt_register_terminate_reg_ctx`).
+- Step 10 REGISTER predicate: `handler_lock` → per-segment lock (existing admission-path lock).
+
+Audit existing callers of `nvmeibt_register_terminate_reg_ctx` and every REGISTER-path lock acquisition to confirm no path takes per-segment before per-CDV. If any does, it must be refactored. A lock-dependency lint (LOCKDEP annotations in debug builds) is cheap and should be added.
 
 ### Step 8. Floor seeding on CDV topology arrival
 
@@ -204,7 +212,14 @@ static int handle_preempt_client_from_cdv(const char *msg_json)
 {
     // parse clientID, cdvUUID, newFloor
     cdv = nvmeibt_cdv_alloc_lookup(cdv_uuid);
-    if (!cdv) { ack(success=false, error="cdv_not_found"); return 0; }
+    if (!cdv) {
+        // Topology push hasn't reached this TOMA yet. Create the entry
+        // on the fly, seeded from the authoritative newFloor in the
+        // message. This eliminates a class of spurious retries when a
+        // preempt races ahead of the topology delivery.
+        cdv = nvmeibt_cdv_alloc_create_with_floor(cdv_uuid, newFloor);
+        if (!cdv) { ack(success=false, error="alloc_failed"); return 0; }
+    }
 
     mutex_lock(&cdv->handler_lock);
 
@@ -212,9 +227,14 @@ static int handle_preempt_client_from_cdv(const char *msg_json)
     cdv->admission_floor = max_t(u64, cdv->admission_floor, newFloor);
 
     // Step 2: terminate registrants on every CDV segment for this client.
+    // Linear walk over active_registrants is acceptable here — preempt is
+    // a control-plane event (rare), not an I/O-path operation. A dedicated
+    // active_registrants_hash_by_client index was considered and rejected:
+    // the register/unregister hot path pays a maintenance cost that isn't
+    // recouped by the preempt path's savings.
     for_each_seg_active_of_cdv(cdv, seg_active) {
-        reg = nvmeibt_register_lookup_by_client(seg_active, clientID);
-        if (reg) {
+        NVMEIB_HASH_FOREACH(reg, seg_active->active_registrants_hash_by_handle) {
+            if (reg->client_id != clientID) continue;
             nvmeibt_register_terminate_reg_ctx(reg, /*is_deleting_seg_active=*/false);
             terminated++;
         }
@@ -228,9 +248,11 @@ static int handle_preempt_client_from_cdv(const char *msg_json)
 }
 ```
 
-Order (floor first, termination second) is a correctness invariant — see §2.10.4. Add a block comment on this function explaining why, and debug-assert that `admission_floor >= newFloor` at the end of step 1 before entering step 2.
+**Order invariant (floor first, termination second).** See §2.10.4. Add a block comment and debug-assert `admission_floor >= newFloor` between steps 1 and 2.
 
-**Idempotency:** a second message with the same or lower `newFloor` is a no-op on the floor (because `max`); `nvmeibt_register_lookup_by_client` returns NULL for an already-terminated client, so no double-termination.
+**Idempotency.** A second message with the same or lower `newFloor` is a no-op on the floor (because `max_t`); a second termination pass finds no matching `reg_ctx` and is a no-op there too.
+
+**Lock discipline.** The `handler_lock` is acquired before any per-segment lock (see Step 7 Lock ordering invariant). `nvmeibt_register_terminate_reg_ctx` internally takes the per-segment lock; that is compatible with the ordering because this handler acquires per-CDV first.
 
 ### Step 10. New `REGISTER` predicate — `nvmesh-kernel/toma/nvmeibt_register.c`
 
@@ -238,15 +260,32 @@ In `handle_register_registrant_on_disk_segment` (line 2539), **before** the exis
 
 ```c
 if (nvmeibt_seg_active_is_cdv(seg_active)) {
-    u64 floor = nvmeibt_cdv_get_admission_floor(seg_active);
-    if (incoming_reg_ctx->reservation_mode_version < floor) {
+    struct nvmeibt_cdv_alloc *cdv = nvmeibt_cdv_alloc_for_seg(seg_active);
+    // CRITICAL: take handler_lock across (floor-check + hash-insert) so a
+    // concurrent preemptClientFromCDV handler (Step 9) cannot observe an
+    // intermediate state where we passed the predicate but haven't yet
+    // inserted into active_registrants. See §2.10.4 "handler step order".
+    mutex_lock(&cdv->handler_lock);
+    if (incoming_reg_ctx->reservation_mode_version < cdv->admission_floor) {
+        mutex_unlock(&cdv->handler_lock);
         reg_refusal_reason = NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR;
         goto reject;
     }
+    // … existing admission checks and hash insert under the existing
+    // per-segment lock run while handler_lock is still held …
+    mutex_unlock(&cdv->handler_lock);   // released only after the hash insert
 }
 ```
 
-`nvmeibt_seg_active_is_cdv(seg_active)` is a one-line helper (`volume_class == CDV`) added to `nvmeibt_seg_active.h`. `nvmeibt_cdv_get_admission_floor(seg_active)` looks up the per-CDV state from the segment's parent CDV UUID.
+The `handler_lock` must span **both** the floor-check and the `active_registrants_hash` insert. Without this span, the race is:
+
+1. REGISTER reads floor = V, passes the check.
+2. Context switch; preempt handler runs, raises floor to V+1, walks segments, finds no reg_ctx for clientA (the REGISTER hasn't inserted yet), terminates nothing.
+3. REGISTER resumes, inserts reg_ctx.
+
+Result: clientA has a fresh reg_ctx that is never terminated, defeating the preempt. Spanning the lock prevents step 2 from interleaving between the read and the insert.
+
+`nvmeibt_seg_active_is_cdv(seg_active)` is a one-line helper (`volume_class == CDV`) added to `nvmeibt_seg_active.h`. `nvmeibt_cdv_alloc_for_seg(seg_active)` looks up the per-CDV state from the segment's parent CDV UUID.
 
 Extend `enum NVMEIBT_CLIENT_TR_REASON` with `NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR`. Update `nvmeibt_client_tr_reason_to_string()` for log output.
 
@@ -296,6 +335,13 @@ case 'P':
 
 `nvmeibc_tpv_detach` (existing) already: cancels `cdv_alloc_work`, `persist_work`, `bio_timeout_work`; fails parked bios on `pending_bios` and `pending_l1_flush_bios` with `-EIO`; transitions to `TPV_DETACHING`; unregisters `gendisk`; frees the xarray. This is the cleanup barrier that makes the §2.10.4 Path 2 / Path 3 safety arguments hold.
 
+**Idempotency invariant.** `nvmeibc_tpv_detach` must be callable more than once per TPV without harm. Two paths can invoke it concurrently or sequentially:
+
+1. This step, on CDV `NCBD_PREEMPTED` (client-kernel initiated).
+2. The subsequent management-initiated `DetachVolumes` (observed after Step 14 `cleanupDB` removes the attachment from Mongo and the client's management agent syncs state).
+
+The detach path must gate its mutating work on `state != TPV_DETACHING && state != TPV_DETACHED`; a second entry observes the state transition from the first and returns without re-running teardown. Verify in Step 15 (kernel self-test: call `nvmeibc_tpv_detach` twice on the same TPV; second call is a no-op, no double-free, no use-after-free).
+
 Trace macros: `_NI`/`_NW`/`_NE` (per project convention). No `pr_*`.
 
 ### Step 13. Handle `BELOW_CDV_FLOOR` register failure — `nvmesh-kernel/clnt/nvmeibc_register.c`
@@ -322,9 +368,25 @@ Exported entry point. Signature callable from both the force-detach path and the
 ```js
 scope.preemptClientFromCDV = (cdvUUID, clientID, cb) => {
     async.auto({
-        lock:        next => lockUtils.acquireCDVLock(cdvUUID, next),
-        cdv:         ['lock', (r, next) => volumeCollection.findOne({ uuid: cdvUUID }, next)],
-        newFloor:    ['cdv', (r, next) => {
+        lock:         next => lockUtils.acquireCDVLock(cdvUUID, next),
+        cdv:          ['lock', (r, next) => volumeCollection.findOne({ uuid: cdvUUID }, next)],
+
+        // CRITICAL: mark EVICTING FIRST, bump floor SECOND.
+        //
+        // If management crashes between these two writes, the reaper
+        // (Step 14b) observes the EVICTING state on restart and resumes
+        // from the floor-bump step. The reverse order leaves no
+        // recoverable signal: a bumped floor with no EVICTING state is
+        // indistinguishable from a completed eviction, so no recovery
+        // path can know to terminate the stale client's reg_ctx on TOMA.
+        markEvicting: ['cdv', (r, next) => {
+            clientCollection.updateOne(
+                { _id: clientID, 'attachments.volumeID': r.cdv._id },
+                { $set: { 'attachments.$.action': consts.volumeAttachmentActions.EVICTING } },
+                next
+            );
+        }],
+        newFloor:     ['markEvicting', (r, next) => {
             const newFloor = (r.cdv.cdvConfig.admissionFloor || 0) + 1;
             volumeCollection.updateOne(
                 { uuid: cdvUUID },
@@ -332,20 +394,13 @@ scope.preemptClientFromCDV = (cdvUUID, clientID, cb) => {
                 err => next(err, newFloor)
             );
         }],
-        markEvicting: ['newFloor', (r, next) => {
-            clientCollection.updateOne(
-                { _id: clientID, 'attachments.volumeID': r.cdv._id },
-                { $set: { 'attachments.$.action': consts.volumeAttachmentActions.EVICTING } },
-                next
-            );
-        }],
-        fanOut:      ['markEvicting', (r, next) => scope.sendPreemptToAllTomasOfCDV(
+        fanOut:       ['newFloor', (r, next) => scope.sendPreemptToAllTomasOfCDV(
             r.cdv, clientID, r.newFloor, next
         )],
-        cleanupDB:   ['fanOut', (r, next) => scope.clearEvictedClientState(
+        cleanupDB:    ['fanOut', (r, next) => scope.clearEvictedClientState(
             r.cdv, clientID, next  // remove attachment, clear exclusiveClient on TPVs
         )],
-        release:     ['cleanupDB', (r, next) => lockUtils.releaseCDVLock(cdvUUID, next)],
+        release:      ['cleanupDB', (r, next) => lockUtils.releaseCDVLock(cdvUUID, next)],
     }, cb);
 };
 ```
@@ -353,7 +408,39 @@ scope.preemptClientFromCDV = (cdvUUID, clientID, cb) => {
 Notes:
 - Steps run serially; `async.auto` is used for readability.
 - `lockUtils.acquireCDVLock` must be the same lock that serializes other per-CDV ops (extent pre-allocation for encrypted TPVs, CDV update, etc.). Verify the lock exists; add if missing.
-- On any error, the `EVICTING` state remains — an operator or a restarted management instance can resume by calling the entry point again with the same args. Floor bump uses `$max`, not `$set`, so retry is idempotent.
+- On any error, the `EVICTING` state remains — an operator or the reaper (Step 14b) resumes by calling this entry point again with the same args. Floor bump uses `$max`, not `$set`, so retry is idempotent.
+- §2.10.3 describes the (markEvicting, newFloor) pair as "atomic." This ordering plus the reaper is the operational equivalent of atomicity: any interleaving of a management crash with the two writes is recoverable. A true Mongo transaction across the `volume` and `client` collections is available and can be used if operator experience suggests the reaper's latency is unacceptable.
+
+### Step 14b. Reaper for stuck `EVICTING` state — `nvmesh-management/modules/volume.js` + `bootstrapper.js`
+
+On management startup and on a periodic timer (default 60 s), scan for attachments whose `action === 'evicting'` and resume each:
+
+```js
+scope.reapEvictingAttachments = (cb) => {
+    clientCollection.find(
+        { 'attachments.action': consts.volumeAttachmentActions.EVICTING }
+    ).toArray((err, clients) => {
+        if (err) return cb(new MongoError(err).log());
+        async.eachSeries(clients, (client, nextClient) => {
+            const evictingAttachments = (client.attachments || []).filter(
+                a => a.action === consts.volumeAttachmentActions.EVICTING
+            );
+            async.eachSeries(evictingAttachments, (attachment, nextAttach) => {
+                // Resume is safe because every step downstream is idempotent:
+                //   - floor bump uses $max
+                //   - TOMA handler uses max_t on the floor and a second
+                //     terminate pass is a no-op
+                //   - cleanupDB is a no-op if attachment is already gone
+                scope.preemptClientFromCDV(attachment.cdvUUID, client._id, nextAttach);
+            }, nextClient);
+        }, cb);
+    });
+};
+```
+
+Wired into `bootstrapper.js` startup sequence after the Mongo connection is established, and into a `setInterval` (cleared on shutdown). The reaper bypasses the feature flag — stuck EVICTING states must be resumable regardless of whether the feature flag is currently on.
+
+Reaper must also run if management observes a `CDV_PREEMPT_TOMA_UNRESPONSIVE` error from an earlier preempt: the 5-retry ACK loop in Step 5 gives up, but the EVICTING state persists, and the reaper picks it up on the next tick (useful if the unresponsive TOMA comes back later).
 
 ### Step 15. Wire into existing eviction paths — `nvmesh-management/modules/client.js`
 
@@ -366,6 +453,10 @@ Three call sites / changes:
 3. **Attach-with-preempt** (`client.js` caller of `attachTPV` with `reservation.preempt === PREEMPT`, line 2403 / 3516): today's path bumps the CDV's `reservation.version` volume-wide via the register-side bump at the new attacher's `REGISTER`, disturbing every survivor on the CDV. Replace with the narrow primitive: before the new client's `attachTPV` runs, call `preemptClientFromCDV(cdv, previousHolderClientID)` — where `previousHolderClientID` is read from `tpv.tpvConfig.exclusiveClient` on the target TPV. Once the per-client preempt clears, the new attach proceeds through Step 2 and stamps the current floor on the incoming client's CDV attach. No survivor impact, no `reservation.version` bump on the CDV.
 
    Keep the existing `reservation.preempt` flag semantics on the API surface for backward compatibility; the management-side implementation changes but the REST contract does not.
+
+   **Failure propagation.** If the inline `preemptClientFromCDV` fails (typically `CDV_PREEMPT_TOMA_UNRESPONSIVE` after 5 retries), the attach must **not** proceed. Proceeding would stamp the new floor on the new client's CDV attach while the old client's `reg_ctx` still exists on some TOMAs — both clients end up writing to the same CDV extents concurrently, corrupting TPV data. Correct behavior: `attachTPV` returns the preempt error to the caller (REST or CLI), leaves `EVICTING` set, and lets the reaper (Step 14b) retry. The operator investigates the unresponsive TOMA.
+
+   **Latency budget.** The inline preempt is synchronous: its latency is bounded by `Config.preemptAckTimeout` (default 30 s) plus the 5-retry exponential backoff — worst case on the order of a minute before the attach fails with `CDV_PREEMPT_TOMA_UNRESPONSIVE`. Happy path is sub-second (one round of Kafka delivery + handler time). Callers (REST, CSI driver, operator CLI) must allow the full worst-case timeout; document this in the REST contract for `POST /clients/:id/attach` with preempt semantics.
 
 The attach-path EVICTING gate lives in Step 2a, not here — it must run before floor stamping, not alongside these eviction-initiating paths.
 
@@ -509,6 +600,26 @@ A cooperative client that wants to learn the current floor contacts management v
 ### 3. Concurrent evictions on one CDV
 
 Handled by the per-CDV lock (§2.10.4) plus monotonic floor. Verify in Step 20 unit tests.
+
+### 3a. Eventual-consistency window across TOMAs
+
+A single `preemptClientFromCDV` is fan-out to every TOMA of the CDV; each TOMA processes independently. Between the first ACK and the last, the evicted client's already-mapped CDV writes can still land on TOMAs whose handler hasn't run yet. The window is bounded by Kafka delivery + handler time per TOMA (happy path: sub-second; worst case: the ACK-timeout window).
+
+Invariant A ("evicted client cannot write to the CDV") holds **strictly only after all ACKs land** and management clears `EVICTING`. During the window:
+
+- No new client can take over the evicted TPV — management gates the reassigning attach on `EVICTING` clearing (Step 2a), so both-writing races are structurally impossible.
+- Survivor clients on the same CDV are unaffected (Invariant B still holds instantaneously).
+- The only effect is that a stale writer's I/O tail bleeds into already-allocated extents for a bounded period. For the stale-writer scenarios this design targets (rogue or unresponsive client), this matches or improves on today's volume-wide preempt behavior.
+
+Document this bound explicitly in operator-facing material. For use cases requiring strict atomicity (none currently), a two-phase-commit variant is available as a future extension but out of scope here.
+
+### 3b. Cooperative survivor losing its registration
+
+A survivor reg_ctx that is reaped by TOMA (timeout, reconnect cycle, or any cause) causes the client-kernel to retry `REGISTER` with its cached `reservation_mode_version`. If the CDV floor has advanced since the original attach, the predicate returns `BELOW_CDV_FLOOR`, which Step 13 maps to `NCBD_PREEMPTED` → full TPV teardown.
+
+This is correct per the design's philosophy (no new client↔management RPC, management is the only source of current-floor truth), but it's a bigger disruption than the pre-feature "re-register with cached version" behavior on non-CDV volumes.
+
+**Accepted trade-off.** The alternatives — teach the client to consult management on `BELOW_CDV_FLOOR` before tearing down, or widen the predicate to a tolerance window — add complexity that isn't justified for a rare event. The cooperative survivor's TPV will come back after a management-driven re-attach; the disruption is visible to the workload but bounded in duration and frequency.
 
 ### 4. CDV deletion while `EVICTING` is in flight
 

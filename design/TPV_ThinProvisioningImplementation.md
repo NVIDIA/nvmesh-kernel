@@ -881,11 +881,15 @@ Both primitives are CDV-specific. Non-CDV volumes (including the allocator satel
 **Preempt flow.**
 
 1. Management detects the need to evict `clientA` from `cdvC` (TPV force-detach, stale-client cleanup, involuntary-detach path).
-2. Management atomically (a) sets `cdvC.cdvConfig.admissionFloor = floor + 1`, (b) writes `EVICTING` into `client[clientA].attachments[cdvC].action` — reusing the existing `ATTACHING`/`DETACHING` state enum (`consts.volumeAttachmentActions`).
+2. Management, in order (the ordering is load-bearing — see "crash recovery" below):
+   (a) writes `EVICTING` into `client[clientA].attachments[cdvC].action` — reusing the existing `ATTACHING`/`DETACHING` state enum (`consts.volumeAttachmentActions`);
+   (b) sets `cdvC.cdvConfig.admissionFloor = floor + 1` via `$max`.
 3. Management publishes `preemptClientFromCDV(clientA, cdvC, newFloor)` on every `TOMA_COMMANDS` topic for the zones hosting `cdvC`'s pRaids.
 4. Each TOMA processes the message: raise floor, terminate `clientA`'s registrants on every local CDV segment, drain, ACK.
 5. Management collects ACKs fan-in (same pattern as `sendReservationModeChangeMessageToAllTargets` in `client.js:1511`). Once every TOMA has ACKed, management clears the `EVICTING` action, removes the `(clientA, cdvC)` Mongo attachment entry (stripping all `tpv:*` references), and clears `exclusiveClient` on every TPV `clientA` previously held on `cdvC`.
 6. New TPV assignments proceed. Client B attaches TPV X; its hidden CDV attach is stamped with the new floor; registration succeeds.
+
+**Crash recovery (ordering rationale for step 2).** The `EVICTING` mark is the recoverable signal. A management crash between steps 2(a) and 2(b) leaves `EVICTING` set with the floor at its old value; a reaper observes the `EVICTING` state on restart and resumes by calling the entry point again (floor bump is idempotent via `$max`, Kafka fan-out is idempotent because the TOMA handler uses `max` on its own floor and a second termination pass is a no-op). The reverse order — floor bumped first, `EVICTING` marked second — leaves no recoverable signal: a bumped floor with no `EVICTING` is indistinguishable from a completed eviction, so the reaper cannot know to finish the job. The true-atomic alternative is a Mongo transaction across the `volume` and `client` collections; it is available as a future hardening if the reaper's latency becomes operationally unacceptable.
 
 **Re-admission flow for a cooperative evicted client.**
 
@@ -904,9 +908,13 @@ Three paths a stale client might try to keep writing.
 
 **Path 3 — ask management for a new attach.** Gated by the `EVICTING` action in the client's attachment record. Management refuses re-admission while the eviction is in flight, and after eviction completes, `clientA` no longer holds any TPV on `cdvC` whose `extent_map` could be abused — it is just a new attacher.
 
-**The handler step order matters.** If TOMA terminated the `reg_ctx` before raising the floor, a `clientA` `REGISTER` retry landing in the window between those two steps would be admitted at the old version, re-establishing the stale registrant. Raising the floor first closes that window; the per-CDV handler lock serializes the handler against concurrent `REGISTER` paths on the same CDV.
+**The handler step order matters.** If TOMA terminated the `reg_ctx` before raising the floor, a `clientA` `REGISTER` retry landing in the window between those two steps would be admitted at the old version, re-establishing the stale registrant. Raising the floor first closes that window; the per-CDV `handler_lock` serializes the handler against concurrent `REGISTER` paths on the same CDV. The REGISTER predicate takes the same `handler_lock` and holds it across (floor-check + `active_registrants_hash` insert), so the handler's termination loop sees every concurrently-arriving registrant.
+
+**Eventual consistency across TOMAs.** A single `preemptClientFromCDV` fans out to every TOMA of the CDV; each TOMA processes independently. Between the first TOMA's ACK and the last TOMA's ACK, `clientA`'s already-mapped CDV writes can still land on TOMAs whose handler has not yet run. The window is bounded by Kafka delivery + handler time per TOMA (happy path: sub-second). Invariant A ("evicted client cannot write to the CDV") holds **strictly only after** management clears the `EVICTING` action, which happens only after every TOMA has ACKed. During the window, reassignment of `clientA`'s TPVs to a new client is gated by the `EVICTING` state (re-admission flow step 3), so a both-writing race between the evicted client and a successor is structurally impossible.
 
 **Survivor impact.** Client C holds TPV Y on the same CDV `cdvC` at version V. During and after `clientA`'s eviction: no `ReservationModeChange` fires for the CDV, no segment `highest_reservation_mode_version` bump occurs (the gate at `register.c:1020` is never tripped), no `is_seg_active_reservation_mode_version_registrable` rejection for C's I/O. C's writes continue at line rate. C's cached `reservation_mode_version = V` is stale relative to the floor, but stale-version **existing** registrants are explicitly grandfathered — only **new** `REGISTER`s are gated. C only learns the new floor if it disconnects and re-attaches, at which point management stamps it.
+
+**Cooperative survivor losing its registration.** If a survivor reg_ctx is reaped by TOMA (timeout, reconnect cycle) and the client-kernel retries `REGISTER` with its cached `reservation_mode_version`, and the floor has advanced since the original attach, the predicate returns `BELOW_CDV_FLOOR`. Per §2.10.5 client-kernel handling, this is treated like `NCBD_PREEMPTED` and triggers a full TPV teardown. Recovery is via the normal management-driven re-attach flow: the survivor's agent calls management, management stamps the current floor on the new `AttachVolumes`, and the TPV is re-registered. Bounded disruption; accepted trade-off for "management is the only source of current-floor truth."
 
 **Failover.** The admission floor lives in Mongo on the CDV document — durable by construction. TOMAs hold it only in memory. On TOMA cold start, the floor arrives as part of the standard CDV metadata delivery (topology push from the RAFT leader, seeded from management). No per-client state survives failover because none is kept. If a registrant was terminated and the TOMA then fails over before the client has retried, the new primary simply has no record of the client — which is the correct state, since the client's `reg_ctx` was terminated by design.
 
@@ -928,29 +936,38 @@ Three paths a stale client might try to keep writing.
 
 **TOMA (`nvmesh-kernel/toma`)**
 
-- Per-CDV state extended with `u64 admission_floor`. Location TBD: extend `nvmeibt_cdv_alloc` entry and ensure it is created eagerly on CDV topology arrival (today it is created lazily by the first `CDV_ALLOC_EXTENT`); or add a sibling per-CDV hash keyed by CDV UUID populated at CDV attach time. Eager creation is preferred for locality with the existing CDV bookkeeping.
+- Per-CDV state extended with `u64 admission_floor` and `struct mutex handler_lock`. Location TBD: extend `nvmeibt_cdv_alloc` entry and ensure it is created eagerly on CDV topology arrival (today it is created lazily by the first `CDV_ALLOC_EXTENT`); or add a sibling per-CDV hash keyed by CDV UUID populated at CDV attach time. Eager creation is preferred for locality with the existing CDV bookkeeping.
+- **Lock ordering invariant.** The new per-CDV `handler_lock` is acquired **before** any per-`seg_active` lock on every path that takes both. Audit existing callers of `nvmeibt_register_terminate_reg_ctx` and every REGISTER-path lock acquisition to confirm no path takes per-segment before per-CDV; refactor any that do.
 - New Kafka handler for `preemptClientFromCDV` in `nvmeibt_kafka.c`:
-  1. Look up CDV state under per-CDV handler lock.
-  2. `cdv->admission_floor = newFloor`.
-  3. For each segment of the CDV on this TOMA: locate `active_registrants` matching `clientID`; call `nvmeibt_register_terminate_reg_ctx` with `is_deleting_seg_active = false`.
-  4. On handler exit (after drain machinery completes), publish `preemptClientFromCDVResponse`.
-- New predicate in `handle_register_registrant_on_disk_segment` (`nvmeibt_register.c:2539`), inserted before the existing `is_valid_register_req` check:
+  1. Look up CDV state. If not present (topology push has not yet reached this TOMA), create the entry eagerly and seed `admission_floor = msg.newFloor` — the message carries management's authoritative floor, so on-the-fly creation is correct and avoids spurious retries.
+  2. Acquire per-CDV `handler_lock`.
+  3. `cdv->admission_floor = max_t(u64, cdv->admission_floor, newFloor);` (idempotent; safe to interleave with topology seeding).
+  4. For each segment of the CDV on this TOMA: linear walk over `active_registrants_hash_by_handle` for this `clientID`; call `nvmeibt_register_terminate_reg_ctx` with `is_deleting_seg_active = false`. (Linear walk is acceptable — preempt is a control-plane event; an `active_registrants_hash_by_client` index was considered and rejected because the register/unregister hot-path cost isn't recouped.)
+  5. Release `handler_lock`. Drain machinery inside `terminate_reg_ctx` completes asynchronously.
+  6. Publish `preemptClientFromCDVResponse`.
+- New predicate in `handle_register_registrant_on_disk_segment` (`nvmeibt_register.c:2539`), inserted before the existing `is_valid_register_req` check. The predicate must take `cdv->handler_lock` and hold it across (floor-check + hash-insert) so a concurrent preempt handler cannot observe an intermediate state:
   ```c
   if (nvmeibt_seg_active_is_cdv(seg_active)) {
-      u64 floor = nvmeibt_cdv_get_admission_floor(seg_active);
-      if (incoming_reg_ctx->reservation_mode_version < floor) {
+      struct nvmeibt_cdv_alloc *cdv = nvmeibt_cdv_alloc_for_seg(seg_active);
+      mutex_lock(&cdv->handler_lock);      // held across the hash insert below
+      if (incoming_reg_ctx->reservation_mode_version < cdv->admission_floor) {
+          mutex_unlock(&cdv->handler_lock);
           reg_refusal_reason = NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR;
           goto reject;
       }
+      /* … existing admission checks and the active_registrants_hash insert
+         run under the existing per-segment lock while handler_lock is held … */
+      mutex_unlock(&cdv->handler_lock);    // released only after the insert
   }
   ```
-- Floor seeding on CDV topology arrival: the CDV-metadata message from management (same channel that already delivers CDV parameters) carries `admission_floor`; handler stores it.
+- Floor seeding on CDV topology arrival: the CDV-metadata message from management (same channel that already delivers CDV parameters) carries `admission_floor`; handler stores it via `max_t` (monotonic). A fallback seed path fires from the first `AttachVolumes` for the CDV if topology push has not yet arrived.
 - Extend `enum NVMEIBT_CLIENT_TR_REASON` with `NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR`. mNDU feature-compatibility gate on the new message and reason code.
 
 **Client kernel (`nvmesh-kernel/clnt`)**
 
 - Extend CDV attach path to propagate `reservation_mode_version` from the management payload into the `REGISTER` header (existing field at `toma/clnt/nvmeibt_client_protocol.h:389`).
 - On CDV device entering `NCBD_PREEMPTED` (`clnt/nvmeibc_block.c:1079`), tear down every TPV whose `cdv_vol` points to this CDV. New hook in `clnt/tpv/nvmeibc_tpv.c`: `nvmeibc_tpv_handle_cdv_preempted(struct nvmeibc_volume *cdv)` walks the per-CDV TPV list and calls the existing `nvmeibc_tpv_detach` path for each. This is the cleanup barrier that makes Path 2 / Path 3 safety arguments valid. Without it, `extent_map`s remain in memory and a re-attached client could theoretically replay them.
+- **`nvmeibc_tpv_detach` must be idempotent.** Two paths can invoke it: the CDV-preempted hook above (client-kernel initiated) and the subsequent management-initiated `DetachVolumes` (observed after management's `cleanupDB` removes the attachment from Mongo). The detach body must gate mutating work on `state != TPV_DETACHING && state != TPV_DETACHED`; a second entry observes the transition from the first and returns without re-running teardown. No double-free, no use-after-free.
 - No new client-to-management RPC: a `REGISTER` failure with `BELOW_CDV_FLOOR` is treated like `NCBD_PREEMPTED` — device teardown plus reliance on the existing management-driven re-attach flow.
 
 **Satellite allocator volume**
