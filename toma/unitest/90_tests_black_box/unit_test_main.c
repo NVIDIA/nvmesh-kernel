@@ -162,6 +162,35 @@ void scenario_attach_good_path_io_detach_on_volume(int v) {
 	}
 }
 
+/* Locate the segment in the V_R1 snapshot by u32 uuid, or -1 if absent. */
+static int __rpt_find_seg(const struct mgmt_sim_praid_report_snapshot *r, u32 uuid) {
+	for (int i = 0; i < r->n_segments; i++)
+		if (r->segs[i].uuid == uuid)
+			return i;
+	return -1;
+}
+
+/* Phase-2 verification: toma has promoted seg[3] and reports the evicted slot
+ * as deprecated + the replacement as "replacement" in the latest V_R1 report. */
+static bool evict_replacement_reported(void) {
+	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
+	const struct sb_praid_conf *pr = &sb_cluster_get_const_conf()->vols[1].chunks[0].raids[0];
+	int old_i = __rpt_find_seg(r, pr->segs[0].uuid);
+	int rep_i = __rpt_find_seg(r, pr->segs[3].uuid);
+	return r->n_segments == 4
+		&& old_i >= 0 && strcmp(r->segs[old_i].status, "deprecated")  == 0
+		&& rep_i >= 0 && strcmp(r->segs[rep_i].status, "replacement") == 0;
+}
+
+/* Phase-2 verification: additionally, seg[3]'s vitality is "up" (peer node 2
+ * has surfaced it in its ACT_TOPO reply). */
+static bool evict_replacement_up(void) {
+	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
+	int rep_i = __rpt_find_seg(r, sb_cluster_get_const_conf()->vols[1].chunks[0].raids[0].segs[3].uuid);
+	return evict_replacement_reported()
+		&& rep_i >= 0 && strcmp(r->segs[rep_i].vitality, "up") == 0;
+}
+
 /*
  * Disk eviction / segment replacement scenario for V_R1 (NVMESH-8156).
  *
@@ -237,6 +266,8 @@ static void scenario_evict_rebuild_r1(void) {
 	 * [VERIFY]  WAIT_UNTIL snapshot shows 4 segments with seg[0]=deprecated,
 	 *           seg[3]=replacement, seg[3] vitality=up.
 	 * ==================================================================== */
+	WAIT_UNTIL_N(evict_replacement_reported(), 2000);
+	WAIT_UNTIL_N(evict_replacement_up(),       2000);
 
 	/* ====================================================================
 	 * PHASE 3 -- Management removes the deprecated segment
