@@ -163,15 +163,15 @@ void scenario_attach_good_path_io_detach_on_volume(int v) {
 	}
 }
 
-/* Well-known V_R1 UUIDs for the eviction scenario. The sandbox encodes UUIDs
- * as 0xbdV0CRS (V=vol_idx+1, C=chunk+1, R=raid+1, S=seg+1) -- see
- * mongodb_simu.c. Naming by *role* (evicted / surviving / replacement) keeps
- * the scenario reading like a story rather than chasing array indices. */
-#define V_R1_PRAID_UUID            0xbd020110u
-#define V_R1_EVICTED_SEG_UUID      0xbd020111u   /* node 0 disk 1 */
-#define V_R1_SURVIVOR1_SEG_UUID    0xbd020112u   /* node 1 disk 0 */
-#define V_R1_SURVIVOR2_SEG_UUID    0xbd020113u   /* node 1 disk 1 */
-#define V_R1_REPLACEMENT_SEG_UUID  0xbd020114u   /* node 2 disk 0 (dormant fixture, promoted in Phase 1) */
+/* Well-known V_R1 UUIDs, named by their *role* in the eviction scenario.
+ * V_R1 lives at sb_cluster_conf.vols[1] with one chunk + one praid; the SB_*
+ * macros (mongodb_simu.h) encode that into the sandbox's u32 UUID scheme. */
+#define V_R1_SEG_UUID(seg_idx)     sb_seg_uuid(/*vol*/1, /*chunk*/0, /*raid*/0, (seg_idx))
+#define V_R1_PRAID_UUID            sb_praid_uuid(1, 0, 0)
+#define V_R1_EVICTED_SEG_UUID      V_R1_SEG_UUID(0)   /* node 0 disk 1 */
+#define V_R1_SURVIVOR1_SEG_UUID    V_R1_SEG_UUID(1)   /* node 1 disk 0 */
+#define V_R1_SURVIVOR2_SEG_UUID    V_R1_SEG_UUID(2)   /* node 1 disk 1 */
+#define V_R1_REPLACEMENT_SEG_UUID  V_R1_SEG_UUID(3)   /* node 2 disk 0 (dormant fixture, promoted in Phase 1) */
 
 /* Locate the segment in the V_R1 snapshot by u32 uuid, or -1 if absent. */
 static int __rpt_find_seg(const struct mgmt_sim_praid_report_snapshot *r, u32 uuid) {

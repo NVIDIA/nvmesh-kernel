@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <signal.h>		// BUG_ON uses raise(SIGABRT)
 
 #define SANDBOX_PRINT(fmt, ...)      fprintf(stderr, "SANDBOX: " fmt, __VA_ARGS__)      // Todo: Remove me, use binary tracing
 #define SANDBOX_PRINT_TMP(fmt, ...)  fprintf(stderr, "SANDBOX: " COL_PURPL fmt COL_RESET, __VA_ARGS__)

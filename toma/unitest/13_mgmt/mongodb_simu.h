@@ -11,6 +11,29 @@
 #define SB_CLUSTER_CONF_MAX_VOLS      (4)			// Maximum number of volumes in the cluster configuration
 #define SB_CLUSTER_CONF_MAX_CHUNKS    (2)			// Maximum number of chunks in a volume, For now, 2 chunks only, Support for volume extend once
 
+/* Sandbox UUID encoding -- all uuids are 32-bit integers built from 0-based
+ * array indices. First 3 nibbles = node {f37 (liveToma), 2 other Tomas: f38,
+ * f39}. Volumes (block devices) have first 4 nibbles as bdXX where XX is
+ * volume index (up to 256 vols), last 4 nibbles are 0CRS where C, R, S are
+ * chunk, raid and seg indices respectively. Counting in the encoded UUID
+ * starts from 1.
+ *   node:   0xf3{N+7}000c{N}              N = node index in sb_cluster_conf.nodes[]
+ *   disk:   0xf3{N+7}000d{D}              D = disk index in sb_node_conf.disks[]
+ *   vol:    0xbd{V+1}0000                 V = volume index in sb_cluster_conf.vols[]
+ *   praid:  0xbd{V+1}{C+1}{R+1}0          C, R = chunk and praid indices
+ *   seg:    0xbd{V+1}{C+1}{R+1}{S+1}      S = segment index in sb_praid_conf.segs[]
+ *
+ * Tests should refer to objects via these helpers instead of dealing with the
+ * bit positions, and instead of dereferencing sb_cluster_conf for the UUID.
+ * Each component is a single hex nibble after the +1 shift, so any index
+ * >= 15 would corrupt the encoding -- the BUG_ONs catch that.
+ */
+uint32_t sb_node_uuid (int n);
+uint32_t sb_disk_uuid (int n, int d);
+uint32_t sb_vol_uuid  (int v);
+uint32_t sb_praid_uuid(int v, int c, int r);
+uint32_t sb_seg_uuid  (int v, int c, int r, int s);
+
 struct sb_cluster_conf {
 	struct sb_node_conf {
 		char hostname[64];		// Easily recognizable host name
