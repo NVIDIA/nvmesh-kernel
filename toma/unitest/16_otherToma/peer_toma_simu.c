@@ -42,7 +42,6 @@ static struct toma_simu_inject_seg_state_t *__find_seg_inject(struct peer_toma_s
 	return NULL;
 }
 
-static void __verify_implemented(enum NVMEIBT_SEGMENT_DIRTY_BITS_STATE e) {BUG_ON((e & (NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_IDLE | NVMEIBT_SEG_DIRTY_BITS_STATE_X_ZERO| NVMEIBT_SEG_DIRTY_BITS_STATE_X_DONE | NVMEIBT_SEG_DIRTY_BITS_STATE_DEAD)) == 0);}
 static void __gen_seg_reply_to_leader(struct peer_toma_simu *T, const struct sb_seg_conf *sb_seg, const struct nvmeibt_serialized_seg_leader_topo *ld_seg, struct nvmeibt_serialized_seg_active_topo *act_seg) {
 	struct toma_simu_inject_seg_state_t *inj = __find_seg_inject(T, sb_seg->uuid);
 	BUG_ON(!act_seg);
@@ -65,7 +64,6 @@ static void __gen_seg_reply_to_leader(struct peer_toma_simu *T, const struct sb_
 	}
 	if (ld_seg->dirty_bits_state == NVMEIBT_SEG_DIRTY_BITS_STATE_X_ZERO)
 		act_seg->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_X_DONE;						// Toma done zeroing this disk segment
-	__verify_implemented(ld_seg->dirty_bits_state);												// Todo: remove me, just a trap for unimplemented states
 	if (inj) {
 		act_seg->active_seg_flags.is_drive_write_error = inj->disk_error;
 		act_seg->dirty_bits_state = inj->dbits_state;											// Here, inject degraded mode instead of owner idle, etc
