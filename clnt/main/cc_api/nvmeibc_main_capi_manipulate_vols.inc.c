@@ -28,7 +28,9 @@
  *   conf->mdvUUID       - parent CDV UUID (for lookup in the volumes list)
  *   conf->stripeSize    - TPV extent size in KiB  (tpv_extent_size_kb)
  *   conf->dataBlocks    - CDV extent size in MiB  (cdv_extent_size_mb)
- *   conf->parityBlocks  - allocator size in GiB   (allocator_size_gb)
+ *   conf->parityBlocks  - allocator area size in GiB within the CDV
+ *                         (allocator_size_gb; 0 under satellite design —
+ *                         allocator metadata lives on the <cdv>-mgmt volume)
  *
  * The CDV must already be attached as a regular (hidden) volume before this
  * function is called.
@@ -74,8 +76,9 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	sync_flush = (strncmp(conf->sourceUUID, "sync_flush",
 			      sizeof(conf->sourceUUID)) == 0);
 
-	if (!virtual_size_bytes || !tpv_extent_size_kb ||
-	    !cdv_extent_size_mb || !allocator_size_gb) {
+	/* allocator_size_gb may legitimately be 0 under the satellite design
+	 * (A = 0 — data extents start at CDV offset 0).                     */
+	if (!virtual_size_bytes || !tpv_extent_size_kb || !cdv_extent_size_mb) {
 		_NE(tpv_setup_bad_params,
 		    "TPV @STR: invalid params vsize=@LLU tpv_ext_kb=@UINT cdv_ext_mb=@UINT alloc_gb=@LLU",
 		    conf->name, virtual_size_bytes,
