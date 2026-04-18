@@ -212,6 +212,28 @@ struct nvmeibt_cdv_alloc {
 	struct nvmeibt_wq *io_wq;	/* per-satellite I/O work queue (scan + writes); lifetime tied
 					 * to this TOMA's allocator role on the CDV */
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
+
+	/*
+	 * Per-client CDV preempt (TPV_PerClientCDVPreemption.md §2.10):
+	 *
+	 *   admission_floor — monotonic u64. New REGISTERs on CDV segments with
+	 *     reservation_mode_version < admission_floor are rejected with
+	 *     NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR. Raised by the
+	 *     preempt_client_from_cdv Kafka handler under handler_lock, and
+	 *     seeded by the CDV topology push. Existing registrants are NOT
+	 *     reconsulted against the floor — survivor immunity is deliberate.
+	 *   admission_floor_seeded — tracks whether either seeding path (topology
+	 *     push, or first AttachVolumes fallback) has run; guards against
+	 *     overwrites from later-arriving stale AttachVolumes payloads.
+	 *   handler_lock — serializes the preempt handler against the new
+	 *     REGISTER predicate in nvmeibt_register.c. Both paths acquire this
+	 *     lock BEFORE any per-seg_active lock. Lock order invariant:
+	 *       handler_lock → seg_active locks
+	 *     Never reverse.
+	 */
+	uint64_t         admission_floor;
+	bool             admission_floor_seeded;
+	pthread_mutex_t  handler_lock;
 };
 
 /* ── Runtime config ─────────────────────────────────────────────────────────
@@ -285,6 +307,84 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
  * Called from garbage_collect_as_needed() after block-device GC.
  */
 void nvmeibt_cdv_alloc_gc_stale_entries(void);
+
+/*
+ * ── Per-client CDV preempt (§2.10) ──────────────────────────────────────────
+ *
+ * nvmeibt_cdv_alloc_lookup — return the per-CDV state entry if present.
+ * Safe to call from any context holding the cdv_alloc_hash read barrier.
+ */
+struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup(const char *cdv_uuid);
+
+/*
+ * nvmeibt_cdv_alloc_lookup_or_create_with_floor — return the per-CDV state
+ * entry, creating it on the fly if not present and seeding admission_floor.
+ *
+ * Called from the preempt_client_from_cdv Kafka handler when the message
+ * arrives before the CDV topology push has reached this TOMA. newFloor is
+ * management's authoritative value, so seeding from it is correct.
+ *
+ * Returns NULL only on allocation failure.
+ */
+struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup_or_create_with_floor(
+		const char *cdv_uuid, uint64_t initial_floor);
+
+/*
+ * nvmeibt_cdv_alloc_seed_floor — set the admission floor if not yet seeded,
+ * or max-merge with the existing value. Path A (topology push) uses this with
+ * the full authoritative floor. Path B (first AttachVolumes for the CDV) uses
+ * this only when admission_floor_seeded is still false, to close the window
+ * where a REGISTER arrives before the topology push.
+ *
+ * Safe to call without handler_lock — updates are monotonic via max_t.
+ */
+void nvmeibt_cdv_alloc_seed_floor(struct nvmeibt_cdv_alloc *alloc,
+				  uint64_t floor, bool from_topology);
+
+/*
+ * nvmeibt_seg_active_get_cdv_alloc — return the per-CDV state entry for this
+ * segment's parent CDV, or NULL if the segment's parent volume is not a CDV
+ * (or the applied topology isn't yet available).
+ *
+ * Navigates the applied topology:
+ *   seg_active → applied_seg_lot → praid_lot->my_praid → blkdev (via
+ *   praid_mgmt.its_chunk.its_block_device) → from_config.is_cdv +
+ *   urn_uuid.str → nvmeibt_cdv_alloc_lookup.
+ *
+ * Safe to call from the REGISTER admission path (read-only on the topology
+ * chain). Used by check_cdv_admission_floor in nvmeibt_register.c and by the
+ * preempt-client outer walk in nvmeibt_cdv_alloc.c.
+ */
+struct nvmeibt_seg_active;
+struct nvmeibt_cdv_alloc *nvmeibt_seg_active_get_cdv_alloc(
+		struct nvmeibt_seg_active *seg_active);
+
+/*
+ * nvmeibt_cdv_alloc_preempt_client — handle the preemptClientFromCDV Kafka
+ * message. Raises admission_floor FIRST (order invariant — see §2.10.4),
+ * then terminates the named client's registrants on every CDV segment under
+ * handler_lock. On completion, caller publishes the response with the value
+ * returned in *out_terminated.
+ *
+ * Returns 0 on success (even if no reg_ctx matched — idempotent no-op).
+ * Returns -ENOMEM on allocation failure in the create-on-the-fly path.
+ */
+int nvmeibt_cdv_alloc_preempt_client(const char *cdv_uuid,
+				     const char *client_id,      /* client hostname */
+				     uint64_t    new_floor,
+				     uint32_t   *out_terminated);
+
+/*
+ * nvmeibt_cdv_alloc_send_preempt_response — publish preemptClientFromCDVResponse
+ * to management after the preempt handler completes. Management aggregates
+ * ACKs across all TOMAs before clearing EVICTING.
+ */
+void nvmeibt_cdv_alloc_send_preempt_response(const char *cdv_uuid,
+					     const char *client_id,      /* client hostname */
+					     uint64_t    new_floor,
+					     bool        success,
+					     uint32_t    terminated,
+					     const char *error);
 
 /*
  * nvmeibt_cdv_alloc_remove — tear down the per-CDV allocator when a CDV is

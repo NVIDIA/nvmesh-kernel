@@ -218,6 +218,15 @@ enum NVMEIBT_CLIENT_TR_REASON { // [1..0xFF], TR - measn Toma to client, RT - me
 	NVMEIBT_CLIENT_TR_REASON_WAIT_4_SERJIO				= 0x4 | NVMEIBT_CLIENT_TR_REASON_PREFIX_MAINTANANCE,
 	NVMEIBT_CLIENT_TR_REASON_UPDATING_RM_VERSION		= 0x5 | NVMEIBT_CLIENT_TR_REASON_PREFIX_MAINTANANCE,
 	NVMEIBT_CLIENT_TR_REASON_UNREGISTER_IN_PROGRESS		= 0x2 | NVMEIBT_CLIENT_TR_REASON_PREFIX_MAINTANANCE,
+	/*
+	 * Per-client CDV preempt admission-floor rejection (TPV_PerClientCDVPreemption.md §2.10).
+	 * Sent when a REGISTER on a CDV segment carries reservation_mode_version
+	 * below the CDV's current admission_floor. Treated by the client like
+	 * NCBD_PREEMPTED: tear down TPVs whose cdv_vol is this CDV, reliance on
+	 * the normal management-driven re-attach flow for recovery.
+	 * Fatal from the client's perspective (requires management-driven re-attach).
+	 */
+	NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR			= 0x6 | NVMEIBT_CLIENT_TR_REASON_PREFIX_FATAL,
 
 	/* Non Fatal reasons for Tomas request (typically unregister) */
 	NVMEIBT_CLIENT_TR_REASON_INIT						= 0x1 | NVMEIBT_CLIENT_TR_REASON_PREFIX_UNREG_TOPO,

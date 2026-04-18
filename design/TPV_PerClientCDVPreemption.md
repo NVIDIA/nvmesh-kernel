@@ -669,6 +669,66 @@ When the last `tpv:*` reference is removed during eviction cleanup (Step 14 `cle
 
 ---
 
+## Follow-on TODOs (post-initial-implementation)
+
+These items were deliberately scoped out of the initial implementation. None affects correctness of the per-client preempt primitive; they are hardening, operator-experience, and code-cleanup items.
+
+### F1. mNDU capability gate via `nvmesh-interop-db`  *(from Step 17)*
+
+**Status:** `systemMessages.MIXED_VERSION_CLUSTER_NOT_SUPPORTED` is declared but unused. No gating logic exists in `preemptClientFromCDV`.
+
+**What's missing:**
+- Add a capability flag to the `Component` (or `ComponentVersion`) model in `nvmesh-interop-db`: `supportsCdvAdmissionFloor` (or equivalent), set `true` from the release that ships this feature onward.
+- Add a helper query in `dbAPI.js` that returns true iff every component (management, TOMA, client) currently in the cluster supports the capability.
+- Add a guard at the top of `modules/client.js:preemptClientFromCDV` that returns `MIXED_VERSION_CLUSTER_NOT_SUPPORTED` when the capability is not cluster-wide.
+
+**Why deferred:** Adding the capability flag is coordinated with the interop-db team and requires a migration. Per-client preempt is safe to ship without the gate as long as cluster rollout completes before any preempt is issued — which is the normal mNDU discipline.
+
+### F2. Feature flag `management.cdvPerClientPreempt.enabled`
+
+**Status:** Not implemented. `preemptClientFromCDV` runs unconditionally when invoked; the schema field `cdvConfig.admissionFloor` is always written on CDV create.
+
+**What's missing:**
+- Add the flag to `generalSettings` (or the equivalent settings mechanism).
+- Short-circuit `preemptClientFromCDV` with a specific system message when off.
+- Test path: flag-off mode writes `admissionFloor: 0` into `cdvConfig` (so a later flip-on is a no-op on existing CDVs), `attachTPV` still stamps `reservation.version: 0` on the CDV attach (no-op gate on TOMA), and `preemptClientFromCDV` refuses with `FEATURE_DISABLED`.
+
+**Why deferred:** The plan §5 "Feature flag" describes this as the rollout mechanism. It is a rollout-ops concern, not a correctness concern; the current code is safe to enable always (the admission floor starts at 0 and only advances on explicit preempt).
+
+### F3. Span `handler_lock` across REGISTER floor-check + hash-insert
+
+**Status:** Known trade-off, documented in `toma/nvmeibt_register.c:check_cdv_admission_floor` FOLLOW-ON comment.
+
+**Current shape:** The REGISTER predicate takes `handler_lock`, checks the floor, unlocks, returns. The subsequent hash insert in `register_on_disk_segment` runs unlocked.
+
+**Why safe today:** The preempt handler walks `active_registrants_hash_by_handle` under `handler_lock`. A REGISTER that slips past the floor check between floor-raise and hash-insert installs a reg_ctx that the handler's linear walk catches. Management does not clear `EVICTING` until all TOMAs ACK — so the management-side "preempt complete" state is only declared after any racing REGISTER has been caught.
+
+**What hardening would add:** span `handler_lock` across the hash insert. Requires threading a locked `cdv_alloc *` pointer through `is_valid_register_req` → `register_on_disk_segment` → the active-registrants-hash insert, and unlocking at the insert's completion. Larger refactor touching existing code that already has its own lock discipline. Skip unless profiling or a live race shows the race is observable.
+
+### F4. LOCKDEP-style annotations for per-CDV `handler_lock`
+
+**Status:** Not added.
+
+**What's missing:** Debug-build annotations (LOCKDEP in kernel code; equivalent mechanism in TOMA userspace) to assert the lock ordering invariant `handler_lock` → per-`seg_active` locks on every call site that takes both. Cheap to add; catches accidental ordering violations introduced by future refactors.
+
+**Why deferred:** The invariant holds by construction in this change (every call site verified); the annotation is a regression guard, not a current-correctness requirement.
+
+### F5. Ancillary code-quality
+
+- **Unused system message:** `MIXED_VERSION_CLUSTER_NOT_SUPPORTED` is declared in `systemMessages.js` (id 1960) but never referenced. Either wire it into F1's gate or remove until F1 lands. Currently harmless clutter.
+- **Retry-backoff timer handle:** In `sendPreemptToAllTomasOfCDV`'s retry loop, the `setTimeout` scheduled during exponential backoff is not stored on `entry.timer`, so `resolvePendingPreempt` cannot cancel it. The guard `if (!pendingPreempts.has(key)) return;` at the top of the backoff callback makes this safe — at worst, a few wasted republish cycles when all ACKs arrive during a backoff window. Storing the backoff timer handle and cancelling it on resolve eliminates the wasted work.
+- **`clientUUID` propagation:** `new PreemptClientFromCDV(clientID, null, cdv._id, cdv.uuid, newFloor)` passes `null` for clientUUID. TOMA does not read it today (it matches by hostname via `registrant_node_id.str`). If a future code path wants the UUID, look it up from `clientCollection.findOne({_id: clientID}, {projection: {uuid: 1}})` at the top of `preemptClientFromCDV` and pass it through.
+
+### F6. UI surfacing of preempt history on CDV detail panel
+
+**Status:** Per-row `Evicting` badge on `ThinProvisioning.jsx` TPV table is implemented. Dashboard dial alarm count is implemented. Historical preempt log (who was evicted when, by whom, with what reason) is not.
+
+**What's missing:** Persist each successful preempt in an audit-log collection (or piggyback on the existing `auditLog` the REST endpoint already writes) and render it as a tab on the CDV detail panel in `Volumes.jsx`.
+
+**Why deferred:** Operator-experience enhancement. The data needed (timestamp, clientID, reason, floor transition) is already captured in the audit log written by the admin REST endpoint; the UI piece is a separate workstream.
+
+---
+
 ## Done criteria
 
 - All 23 steps merged behind the feature flag. Each step independently reviewed and unit-tested.

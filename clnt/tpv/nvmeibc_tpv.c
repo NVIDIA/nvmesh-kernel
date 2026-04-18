@@ -179,6 +179,47 @@ again:
 	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
 }
 
+/*
+ * nvmeibc_tpv_handle_cdv_preempted — CDV preempted; tear down every TPV that
+ * points at it (per-client CDV preempt cleanup barrier; §2.10).
+ *
+ * Called from the CDV block-device status 'P' handler in nvmeibc_block.c when
+ * the CDV enters NCBD_PREEMPTED. This happens in two cases:
+ *   1. TOMA terminated this client's reg_ctx on the CDV (preemptClientFromCDV
+ *      handler raised admission_floor + ran the termination).
+ *   2. A REGISTER to a CDV segment was rejected with BELOW_CDV_FLOOR and the
+ *      client-side handler (in nvmeibc_register.c) mapped the rejection to
+ *      NCBD_PREEMPTED.
+ *
+ * Without this cleanup, the TPV's extent_map remains in memory and a
+ * re-attached client could replay stale CDV offsets, defeating the preempt.
+ *
+ * Each nvmeibc_tpv_detach() removes the TPV from nvmeibc_tpv_active_list
+ * internally, so we restart the search from the list head after each detach.
+ */
+void nvmeibc_tpv_handle_cdv_preempted(const struct nvmeibc_volume *cdv)
+{
+	struct nvmeibc_tpv *tpv;
+	unsigned long flags;
+
+	if (!cdv)
+		return;
+
+again:
+	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
+	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
+		if (tpv->cdv_vol == cdv) {
+			spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+			_NW(tpv_cdv_preempted,
+			    "TPV: @STR tearing down due to parent CDV preempt",
+			    tpv->tpv_name);
+			nvmeibc_tpv_detach(tpv);
+			goto again;
+		}
+	}
+	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+}
+
 /* ── Allocator helpers ─────────────────────────────────────────────────── */
 
 /*

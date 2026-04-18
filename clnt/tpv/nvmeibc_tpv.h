@@ -402,7 +402,29 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					u64 allocator_size_gb,
 					bool sync_flush);
 
+/*
+ * Detach a TPV. MUST be idempotent (callable more than once per TPV without
+ * harm) — both the CDV-preempted hook (nvmeibc_tpv_handle_cdv_preempted) and
+ * the subsequent management-driven DetachVolumes path can invoke this. The
+ * body gates mutating work on the TPV state (TPV_DETACHING / TPV_DETACHED);
+ * a second entry observes the transition and returns without re-running
+ * teardown. See TPV_PerClientCDVPreemption.md §2.10.5 "`nvmeibc_tpv_detach`
+ * must be idempotent."
+ */
 void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv);
+
+/*
+ * Per-client CDV preempt cleanup barrier (TPV_PerClientCDVPreemption.md §2.10).
+ *
+ * Called when the parent CDV's block device enters NCBD_PREEMPTED, either
+ * because TOMA terminated this client's reg_ctx on the CDV or because a
+ * REGISTER was rejected with BELOW_CDV_FLOOR. Walks the per-CDV TPV list and
+ * tears down every TPV whose cdv_vol points to this CDV: extent_maps
+ * discarded, cdv_alloc_work cancelled, parked bios failed with -EIO, gendisk
+ * unregistered. Without this cleanup, stale CDV offsets remain in memory and
+ * a re-attached client could replay them — defeating the preempt.
+ */
+void nvmeibc_tpv_handle_cdv_preempted(const struct nvmeibc_volume *cdv);
 
 /* Handle UpdateVolume MCS: grow virtual size and update gendisk capacity. */
 void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes);

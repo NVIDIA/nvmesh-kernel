@@ -1157,6 +1157,20 @@ struct generic_CMD_params_ctx {
 	int								blockSize;
 	int								metadataSize;
 	struct nvmeibt_urn_uuid			dbUUID;
+	/*
+	 * preemptClientFromCDV fields (TPV_PerClientCDVPreemption.md §2.10).
+	 * Kept OUTSIDE the sibling union so parsing cannot race with
+	 * cdv_free_all.cdv_uuid at the same offset. The CDV UUID itself still
+	 * lives in cdv_free_all.cdv_uuid (shared key "cdvUUID"); these fields
+	 * carry the preempt-specific payload.
+	 *
+	 * preempt_client_id is the client's hostname — matched against the
+	 * registrant_node_id.str field on nvmeibt_registrant_ctx during the
+	 * termination walk. It is NOT a uint64 handle — TOMA's
+	 * client_messaging_handle is opaque to management.
+	 */
+	char							preempt_client_id[NVMEIBT_CDV_HOSTNAME_LEN];
+	uint64_t						preempt_new_floor;
 	union {
 		struct report_disks_t {
 			struct resend_report_disk_ctx	arr[NVMEIBT_MAX_N_DISKS_PER_NODE];
@@ -1413,6 +1427,16 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 				CMD_params->attach_sat_resp.request_id = (uint64_t)strtoull(payload_kv->value->str, NULL, 10);
 			} else if (!strcmp(payload_kv->key, "allocatorGeneration")) {
 				CMD_params->attach_sat_resp.allocator_generation = (uint64_t)payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "clientID")) {
+				/* preemptClientFromCDV: clientID is a client hostname string
+				 * (matches nvmeibt_registrant_ctx.registrant_node_id.str).
+				 * Top-level field outside the sibling union. */
+				nvmeibt_strlcpy(CMD_params->preempt_client_id, payload_kv->value->str, sizeof(CMD_params->preempt_client_id));
+			} else if (!strcmp(payload_kv->key, "newFloor")) {
+				CMD_params->preempt_new_floor = (uint64_t)payload_kv->value->num;
+			/* cdvID (CDV name) is only used for logging on the management side;
+			 * no need to parse here. The authoritative cdvUUID is parsed into
+			 * cdv_free_all.cdv_uuid (shared for all CDV-addressed messages). */
 			} else {
 				N_Tf(__AUTOID__, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
@@ -2774,6 +2798,30 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 			nvmeibt_cdv_alloc_free_all_for_tpv(cfa->cdv_uuid, cfa->tpv_uuid,
 							   cfa->allocator_size_gb,
 							   cfa->cdv_extent_size_mb);
+		}
+	} else if (strcmp(messageType_params->messageType, "preemptClientFromCDV") == 0) {
+		uint32_t terminated = 0;
+		int prv;
+		/* CDV UUID is parsed (shared key "cdvUUID") into cdv_free_all.cdv_uuid.
+		 * preempt-specific fields are top-level in generic_CMD_params_ctx to
+		 * avoid union-offset races. */
+		const char *cdv_uuid  = CMD_params->cdv_free_all.cdv_uuid;
+		const char *client_id = CMD_params->preempt_client_id;
+		const uint64_t new_floor = CMD_params->preempt_new_floor;
+
+		N_If(cdv_preempt_cmd,
+		     "CDV: preemptClientFromCDV cdv=@STR client=@STR floor=@LLU",
+		     cdv_uuid, client_id, new_floor);
+
+		if (cdv_uuid[0] == '\0' || client_id[0] == '\0') {
+			N_Ef(cdv_preempt_cmd_bad, "CDV: preemptClientFromCDV missing cdvUUID or clientID; ignoring");
+			nvmeibt_cdv_alloc_send_preempt_response(cdv_uuid, client_id, new_floor,
+								false, 0, "missing_field");
+		} else {
+			prv = nvmeibt_cdv_alloc_preempt_client(cdv_uuid, client_id, new_floor, &terminated);
+			nvmeibt_cdv_alloc_send_preempt_response(cdv_uuid, client_id, new_floor,
+								prv == 0, terminated,
+								prv == 0 ? NULL : "handler_error");
 		}
 	} else if (strcmp(messageType_params->messageType, "attachSatelliteResponse") == 0) {
 		const struct attach_satellite_resp_t *asr = &CMD_params->attach_sat_resp;

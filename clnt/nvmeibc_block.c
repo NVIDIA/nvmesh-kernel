@@ -11,6 +11,8 @@
 #include "block/nvmeibc_block_common.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "nvmeibc_disk_hooks.h"
+#include "tpv/nvmeibc_tpv.h"    /* nvmeibc_tpv_handle_cdv_preempted */
+#include "nvmeibc_icore_ops.h"
 #include "block/nvmeibc_block_api_conf.h"
 #include "nvmeibc_main.h"		// Configuration/cci_api/self_detach etc
 #include "nvmeibc_common.h"
@@ -1041,8 +1043,10 @@ bool nvmeibc_block_update_status(struct nvmeibc_block_device* dev, char reason)
 	}
 
 	case 'P': { /* IO was preempted */
+		bool newly_preempted;
 		spin_lock_irqsave(&dev->dp.resub.lock, flags);
-		if (!nvmeibc_block_status_is_detaching(dev->status) && !nvmeibc_block_status_is_preempted(dev->status)) {
+		newly_preempted = (!nvmeibc_block_status_is_detaching(dev->status) && !nvmeibc_block_status_is_preempted(dev->status));
+		if (newly_preempted) {
 			dev->status = NCBD_PREEMPTED;							// Appears in device status file only can not overwrite detaching
 			// block_api_os_stop_accepting_kernel_io(dev->os, 'D');	// Todo: Consider, currently detach will do that
 			dev->max_retry_jiffies = HZ / 100;	/* Autofail all existing IOs almost immediately */
@@ -1051,6 +1055,15 @@ bool nvmeibc_block_update_status(struct nvmeibc_block_device* dev, char reason)
 		}
 		spin_unlock_irqrestore(&dev->dp.resub.lock, flags);
 		nvmeibc_io_resubmitter_wakeup(&dev->dp.resub);
+		/*
+		 * Per-client CDV preempt cleanup barrier (TPV_PerClientCDVPreemption.md §2.10).
+		 * If this device is a CDV that was just preempted, tear down every TPV that
+		 * references it so no stale CDV offsets remain in the TPV extent_map. The
+		 * helper is a no-op when dev->volume is not a CDV (no matching TPV
+		 * cdv_vol in nvmeibc_tpv_active_list). Called outside the spinlock.
+		 */
+		if (newly_preempted)
+			nvmeibc_tpv_handle_cdv_preempted(dev->volume);
 		break;
 	}
 

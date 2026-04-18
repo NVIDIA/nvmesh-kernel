@@ -1630,6 +1630,25 @@ static void __do_on_toma_not_ready(struct nvmeibc_subscription_ctx* tr, struct n
 	} else if (pl->hdr.reason == NVMEIBT_CLIENT_TR_REASON_LOCKID_MESS) {
 		/* Very Bad, What todo here??? */
 		_NTTR(trace_topology_do_on_toma_not_ready, "got LOCKID_MESS");
+	} else if (pl->hdr.reason == NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR) {
+		/*
+		 * Per-client CDV preempt: TOMA rejected our REGISTER because our
+		 * reservation_mode_version is below the CDV's current admission
+		 * floor (TPV_PerClientCDVPreemption.md §2.10). Management has
+		 * evicted this client from the CDV. Treat like NCBD_PREEMPTED:
+		 * transition the CDV device to preempted, which triggers the
+		 * cleanup barrier in nvmeibc_block.c (nvmeibc_tpv_handle_cdv_preempted)
+		 * to tear down every TPV that references this CDV. The client's
+		 * management agent observes the DB-side detach and completes
+		 * local cleanup via the normal DetachVolumes / re-attach flow.
+		 */
+		_NWTR(w_on_toma_below_cdv_floor,
+		      "REGISTER refused BELOW_CDV_FLOOR: CDV admission floor has advanced past our cached version");
+		if (seg) {
+			struct nvmeibc_block_device *bdev = nvmeibc_disk_seg_to_bdev(seg);
+			if (bdev)
+				nvmeibc_block_update_status(bdev, 'P');
+		}
 	}
 ignore_msg:
 	spin_unlock_irqrestore(&nt->lock, flags);

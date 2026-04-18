@@ -21,6 +21,8 @@
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
 #include "nvmeibt_praid_basics.h"	/* struct nvmeibt_praid_topo_ctx (field access) */
+#include "nvmeibt_disk_segment.h"	/* struct nvmeibt_seg_lot (praid_lot field access) */
+#include "nvmeibt_praid.h"		/* nvmeibt_praid_get_blkdev */
 #include "nvmeibt_register.h"		/* struct nvmeibt_register_msg, nvmeibt_register_send_msg_to_registrant */
 #include "nvmeibt_toma.h"		/* nvmeibt_toma_send_msg_to_client, nvmeibt_global_get_global */
 #include "nvmeibt_global.h"		/* struct nvmeibt_topology (full definition) */
@@ -1330,6 +1332,7 @@ static int cdv_alloc_insert(const char *cdv_uuid,
 		alloc->state        = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
 		XDLIST_HEAD_INIT(&alloc->extents);
 		alloc->n_allocated = 0;
+		pthread_mutex_init(&alloc->handler_lock, NULL);
 		nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
 		N_Tf(cdv_alloc_new_cdv, "CDV-alloc: new per-CDV allocator cdv=@STR",
 		     cdv_uuid);
@@ -1369,6 +1372,269 @@ static int cdv_alloc_insert(const char *cdv_uuid,
 }
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
+
+/*
+ * ── Per-client CDV preempt (§2.10) ──────────────────────────────────────────
+ */
+
+struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup(const char *cdv_uuid)
+{
+	return nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+}
+
+struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup_or_create_with_floor(
+		const char *cdv_uuid, uint64_t initial_floor)
+{
+	struct nvmeibt_cdv_alloc *alloc;
+
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (alloc) {
+		/* Seed floor if this is our first knowledge of the CDV. */
+		if (!alloc->admission_floor_seeded) {
+			alloc->admission_floor = initial_floor;
+			alloc->admission_floor_seeded = true;
+		} else {
+			alloc->admission_floor = (initial_floor > alloc->admission_floor)
+				? initial_floor : alloc->admission_floor;
+		}
+		return alloc;
+	}
+
+	alloc = NNVMEIBT_BM_CALLOC(cdv_alloc_preempt_create, sizeof(*alloc));
+	if (!alloc) {
+		N_Ef(cdv_alloc_preempt_oom,
+		     "CDV-alloc: preempt create-on-the-fly OOM cdv=@STR", cdv_uuid);
+		return NULL;
+	}
+	strncpy(alloc->cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	alloc->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	alloc->cdv_fd       = -1;
+	alloc->satellite_fd = -1;
+	alloc->state        = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
+	XDLIST_HEAD_INIT(&alloc->extents);
+	pthread_mutex_init(&alloc->handler_lock, NULL);
+	alloc->admission_floor        = initial_floor;
+	alloc->admission_floor_seeded = true;
+	nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
+	N_If(cdv_alloc_preempt_created,
+	     "CDV-alloc: created-on-preempt cdv=@STR floor=@LLU",
+	     cdv_uuid, initial_floor);
+	return alloc;
+}
+
+void nvmeibt_cdv_alloc_seed_floor(struct nvmeibt_cdv_alloc *alloc,
+				   uint64_t floor, bool from_topology)
+{
+	if (!alloc)
+		return;
+	/*
+	 * Monotonic max-merge. This is safe to call lock-free because the u64
+	 * write is atomic on all supported architectures and readers do a
+	 * single-value compare. The only correctness constraint is monotonicity,
+	 * which max_t guarantees.
+	 */
+	if (!alloc->admission_floor_seeded) {
+		alloc->admission_floor = floor;
+		alloc->admission_floor_seeded = true;
+		N_If(cdv_alloc_floor_seeded,
+		     "CDV-alloc: floor seeded cdv=@STR floor=@LLU src=@STR",
+		     alloc->cdv_uuid, floor,
+		     from_topology ? "topology" : "attach");
+	} else if (floor > alloc->admission_floor) {
+		alloc->admission_floor = floor;
+		N_If(cdv_alloc_floor_raised,
+		     "CDV-alloc: floor raised cdv=@STR floor=@LLU src=@STR",
+		     alloc->cdv_uuid, floor,
+		     from_topology ? "topology" : "attach");
+	}
+}
+
+/*
+ * nvmeibt_cdv_alloc_preempt_client — raise the CDV's admission floor and
+ * terminate the named client's reg_ctx on every local CDV segment.
+ *
+ * Ordering invariant (TPV_PerClientCDVPreemption.md §2.10.4):
+ *   1. Raise admission_floor FIRST under handler_lock — a concurrent REGISTER
+ *      predicate (check_cdv_admission_floor) that has already taken
+ *      handler_lock will observe the new floor; the reverse order would let
+ *      a retry REGISTER re-register at the old version in the window between
+ *      the two steps.
+ *   2. Walk every seg_active belonging to this CDV via
+ *      nvmeibt_seg_active_get_cdv_alloc pointer-equality filter, and call
+ *      nvmeibt_register_terminate_reg_ctx on each active registrant whose
+ *      registrant_node_id.str matches client_id.
+ *
+ * Linear inner-walk is intentional: preempt is a control-plane event, not
+ * I/O-path. A dedicated by-client hash index was considered and rejected in
+ * §2.10.5 — the register/unregister maintenance cost isn't justified by the
+ * preempt-path savings.
+ */
+int nvmeibt_cdv_alloc_preempt_client(const char *cdv_uuid,
+				     const char *client_id,
+				     uint64_t    new_floor,
+				     uint32_t   *out_terminated)
+{
+	struct nvmeibt_cdv_alloc     *alloc;
+	struct nvmeibt_local_disk    *local_disk;
+	struct nvmeibt_seg_active    *seg_active;
+	struct nvmeibt_registrant_ctx *reg_ctx;
+	uint32_t                      terminated = 0;
+
+	if (out_terminated)
+		*out_terminated = 0;
+
+	alloc = nvmeibt_cdv_alloc_lookup_or_create_with_floor(cdv_uuid, new_floor);
+	if (!alloc)
+		return -ENOMEM;
+
+	pthread_mutex_lock(&alloc->handler_lock);
+
+	/* Step 1: raise floor FIRST (order invariant, §2.10.4). */
+	if (new_floor > alloc->admission_floor)
+		alloc->admission_floor = new_floor;
+	/* admission_floor_seeded is guaranteed true by lookup_or_create_with_floor. */
+
+	/*
+	 * Step 2: terminate this client's reg_ctx on every CDV segment served
+	 * by this TOMA. Outer walk: every local_disk → every seg_active; filter
+	 * to segments of the target CDV via the helper (pointer-equality against
+	 * our alloc entry is correct — cdv_alloc_hash returns the same pointer
+	 * for the same UUID key). Inner walk: linear scan of the seg's active
+	 * registrants matching on registrant_node_id.str (hostname); a dedicated
+	 * by-client hash was considered and rejected per §2.10.5 (cost-of-
+	 * maintenance > benefit-on-this-rare-control-plane-path).
+	 *
+	 * NVMEIB_HASH_FOREACH is safe against in-iteration deletion (see the
+	 * macro comment in common/nvmeib_hash.h). terminate_reg_ctx removes
+	 * the entry from active_registrants_hash_by_handle, which is exactly
+	 * what the macro is designed to tolerate.
+	 */
+	NVMEIB_HASH_FOREACH(local_disk,
+			nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
+		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
+			if (nvmeibt_seg_active_get_cdv_alloc(seg_active) != alloc)
+				continue;
+			NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_handle) {
+				if (strcmp(reg_ctx->registrant_node_id.str, client_id) != 0)
+					continue;
+				nvmeibt_register_terminate_reg_ctx(reg_ctx,
+					/*is_deleting_seg_active=*/false,
+					NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE,
+					/*is_move_from_active_reg_hash_to_stale_reg_hash=*/false);
+				terminated++;
+			}
+		}
+	}
+
+	if (out_terminated)
+		*out_terminated = terminated;
+
+	pthread_mutex_unlock(&alloc->handler_lock);
+
+	N_If(cdv_alloc_preempt_done,
+	     "CDV-alloc: preempt cdv=@STR client=@STR floor=@LLU terminated=@UINT",
+	     cdv_uuid, client_id, alloc->admission_floor, terminated);
+	return 0;
+}
+
+struct nvmeibt_cdv_alloc *nvmeibt_seg_active_get_cdv_alloc(
+		struct nvmeibt_seg_active *seg_active)
+{
+	/*
+	 * Navigate from the segment to its parent CDV via the applied topology:
+	 *   seg_active
+	 *     → applied_seg_lot              (nvmeibt_seg_active_get_applied_seg_lot)
+	 *       → praid_lot                   (seg_lot->praid_lot)
+	 *         → my_praid                  (praid_lot->my_praid)
+	 *           → blkdev                  (nvmeibt_praid_get_blkdev; follows
+	 *                                      praid_mgmt.its_chunk.its_block_device)
+	 *             → from_config.is_cdv    (CDV predicate)
+	 *             → urn_uuid.str          (CDV UUID — hash key in cdv_alloc_hash)
+	 *
+	 * Returns NULL for non-CDV segments or when any link in the chain is
+	 * not yet established (e.g., topology not applied yet). A NULL return
+	 * causes check_cdv_admission_floor to admit the REGISTER, matching
+	 * pre-feature behavior — safe because non-CDV volumes have no floor
+	 * semantics, and a segment without an applied topology can't have a
+	 * live reg_ctx to terminate.
+	 */
+	struct nvmeibt_seg_lot       *seg_lot;
+	struct nvmeibt_praid_lot     *praid_lot;
+	struct nvmeibt_praid         *praid;
+	struct nvmeibt_block_device  *blkdev;
+
+	if (!seg_active)
+		return NULL;
+
+	seg_lot = nvmeibt_seg_active_get_applied_seg_lot(seg_active);
+	if (!seg_lot)
+		return NULL;
+
+	praid_lot = seg_lot->praid_lot;
+	if (!praid_lot)
+		return NULL;
+
+	praid = praid_lot->my_praid;
+	if (!praid)
+		return NULL;
+
+	blkdev = nvmeibt_praid_get_blkdev(praid);
+	if (!blkdev || !blkdev->from_config.is_cdv)
+		return NULL;
+
+	return nvmeibt_cdv_alloc_lookup(blkdev->urn_uuid.str);
+}
+
+void nvmeibt_cdv_alloc_send_preempt_response(const char *cdv_uuid,
+					     const char *client_id,
+					     uint64_t    new_floor,
+					     bool        success,
+					     uint32_t    terminated,
+					     const char *error)
+{
+	struct nvmeibt_Str *json;
+
+	json = NNVMEIBT_STR_ALLOC(cdv_preempt_resp_json_alloc);
+	if (!json) {
+		N_Ef(cdv_preempt_resp_oom,
+		     "CDV-alloc: preemptClientFromCDVResponse OOM cdv=@STR", cdv_uuid);
+		return;
+	}
+
+	nvmeibt_Str_sprintf(json,
+		"{" KAFKA_PRODUCER_MSG_HEADER_FMT
+		"\"payload\": {"
+		"\"tomaID\": \"%s\", "
+		"\"cdvUUID\": \"%s\", "
+		"\"clientID\": \"%s\", "
+		"\"newFloor\": %llu, "
+		"\"success\": %s, "
+		"\"terminatedRegistrants\": %u"
+		"%s%s%s"
+		"}}",
+		KAFKA_PRODUCER_MSG_HEADER_VAR("preemptClientFromCDVResponse", 1),
+		nvmeibt_get_my_hostname(),
+		cdv_uuid,
+		client_id ? client_id : "",
+		(unsigned long long)new_floor,
+		success ? "true" : "false",
+		terminated,
+		error ? ", \"error\": \"" : "",
+		error ? error : "",
+		error ? "\"" : "");
+
+	N_If(cdv_preempt_resp_send,
+	     "CDV-alloc: preempt response cdv=@STR client=@STR floor=@LLU ok=@INT term=@UINT",
+	     cdv_uuid, client_id ? client_id : "", new_floor, (int)success, terminated);
+
+	nvmeibt_kafka_outgoing_msgs_queue_add(
+		cdv_uuid,
+		nvmeibt_Str_str(json),
+		nvmeibt_Str_strlen(json) + 1,
+		NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+
+	NNVMEIBT_STR_FREE(cdv_preempt_resp_json_free, json);
+}
 
 int nvmeibt_cdv_alloc_add_extent(const char *cdv_uuid,
 				 uint64_t    extent_index,
@@ -1652,6 +1918,7 @@ static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
 	alloc->satellite_fd = -1;
 	alloc->state        = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
 	XDLIST_HEAD_INIT(&alloc->extents);
+	pthread_mutex_init(&alloc->handler_lock, NULL);
 	nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
 	return alloc;
 }
