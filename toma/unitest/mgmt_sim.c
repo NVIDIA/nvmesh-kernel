@@ -147,6 +147,37 @@ void mgmt_sim_send_add_volume(int vol_idx) {
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, rv, false);
 }
 
+void mgmt_sim_send_volume_update(int vol_idx, int version,
+	const char *vol_status, const char *vol_action,
+	const struct mgmt_sim_vol_seg_update *segs, int n_segs) {
+	#define BUF_ADD(...) rv += snprintf(&buf[rv], msg_size-rv, __VA_ARGS__)
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	const struct sb_volume_conf *V = &m->cfg->vols[vol_idx];
+	const struct sb_chunk_conf  *C = &V->chunks[0];
+	const struct sb_praid_conf  *P = &C->raids[0];
+	const size_t msg_size = 2048;
+	char *buf = malloc(msg_size);
+	int rv = 0, i;
+	BUG_ON(vol_idx >= m->cfg->n_vols || n_segs <= 0);
+	BUF_ADD("{\"messageType\":\"updateVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"version\":%d,\"name\":\"%s\",\"blockSize\":4096,",
+		V->name, V->uuid, version, V->name);
+	BUF_ADD("\"lockServer\":{\"maxNOwners\":%u,\"type\":4,\"locksetShift\":-1},\"blocks\":%u,\"RAIDLevel\":\"Mirrored RAID-1\",\"numberOfMirrors\":%d,\"stripeSize\":32,\"stripeWidth\":%u,",
+		P->P+1, V->num_blocks, P->P, C->n_raids);
+	BUF_ADD("\"status\":\"%s\",\"action\":\"%s\",\"relativeRebuildPriority\":10,\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null,\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,",
+		vol_status, vol_action);
+	BUF_ADD("\"chunks\":[{\"uuid\":\"" UUID_from_U32 "\",\"vlbs\":%u,\"vlbe\":%u,\"pRaids\":[{\"uuid\":\"" UUID_from_U32 "\",\"activated\":true,\"stripeIndex\":0,\"zone\":\"%d\",\"diskSegments\":[",
+		C->uuid, C->vlba_start, C->vlba_end, P->uuid, m->cfg->zone_idx);
+	for (i = 0; i < n_segs; i++) {
+		const struct sb_seg_conf *ps = &P->segs[segs[i].seg_idx];
+		BUF_ADD("{\"uuid\":\"" UUID_from_U32 "\",\"lbs\":%u,\"lbe\":%u,\"type\":\"data\",\"pRaidIndex\":%u,\"pRaidTypeIndex\":0,\"status\":\"%s\",\"diskUUID\":\"" UUID_from_U32 "\"},",
+			ps->uuid, ps->block_start, ps->block_end, segs[i].praid_idx, segs[i].status, ps->disk_uuid);
+	}
+	rv--;	// Remove the trailing ','
+	BUF_ADD("]}]}]}}");
+	N_IMf(__AUTOID__, "vol=@DEV_NAME sending updateVolume v@INT status=@STR action=@STR n_segs=@INT @INT[b]", V->name, version, vol_status, vol_action, n_segs, rv);
+	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, rv, false);
+}
+
 static void __send_msg_volume_del(int vol_idx, bool is_completed) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	const struct sb_volume_conf *V = &m->cfg->vols[vol_idx];
@@ -491,6 +522,18 @@ bool mgmt_sim_v_r1_praid_reported(void) {
 bool mgmt_sim_v_r1_seg_zeroing_seen(void)        { return g_mgmt_sim->v_r1_seg_zeroing_progress_seen; }
 bool mgmt_sim_v_r1_praid_deprecated(void)         { return g_mgmt_sim->v_r1_praid_deprecated; }
 bool mgmt_sim_v_r1_praid_absent_from_report(void) { return g_mgmt_sim->v_r1_praid_absent_from_report; }
+
+/* Condition flags above latch on state observed from the *latest* report.
+ * Scenarios that re-enter a volume's lifecycle (e.g. eviction rewrites the
+ * topology) need a way to drop stale flags before waiting on new ones.
+ */
+void mgmt_sim_reset_v_r1_report_state(void) {
+	struct mgmt_sim_state *m = g_mgmt_sim;
+	m->v_r1_praid_reported = false;
+	m->v_r1_seg_zeroing_progress_seen = false;
+	m->v_r1_praid_deprecated = false;
+	m->v_r1_praid_absent_from_report = false;
+}
 
 
 /******************************************************************************/

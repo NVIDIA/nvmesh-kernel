@@ -33,6 +33,25 @@ void mgmt_sim_send_msg_latest_hw_config(void);
 void mgmt_sim_send_add_volume(int vol_idx);
 void mgmt_sim_send_delete_volume_r1(void);
 void mgmt_sim_send_delete_volume_completed_r1(void);
+
+/** Per-segment spec for mgmt_sim_send_volume_update(). */
+struct mgmt_sim_vol_seg_update {
+	int seg_idx;			// index into sb_praid_conf.segs[]
+	int praid_idx;			// pRaidIndex field emitted in JSON
+	const char *status;		// e.g. "normal" | "markedForRebuild" | "markedForRebuild_old"
+};
+
+/** Send updateVolume with an explicit per-segment status list and an
+ *  explicit payload version / volume status / volume action.  The scenario
+ *  uses this to emit the v2 (replacement added) and v3 (deprecated removed)
+ *  updates that drive eviction. */
+void mgmt_sim_send_volume_update(int vol_idx, int version,
+	const char *vol_status, const char *vol_action,
+	const struct mgmt_sim_vol_seg_update *segs, int n_segs);
+
+/** Clear cached condition flags derived from V_R1 pRaidReports so a
+ *  subsequent scenario phase starts from a known baseline. */
+void mgmt_sim_reset_v_r1_report_state(void);
 void mgmt_sim_send_praid_report_req(const u32 praid_uuid);
 void mgmt_sim_send_volume_exclusive_attach_notify(const u32 volume_uuid);
 void mgmt_sim_send_disk_report_req(const u32 disk_idx);
