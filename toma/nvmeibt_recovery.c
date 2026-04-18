@@ -1267,6 +1267,122 @@ void nvmeibt_attach_vol_for_encryption(struct nvmeibt_block_device *vol, char *s
 							  MAGIC_CONFIG_SHADOW_TOKEN, NORMAL_VOLUME, RECOVERY_ATTACH_CMD_ATTACH);
 }
 
+/*
+ * TPV-encryption exec-completion callback.
+ *
+ * Used by both the server-side-vol path (nvmeibt_start_encrypt_for_tpv) and
+ * the namebased path (nvmeibt_start_encrypt_for_tpv_by_name). When origin_vol
+ * is NULL (namebased), the name and UUID come from ep->tpv_vol_name /
+ * ep->tpv_urn_uuid.  When origin_vol is non-NULL, use it directly.
+ * Either way, do NOT free the vol or the origin_vol — management owns its
+ * lifecycle and will detach after receiving the Kafka response.
+ */
+static void tpv_encrypt_after_exec_cb(struct run_exec_on_blkdev_ctx *exec_ctx)
+{
+	struct nvmeibt_encrypt_params	*ep = container_of(exec_ctx, struct nvmeibt_encrypt_params, exec_ctx);
+	struct nvmeibt_block_device		*vol = ep->origin_vol;
+	const char						*bdev_name  = vol ? vol->from_config.client_blkdev_name : ep->tpv_vol_name;
+	const struct nvmeibt_urn_uuid	*resp_uuid  = vol ? &vol->urn_uuid : &ep->tpv_urn_uuid;
+
+	NFIN;
+	NVMEIBT_LONG_TRACE_WRAPPER(tpv_so1, 1, "STDOUT", nvmeibt_Str_str(exec_ctx->child_stdout_buf), nvmeibt_Str_strlen(exec_ctx->child_stdout_buf));
+	NVMEIBT_LONG_TRACE_WRAPPER(tpv_se1, 1, "STDERR", nvmeibt_Str_str(exec_ctx->child_stderr_buf), nvmeibt_Str_strlen(exec_ctx->child_stderr_buf));
+	sanitize_str(&exec_ctx->child_stdout_buf);
+	sanitize_str(&exec_ctx->child_stderr_buf);
+
+	if (exec_ctx->toma_rv)
+		nvmeibt_kafka_send_encrypt_cmd_response(bdev_name, resp_uuid, ep->encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 1, nvmeibt_Str_str(exec_ctx->child_stderr_buf));
+	else if (exec_ctx->exec_rv)
+		nvmeibt_kafka_send_encrypt_cmd_response(bdev_name, resp_uuid, ep->encrypt_idx, ENCRYPT_CMD_RESPONSE_CMD_ERR, is_cryptsetup_error_retryable(exec_ctx->exec_rv), nvmeibt_Str_str(exec_ctx->child_stderr_buf));
+	else
+		nvmeibt_kafka_send_encrypt_cmd_response(bdev_name, resp_uuid, ep->encrypt_idx, ENCRYPT_CMD_RESPONSE_SUCCESS, 0, "");
+
+	NNVMEIBT_STR_FREE(tpv_so2, exec_ctx->child_stdout_buf);
+	NNVMEIBT_STR_FREE(tpv_se2, exec_ctx->child_stderr_buf);
+
+	if (vol) vol->encrypt_params = NULL;
+	nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(ep->kafka_offset);
+	NNVMEIBT_TOMA_FREE(tpv_ep, ep);
+	NFOUT;
+}
+
+void nvmeibt_start_encrypt_for_tpv(struct nvmeibt_block_device *vol, struct nvmeibt_encrypt_params *encrypt_params)
+{
+	struct run_exec_on_blkdev_ctx	*exec_ctx = &encrypt_params->exec_ctx;
+
+	N_Tf(tpv_enc_start, "vol=@STR", vol->from_config.client_blkdev_name);
+	exec_ctx->blkdev = vol;
+	encrypt_params->origin_vol = vol;
+	vol->encrypt_params = encrypt_params;
+
+	exec_ctx->run_exec_on_blkdev_cb_func = tpv_encrypt_after_exec_cb;
+	exec_ctx->child_stdout_buf = NNVMEIBT_STR_ALLOC(tpv_so_al);
+	exec_ctx->child_stderr_buf = NNVMEIBT_STR_ALLOC(tpv_se_al);
+	exec_ctx->timeout_ms = 100000;
+	nvmeibt_run_exec_on_blkdev(exec_ctx);
+}
+
+/*
+ * Namebased TPV encryption path.  Called from start_encrypt_action() when
+ * nvmeibt_block_device_get_block_device_by_id() returns NULL (TPVs are not
+ * in TOMA's server-side block_devices_hash_by_uuid because they carry no
+ * physical disk chunks).  Uses the volumeName and volumeUUID parsed from the
+ * Kafka payload.  cryptsetup runs against /dev/nvmesh-tpv/<tpv_vol_name>,
+ * which exists because management attached the TPV to this TOMA node's client
+ * kernel as EXCLUSIVE_READ_WRITE before firing the initEncryption Kafka.
+ */
+bool nvmeibt_start_encrypt_for_tpv_by_name(const char *vol_name, const union nvmeib_uuid *vol_uuid,
+											int encrypt_idx, const char *encrypt_args,
+											const char *old_passphrase, const char *new_passphrase,
+											int64_t kafka_offset)
+{
+	const struct nvmeibt_urn_uuid	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
+	struct nvmeibt_encrypt_params	*encrypt_params;
+	struct run_exec_on_blkdev_ctx	*exec_ctx;
+
+	N_If(tpv_by_name, "TPV namebased encryption: vol='@STR'", vol_name);
+
+	encrypt_params = NNVMEIBT_TOMA_CALLOC(tpv_ep_alloc, 1, sizeof(*encrypt_params));
+	encrypt_params->kafka_offset = kafka_offset;
+	encrypt_params->encrypt_idx  = encrypt_idx;
+	encrypt_params->origin_vol   = NULL;
+	nvmeibt_strlcpy(encrypt_params->tpv_vol_name, vol_name, sizeof(encrypt_params->tpv_vol_name));
+	encrypt_params->tpv_urn_uuid = urn_uuid;
+
+	snprintf(encrypt_params->old_passphrase, sizeof(encrypt_params->old_passphrase), "%s", old_passphrase);
+	snprintf(encrypt_params->new_passphrase, sizeof(encrypt_params->new_passphrase), "%s", new_passphrase);
+	encrypt_params->old_passphrase_file_name[0] = '\0';
+	if (old_passphrase[0]) {
+		snprintf(encrypt_params->old_passphrase_file_name, sizeof(encrypt_params->old_passphrase_file_name),
+				 PASSPHRASE_DIR_NAME "/old_passphrase_%s", vol_name);
+	}
+	encrypt_params->new_passphrase_file_name[0] = '\0';
+	if (new_passphrase[0]) {
+		snprintf(encrypt_params->new_passphrase_file_name, sizeof(encrypt_params->new_passphrase_file_name),
+				 PASSPHRASE_DIR_NAME "/new_passphrase_%s", vol_name);
+	}
+
+	exec_ctx = &encrypt_params->exec_ctx;
+	exec_ctx->blkdev = NULL; /* no server-side vol — callback uses tpv_vol_name/tpv_urn_uuid */
+	if (old_passphrase[0] && new_passphrase[0]) {
+		snprintf(exec_ctx->executable_str, sizeof(exec_ctx->executable_str),
+				 "cryptsetup %s --key-file=%.256s /dev/nvmesh-tpv/%s %.256s",
+				 encrypt_args, encrypt_params->old_passphrase_file_name, vol_name, encrypt_params->new_passphrase_file_name);
+	} else {
+		const char *key_path = old_passphrase[0] ? encrypt_params->old_passphrase_file_name : encrypt_params->new_passphrase_file_name;
+		snprintf(exec_ctx->executable_str, sizeof(exec_ctx->executable_str),
+				 "cryptsetup %s --key-file=%.256s /dev/nvmesh-tpv/%s",
+				 encrypt_args, key_path, vol_name);
+	}
+
+	exec_ctx->run_exec_on_blkdev_cb_func = tpv_encrypt_after_exec_cb;
+	exec_ctx->child_stdout_buf = NNVMEIBT_STR_ALLOC(tpv_so_n);
+	exec_ctx->child_stderr_buf = NNVMEIBT_STR_ALLOC(tpv_se_n);
+	exec_ctx->timeout_ms = 100000;
+	nvmeibt_run_exec_on_blkdev(exec_ctx);
+	return 0; /* 0 = started (same convention as start_encrypt_action) */
+}
+
 void nvmeibt_detach_vol_for_encryption(struct run_exec_on_blkdev_ctx *exec_ctx)
 {
 	// struct nvmeibt_encrypt_params					*encrypt_params;
@@ -1464,11 +1580,23 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 	NFIN;
 	entry = container_of(wq_entry, struct run_exec_on_blkdev_wq_entry, wq_entry);
 	blkdev = entry->run_exec_on_blkdev_ctx->blkdev;
-	N_Tf(tskoawm, "blkdev=@STR", nvmeibt_blkdev_name(blkdev));
-	encrypt_params = blkdev->encrypt_params;
-	// Wait for the blkdev to show up
-	snprintf(blkdev_path, sizeof(blkdev_path), "/dev/nvmesh/%s", nvmeibt_blkdev_name(blkdev));
-	getnstimeofday(&start_timestamp);
+	if (blkdev) {
+		/* Regular path: derive encrypt_params from blkdev (shadow volume) and
+		 * wait for /dev/nvmesh/<name> to appear. */
+		encrypt_params = blkdev->encrypt_params;
+		snprintf(blkdev_path, sizeof(blkdev_path), "/dev/nvmesh/%s", nvmeibt_blkdev_name(blkdev));
+	} else {
+		/* TPV namebased encryption (design/TPV_EncryptionPlan.md §Phase 3):
+		 * no server-side blkdev.  Derive encrypt_params from the embedded
+		 * exec_ctx via container_of, and wait for /dev/nvmesh-tpv/<name>
+		 * (where management attached the TPV to this TOMA node's client
+		 * kernel).  The passphrase-file and spawn logic below is unchanged —
+		 * it operates on encrypt_params only. */
+		encrypt_params = container_of(entry->run_exec_on_blkdev_ctx, struct nvmeibt_encrypt_params, exec_ctx);
+		snprintf(blkdev_path, sizeof(blkdev_path), "/dev/nvmesh-tpv/%s", encrypt_params->tpv_vol_name);
+	}
+	N_Tf(tskoawm, "blkdev=@STR path=@STR", blkdev ? nvmeibt_blkdev_name(blkdev) : encrypt_params->tpv_vol_name, blkdev_path);
+	getnstimeofday_boot(&start_timestamp);
     do {
 		if (stat(blkdev_path, &blkdev_stat) == 0) {
 			if (!is_block_device_stat(blkdev_stat)) {

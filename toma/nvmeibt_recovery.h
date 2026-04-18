@@ -91,6 +91,18 @@ struct timespec nvmeibt_recovery_get_next_timeout_timespec(void);
 void nvmeibt_run_exec_on_blkdev(struct run_exec_on_blkdev_ctx *ctx);
 void nvmeibt_attach_vol_for_encryption(struct nvmeibt_block_device *vol, char *shadow_vol_name, struct nvmeibt_encrypt_params *encrypt_params);
 void nvmeibt_detach_vol_for_encryption(struct run_exec_on_blkdev_ctx *exec_ctx);
+/* TPV path when TOMA found the vol via block_devices_hash_by_uuid (rare, but
+ * kept for completeness). */
+void nvmeibt_start_encrypt_for_tpv(struct nvmeibt_block_device *vol, struct nvmeibt_encrypt_params *encrypt_params);
+/* TPV namebased path: called from start_encrypt_action() when vol == NULL.
+ * TOMA's server-side hash never contains TPVs (chunks:[]).  Uses volumeName
+ * and volumeUUID from the Kafka payload to run cryptsetup against
+ * /dev/nvmesh-tpv/<vol_name> without a vol struct.
+ * Returns 0 on success (exec started), 1 on allocation failure. */
+bool nvmeibt_start_encrypt_for_tpv_by_name(const char *vol_name, const union nvmeib_uuid *vol_uuid,
+											int encrypt_idx, const char *encrypt_args,
+											const char *old_passphrase, const char *new_passphrase,
+											int64_t kafka_offset);
 void nvmeibt_attach_detach_shadow_vol(char *origin_vol_name, bool is_attach, struct nvmeibt_Str *out);
 
 int nvmeibt_recovery_print_status(

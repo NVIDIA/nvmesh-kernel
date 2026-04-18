@@ -194,21 +194,33 @@ again:
  * Without this cleanup, the TPV's extent_map remains in memory and a
  * re-attached client could replay stale CDV offsets, defeating the preempt.
  *
- * Each nvmeibc_tpv_detach() removes the TPV from nvmeibc_tpv_active_list
- * internally, so we restart the search from the list head after each detach.
+ * The block-device status handler invokes us from the siw/RDMA recv path,
+ * which runs in softirq (tasklet) context.  nvmeibc_tpv_detach() eventually
+ * calls del_gendisk() → bdev_mark_dead() → invalidate_bh_lrus() →
+ * on_each_cpu_cond_mask(), which BUG_ON's if called from a non-sleepable
+ * context (kernel/smp.c smp_call_function_many_cond WARN).  So we only
+ * SNAPSHOT the CDV identity here and defer the teardown loop to a workqueue
+ * that runs in process context.  The match is by UUID (string), which keeps
+ * the deferred work safe against the CDV's nvmeibc_volume being torn down
+ * between scheduling and firing.
  */
-void nvmeibc_tpv_handle_cdv_preempted(const struct nvmeibc_volume *cdv)
+struct nvmeibc_tpv_cdv_preempt_ctx {
+	struct work_struct work;
+	char               cdv_uuid[NVMEIBC_BD_UUID_LEN];
+};
+
+static void nvmeibc_tpv_cdv_preempted_work_fn(struct work_struct *work)
 {
+	struct nvmeibc_tpv_cdv_preempt_ctx *ctx =
+		container_of(work, struct nvmeibc_tpv_cdv_preempt_ctx, work);
 	struct nvmeibc_tpv *tpv;
 	unsigned long flags;
-
-	if (!cdv)
-		return;
 
 again:
 	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
 	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
-		if (tpv->cdv_vol == cdv) {
+		if (tpv->cdv_vol &&
+		    strncmp(tpv->cdv_vol->hdr.uuid, ctx->cdv_uuid, NVMEIBC_BD_UUID_LEN) == 0) {
 			spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
 			_NW(tpv_cdv_preempted,
 			    "TPV: @STR tearing down due to parent CDV preempt",
@@ -218,6 +230,33 @@ again:
 		}
 	}
 	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+	kfree(ctx);
+}
+
+void nvmeibc_tpv_handle_cdv_preempted(const struct nvmeibc_volume *cdv)
+{
+	struct nvmeibc_tpv_cdv_preempt_ctx *ctx;
+
+	if (!cdv)
+		return;
+
+	/* Allocate in the caller's (possibly softirq) context.  On OOM the
+	 * teardown is skipped — the CDV floor bump on TOMA still fences any
+	 * further I/O, so this is best-effort cleanup rather than a correctness
+	 * gate.  The TPV will be torn down on the next instance shutdown via
+	 * nvmeibc_tpv_detach_all_for_inst(), or when the TPV's own detach
+	 * lifecycle reaches it. */
+	ctx = kmalloc(sizeof(*ctx), GFP_ATOMIC);
+	if (!ctx) {
+		_NE(tpv_cdv_preempt_nomem,
+		    "CDV @STR preempt: deferred TPV teardown kmalloc failed",
+		    cdv->hdr.uuid);
+		return;
+	}
+
+	memcpy(ctx->cdv_uuid, cdv->hdr.uuid, NVMEIBC_BD_UUID_LEN);
+	INIT_WORK(&ctx->work, nvmeibc_tpv_cdv_preempted_work_fn);
+	schedule_work(&ctx->work);
 }
 
 /* ── Allocator helpers ─────────────────────────────────────────────────── */

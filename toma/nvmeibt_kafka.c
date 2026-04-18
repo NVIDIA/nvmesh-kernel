@@ -1171,6 +1171,12 @@ struct generic_CMD_params_ctx {
 	 */
 	char							preempt_client_id[NVMEIBT_CDV_HOSTNAME_LEN];
 	uint64_t						preempt_new_floor;
+	/* TPV encryption: the volume name from the Kafka payload, parsed so the
+	 * namebased fallback path in start_encrypt_action() can identify the target
+	 * device (/dev/nvmesh-tpv/<name>) when the TOMA server-side
+	 * block_devices_hash_by_uuid has no entry for the TPV (TPVs have chunks:[]
+	 * and are not ingested into the TOMA server's hash). */
+	char							tpv_vol_name[32];
 	union {
 		struct report_disks_t {
 			struct resend_report_disk_ctx	arr[NVMEIBT_MAX_N_DISKS_PER_NODE];
@@ -1382,7 +1388,9 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			} else if (!strcmp(payload_kv->key, "formatType")) {
 				nvmeibt_strlcpy(CMD_params->fmt.formatType, payload_kv->value->str, sizeof(CMD_params->fmt.formatType));
 			} else if (!strcmp(payload_kv->key, "volumeID")) {			// Do nothing, we don't need this param
-			} else if (!strcmp(payload_kv->key, "volumeName")) {		// Do nothing, we don't need this param
+			} else if (!strcmp(payload_kv->key, "volumeName")) {
+				/* Stored for the TPV namebased encryption fallback. */
+				nvmeibt_strlcpy(CMD_params->tpv_vol_name, payload_kv->value->str, sizeof(CMD_params->tpv_vol_name));
 			} else if (!strcmp(payload_kv->key, "volumeUUID")) {
 				nvmeibt_urn_uuid_to_union_uuid(&CMD_params->volumeUUID,(struct nvmeibt_urn_uuid *)(payload_kv->value->str));
 			} else if (!strcmp(payload_kv->key, "reservationMode")) {	// Do nothing, we don't need this param
@@ -2633,6 +2641,13 @@ void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name, const struct 
 	nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*unique_key*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 }
 
+/* Defined in nvmeibt_recovery.c. Runs cryptsetup against /dev/nvmesh-tpv/<name>
+ * using name+uuid from the Kafka payload, without a server-side vol struct. */
+extern bool nvmeibt_start_encrypt_for_tpv_by_name(const char *vol_name, const union nvmeib_uuid *vol_uuid,
+												   int encrypt_idx, const char *encrypt_args,
+												   const char *old_passphrase, const char *new_passphrase,
+												   int64_t kafka_offset);
+
 static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 								 char *encrypt_cmd, char *encrypt_args, char *old_passphrase, char *new_passphrase, int64_t kafka_offset)
 {
@@ -2653,8 +2668,22 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 	}
 	vol = nvmeibt_block_device_get_block_device_by_id(vol_uuid);
 	if (!vol) {
-		const struct nvmeibt_urn_uuid urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
-		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
+		/* TOMA's server-side block_devices_hash_by_uuid does not contain TPVs:
+		 * they have chunks:[] and are never ingested into the server's hash.
+		 * If the Kafka payload carried a volumeName and the corresponding
+		 * /dev/nvmesh-tpv/<name> device exists (TOMA-as-client has the TPV
+		 * attached), run encryption directly against that path.  Otherwise fall
+		 * through to the "Volume doesn't exist" error. */
+		if (CMD_params->tpv_vol_name[0]) {
+			rv = nvmeibt_start_encrypt_for_tpv_by_name(CMD_params->tpv_vol_name, vol_uuid,
+													   encrypt_idx, encrypt_args,
+													   old_passphrase, new_passphrase, kafka_offset);
+			goto out;
+		}
+		{
+			const struct nvmeibt_urn_uuid urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
+			nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
+		}
 		goto out;
 	}
 	if (encrypt_idx <= vol->encrypt_idx) {
@@ -2696,13 +2725,22 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 				 PASSPHRASE_DIR_NAME "/new_passphrase_%s", shadow_vol_name);
 	}
 	//
+	// Regular (thick) volume shadow path. TPVs are handled via the namebased
+	// fallback above (vol == NULL branch), before this point is reached.
 	if (old_passphrase[0] && new_passphrase[0]) {
 		snprintf(encrypt_params->exec_ctx.executable_str, sizeof(encrypt_params->exec_ctx.executable_str),
 				 "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s %.256s",
 				 encrypt_args, encrypt_params->old_passphrase_file_name, shadow_vol_name, encrypt_params->new_passphrase_file_name);
 	} else {
-		snprintf(encrypt_params->exec_ctx.executable_str, sizeof(encrypt_params->exec_ctx.executable_str), "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s",
-				 encrypt_args, (old_passphrase[0] ? encrypt_params->old_passphrase_file_name : encrypt_params->new_passphrase_file_name), shadow_vol_name);
+		const char *key_path = (old_passphrase[0] ? encrypt_params->old_passphrase_file_name : encrypt_params->new_passphrase_file_name);
+		#define CRYPT_SETUP_CMD "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s"
+		snprintf(encrypt_params->exec_ctx.executable_str, sizeof(encrypt_params->exec_ctx.executable_str),
+			#if 1
+				CRYPT_SETUP_CMD,
+			#else
+				"strace -o /tmp/out_%s " CRYPT_SETUP_CMD, shadow_vol_name,
+			#endif
+				encrypt_args, key_path, shadow_vol_name);
 	}
 	nvmeibt_attach_vol_for_encryption(vol, shadow_vol_name, encrypt_params);
 	rv = 0;
