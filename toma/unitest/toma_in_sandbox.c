@@ -1012,6 +1012,7 @@ int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
 }
 
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void) { return &sys->cfg; }
+struct sb_cluster_conf       *sb_cluster_get_conf(void)       { return &sys->cfg; }
 
 int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
 	const struct raft_msg *in_r_msg = (typeof(in_r_msg))req->cnst_msg;
