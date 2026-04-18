@@ -770,15 +770,13 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 
 	/*
 	 * Provide CDV capacity so TOMA can determine when the CDV is full.
-	 * CDV size in 4 KB sectors → bytes; subtract metadata region offset
-	 * (allocator_size_gb GB); divide by extent size (cdv_extent_size_mb MB).
+	 * Post-satellite-migration the allocator metadata lives on the
+	 * <cdv>-mgmt satellite volume, so the full CDV is available as data.
 	 */
 	if (alloc->cdv_extent_size_mb > 0) {
 		u64 cdv_bytes   = (u64)nvmeibc_volume_get_size(tpv->cdv_vol)
 				  << NVMEIBC_SECTOR_SHIFT;
-		u64 meta_bytes  = (u64)alloc->allocator_size_gb << 30;
-		u64 data_bytes  = (cdv_bytes > meta_bytes) ? cdv_bytes - meta_bytes : 0;
-		req.total_data_extents = data_bytes / ((u64)alloc->cdv_extent_size_mb << 20);
+		req.total_data_extents = cdv_bytes / ((u64)alloc->cdv_extent_size_mb << 20);
 	}
 
 	_NT(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU total_extents=@LLU free=@LLU wm=@LLU cdv_extents=@LLU",

@@ -213,9 +213,11 @@ static int cdv_worker_open_cdv_fd_for_zeroing(struct nvmeibt_cdv_alloc *alloc)
 }
 
 /*
- * cdv_ondisk_record_offset — byte offset within the CDV for extent_index's record.
+ * cdv_ondisk_record_offset — byte offset within the satellite volume for
+ * extent_index's record.
  *
- * Extent indices are 1-based (extent 0 is the allocator area itself):
+ * Extent indices are 1-based (index 0 is unused; the satellite header lives
+ * at offset 0):
  *   Offset 0:                            Header (4 KiB)
  *   Offset 1 * CDV_ONDISK_BLOCK_SIZE:    Record for extent 1
  *   Offset 2 * CDV_ONDISK_BLOCK_SIZE:    Record for extent 2
@@ -892,15 +894,20 @@ static void cdv_async_write_header(struct nvmeibt_cdv_alloc *alloc)
 /*
  * cdv_data_extent_offset — CDV byte offset of data extent @extent_index.
  *
- * Data extents are 1-based (extent 0 is the allocator area).
- * Byte offset = allocator_size_gb * 1 GiB + (extent_index - 1) * cdv_extent_size_mb * 1 MiB
+ * Data extents are 1-based (index 0 is unused so the on-satellite record at
+ * offset 0 can remain the header — see cdv_ondisk_record_offset).
+ * Post-satellite-migration the allocator metadata lives on the <cdv>-mgmt
+ * satellite, so the entire CDV is data:
+ *   Byte offset = (extent_index - 1) * cdv_extent_size_mb * 1 MiB
+ * @allocator_size_gb is retained in the signature for call-site compatibility
+ * but is no longer consulted.
  */
 static inline uint64_t cdv_data_extent_offset(uint64_t extent_index,
 					       uint32_t allocator_size_gb,
 					       uint32_t cdv_extent_size_mb)
 {
-	return (uint64_t)allocator_size_gb * (1ULL << 30)
-	     + (extent_index - 1) * (uint64_t)cdv_extent_size_mb * (1ULL << 20);
+	(void)allocator_size_gb;
+	return (extent_index - 1) * (uint64_t)cdv_extent_size_mb * (1ULL << 20);
 }
 
 /*
@@ -2999,8 +3006,9 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	/*
 	 * ── Find first free extent index ────────────────────────────────────
 	 *
-	 * Extent indices are 1-based: extent 0 is the allocator area,
-	 * data extents are numbered 1 .. total_data_extents.
+	 * Extent indices are 1-based: index 0 is unused (kept so the satellite
+	 * record at offset 0 stays the header); data extents are numbered
+	 * 1 .. total_data_extents.
 	 */
 	candidate = 0;
 	found     = false;
