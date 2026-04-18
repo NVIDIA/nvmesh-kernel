@@ -11,6 +11,7 @@
 #include "../12_user/user_rpc_simu.h"
 #include "../15_server/sandbox_nvmeibs_toma.h"
 #include "../16_otherToma/peer_toma_simu.h"
+#include "nvmeibt_disk_segment_basics.h"	// NVMEIBT_SEG_DIRTY_BITS_STATE_* used by eviction Phase 5
 #include "../kafka/sandbox_kafka_internal.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
@@ -197,6 +198,19 @@ static bool evict_under_recovery(void) {
 	return mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed;
 }
 
+/* Phase-6 verification: recovery actually happened AND the praid converged back
+ * to 3 normal segments, with seg[3] (the replacement) present. */
+static bool evict_rebuild_complete(void) {
+	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
+	const struct sb_praid_conf *pr = &sb_cluster_get_const_conf()->vols[1].chunks[0].raids[0];
+	if (!r->was_under_recovery_witnessed || r->n_segments != 3) return false;
+	if (__rpt_find_seg(r, pr->segs[3].uuid) < 0) return false;
+	for (int i = 0; i < r->n_segments; i++)
+		if (strcmp(r->segs[i].status, "normal") != 0)
+			return false;
+	return true;
+}
+
 /*
  * Disk eviction / segment replacement scenario for V_R1 (NVMESH-8156).
  *
@@ -335,6 +349,21 @@ static void scenario_evict_rebuild_r1(void) {
 	 * [REAL]    no action this phase (Phase 6 observes the effects once
 	 *           the next ACT_TOPO reply is processed).
 	 * ==================================================================== */
+	SCENARIO_PRINT(__AUTOID__, "Phase 5: forcing OWNER_RECOVERER_DONE on node 1's seg[1] and seg[2]");
+	{
+		struct sb_cluster_conf     *cfg = sb_cluster_get_conf();
+		const struct sb_praid_conf *pr  = &cfg->vols[1].chunks[0].raids[0];
+		struct peer_toma_simu      *p1  = cfg->nodes[1].peer;
+		peer_toma_simu_set_seg_inject(p1, &(struct toma_simu_inject_seg_state_t){
+			.uuid = pr->segs[1].uuid,
+			.dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
+		});
+		peer_toma_simu_set_seg_inject(p1, &(struct toma_simu_inject_seg_state_t){
+			.uuid = pr->segs[2].uuid,
+			.dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
+		});
+	}
+	mgmt_sim_send_leader_keep_alive();
 
 	/* ====================================================================
 	 * PHASE 6 -- Rebuild complete; verify
@@ -348,6 +377,12 @@ static void scenario_evict_rebuild_r1(void) {
 	 * [VERIFY]  WAIT_UNTIL snapshot has was_under_recovery_witnessed
 	 *           AND n_segments==3 AND seg[3] present AND all "normal".
 	 * ==================================================================== */
+	WAIT_UNTIL(evict_rebuild_complete());
+	SCENARIO_PRINT(__AUTOID__, "Phase 6: V_R1 segment replacement rebuild complete");
+	/* Drop the Phase 5 overrides now that rebuild is verified; otherwise the
+	 * peer would keep pinning seg[1]/seg[2] at OWNER_RECOVERER_DONE and block
+	 * any later topology transitions (e.g. the delete-driven X_ZERO->X_DONE). */
+	peer_toma_simu_clear_seg_injects(sb_cluster_get_conf()->nodes[1].peer);
 
 	SCENARIO_PRINT(__AUTOID__, "done (inert)");
 }
