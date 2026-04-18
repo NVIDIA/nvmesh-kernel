@@ -73,6 +73,18 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 			}
 			pv->num_blocks = pv->chunks[pv->num_chunks-1].vlba_end + 1;
 		}
+		/* Dormant V_R1 seg[3] for the drive-eviction scenario (NVMESH-8156).
+		 * Sits in segs[3] but is not counted in D+P, so it doesn't appear in
+		 * the initial topology. The scenario activates it via updateVolume v2.
+		 */
+		{
+			struct sb_praid_conf *pr_r1 = &sb->vols[1].chunks[0].raids[0];
+			struct sb_seg_conf   *ps3   = &pr_r1->segs[3];
+			ps3->disk_uuid   = sb->nodes[2].disks[0].uuid;
+			ps3->block_start = 0;
+			ps3->block_end   = ps3->block_start + disk_seg_n_blocks - 1;
+			ps3->uuid        = pr_r1->uuid | 4;
+		}
 	}
 }
 
