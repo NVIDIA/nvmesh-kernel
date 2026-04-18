@@ -2493,9 +2493,9 @@ When a TPV is selected in the volume list, show an informational banner (no func
 
 ### 5.1 Overview
 
-TPV encryption follows architecture decision #18: encryption is at the TPV level, not the CDV level. The CDV stores raw (unencrypted) extents; each TPV independently manages its own LUKS container within the CDV extents it has been allocated.
+TPV encryption follows architecture decision #18: encryption is at the TPV level, not the CDV level. The CDV stores raw (unencrypted) extents; each TPV independently manages its own LUKS container in its own virtual address space. The LUKS header is written as the first bytes of the TPV — the client-side TPV allocator binds those logical bytes to whichever CDV extent it allocates first, on demand. **No pre-allocation of CDV extents is required.**
 
-The management-side workflow mirrors regular volume encryption as closely as possible: the same "Encryption" dropdown button (Init Encryption, Add/Rotate/Delete Passphrase, Acknowledge Error), the same REST endpoints (`POST /volumes/initEncryption`, etc.), the same Kafka message types, and the same TOMA-side `cryptsetup` execution pattern. The differences are confined to (a) TOMA selection, (b) shadow device creation mechanism, and (c) a pre-allocation step during TPV creation.
+The management-side workflow mirrors regular volume encryption as closely as possible: the same "Encryption" dropdown button (Init Encryption, Add/Rotate/Delete Passphrase, Acknowledge Error), the same REST endpoints (`POST /volumes/initEncryption`, etc.), the same Kafka message types and payload schema, and the same TOMA-side `cryptsetup` execution pattern. The **only** TPV-specific difference on the TOMA is which block-device path cryptsetup runs against — `/dev/nvmesh-tpv/<tpv_name>` instead of `/dev/nvmesh/e_<name>` — because the TPV itself is attached on the TOMA node (exclusively, with preempt) before the Kafka command arrives. There is no dm-linear wrapper, no shadow-volume clone, and no CDV-geometry plumbing in the Kafka payload.
 
 ### 5.2 How Regular Volume Encryption Works (reference)
 
@@ -2537,12 +2537,13 @@ volumeEncryption.js                DB: status = EXECUTED, isInitialized = true, 
 ### 5.3 TPV Encryption — Architecture Decisions
 
 19. **No CDV-level encryption**: The CDV remains unencrypted. Each TPV independently manages its own LUKS container within its allocated CDV extents. This means different TPVs on the same CDV can have different encryption keys.
-20. **LUKS header location**: The LUKS header occupies the first bytes of the TPV's virtual address space, which maps to the TPV's first CDV data extent. The default encryption header size is 16 MB — well within the minimum CDV extent size of 64 MB.
-21. **First-extent pre-allocation**: When a TPV is created with `isEncrypted: true`, management pre-allocates the first CDV data extent for the TPV via `CDV_ALLOC_EXTENT` IB admin message. This guarantees backing storage for the LUKS header before encryption init. The allocated extent index is stored in `tpvConfig.firstExtentIndex`.
-22. **TOMA selection for TPV encryption**: Instead of zone-based round-robin (regular volumes), TPV encryption commands are sent to a TOMA node that has the parent CDV attached. This ensures `/dev/nvmesh/<cdv_name>` exists locally for shadow device creation.
-23. **Shadow device for TPVs**: TOMA creates a `dm-linear` device mapping from the CDV's block device at the correct byte offset, rather than creating a shadow-volume re-attach (which requires chunks). The dm-linear device is sized to the CDV extent size and points to the offset `A + firstExtentIndex × E` within the CDV.
-24. **Reuse existing REST endpoints**: The same encryption endpoints (`POST /volumes/initEncryption`, `addPassphrase`, etc.) work for both regular volumes and TPVs. The `volumeEncryption.js` module detects TPV via `volumeClass === 'TPV'` and branches TOMA selection and Kafka payload accordingly.
-25. **Reuse existing Kafka message types**: The existing `initEncryption`, `addPassphrase`, `deletePassphrase`, `rotatePassphrase` message types are extended with optional fields (`cdvName`, `cdvUUID`, `cdvByteOffset`, `shadowSizeSectors`). TOMA checks for the presence of `cdvName` to decide between shadow-volume and dm-linear execution paths.
+20. **LUKS header location**: The LUKS header occupies the first bytes of the TPV's virtual address space. The default encryption header size is 16 MB — well within the minimum TPV extent size of 64 KB and the minimum CDV extent size of 64 MB. The client-side TPV allocator materialises the backing CDV extent on the first write, which is `cryptsetup luksFormat`'s header write during Init Encryption; no upfront CDV reservation is required.
+21. **~~First-extent pre-allocation~~ (removed)**: Earlier revisions of this plan called for a management-issued `CDV_ALLOC_EXTENT` round-trip before TPV insert so the LUKS header was guaranteed backing storage. This has been **removed**. The TPV's own first-write path triggers extent allocation transparently via the existing client-↔-TOMA admin channel (see §3). No `firstExtentIndex` field, no management-side IB admin message, no pre-insert allocator dependency. The only CDV-capacity failure path is "CDV full at first write", which surfaces to the client as the existing `CDV_ALLOC_CDV_FULL` response during cryptsetup's header I/O.
+22. **TOMA selection for TPV encryption**: Instead of zone-based round-robin (regular volumes), TPV encryption commands are sent to a TOMA node that hosts one of the CDV's first pRAID RW disk segments (and therefore can attach the CDV). Preference order: the CDV's current allocator TOMA (best locality for extent allocation during LUKS header write), then a random pick from the remaining candidates.
+23. **Attach the TPV exclusively on the TOMA**: Before sending the encryption Kafka command, management attaches the TPV itself to the chosen TOMA node using the existing client-attach path (`clientModule.attachTPV`) with `{preempt: true, mode: EXCLUSIVE_READ_WRITE}`. The TOMA's client kernel module then exposes the TPV at `/dev/nvmesh-tpv/<tpv_name>` — the exact same device path a real client would see. Preempt is used so any stale holder (e.g., a crashed client that was never cleaned up) is fenced; refusing to run encryption while a live client holds the TPV is a higher-layer policy decision not enforced by management today.
+24. **No shadow and no dm-linear**: Because the TPV is already locally attached on the TOMA when the Kafka command arrives, TOMA skips `nvmeibt_attach_vol_for_encryption` entirely and runs `cryptsetup` directly against `/dev/nvmesh-tpv/<tpv_name>`. No dm-linear wrapper, no shadow-clone, no CDV-byte-offset arithmetic.
+25. **Reuse existing REST endpoints and Kafka schema**: The same endpoints (`POST /volumes/initEncryption`, `addPassphrase`, `deletePassphrase`, `rotatePassphrase`) and Kafka message types work for both regular volumes and TPVs. The Kafka payload schema is **unchanged** — no new `cdvName`/`cdvByteOffset`/`shadowSizeSectors` fields. The TOMA side distinguishes TPV from regular volume by the chunk-less shape of the block-device record: `(vol->from_config.n_chunks == 0) && !vol->from_config.is_cdv`. TOMA's `struct nvmeibt_block_device` has no kernel-client `type` enum; a TPV is the only class that arrives with `chunks: []` from management.
+26. **Management auto-detaches after response**: When the Kafka encryption response arrives at `handleCommandResponse`, management calls the symmetric `clientModule.detachTPV` so the TOMA releases the TPV. The real client (user) can then attach it normally.
 
 ### 5.4 TPV Encryption Flow
 
@@ -2551,56 +2552,44 @@ UI (ThinProvisioning.jsx)          Encrypt dropdown → Init Encryption
   ↓
 VolumesService.initEncryption()    POST /volumes/initEncryption  (same endpoint)
   ↓
-routes/volumes.js                  Audit log + call encryptionModule  (same route handler)
+routes/volumes.js                  Audit log + call encryptionModule
   ↓
 volumeEncryption.js                runEncryptionCommand():
   ├─ Fetch volume by UUID          Verify isEncrypted, !isInitialized
-  ├─ chooseTOMAForEncryption()     ← NEW BRANCH: for TPV, pick TOMA with parent CDV attached
-  ├─ setEncryptionCommand()        DB: status = PENDING_SEND, $inc commandIndex  (unchanged)
-  ├─ sendEncryptionCommandToTOMA() ← EXTENDED: include cdvName, cdvByteOffset in payload
+  ├─ chooseTOMAForEncryption()     ← NEW BRANCH: for TPV, pick TOMA on CDV's first pRAID
+  ├─ attachTPVToTOMAForEncryption()← NEW STEP: clientModule.attachTPV(toma._id, clientUUID, tpv, {preempt: true})
+  ├─ setEncryptionCommand()        DB: status = PENDING_SEND, $inc commandIndex,
+  │                                    ALSO stamp encryption.command.tpvAutoAttachedTOMA = toma._id
+  ├─ sendEncryptionCommandToTOMA() Kafka payload UNCHANGED — same envelope as regular volumes
   └─ updateLastCommandSent()       DB: status = SENT  (unchanged)
   ↓
 TOMA (nvmeibt_kafka.c)             toma_CMD_handler():
   ├─ Validate bootTime             (unchanged)
-  ├─ Detect TPV mode               Check payload.cdvName presence
-  ├─ Create dm-linear shadow       dmsetup create tpv_enc_<tpv_name> ...
-  │                                 "0 <sectors> linear /dev/nvmesh/<cdv_name> <start_sector>"
+  ├─ Detect TPV mode               vol->from_config.n_chunks == 0 && !is_cdv
+  ├─ Skip shadow attach            /dev/nvmesh-tpv/<tpv_name> already exists
   ├─ Write passphrase to file      (unchanged)
-  ├─ cryptsetup luksFormat          On /dev/mapper/tpv_enc_<tpv_name>
-  ├─ Cleanup                        dmsetup remove tpv_enc_<tpv_name>, delete passphrase file
+  ├─ cryptsetup luksFormat          On /dev/nvmesh-tpv/<tpv_name>
+  │                                 (client-side TPV allocator materialises CDV extent(s)
+  │                                  transparently during LUKS header write)
   └─ Send response via Kafka       encryptionCommandResponse  (unchanged)
   ↓
-kafkaRouter.js                     Route to volumeEncryption.handleCommandResponse()  (unchanged)
+kafkaRouter.js                     Route to volumeEncryption.handleCommandResponse()
   ↓
-volumeEncryption.js                DB: status = EXECUTED, isInitialized = true, isReady = true  (unchanged)
+volumeEncryption.js                DB: status = EXECUTED, isInitialized = true, isReady = true
+  └─ detachTPVFromTOMAForEncryption() ← NEW STEP: release TPV from TOMA; clear tpvAutoAttachedTOMA
 ```
 
-### 5.5 CDV Extent Pre-allocation for Encrypted TPVs
+### 5.5 ~~CDV Extent Pre-allocation for Encrypted TPVs~~ (removed)
 
-When `createTPV()` in `modules/volume.js` sees `isEncrypted: true`:
-
-1. After CDV validation, before inserting the TPV record, management sends a `CDV_ALLOC_EXTENT` IB admin message to the CDV allocator TOMA requesting one extent for the new TPV's UUID.
-2. The TOMA allocator responds with the extent index.
-3. The extent index is stored in `tpvConfig.firstExtentIndex`.
-4. The TPV record is inserted with `isReady: false` and `encryption: { isInitialized: false }`.
-
-**Failure handling**: If the pre-allocation fails (TOMA unavailable, CDV full), the TPV creation fails with an error. The user must ensure CDV has capacity before creating encrypted TPVs.
-
-**Byte offset calculation** (for the Kafka message to TOMA):
-```
-A = cdvConfig.allocatorSizeGB × 1 GiB
-E = cdvConfig.cdvExtentSizeMB × 1 MiB
-cdvByteOffset = A + firstExtentIndex × E
-shadowSizeSectors = E / 512
-```
+Previous revisions of this plan required management to pre-allocate the first CDV data extent via `CDV_ALLOC_EXTENT` before inserting the encrypted TPV, storing the result in `tpvConfig.firstExtentIndex` for later use by the TOMA's dm-linear wrapper. Both the pre-allocation and the `firstExtentIndex` field have been **removed**. Writing the LUKS header triggers the normal client-side first-write allocation path; the CDV allocator sees an ordinary TPV extent request and no special management pre-handshake exists. Any "CDV full" failure is surfaced by the client's first write and funnels into the existing encryption error response path.
 
 ### 5.6 TOMA Selection for TPV Encryption
 
 **New function: `chooseTOMAForTPVEncryption(tpvVolume, callback)`** in `volumeEncryption.js`:
 
 1. Look up the parent CDV via `tpvConfig.cdvId`.
-2. Find TOMA nodes that have the CDV attached (query `server` collection for nodes in the CDV's first pRAID with `tomaStatus === UP`).
-3. Pick one (prefer the current CDV allocator TOMA if available, else random from candidates).
+2. Find candidate TOMA nodes: servers that own an RW disk segment in the CDV's first pRAID and are `tomaStatus === UP`.
+3. Prefer the CDV's current allocator TOMA (read from `cdv.currentAllocatorTomaHostname`, populated by `client.js::handleAttachSatelliteRequest`) if present in the candidates — same-node allocator affinity minimises cross-node round-trips during the LUKS header write. Otherwise pick a random candidate.
 4. Return the selected TOMA with its `bootTime` and `topics`.
 
 **Integration**: `chooseTOMAForEncryption()` gains a branch:
@@ -2613,70 +2602,75 @@ if (volume.volumeClass === consts.volumeClass.TPV) {
 
 ### 5.7 Kafka Message Changes
 
-The existing `EncryptionCommandMessage` base class gains optional CDV fields for TPV mode:
+**None.** The `EncryptionCommandMessage` base class and all four subclasses (`InitEncryption`, `AddPassphrase`, `DeletePassphrase`, `RotatePassphrase`) are unchanged. The TOMA distinguishes TPV from regular volume by the chunk-less shape of the block-device entry: `(vol->from_config.n_chunks == 0) && !vol->from_config.is_cdv`. TOMA already maintains `from_config.n_chunks` and `from_config.is_cdv` on every locally-attached volume; no new fields or JSON keys are needed.
 
-```js
-// Added to EncryptionCommandMessage.toJSON() payload when cdvName is set:
-payload.cdvName = this.cdvName;            // CDV volume name (for /dev/nvmesh/<cdvName>)
-payload.cdvUUID = this.cdvUUID;            // CDV UUID
-payload.cdvByteOffset = this.cdvByteOffset; // byte offset within CDV for dm-linear start
-payload.shadowSizeSectors = this.shadowSizeSectors; // dm-linear size in 512-byte sectors
-```
+### 5.8 TOMA Changes (`nvmeibt_kafka.c`, `nvmeibt_recovery.c`)
 
-`volumeEncryption.js` populates these fields only for TPV volumes (when `volumeClass === 'TPV'`). For regular volumes the fields are absent, and TOMA falls back to the existing shadow-volume path.
+#### Branch in `start_encrypt_action`
 
-### 5.8 TOMA Changes (nvmeibt_kafka.c, nvmeibt_recovery.c)
+Inside `start_encrypt_action()` the existing code builds a `cryptsetup` command targeting `/dev/nvmesh/<shadow_vol_name>` and calls `nvmeibt_attach_vol_for_encryption(vol, shadow_vol_name, encrypt_params)` to create the shadow and drive the exec. For TPVs (detected by `(vol->from_config.n_chunks == 0) && !vol->from_config.is_cdv`) the branch:
 
-#### New shadow path: dm-linear
+1. Builds the same `cryptsetup` command string, but with device path `/dev/nvmesh-tpv/<vol->from_config.client_blkdev_name>`.
+2. Calls `nvmeibt_start_encrypt_for_tpv(vol, encrypt_params)` instead of `nvmeibt_attach_vol_for_encryption`.
 
-When `start_encrypt_action()` detects `cdvName` in the parsed payload:
+`nvmeibt_start_encrypt_for_tpv` (new, `nvmeibt_recovery.c`) skips the shadow-clone and attach-WQ scheduling entirely. It sets `encrypt_params->exec_ctx.blkdev = vol; encrypt_params->origin_vol = vol; vol->encrypt_params = encrypt_params;` allocates stdout/stderr buffers, sets a TPV-specific exec-done callback `tpv_encrypt_after_exec_cb`, and invokes `nvmeibt_run_exec_on_blkdev(exec_ctx)` directly.
 
-1. Verify `/dev/nvmesh/<cdvName>` exists (CDV is attached to this TOMA).
-2. Construct the dm-linear table string: `"0 <shadowSizeSectors> linear /dev/nvmesh/<cdvName> <startSector>"` where `startSector = cdvByteOffset / 512`.
-3. Run: `dmsetup create tpv_enc_<volumeName> --table "<table>"`.
-4. Wait for `/dev/mapper/tpv_enc_<volumeName>` to appear.
-5. Run `cryptsetup` on `/dev/mapper/tpv_enc_<volumeName>` (same command construction as regular encryption).
-6. On completion (success or failure), run `dmsetup remove tpv_enc_<volumeName>`.
+`tpv_encrypt_after_exec_cb` is a trimmed copy of `detach_shadow_vol_for_encryption_finalize`: it builds and sends the Kafka response via `nvmeibt_kafka_send_encrypt_cmd_response`, frees the stdout/stderr buffers and the `encrypt_params`, and clears `vol->encrypt_params`. It does **not** free `vol` — `vol` is the real TPV, owned by TOMA's block-device hash and still attached; management's post-response detach will remove it.
 
-The rest of the flow (passphrase file handling, response building, error codes) is identical to regular encryption.
-
-#### New struct fields in `encrypt_cmd_t`:
-```c
-char cdv_name[MAX_VOL_NAME_LEN];       // empty for regular volumes
-char cdv_uuid[UUID_STR_LEN];
-uint64_t cdv_byte_offset;
-uint64_t shadow_size_sectors;
-```
-
-#### Parsing (parse_CMD):
-- Extract optional `cdvName`, `cdvUUID`, `cdvByteOffset`, `shadowSizeSectors` from JSON payload.
-- If `cdvName[0] != '\0'`, set `is_tpv_encryption = true`.
+No changes to the `encrypt_cmd_t` struct, no changes to `parse_CMD()`, no new JSON keys.
 
 ### 5.9 Management Module Changes
 
 #### `modules/volume.js` — `createTPV()`
 
-Add `isEncrypted` handling:
+Accept `isEncrypted` and `encryption.headerSize` on the input. When `isEncrypted`:
+- Set `isReady: false` (flips to true only after `initEncryption` succeeds).
+- Add `encryption: { headerSize, isInitialized: false }` sub-document.
+- Set `action: INIT_ENCRYPTION_REQUIRED` so the UI surfaces the pending-init state.
+
+No CDV-side work at creation time — no pre-allocation, no extent reservation, no new Kafka chatter. `prepareCDVForCreate()` strips any incoming `isEncrypted`/`encryption` on a CDV payload (Architecture Decision #18).
+
+#### `modules/volumeEncryption.js` — new attach/detach helpers
 
 ```js
-// After CDV validation, before insertTPVRecord:
-function preAllocateFirstExtent(next) {
-    if (!volume.isEncrypted) return next();
-    // Send CDV_ALLOC_EXTENT to TOMA for this TPV's UUID
-    // On success: store extent index in tpvConfig.firstExtentIndex
-    // On failure: fail TPV creation with error
-}
+scope.attachTPVToTOMAForEncryption = (dbVolume, executingTOMA, cb) => {
+    // Look up the client doc for executingTOMA._id (TOMA nodes also register
+    // as clients because the same host runs both modules).
+    // Call clientModule.attachTPV(toma._id, clientDoc.uuid, tpv._id,
+    //                             {preempt: true}, cb);
+    // syncFlush is deliberately NOT passed — attachTPV's applySyncFlush step
+    // persists sourceUUID on the TPV and would leak the encryption-time value
+    // past detach. Default behaviour keeps sync_flush on, matching real client
+    // attaches.
+    // Verify tpvConfig.exclusiveClient now matches the TOMA; surface a
+    // retriable error otherwise.
+};
+
+scope.detachTPVFromTOMAForEncryption = (tpvName, tomaId, cb) => {
+    // Symmetric: clientModule.detachTPV(tomaId, clientDoc.uuid, tpvName, cb).
+    // Idempotent and best-effort; recovery cleans up stragglers on restart.
+};
 ```
 
-TPV record changes when `isEncrypted`:
+#### `modules/volumeEncryption.js` — `runEncryptionCommand()` orchestration
+
+Inserted between `chooseTOMAForEncryption()` and `setEncryptionCommand()`:
 ```js
-isReady: !volume.isEncrypted,   // false if encrypted (wait for init)
-isEncrypted: !!volume.isEncrypted,
-encryption: volume.isEncrypted ? {
-    headerSize: volume.encryption?.headerSize || 16,
-    isInitialized: false,
-} : undefined,
+(callback) => {
+    if (dbVolume.volumeClass !== consts.volumeClass.TPV) return callback();
+    scope.attachTPVToTOMAForEncryption(dbVolume, executingTOMA, callback);
+},
 ```
+
+`setEncryptionCommand()` additionally stamps `encryption.command.tpvAutoAttachedTOMA = executingTOMA._id` when the volume is a TPV, so the response handler and crash-recovery path know to detach.
+
+#### `modules/volumeEncryption.js` — `handleCommandResponse()`
+
+After updating the DB with the command result, if the just-updated document is a TPV and `encryption.command.tpvAutoAttachedTOMA` is set, invoke `detachTPVFromTOMAForEncryption(...)` and then `$unset` that field. Regular volumes are unaffected.
+
+#### `modules/volumeEncryption.js` — `cleanupTPVAutoAttachesAfterStartup()` (new)
+
+Scan for TPVs with `encryption.command.tpvAutoAttachedTOMA` set and `encryption.command.status === EXECUTED`. Drive the symmetric detach for each — covers the "management died between response receipt and detach" window. Invoked from `sanityAndRecover.js` alongside `resendStaleEncryptionCommands`.
 
 #### `modules/volumeEncryption.js` — `chooseTOMAForEncryption()`
 
@@ -2684,24 +2678,11 @@ Branch on `volume.volumeClass === 'TPV'` to use `chooseTOMAForTPVEncryption()` i
 
 #### `modules/volumeEncryption.js` — `sendEncryptionCommandToTOMA()`
 
-When building the Kafka message for a TPV, compute and include CDV geometry:
-
-```js
-if (dbVolume.volumeClass === consts.volumeClass.TPV) {
-    // Look up parent CDV to get cdvConfig and CDV name
-    const cdv = await volumeCollection.findOne({ _id: dbVolume.tpvConfig.cdvId });
-    const A = cdv.cdvConfig.allocatorSizeGB * 1024 * 1024 * 1024;
-    const E = cdv.cdvConfig.cdvExtentSizeMB * 1024 * 1024;
-    encryptionObj.cdvName = cdv._id;
-    encryptionObj.cdvUUID = cdv.uuid;
-    encryptionObj.cdvByteOffset = A + dbVolume.tpvConfig.firstExtentIndex * E;
-    encryptionObj.shadowSizeSectors = E / 512;
-}
-```
+Unchanged. The Kafka payload is identical to the regular-volume case.
 
 #### `modules/volumeEncryption.js` — `verifyEncryptionCommand()`
 
-No changes needed — the existing checks (`isEncrypted`, `isInitialized`, `action`) apply identically to TPVs.
+Unchanged — the existing checks (`isEncrypted`, `isInitialized`, `action`) apply identically to TPVs. No additional "client already attached" guard is enforced today; preempt handles reattachment cleanly, and any interlock against encrypting a TPV currently in use by a live client is a higher-layer policy choice that this plan defers.
 
 ### 5.10 UI Changes
 
@@ -2915,27 +2896,27 @@ Add to `test/integration/`:
 
 **Step 1: TPV creation with encryption support** (`modules/volume.js`)
 - Extend `createTPV()` to accept `isEncrypted` and `encryption.headerSize`
-- Set `isReady: false` when encrypted
-- Add `encryption: { isInitialized: false }` sub-document
-- Wire the first-extent pre-allocation call (can be stubbed initially)
-- Store `tpvConfig.firstExtentIndex` on success
+- Set `isReady: false` and `action: INIT_ENCRYPTION_REQUIRED` when encrypted
+- Add `encryption: { headerSize, isInitialized: false }` sub-document
+- `prepareCDVForCreate()`: strip incoming `isEncrypted`/`encryption` on CDVs
 
-**Step 2: TOMA selection for TPVs** (`modules/volumeEncryption.js`)
-- Implement `chooseTOMAForTPVEncryption(volume, callback)`
-- Look up parent CDV, find TOMAs with CDV attached (`tomaStatus === UP` in CDV's first pRAID)
+**Step 2: TOMA selection + attach/detach orchestration** (`modules/volumeEncryption.js`)
+- Implement `chooseTOMAForTPVEncryption(volume, callback)` — first-pRAID candidates, prefer allocator TOMA
 - Add branch in `chooseTOMAForEncryption()` for `volumeClass === 'TPV'`
+- Add `attachTPVToTOMAForEncryption` / `detachTPVFromTOMAForEncryption` helpers (thin wrappers around `clientModule.attachTPV`/`detachTPV` with `preempt: true`)
+- Insert attach step in `runEncryptionCommand()` after TOMA selection
+- Stamp `encryption.command.tpvAutoAttachedTOMA` in `setEncryptionCommand()` for TPVs
+- Drive detach in `handleCommandResponse()` after status update
+- Add `cleanupTPVAutoAttachesAfterStartup()` and invoke from `sanityAndRecover.js`
 
-**Step 3: Kafka message extension** (`models/kafkaMessages/`)
-- Extend `EncryptionCommandMessage.toJSON()` with optional `cdvName`, `cdvUUID`, `cdvByteOffset`, `shadowSizeSectors`
-- Extend `volumeEncryption.js` `sendEncryptionCommandToTOMA()` to compute and inject CDV geometry for TPVs
-- No changes to `InitEncryption.js`, `AddPassphrase.js`, `DeletePassphrase.js` constructors — the CDV fields are set on the base class
+**Step 3: Kafka envelope** — **no changes**. The base class and subclasses are reused verbatim.
 
 **Step 4: Integration test** (backend only)
 - Create an encrypted TPV via `POST /volumes/save`
-- Verify DB record: `isReady: false`, `isEncrypted: true`, `encryption.isInitialized: false`
+- Verify DB record: `isReady: false`, `isEncrypted: true`, `encryption.isInitialized: false`, `action: INIT_ENCRYPTION_REQUIRED`
 - Call `POST /volumes/initEncryption` with the TPV's UUID
-- Verify Kafka message includes CDV geometry fields
-- Simulate TOMA response: verify DB transitions to `isReady: true`, `encryption.isInitialized: true`
+- Verify the TPV becomes attached to the chosen TOMA (`tpvConfig.exclusiveClient === toma._id`) and `encryption.command.tpvAutoAttachedTOMA` is stamped
+- Simulate TOMA response: verify DB transitions to `isReady: true`, `encryption.isInitialized: true`, TPV is detached from TOMA, `tpvAutoAttachedTOMA` cleared
 
 #### Phase 2 — UI
 
@@ -2959,20 +2940,23 @@ Add to `test/integration/`:
 
 #### Phase 3 — TOMA
 
-**Step 8: TOMA Kafka parsing** (`nvmeibt_kafka.c`)
-- Extend `parse_CMD()` to extract `cdvName`, `cdvUUID`, `cdvByteOffset`, `shadowSizeSectors` from JSON payload
-- Add fields to `encrypt_cmd_t` struct
+**Step 8: TOMA branch in `start_encrypt_action`** (`nvmeibt_kafka.c`)
+- Detect TPV via `(vol->from_config.n_chunks == 0) && !vol->from_config.is_cdv`
+- Retarget the `cryptsetup` command to `/dev/nvmesh-tpv/<vol->from_config.client_blkdev_name>`
+- Call `nvmeibt_start_encrypt_for_tpv(vol, encrypt_params)` instead of `nvmeibt_attach_vol_for_encryption`
+- No changes to `encrypt_cmd_t` or `parse_CMD`
+- Use a local name other than `dev_dir` for the device-directory local — it collides with the `dev_dir` macro defined in `nvmeibt_local_disk.h:316` (`#define dev_dir TOMA_ROOT_DIR "dev/"`). The implementation uses `enc_dev_dir` / `enc_dev_name`.
 
-**Step 9: TOMA dm-linear shadow path** (`nvmeibt_kafka.c` / `nvmeibt_recovery.c`)
-- In `start_encrypt_action()`: if `cdv_name[0] != '\0'`, branch to dm-linear path
-- Construct `dmsetup create` command string
-- Construct `cryptsetup` command referencing `/dev/mapper/tpv_enc_<name>` instead of `/dev/nvmesh/e_<name>`
-- Cleanup: `dmsetup remove tpv_enc_<name>` (in both success and failure paths)
+**Step 9: TPV exec entry point** (`nvmeibt_recovery.c`, `nvmeibt_recovery.h`)
+- Add `nvmeibt_start_encrypt_for_tpv(vol, encrypt_params)` — skips `create_shadow_vol`/WQ attach, points `exec_ctx->blkdev` at the TPV, sets a TPV-specific exec-done callback, runs `nvmeibt_run_exec_on_blkdev`
+- Add `tpv_encrypt_after_exec_cb(exec_ctx)` — sends Kafka response, frees buffers and encrypt_params; does NOT free the TPV (management still owns it until detach)
+- Export `nvmeibt_start_encrypt_for_tpv` in `nvmeibt_recovery.h`
 
 **Step 10: TOMA integration test**
-- Send mock `initEncryption` Kafka message with CDV fields
-- Verify dm-linear device created, cryptsetup executed, device cleaned up
-- Verify response Kafka message with correct result code
+- Send a mock `initEncryption` Kafka message for a TPV that management has pre-attached to this TOMA
+- Verify `cryptsetup luksFormat` runs against `/dev/nvmesh-tpv/<name>` (no dm-linear, no shadow volume)
+- Verify the TOMA's client kernel module allocates CDV extents on demand during the LUKS header write
+- Verify the response Kafka message carries the correct result code
 
 #### Phase 4 — CLI
 
@@ -3016,15 +3000,19 @@ Add to `test/integration/`:
 
 ### 5.15 Risks and Open Questions
 
-1. **First-extent pre-allocation timing**: The `createTPV()` function currently runs entirely within management. Adding an IB admin message (`CDV_ALLOC_EXTENT`) to the creation path introduces an async dependency on TOMA availability. If TOMA is down, encrypted TPV creation fails. Mitigation: document this requirement; the user can retry once TOMA is up.
+1. **TOMA must be registered as a client**: Attaching the TPV on the TOMA for encryption uses `clientModule.attachTPV`, which requires a `client` document with `_id` = the TOMA's hostname. NVMesh clusters today run the client kernel module on TOMA nodes as a matter of course, so this record exists. If an operator deploys a TOMA-only node without the client module, encryption commands on TPVs backed by that node's CDV pRAID will fail with a diagnostic pointing at the missing client registration. Mitigation: document the prerequisite; `chooseTOMAForTPVEncryption` could also de-prioritise TOMAs without client registrations.
 
-2. **dm-linear device naming collisions**: If two concurrent encryption commands target different TPVs on the same CDV on the same TOMA, the dm-linear device names (`tpv_enc_<tpv_name>`) are unique per-TPV. No collision risk as long as TPV names are unique (enforced by MongoDB `_id`).
+2. **Preempt semantics**: The attach uses `preempt: true`, which will fence a real live client holding the TPV. No additional interlock prevents running encryption while a user I/O load is active. For `initEncryption` on a freshly created TPV this is fine (no user data yet). For later passphrase ops (`addPassphrase` / `rotatePassphrase` / `deletePassphrase`) the operator is responsible for knowing the TPV is quiescent. A future hardening step could reject these ops if `tpvConfig.exclusiveClient` is a non-TOMA client.
 
-3. **Client-side LUKS open**: After encryption init, when a client attaches the encrypted TPV, the client's management agent must `cryptsetup open` the TPV block device. This is the same flow as regular encrypted volumes — the attach path already handles it. Verify that the TPV block device (`/dev/nvmesh/<tpv_name>`) is accessible to the client agent at attach time.
+3. **Crash recovery**: If management dies between receiving the Kafka response and issuing the detach, the TPV is left attached to the TOMA and its real client cannot reattach. `cleanupTPVAutoAttachesAfterStartup` scans for this state on startup and drives the missing detach. The same function also backstops the rarer case where the response write to DB succeeded but the detach call itself crashed.
 
-4. **CDV extent 0 conflict**: The allocator tree (L1 table) occupies CDV extent 0 (first data extent at offset `A`). The pre-allocated encryption extent for a TPV must be a **data extent** (index ≥ 0 from the allocator's perspective), not the allocator area itself. The `CDV_ALLOC_EXTENT` message returns data extent indices that start after the allocator area, so there is no conflict.
+4. **CDV full during LUKS header write**: `cryptsetup luksFormat` writes ~16 MB of LUKS metadata at offset 0. This triggers CDV extent allocation through the client's normal first-write path; on `CDV_ALLOC_CDV_FULL` the client I/O fails, cryptsetup exits non-zero, and the existing TOMA encryption response builder reports `CMD_ERR`. No new error path.
 
-5. **Passphrase operations after TPV extend**: If a TPV is extended and new CDV extents are allocated, the LUKS header remains in the first extent. Passphrase operations still target only the LUKS header, so they work correctly regardless of subsequent extent allocations.
+5. **Client-side LUKS open at attach**: After encryption init the TPV is reattached to a real client; the client's management agent runs `cryptsetup open` against `/dev/nvmesh-tpv/<tpv_name>` — the same flow as regular encrypted volumes, just on a different device prefix. Verify the client agent's cryptsetup invocation is path-agnostic (`/dev/nvmesh/` vs `/dev/nvmesh-tpv/`).
+
+6. **Passphrase operations after TPV extend**: Extending a TPV changes only `virtualSizeGB`; the LUKS header stays at offset 0 of the TPV's address space and is bound to whichever CDV extent backs that offset. Passphrase ops target only the LUKS header and are unaffected by subsequent extent allocations.
+
+7. **~~dm-linear naming collisions, CDV extent 0 conflict~~** — removed along with the dm-linear and pre-allocation paths they referenced.
 
 ---
 
@@ -4487,4 +4475,10 @@ The CSI driver cannot subscribe to the Kafka `CDVCapacityWarning` topic directly
 - **Access-mode coercion:** some CSI consumers pass `MULTI_NODE_READER_ONLY` for read workloads. Do not silently downgrade — reject, because a second reader would violate `exclusiveClient` and succeed only sporadically depending on management race windows.
 - **Pool empty result:** zero candidates after filtering → `ResourceExhausted` (retriable by k8s), not `FailedPrecondition`. Admin action (extending the pool) resolves it without manifest changes.
 - **WebSocket vs. REST consistency:** the pool selector reads CDV state via REST; the capacity-warning watcher reads via WebSocket. Treat WebSocket as the source of truth for `capacityWarning` (more timely) and REST for `tpvCount` (authoritative counter). Do not cross-reconcile on every `CreateVolume` — the small race window is harmless because management re-validates `tpvCount < maxTPVs` server-side.
+
+---
+
+## Section 15 — Post-MVP Features
+
+This section collects well-defined enhancements deferred from the initial TPV release. Each item is scoped, has a known implementation path, and does not require architectural changes to the MVP design.
 
