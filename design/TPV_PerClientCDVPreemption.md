@@ -20,7 +20,7 @@ Combined, these fence one client from a `SHARED_READ_WRITE` CDV without disturbi
 | 3 — TOMA admission floor & handler          | 7–10 | Eager per-CDV state, dual-path floor seeding, `preemptClientFromCDV` handler, new `REGISTER` predicate + reason code |
 | 4 — Client kernel cleanup barrier           | 11–13 | Propagate `reservation_mode_version` on CDV attach, teardown TPVs on `NCBD_PREEMPTED`, handle `BELOW_CDV_FLOOR` |
 | 5 — Management preempt flow                 | 14–16 | `preemptClientFromCDV(cdv, client)` + reaper for stuck `EVICTING` state; hook into force-detach, stale-client cleanup, and attach-with-preempt |
-| 6 — mNDU + CLI + CSI surface                | 17–19 | interop-db gate, `nvmesh client preempt-from-cdv`, CSI no-op audit |
+| 6 — mNDU + CLI + CSI + UI surface           | 17–19b | interop-db gate, `nvmesh client preempt-from-cdv`, CSI no-op audit, UI Evicting badge + alarm |
 | 7 — Testing & stabilization                 | 20–23 | Unit, integration, adversarial, failover; feature-flag flip |
 
 Phases 1–3 can run largely in parallel (different sub-repos). Phase 4 depends on Phase 3's reason code. Phase 5 depends on Phases 1 and 2. Phase 6 depends on Phase 5. Phase 7 depends on everything.
@@ -516,6 +516,40 @@ No code change. Audit verifies:
 - A CSI-created TPV whose client is preempted mid-I/O produces a surfaceable `NodePublishVolume` / `NodeStageVolume` error on the next operation, so Kubernetes treats the volume as unhealthy and reschedules the pod.
 
 Document this contract in the CSI `README.md`. No behavior change.
+
+### Step 19b. UI — EVICTING indicator — `nvmesh-management/public/javascripts/components/pages/thinProvisioning/ThinProvisioning.jsx`
+
+`EVICTING` is a per-`(client, CDV)` attachment state (`client.attachments[cdv].action`), not a TPV `status` value. TPV `status` remains `online | offline | degraded | unavailable` and the TPV state dial is **not** extended. Adding a fifth slice would (a) mix two orthogonal axes on one visual, and (b) flicker, because `EVICTING` is transient (sub-second happy path, at most a minute under worst-case preempt retry).
+
+**Primary placement — row-level badge.** Add an `Evicting` badge in the attachment cell of the TPV row, following the column pattern the TPV-encryption plan uses for `encryption.command.status`:
+
+```jsx
+// In ThinProvisioning.jsx, per-row attachment rendering:
+const exclusiveClient = tpv.tpvConfig.exclusiveClient;
+const clientAttachment = exclusiveClient
+    ? clientsById[exclusiveClient]?.attachments.find(a =>
+        a.volumeID === tpv.tpvConfig.cdvId)
+    : null;
+
+if (clientAttachment?.action === consts.volumeAttachmentActions.EVICTING) {
+    return <label className="label bg-yellow">Evicting</label>;
+}
+// …existing render of client name / status…
+```
+
+The badge disappears automatically when the eviction completes (action clears to `null` after Step 14 `cleanupDB`) or when the TPV row no longer has an `exclusiveClient`.
+
+**Secondary placement — alarm.** The dashboard has no `offline` TPV category, so the natural state mapping ("TPV has a holder that cannot serve I/O right now") cannot be surfaced on the state dial. Raise an alarm instead, for the duration of the `EVICTING` window:
+
+- Alarm type: `TPV_CLIENT_EVICTING` (new), severity `warning`.
+- Subject: the TPV.
+- Fields: `tpvID`, `cdvID`, `evictedClientID`, `reservationFloor`, `startedAt`.
+- Raise when management first writes `EVICTING` (Step 14 `markEvicting`); clear when management clears the action (Step 14 `cleanupDB`) or when the reaper (Step 14b) cleans it up on a subsequent tick.
+- File under existing alarm infrastructure in `modules/alarms.js` (or wherever `AlarmRaise` / `AlarmClear` live in the management codebase).
+
+The alarm is the durable observation channel: an operator who misses the transient badge still sees the alarm in the alarms panel and in the alarm history, with enough context (`evictedClientID`, `reservationFloor`) to investigate.
+
+**TPV row `status` column (no change).** During EVICTING the TPV's own `status` is whatever it was before — typically `online` if the CDV is healthy. The fact that the client's I/O is being fenced is orthogonal to the TPV's health. When the previous holder's attachment is removed and no new attachment yet exists, the TPV's existing status-computation path will naturally return `unavailable` (or the equivalent "no exclusive client" state).
 
 ---
 
