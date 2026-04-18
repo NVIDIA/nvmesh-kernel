@@ -191,6 +191,12 @@ static bool evict_replacement_up(void) {
 		&& rep_i >= 0 && strcmp(r->segs[rep_i].vitality, "up") == 0;
 }
 
+/* Phase-4 verification: toma reported at least one segment as "under_recovery"
+ * at some point since the last reset -- proves the praid reached SWITCH_TOPO_U. */
+static bool evict_under_recovery(void) {
+	return mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed;
+}
+
 /*
  * Disk eviction / segment replacement scenario for V_R1 (NVMESH-8156).
  *
@@ -282,6 +288,18 @@ static void scenario_evict_rebuild_r1(void) {
 	 *           followed by a leader keep-alive.
 	 * [REAL]    toma leader receives (effects observed in Phase 4).
 	 * ==================================================================== */
+	SCENARIO_PRINT(__AUTOID__, "Phase 3: updateVolume v3 removing the deprecated segment");
+	{
+		static const struct mgmt_sim_vol_seg_update post_evict_segs[] = {
+			{ .seg_idx = 1, .praid_idx = 1, .status = "normal" },
+			{ .seg_idx = 2, .praid_idx = 2, .status = "normal" },
+			{ .seg_idx = 3, .praid_idx = 0, .status = "markedForRebuild" },
+		};
+		mgmt_sim_send_volume_update(1, 3, "degraded", "markedForRebuild",
+			post_evict_segs, (int)ARRAY_SIZE(post_evict_segs));
+	}
+	yield();
+	mgmt_sim_send_leader_keep_alive();
 
 	/* ====================================================================
 	 * PHASE 4 -- Toma enters under_recovery; verify
@@ -298,6 +316,7 @@ static void scenario_evict_rebuild_r1(void) {
 	 *           after subsequent reports overwrite the per-seg field.
 	 * [VERIFY]  WAIT_UNTIL was_under_recovery_witnessed on V_R1 snapshot.
 	 * ==================================================================== */
+	WAIT_UNTIL_N(evict_under_recovery(), 2000);
 
 	/* ====================================================================
 	 * PHASE 5 -- Fake recovery completion in the sandbox
