@@ -162,6 +162,127 @@ void scenario_attach_good_path_io_detach_on_volume(int v) {
 	}
 }
 
+/*
+ * Disk eviction / segment replacement scenario for V_R1 (NVMESH-8156).
+ *
+ * Reproduces the production drive-eviction + rebuild procedure captured in the
+ * lab. The phase order is the contract; per-phase sandbox adapters land in
+ * subsequent commits as each phase goes live.
+ *
+ * V_R1 is a 3-way mirror (D=1, P=2). The eviction moves data off seg[0]
+ * (on the live toma's disk[1]) to a replacement seg[3] on peer node 2's
+ * disk[0]. seg[1] and seg[2] on peer node 1 provide the surviving mirror.
+ *
+ * Conventions in the comments below:
+ *   [REAL]    behavior of the code under test (live toma leader on node 0)
+ *   [SANDBOX] behavior the test harness drives (mgmt_sim / peer_toma_simu)
+ *   [VERIFY]  what the scenario waits for (expressed on the pRaidReport snapshot)
+ */
+static void scenario_evict_rebuild_r1(void) {
+	SCENARIO_PRINT(__AUTOID__, "start (inert outline -- phases go live incrementally)");
+
+	/* ====================================================================
+	 * PHASE 1 -- Management triggers eviction + rebuild
+	 *
+	 * Production context: user clicks "Evict Drive"; mgmt marks the disk
+	 * isOutOfService, allocates a replacement segment, sends two messages
+	 * + a keep-alive.
+	 *
+	 * [SANDBOX] mgmt_sim sends, in order:
+	 *   (a) updateVolume v2 with 4 segments:
+	 *         seg[0] "markedForRebuild_old"  (evicted, flag 'R')
+	 *         seg[1] "normal"                (surviving mirror)
+	 *         seg[2] "normal"                (surviving mirror)
+	 *         seg[3] "markedForRebuild"      (replacement, flag 'S')
+	 *         vol action="markedForRebuild", status="online"
+	 *   (b) hardwareConfiguration with the evicted disk isOutOfService=true
+	 *   (c) leader keep-alive
+	 * [REAL]    toma leader receives (effects observed in Phase 2).
+	 * ==================================================================== */
+
+	/* ====================================================================
+	 * PHASE 2 -- Toma reports replacement topology; verify
+	 *
+	 * [REAL]    toma leader:
+	 *   - Parses updateVolume v2; maps flags to internal status:
+	 *       seg[0] -> deprecated, seg[3] -> replacement,
+	 *       seg[1]/seg[2] -> normal.
+	 *   - Sees disk isOutOfService -> seg[0] skips zeroing -> X_DONE.
+	 *   - leader_switch_to_replacement_seg() promotes seg[3] to active.
+	 *   - seg[3] is on remote node 2 -> no local GPT write.
+	 *   - Emits updatePRaidReport with seg[0]=deprecated,
+	 *     seg[3]=replacement vitality=up, seg[1]/seg[2]=normal.
+	 * [SANDBOX] node 2's peer_toma_simu must surface seg[3] in its ACT_TOPO
+	 *           reply even though the leader's BIN_TOPO didn't include it
+	 *           before updateVolume v2.
+	 * [VERIFY]  WAIT_UNTIL snapshot shows 4 segments with seg[0]=deprecated,
+	 *           seg[3]=replacement, seg[3] vitality=up.
+	 * ==================================================================== */
+
+	/* ====================================================================
+	 * PHASE 3 -- Management removes the deprecated segment
+	 *
+	 * Production context: mgmt saw seg[0]=deprecated in Phase 2's report
+	 * and now drops seg[0] from the volume.
+	 *
+	 * [SANDBOX] mgmt_sim sends updateVolume v3 with 3 segments:
+	 *             seg[1] "normal", seg[2] "normal",
+	 *             seg[3] "markedForRebuild"
+	 *             vol action="markedForRebuild", status="degraded"
+	 *           followed by a leader keep-alive.
+	 * [REAL]    toma leader receives (effects observed in Phase 4).
+	 * ==================================================================== */
+
+	/* ====================================================================
+	 * PHASE 4 -- Toma enters under_recovery; verify
+	 *
+	 * [REAL]    toma advances praid sync_cmd:
+	 *             STABLE -> RESET_REGISTRANTS -> SWITCH_TOPO_I
+	 *                    -> SWITCH_TOPO_W     -> SWITCH_TOPO_U
+	 *           In SWITCH_TOPO_U:
+	 *             - One of seg[1]/seg[2] (peer node 1) -> OWNER_RECOVERER
+	 *             - seg[3] (peer node 2) -> UNDER_RECOVERY_R
+	 *           Emits updatePRaidReport with seg[3] status="under_recovery".
+	 * [SANDBOX] mgmt_sim parser latches was_under_recovery_witnessed=true on
+	 *           first "under_recovery" observation so the test can see it
+	 *           after subsequent reports overwrite the per-seg field.
+	 * [VERIFY]  WAIT_UNTIL was_under_recovery_witnessed on V_R1 snapshot.
+	 * ==================================================================== */
+
+	/* ====================================================================
+	 * PHASE 5 -- Fake recovery completion in the sandbox
+	 *
+	 * Production context: a hidden client on node 2 copies data from
+	 * OWNER_RECOVERER on node 1 to seg[3]. When done, the peer toma on
+	 * node 1 transitions OWNER_RECOVERER -> OWNER_RECOVERER_DONE. The
+	 * leader sees that via APPEND_ENTRIES_REP and finalizes rebuild.
+	 * The sandbox has no hidden client -- we force the peer's reported
+	 * state directly.
+	 *
+	 * [SANDBOX] Set dirty_bits override on node 1's peer simulator for
+	 *           BOTH seg[1] and seg[2] to OWNER_RECOVERER_DONE (leader
+	 *           picks one as OWNER_RECOVERER; we can't know which, so
+	 *           cover both). Mechanism: peer_toma_simu_set_seg_inject().
+	 * [REAL]    no action this phase (Phase 6 observes the effects once
+	 *           the next ACT_TOPO reply is processed).
+	 * ==================================================================== */
+
+	/* ====================================================================
+	 * PHASE 6 -- Rebuild complete; verify
+	 *
+	 * [REAL]    toma leader on seeing OWNER_RECOVERER_DONE from the peer:
+	 *             - Surviving seg: OWNER_RECOVERER  -> OWNER_IDLE
+	 *             - Replacement:   UNDER_RECOVERY_R -> OWNER_IDLE
+	 *             - Praid:         SWITCH_TOPO_U    -> STABLE
+	 *             - Emits updatePRaidReport with all 3 segs "normal".
+	 * [SANDBOX] mgmt_sim parses the final report; latch remains set.
+	 * [VERIFY]  WAIT_UNTIL snapshot has was_under_recovery_witnessed
+	 *           AND n_segments==3 AND seg[3] present AND all "normal".
+	 * ==================================================================== */
+
+	SCENARIO_PRINT(__AUTOID__, "done (inert)");
+}
+
 static void scenario_create_remove_r1(void) {
 	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
 	struct sim_broker_topic *kb_vol = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_VOLUMES);
@@ -211,6 +332,8 @@ static void scenario_create_remove_r1(void) {
 	scenario_user_rpcs_praid();
 	scenario_attach_good_path_io_detach_on_volume(0);
 	scenario_attach_good_path_io_detach_on_volume(1);
+
+	scenario_evict_rebuild_r1();
 
 	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
 	peer_toma_simu_ignore_append_entries_by_node(2);
