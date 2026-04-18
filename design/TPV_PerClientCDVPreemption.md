@@ -20,7 +20,7 @@ Combined, these fence one client from a `SHARED_READ_WRITE` CDV without disturbi
 | 3 — TOMA admission floor & handler          | 7–10 | Eager per-CDV state, dual-path floor seeding, `preemptClientFromCDV` handler, new `REGISTER` predicate + reason code |
 | 4 — Client kernel cleanup barrier           | 11–13 | Propagate `reservation_mode_version` on CDV attach, teardown TPVs on `NCBD_PREEMPTED`, handle `BELOW_CDV_FLOOR` |
 | 5 — Management preempt flow                 | 14–16 | `preemptClientFromCDV(cdv, client)` + reaper for stuck `EVICTING` state; hook into force-detach, stale-client cleanup, and attach-with-preempt |
-| 6 — mNDU + CLI + CSI + UI surface           | 17–19b | interop-db gate, `nvmesh client preempt-from-cdv`, CSI no-op audit, UI Evicting badge + alarm |
+| 6 — mNDU + CLI + CSI + UI surface           | 17–19b | interop-db gate, `nvmesh client preempt-from-cdv`, CSI no-op audit, UI Evicting badge + dial-alarm count |
 | 7 — Testing & stabilization                 | 20–23 | Unit, integration, adversarial, failover; feature-flag flip |
 
 Phases 1–3 can run largely in parallel (different sub-repos). Phase 4 depends on Phase 3's reason code. Phase 5 depends on Phases 1 and 2. Phase 6 depends on Phase 5. Phase 7 depends on everything.
@@ -539,15 +539,9 @@ if (clientAttachment?.action === consts.volumeAttachmentActions.EVICTING) {
 
 The badge disappears automatically when the eviction completes (action clears to `null` after Step 14 `cleanupDB`) or when the TPV row no longer has an `exclusiveClient`.
 
-**Secondary placement — alarm.** The dashboard has no `offline` TPV category, so the natural state mapping ("TPV has a holder that cannot serve I/O right now") cannot be surfaced on the state dial. Raise an alarm instead, for the duration of the `EVICTING` window:
+**Dashboard dial — count EVICTING TPVs as alarm.** The existing TPV state dial on the dashboard aggregates TPVs into its slices from `status`. The dial has no `offline` slice, so the natural mapping ("TPV has a holder that cannot serve I/O right now") cannot be shown directly. Simplest treatment: in the dial's aggregation function, **a TPV whose `exclusiveClient` has `action === 'evicting'` on the parent CDV is counted in the `alarm` slice** alongside the TPVs whose `status` already indicates alarm. The count drops back out of `alarm` automatically when the eviction clears (either `cleanupDB` in Step 14 or the reaper in Step 14b).
 
-- Alarm type: `TPV_CLIENT_EVICTING` (new), severity `warning`.
-- Subject: the TPV.
-- Fields: `tpvID`, `cdvID`, `evictedClientID`, `reservationFloor`, `startedAt`.
-- Raise when management first writes `EVICTING` (Step 14 `markEvicting`); clear when management clears the action (Step 14 `cleanupDB`) or when the reaper (Step 14b) cleans it up on a subsequent tick.
-- File under existing alarm infrastructure in `modules/alarms.js` (or wherever `AlarmRaise` / `AlarmClear` live in the management codebase).
-
-The alarm is the durable observation channel: an operator who misses the transient badge still sees the alarm in the alarms panel and in the alarm history, with enough context (`evictedClientID`, `reservationFloor`) to investigate.
+No new alarm type, no alarm-raise/clear wiring, no new infrastructure — just an aggregation tweak in the dashboard's dial data source.
 
 **TPV row `status` column (no change).** During EVICTING the TPV's own `status` is whatever it was before — typically `online` if the CDV is healthy. The fact that the client's I/O is being fenced is orthogonal to the TPV's health. When the previous holder's attachment is removed and no new attachment yet exists, the TPV's existing status-computation path will naturally return `unavailable` (or the equivalent "no exclusive client" state).
 
