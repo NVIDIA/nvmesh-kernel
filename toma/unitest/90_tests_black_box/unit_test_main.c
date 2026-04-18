@@ -272,8 +272,8 @@ static void scenario_evict_rebuild_r1(void) {
 	 * [VERIFY]  WAIT_UNTIL snapshot shows 4 segments with seg[0]=deprecated,
 	 *           seg[3]=replacement, seg[3] vitality=up.
 	 * ==================================================================== */
-	WAIT_UNTIL_N(evict_replacement_reported(), 2000);
-	WAIT_UNTIL_N(evict_replacement_up(),       2000);
+	WAIT_UNTIL(evict_replacement_reported());
+	WAIT_UNTIL(evict_replacement_up());
 
 	/* ====================================================================
 	 * PHASE 3 -- Management removes the deprecated segment
@@ -316,7 +316,7 @@ static void scenario_evict_rebuild_r1(void) {
 	 *           after subsequent reports overwrite the per-seg field.
 	 * [VERIFY]  WAIT_UNTIL was_under_recovery_witnessed on V_R1 snapshot.
 	 * ==================================================================== */
-	WAIT_UNTIL_N(evict_under_recovery(), 2000);
+	WAIT_UNTIL(evict_under_recovery());
 
 	/* ====================================================================
 	 * PHASE 5 -- Fake recovery completion in the sandbox
