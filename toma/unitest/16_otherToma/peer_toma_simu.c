@@ -57,11 +57,20 @@ static void __gen_seg_reply_to_leader(struct peer_toma_simu *T, const struct sb_
 
 	// Now Apply the injected changes according to unitest scenario
 	if (!T->ignore_segs_initialization) {
+		/* The leader issues mem-tbl init commands (FIRST_USE_EVER for brand-new
+		 * segments, TURN_ALL_ON/OFF and FROM_PERSIST during recovery) that the
+		 * real peer executes locally and then reports as INIT_DONE. Simulate
+		 * that completion by collapsing every actionable init_mode to
+		 * INIT_DONE in the reply. Without this the leader stays in
+		 * leader_is_waiting_for_any_remote_seg_to_apply_topo() because it sees
+		 * the init command still outstanding. */
+		const unsigned actionable = NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER |
+			NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON  |
+			NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF |
+			NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST;
 		const bool was_fresh = (act_seg->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER);
-		if (act_seg->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER)
-			act_seg->dirty_bits_init_mode =  NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
-		if (act_seg->stale_locks_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER)
-			act_seg->stale_locks_init_mode =  NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
+		if (act_seg->dirty_bits_init_mode  & actionable) act_seg->dirty_bits_init_mode  = NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
+		if (act_seg->stale_locks_init_mode & actionable) act_seg->stale_locks_init_mode = NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
 		/* For segments the peer is seeing for the first time (init_mode was
 		 * FIRST_USE_EVER) with the leader still at UNKNOWN, simulate the real
 		 * peer finishing its local format+GPT by reporting OWNER_IDLE. Without
@@ -87,6 +96,10 @@ void peer_toma_simu_set_seg_inject(struct peer_toma_simu *T, const struct toma_s
 		BUG_ON(T->n_seg_overrides > PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES);
 	}
 	*dst = *inj;
+}
+
+void peer_toma_simu_clear_seg_injects(struct peer_toma_simu *T) {
+	T->n_seg_overrides = 0;
 }
 
 int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *T, const struct nvmeibt_topology_serialized_topo_header *leader_topo_data, int leader_topo_len, char *out_buf, int out_buf_size) {
