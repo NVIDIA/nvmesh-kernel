@@ -24,10 +24,14 @@
  *   is scanned asynchronously to rebuild in-memory state.
  *
  * CDV allocator identity (allocator_toma_id, allocator_generation) is elected
- * by the RAFT leader via nvmeibt_cdv_alloc_elect() and distributed to all
- * TOMAs and clients:
- *   - Clients: via CDV_ALLOCATOR_UPDATE messages pushed to all registrants
- *     (nvmeibt_cdv_alloc_push_to_registrants).
+ * by the RAFT leader via nvmeibt_cdv_alloc_elect() and carried in the
+ * RAFT-replicated pRAID topology record.  Delivery to every TOMA happens via
+ * the standard AppendEntries → follower-apply pipeline; the role transition
+ * (promote / demote) runs in nvmeibt_cdv_alloc_on_topo_applied(), which fires
+ * Stage A of the satellite-attach handshake on the newly-elected allocator
+ * and tears down local state on the demoted one.  Clients learn the new
+ * identity via the existing CDV topology push (CDV_ALLOCATOR_UPDATE).
+ * See design/EmbedAllocatorInRaft.md.
  *
  * Threading:
  *   All public functions must be called from TOMA's single main thread (or
@@ -295,114 +299,78 @@ void nvmeibt_cdv_alloc_gc_stale_entries(void);
  */
 void nvmeibt_cdv_alloc_remove(const char *cdv_uuid);
 
-/*
- * nvmeibt_cdv_alloc_set_generation — update the allocator_generation for a CDV.
- *
- * Called from the RAFT distribution path when the leader assigns (or
- * reassigns) the allocator for cdv_uuid.  If the per-CDV allocator does not
- * exist yet it is created.  Clients whose cached generation no longer matches
- * will receive NVMEIBT_CDV_ALLOC_WRONG_GEN on their next ALLOC request.
- */
-void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation);
+/* Forward-declared here to avoid pulling praid_basics.h into this header. */
+struct nvmeibt_praid_topo_ctx;
 
 /*
  * nvmeibt_cdv_alloc_elect — elect the CDV allocator TOMA for a CDV.
  *
- * Called by the RAFT leader for every stable CDV pRAID on each topo
- * recalculation — including on TOMA restart when topology has not changed.
- * This ensures the CDV alloc hash entry is always populated after startup.
+ * Called by the RAFT leader for every stable CDV pRAID during topology
+ * recalculation.  Operates purely on the caller-supplied topo_ctx (i.e. the
+ * pRAID's calculated_praid_lot.topo_ctx that is about to be committed via
+ * AppendEntries): reads the current (allocator_toma_id, allocator_generation)
+ * fields and, on new election, stages the new identity by writing them.
  *
- * Election rule: if the current allocator is in @candidates, keep it (sticky)
- * and return 0.  Otherwise pick one from @candidates at random, write the
- * chosen allocator_toma_id, and return 1 (newly elected — caller should push
- * CDV_ALLOCATOR_UPDATE to registrants).
+ * This function does NOT touch the local cdv_alloc_hash.  Identity propagation
+ * happens entirely through the RAFT-replicated pRAID topology: every TOMA's
+ * update_applied_topology path invokes nvmeibt_cdv_alloc_on_topo_applied,
+ * which drives the promote/demote state transitions.
  *
- * allocator_generation is NOT mutated by elect.  The proposed new generation
- * is returned via @out_proposed_gen; the caller passes it to
- * nvmeibt_cdv_alloc_send_notify_to_elected, whose handle_notify path is the
- * sole writer that commits allocator_generation after its monotonicity guard.
- * This keeps the guard single-writer so the leader-is-also-allocator
- * self-apply case does not race itself.
+ * Election rule: if the current allocator_toma_id in @topo_ctx is still in
+ * @candidates, keep it (sticky) and return 0.  Otherwise pick one candidate
+ * (random tie-break), write allocator_toma_id + (allocator_generation+1) into
+ * @topo_ctx, and return 1.
  *
- * The on-disk extent records are scanned asynchronously on a worker thread
- * whenever ondisk_loaded is false, regardless of whether the sticky rule
- * fired.  If the disk I/O path is not yet ready, the scan is deferred and
- * retried on the next call (e.g. next heartbeat).
+ * @cdv_uuid:      CDV UUID string (for logging only).
+ * @candidates:    Array of TOMA node hostname strings (alive RAFT members).
+ * @n_candidates:  Number of entries in @candidates.
+ * @topo_ctx:      The pRAID topo_ctx to read from and stage mutations into
+ *                 (typically &praid_leader->calculated_praid_lot.topo_ctx).
+ *                 Must be non-NULL.
  *
- * @cdv_uuid:          CDV UUID string.
- * @candidates:        Array of TOMA node hostname strings (first-pRAID RW nodes).
- * @n_candidates:      Number of entries in @candidates.
- * @out_proposed_gen:  On return: proposed new generation to carry in the
- *                     notify.  Populated on both sticky (current gen) and
- *                     newly-elected (current gen + 1) returns.  May be NULL.
- *
- * Returns  1 if a new allocator was elected (push_to_registrants needed),
- *          0 if the current allocator is sticky (no push needed),
- *         -EINVAL if n_candidates is 0, -ENOMEM on OOM.
+ * Returns  1 if a new allocator was elected (caller should mark the pRAID
+ *            topology as changed so the commit reaches all followers);
+ *          0 if the current allocator is sticky (no change);
+ *         -EINVAL if @topo_ctx is NULL or @n_candidates == 0.
  */
 int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 			    const char **candidates,
 			    int n_candidates,
-			    uint64_t *out_proposed_gen);
+			    struct nvmeibt_praid_topo_ctx *topo_ctx);
 
 /*
- * nvmeibt_cdv_alloc_get_allocator — retrieve the current allocator identity
- * for a CDV.
+ * nvmeibt_cdv_alloc_on_topo_applied — hook fired from update_applied_topology
+ * on every committed topology change, on every TOMA (leader and followers).
  *
- * @cdv_uuid:       CDV UUID string.
- * @out_toma_id:    Buffer of at least NVMEIBT_CDV_HOSTNAME_LEN bytes; filled
- *                  with the allocator hostname (empty string if unelected).
- * @out_generation: Filled with the current allocator_generation.
+ * Called only for the first pRAID of a CDV (caller filters).  Diffs the
+ * previously-applied (allocator_toma_id, allocator_generation) against the
+ * newly-applied values and drives local role transitions:
+ *  - Generation increased and allocator_toma_id == my_hostname, state not
+ *    ACTIVE → promote to AWAITING_SATELLITE_ATTACH and fire Stage A
+ *    (cdv_send_attach_satellite_request).
+ *  - Generation increased and previous allocator was me, new one isn't →
+ *    demote to NOT_ALLOCATOR, tear down satellite state.
+ *  - Generation unchanged → no-op.
  *
- * Returns 0 on success (allocator elected), -ENOENT if no allocator exists
- * for this CDV.
+ * Also triggers CDV_ALLOCATOR_UPDATE push to any clients registered locally
+ * so they learn the new allocator identity.
  */
-int nvmeibt_cdv_alloc_get_allocator(const char *cdv_uuid,
-				    char *out_toma_id,
-				    uint64_t *out_generation);
+void nvmeibt_cdv_alloc_on_topo_applied(const char *cdv_uuid,
+				       const struct nvmeibt_praid_topo_ctx *prev_applied,
+				       const struct nvmeibt_praid_topo_ctx *new_applied);
 
 /*
  * nvmeibt_cdv_alloc_push_to_registrants — push CDV allocator identity to all
- * clients that have this CDV registered (attached).
+ * clients that have this CDV registered (attached) on this TOMA.
  *
  * Sends a CDV_ALLOCATOR_UPDATE message carrying (allocator_toma_id,
  * allocator_generation) to every registrant of a disk segment belonging to
- * this CDV.  Called after nvmeibt_cdv_alloc_elect() succeeds.
+ * this CDV.  Called from the topology-apply hook when the allocator identity
+ * changes for this CDV.
  *
  * @cdv_uuid:  CDV UUID string.
  */
 void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid);
-
-/*
- * Wire payload for the leader → chosen-allocator unicast RAFT_MSG_CDV_ALLOC_NOTIFY.
- * Fixed-size, packed; carried in raft_msg.persist_and_wire_buf.data[].
- */
-struct nvmeibt_cdv_alloc_notify_payload {
-	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
-	char     allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN];
-	uint64_t allocator_generation;
-} __attribute__((packed));
-
-/*
- * nvmeibt_cdv_alloc_send_notify_to_elected — leader calls this after a
- * successful nvmeibt_cdv_alloc_elect() (returns 1).  Sends RAFT_MSG_CDV_ALLOC_NOTIFY
- * unicast to the chosen TOMA.  If the chosen TOMA is the leader itself, applies
- * the notify locally instead (same effect without going through the wire).
- */
-void nvmeibt_cdv_alloc_send_notify_to_elected(const char *cdv_uuid,
-					      const char *allocator_toma_id,
-					      uint64_t    allocator_generation);
-
-/*
- * nvmeibt_cdv_alloc_handle_notify — receiver: called from the RAFT dispatch
- * on RAFT_MSG_CDV_ALLOC_NOTIFY.  Applies the monotonicity guard, updates the
- * local alloc entry, and starts the satellite-volume attach handshake (Stage A):
- * transitions the state machine to AWAITING_SATELLITE_ATTACH and enqueues an
- * AttachSatelliteRequest Kafka message to management.  The on-disk scan and
- * push-to-registrants happen later in Stage B (handle_satellite_attach_response)
- * once management replies that the satellite is exclusively attached to us.
- */
-void nvmeibt_cdv_alloc_handle_notify(const struct nvmeibt_cdv_alloc_notify_payload *payload);
 
 /*
  * nvmeibt_cdv_alloc_handle_satellite_attach_response — Stage B handler.

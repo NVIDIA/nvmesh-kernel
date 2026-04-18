@@ -71,7 +71,6 @@
 #include "interfaces/network/network_incs.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_node.h"
-#include "nvmeibt_cdv_alloc.h"		/* nvmeibt_cdv_alloc_notify_payload, handler */
 #include "nvmeibt_important_logs.h"
 #include "interfaces/log/nvmeibt_dumper.h"
 #include "nvmeibt_bm.h"
@@ -3303,27 +3302,6 @@ static int dispatch_raft_msg(struct raft_msg *msg, struct nvmeibt_node *src_node
 	case RAFT_MSG_APPEND_ENTRIES_REP:
 		rv = raft_handle_append_entries_rep(msg, src_node);
 		break;
-	case RAFT_MSG_CDV_ALLOC_NOTIFY:
-		/*
-		 * Leader → chosen-allocator unicast carrying the CDV allocator
-		 * identity after a fresh election.  The payload lives in the
-		 * persist_and_wire_buf.data[] area; its length is in msg_data_len.
-		 * Not persisted to the RAFT log — monotonicity is enforced at
-		 * the handler via strictly-higher-generation guard.
-		 */
-		if (msg->msg_data_len >= (int)sizeof(struct nvmeibt_cdv_alloc_notify_payload)) {
-			const struct nvmeibt_cdv_alloc_notify_payload *p =
-				(const struct nvmeibt_cdv_alloc_notify_payload *)
-					msg->persist_and_wire_buf.data;
-			nvmeibt_cdv_alloc_handle_notify(p);
-			rv = 0;
-		} else {
-			N_Ef(error_raft_cdv_notify_short,
-			     "CDV_ALLOC_NOTIFY payload too short len=@INT src=@SRC_NODE",
-			     msg->msg_data_len, nvmeibt_node_name(src_node));
-			rv = -1;
-		}
-		break;
 	default:
 		N_Ef(error_raft_dispatch_raft_msg, "msg_type=@MSG_TYPE src_node=@SRC_NODE", msg->msg_type, nvmeibt_node_name(src_node));
 		rv = -1;
@@ -3989,42 +3967,4 @@ int nvmeibt_leader_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...
 	(*printf_fn)(printf_ctx, "%s\n", raft_get_leader_node_name());
 	NFOUT;
 	return 0;
-}
-
-
-/*
- * nvmeibt_raft_send_cdv_alloc_notify — public helper used by the CDV allocator
- * election path to unicast a small {cdv_uuid, allocator_toma_id, generation}
- * payload to the chosen allocator TOMA.  Reuses the RAFT wire transport
- * (raft_send_msg_to_peer) so we inherit its CRC, LE/BE, and node-connection
- * plumbing.  Not logged in RAFT persistency — monotonicity is enforced on the
- * receive side by strictly-higher-generation acceptance.
- */
-int nvmeibt_raft_send_cdv_alloc_notify(struct nvmeibt_node *dst_node,
-				       const struct nvmeibt_cdv_alloc_notify_payload *payload)
-{
-	struct nvmeibt_persist_and_wire_buf *buf;
-	int total_len = (int)(sizeof(*buf) + sizeof(*payload));
-	int rv;
-
-	if (!dst_node || !payload)
-		return -EINVAL;
-
-	buf = NNVMEIBT_BM_CALLOC(cdv_notify_buf_alloc, total_len);
-	if (!buf)
-		return -ENOMEM;
-
-	buf->persist_and_wire_total_len = LE_SWAP32(total_len);
-	memcpy(buf->data, payload, sizeof(*payload));
-
-	rv = raft_send_msg_to_peer(RAFT_MSG_CDV_ALLOC_NOTIFY,
-				   dst_node,
-				   0,            /* is_vote_granted: N/A */
-				   0,            /* is_with_raft_log: no RAFT log for this msg */
-				   buf,
-				   0,            /* flags */
-				   (int)sizeof(*payload));
-
-	NNVMEIBT_BM_FREE(cdv_notify_buf_free, buf);
-	return rv;
 }

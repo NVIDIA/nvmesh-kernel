@@ -672,7 +672,7 @@ The client stores `(allocator_toma_id, allocator_generation)` in its `nvmeibc_tp
 **Allocator identity is two fields on the RAFT-replicated first-pRAID topology record.** `allocator_toma_id` and `allocator_generation` are added to `nvmeibt_praid_topo_ctx` (and its wire/persist analog `nvmeibt_praid_serialized_topo`), travel in the TOPO TLV of the existing `AppendEntries` commit path, and are applied on every TOMA through the standard `applied_praid_lot` update. There is no parallel message and no custom retry logic.
 
 **Election (RAFT leader only):**
-1. `nvmeibt_topology_calc_topology()` runs only on the leader. For every CDV pRAID with `stripe_idx == 0` and `PRAID_REGISTRANTS_SYNC_CMD_STABLE`, the leader builds a candidate list from alive RAFT members (the current candidate source is segment owners; the migration to RAFT members is tracked separately and does not affect this design).
+1. `nvmeibt_topology_calc_topology()` runs only on the leader. For every CDV pRAID with `stripe_idx == 0` and `PRAID_REGISTRANTS_SYNC_CMD_STABLE`, the leader builds a candidate list as the intersection of (a) distinct owner hostnames of the pRAID's data disk segments and (b) alive RAFT members (`raft_member->is_alive_for_topo`). Scoping to segment owners co-locates the allocator with the CDV data and with the satellite; the RAFT-liveness filter drops a dead segment owner within the heartbeat timeout (~200 ms) without having to wait for the pRAID topology to catch up.
 2. `cdv_alloc_elect(cdv_uuid, candidates, out_new_identity)`:
    - Current `allocator_toma_id` still in candidates → sticky, no mutation.
    - Otherwise pick one candidate (random tie-break) → stage `(new_toma_id, current_gen + 1)` into `calculated_praid_lot.topo_ctx`.

@@ -100,7 +100,18 @@ Caller (`nvmeibt_topology_calc_topology`):
 
 ```c
 if (is_first_praid && blkdev->from_config.is_cdv) {
-    /* build candidates from alive RAFT members */
+    /* Candidates = intersection of (distinct owner hostnames of the first
+     * pRAID's data disk segments) and (alive RAFT members).
+     *
+     * - Scoping to segment owners co-locates the allocator with the CDV
+     *   data / satellite (the satellite-attach handshake lands on the
+     *   requester, so picking a non-segment-owner would move the satellite
+     *   away from the CDV data pool for no operational benefit).
+     * - The RAFT-liveness filter drops a dead segment owner within the
+     *   heartbeat timeout (~200 ms) without waiting for the pRAID topology
+     *   to catch up — this closes the "dead allocator never relocates"
+     *   hole that motivated the earlier sticky-rule workaround.
+     */
     int rv = nvmeibt_cdv_alloc_elect(cdv_uuid, candidates, n_candidates,
                                      &praid_leader->calculated_praid_lot.topo_ctx);
     if (rv > 0) {

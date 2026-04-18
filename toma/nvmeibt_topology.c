@@ -1394,6 +1394,8 @@ static void update_applied_topology(void)
 	NFIN;
 	nvmeibt_global_get_global()->last_apply_time = nvmeibt_global_get_cur_event_start_time();
 	XHASHTABLE_FOR_EACH_SAFE(praid, &nvmeibt_global_get_global()->praids_hash) {
+		struct nvmeibt_praid_topo_ctx prev_applied_topo_ctx;
+
 		if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(praid)) {
 			N_Tf(gegey33, "Skipping praid=@UUID_LE outdated", nvmeibt_praid_UUID(praid));
 			continue;
@@ -1401,6 +1403,10 @@ static void update_applied_topology(void)
 		praid_follower = &praid->praid_follower;
 		committed_praid_topo = &praid_follower->committed_praid_lot.topo_ctx;
 		is_praid_config_ver_changed = (praid_follower->applied_praid_lot.from_config.version != praid_follower->committed_praid_lot.from_config.version);
+		/* Snapshot the previously-applied topo_ctx before the duplicate_content
+		 * overwrites it — the CDV allocator hook needs the old (toma_id, gen)
+		 * to detect a role transition. */
+		prev_applied_topo_ctx = praid_follower->applied_praid_lot.topo_ctx;
 		// The duplication must be performed before processing the praid because some segs can be already deleted !
 		nvmeibt_praid_lot_duplicate_content(&praid_follower->applied_praid_lot, &praid_follower->committed_praid_lot);
 		is_praid_during_cold_recovery = nvmeibt_praid_topo_is_client_sync_cmd_cold_recovery(praid_follower->applied_praid_lot.topo_ctx.registrants_sync_cmd);
@@ -1410,6 +1416,23 @@ static void update_applied_topology(void)
 			nvmeibt_praid_mark_all_praid_segs_post_update_actions_required(praid);
 
 		praid->praid_leader.is_waiting_for_timeout_since_activation_attempt &= !committed_praid_topo->is_activated;
+
+		/*
+		 * CDV allocator identity hook: for the first pRAID of a CDV,
+		 * drive Stage A on the newly-elected allocator and local teardown
+		 * on the demoted one.  See design/EmbedAllocatorInRaft.md.
+		 */
+		{
+			struct nvmeibt_block_device *blkdev = nvmeibt_praid_get_blkdev(praid);
+			bool is_first_praid = (blkdev &&
+				praid->praid_mgmt.stripe_idx == 0 &&
+				praid->praid_mgmt.its_chunk->its_idx_in_block_device == 0);
+			if (is_first_praid && blkdev->from_config.is_cdv) {
+				nvmeibt_cdv_alloc_on_topo_applied(blkdev->urn_uuid.str,
+								  &prev_applied_topo_ctx,
+								  &praid_follower->applied_praid_lot.topo_ctx);
+			}
+		}
 	}
 
 	//update active topo for all local segs
@@ -1717,6 +1740,110 @@ void nvmeibt_topology_calc_topology(void)
 		is_conf_change_requires_new_topo = nvmeibt_praid_upd_calculated_lot_from_praid_mgmt(praid);
 		nvmeibt_praid_leader_calc_topo_main(praid);
 
+		/*
+		 * CDV allocator election: for the first pRAID of a CDV, stage the
+		 * elected (allocator_toma_id, allocator_generation) into the pRAID's
+		 * calculated_praid_lot.topo_ctx.  The normal leader → AppendEntries
+		 * → follower-apply pipeline carries the update to every TOMA;
+		 * nvmeibt_cdv_alloc_on_topo_applied() fires the local role
+		 * transition on each TOMA.  On new election (elect returns 1), we
+		 * also bump topo_idx_updated + praid_version_minor so the existing
+		 * is_topo_changed check below triggers we_have_a_new_baseline.
+		 *
+		 * See design/EmbedAllocatorInRaft.md.
+		 */
+		{
+			struct nvmeibt_block_device *blkdev = nvmeibt_praid_get_blkdev(praid);
+			bool is_first_praid = (blkdev &&
+				praid->praid_mgmt.stripe_idx == 0 &&
+				praid->praid_mgmt.its_chunk->its_idx_in_block_device == 0);
+
+			if (is_first_praid && blkdev->from_config.is_cdv) {
+				/*
+				 * Candidates = distinct owner hostnames of the first pRAID's
+				 * data disk segments, filtered to those that are alive RAFT
+				 * members.  Scoping to segment owners keeps the allocator
+				 * co-located with the CDV data (and with the satellite the
+				 * satellite-attach handshake lands on); the RAFT-liveness
+				 * filter ensures a dead segment owner is dropped from the
+				 * candidate set within the RAFT heartbeat timeout (~200 ms),
+				 * so re-election does not wait on the pRAID topology path.
+				 */
+				const char *cdv_uuid = blkdev->urn_uuid.str;
+				const char *candidates[NVMEIBT_MAX_N_SEGMENTS_IN_PRAID];
+				int n_candidates = 0;
+				int si;
+
+				for (si = 0; si < praid->praid_mgmt.n_topo_segs; si++) {
+					struct nvmeibt_disk_segment *seg = praid->praid_mgmt.topo_segs[si];
+					struct nvmeibt_disk *disk;
+					struct nvmeibt_node *node;
+					struct nvmeibt_raft_member *member;
+					const char *name;
+					int k;
+					bool dup = false;
+
+					if (!seg)
+						continue;
+					disk = seg->seg_mgmt.its_disk;
+					if (!disk || !disk->its_node_config)
+						continue;
+					node = disk->its_node_config;
+					/* Require the segment owner to be a currently-alive RAFT
+					 * member — a dead owner must not be picked. */
+					member = nvmeibt_raft_get_member_by_id(nvmeibt_node_UUID(node));
+					if (!member || !member->is_alive_for_topo)
+						continue;
+					name = nvmeibt_node_name(node);
+					if (!name || !name[0])
+						continue;
+					for (k = 0; k < n_candidates; k++) {
+						if (strcmp(candidates[k], name) == 0) {
+							dup = true;
+							break;
+						}
+					}
+					if (!dup && n_candidates < NVMEIBT_MAX_N_SEGMENTS_IN_PRAID)
+						candidates[n_candidates++] = name;
+				}
+
+				if (n_candidates == 0) {
+					N_Wf(cdv_alloc_elect_no_members,
+					     "CDV-alloc: no alive segment-owner candidates for CDV @STR; skipping elect",
+					     cdv_uuid);
+				} else {
+					int elect_rv = nvmeibt_cdv_alloc_elect(cdv_uuid,
+									       candidates,
+									       n_candidates,
+									       &praid_leader->calculated_praid_lot.topo_ctx);
+					if (elect_rv > 0) {
+						/*
+						 * New election: bump praid_version_minor and
+						 * topo_idx_updated so is_topo_changed is true,
+						 * we_have_a_new_baseline ships the new identity,
+						 * and follower's upd_committed_topo version check
+						 * does not skip as ALREADY_UP_TO_DATE.  Propagate
+						 * the new version_minor to every seg_lot so on-wire
+						 * seg entries carry the matching version.  Mirrors
+						 * the version-bump pattern in praid.c:2354.
+						 */
+						struct nvmeibt_seg_lot *calculated_seg_lot;
+						struct nvmeibt_praid_topo_ctx *calculated_praid_topo =
+							&praid_leader->calculated_praid_lot.topo_ctx;
+
+						++(calculated_praid_topo->praid_version_minor);
+						calculated_praid_topo->topo_idx_updated = leader_get_next_topology_version();
+						XDLIST_FOREACH(calculated_seg_lot,
+							&(praid_leader->calculated_praid_lot.all_seg_lot_list)) {
+							calculated_seg_lot->seg_topo.seg_praid_version_minor =
+								calculated_praid_topo->praid_version_minor;
+						}
+						SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(cdv_alloc_elect_next_ver);
+					}
+				}
+			}
+		}
+
 		if (!praid_leader->calculated_praid_lot.topo_ctx.is_activated &&
 			!praid_leader->baseline_praid_lot.topo_ctx.is_activated) {
 			N_Tf(yueet22, "Skipping praid=@UUID_LE remained not activated", nvmeibt_praid_UUID(praid));
@@ -1734,107 +1861,6 @@ void nvmeibt_topology_calc_topology(void)
 		if (is_conf_changed || is_topo_changed) {
 			// The calculation yielded a new valid topology
 			nvmeibt_praid_leader_we_have_a_new_baseline(praid, &praid_leader->calculated_praid_lot);
-		}
-
-		/*
-		 * CDV allocator election: ensure the in-memory CDV alloc entry
-		 * exists and the on-disk extent state is loaded for every stable
-		 * CDV pRAID — including on TOMA restart when topology has not
-		 * changed (is_conf_changed and is_topo_changed are both false).
-		 *
-		 * nvmeibt_cdv_alloc_elect() returns 1 if a new allocator was
-		 * elected (push needed), 0 if sticky (no push needed).  The scan
-		 * of the CDV on-disk extent records is attempted inside elect()
-		 * whenever ondisk_loaded is false; if the disk I/O path is not
-		 * yet ready, the scan is deferred to the next heartbeat.
-		 */
-		{
-			struct nvmeibt_block_device *blkdev = nvmeibt_praid_get_blkdev(praid);
-			bool is_first_praid = (blkdev &&
-				praid->praid_mgmt.stripe_idx == 0 &&
-				praid->praid_mgmt.its_chunk->its_idx_in_block_device == 0);
-			bool is_stable = !!(praid_leader->baseline_praid_lot.topo_ctx.registrants_sync_cmd
-					    & PRAID_REGISTRANTS_SYNC_CMD_STABLE);
-
-			if (is_first_praid && is_stable && blkdev->from_config.is_cdv) {
-				/*
-				 * Candidates = distinct owner hostnames of the first pRAID's
-				 * data disk segments.  Only a node that actually hosts one
-				 * of these segments is a valid allocator; otherwise the
-				 * elected TOMA has no local CDV block device to open
-				 * (cdv_worker_open_fd fails repeatedly) and clients on the
-				 * real data-bearing nodes never learn a usable allocator.
-				 */
-				const char *cdv_uuid = blkdev->urn_uuid.str;
-				const char *candidates[NVMEIBT_MAX_N_SEGMENTS_IN_PRAID];
-				int n_candidates = 0;
-				int si;
-
-				for (si = 0; si < praid->praid_mgmt.n_topo_segs; si++) {
-					struct nvmeibt_disk_segment *seg =
-						praid->praid_mgmt.topo_segs[si];
-					struct nvmeibt_disk *disk;
-					const char *name;
-					int k;
-					bool dup = false;
-
-					if (!seg)
-						continue;
-					disk = seg->seg_mgmt.its_disk;
-					if (!disk || !disk->its_node_config)
-						continue;
-					name = nvmeibt_node_name(disk->its_node_config);
-					if (!name || !name[0])
-						continue;
-					for (k = 0; k < n_candidates; k++) {
-						if (strcmp(candidates[k], name) == 0) {
-							dup = true;
-							break;
-						}
-					}
-					if (!dup)
-						candidates[n_candidates++] = name;
-				}
-
-				if (n_candidates == 0) {
-					N_Wf(cdv_alloc_elect_no_owners,
-					     "CDV-alloc: first pRAID @UUID_LE has no resolvable segment owners; skipping elect",
-					     nvmeibt_praid_UUID(praid));
-				} else {
-					uint64_t proposed_gen = 0;
-					int elect_rv = nvmeibt_cdv_alloc_elect(cdv_uuid,
-									       candidates,
-									       n_candidates,
-									       &proposed_gen);
-					if (elect_rv > 0) {
-					/*
-					 * The leader has proposed an allocator; the chosen TOMA
-					 * commits the new generation and runs Stage A of the
-					 * satellite-attach handshake.  Deliver the proposal via
-					 * unicast RAFT_MSG_CDV_ALLOC_NOTIFY; if the leader is
-					 * itself the chosen TOMA, the helper applies locally
-					 * (through handle_notify) instead of sending.  The
-					 * proposed gen is passed directly — elect does not mutate
-					 * alloc->allocator_generation, so get_allocator would
-					 * still return the old value here.
-					 */
-					char my_toma_id[NVMEIBT_CDV_HOSTNAME_LEN] = {0};
-					uint64_t cur_gen = 0;
-					if (nvmeibt_cdv_alloc_get_allocator(cdv_uuid,
-									    my_toma_id,
-									    &cur_gen) == 0) {
-						nvmeibt_cdv_alloc_send_notify_to_elected(
-							cdv_uuid, my_toma_id, proposed_gen);
-					}
-					/*
-					 * Also push to any local registrants — covers the
-					 * single-node case and is a no-op when the local node
-					 * hosts no first-pRAID segs (hash is empty for this CDV).
-					 */
-					nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
-					}
-				}
-			}
 		}
 	}
 	nvmeibt_topology_serialize_conf_and_topo_if_needed();

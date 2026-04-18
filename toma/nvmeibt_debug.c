@@ -146,6 +146,11 @@ void read_rpc_config_from_persist(bool is_initial_read)
 #else
 		goto continue_reading;
 #endif
+	} else if (sw_ver == 0x00000310 || sw_ver == 0x00000330) {
+		/* v0x340 bumped the wire format of praid_serialized_topo (added
+		 * CDV allocator identity fields).  RPC-config format is unchanged,
+		 * so older persisted RPC configs remain readable. */
+		N_WTf(hj3a06n, "SW_VER old but compatible @X != @X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
 	} else if (sw_ver != TOMA_SW_COMPATIBILITY_VER) {
 		N_WTf(hj3a05n, "SW_VER mismatch");
 		if (is_initial_read)
@@ -278,6 +283,10 @@ void update_traces(void)
 #else
 		goto continue_reading;
 #endif
+	} else if (sw_ver == 0x00000310 || sw_ver == 0x00000330) {
+		/* See comment in read_rpc_config_from_persist: v0x340 only bumped
+		 * the praid wire format; other on-disk formats are unchanged. */
+		N_WTf(hj3836n, "SW_VER old but compatible @X != @X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
 	} else if (sw_ver != TOMA_SW_COMPATIBILITY_VER) {
 		N_WTf(hj3835n, "SW_VER mismatch @X!=@X", sw_ver, TOMA_SW_COMPATIBILITY_VER);
 		if (is_initial_read)

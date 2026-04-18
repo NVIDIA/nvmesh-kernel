@@ -700,6 +700,39 @@ static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
 	struct nvmeibt_serialized_seg_leader_topo		*seg_wire_topo_ptr;
 	int												segs_topo_len;
 
+
+	NFIN;
+	praid_topo = &praid_lot->topo_ctx;
+	n_segs = XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
+
+	nvmeibt_strlcpy(serialized_praid.eyecatcher, "PTO", sizeof(serialized_praid.eyecatcher));
+	serialized_praid.uuid = *praid_uuid;
+	serialized_praid.praid_version_major = praid_topo->praid_version_major;
+	serialized_praid.praid_version_minor = praid_topo->praid_version_minor;
+	serialized_praid.registrants_sync_cmd = praid_topo->registrants_sync_cmd;
+	serialized_praid.leader_did_all_segs_sync_registrants = praid_topo->leader_did_all_segs_sync_registrants;
+	serialized_praid.is_activated = praid_topo->is_activated;
+	serialized_praid.segs_num = n_segs;
+	serialized_praid.topo_idx_updated = praid_topo->topo_idx_updated;
+	/* CDV allocator identity (zero on every pRAID that is not a CDV first pRAID). */
+	memcpy(serialized_praid.allocator_toma_id, praid_topo->allocator_toma_id,
+	       sizeof(serialized_praid.allocator_toma_id));
+	serialized_praid.allocator_generation = praid_topo->allocator_generation;
+
+	// Serialize disk_segments
+	seg_wire_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)out_segs_wire_topo_buf;
+	XDLIST_FOREACH(seg_lot, &praid_lot->all_seg_lot_list) {
+		serialize_seg_lot_topo_to_wire(praid_topo, seg_lot, seg_wire_topo_ptr);
+		seg_wire_topo_ptr++;
+	}
+
+	nvmeibt_praid_convert_topo_le_be(&serialized_praid, out_praid_wire_topo, TOMA_SW_COMPATIBILITY_VER);
+
+	NFOUT;
+}
+
+static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
+{
 	struct nvmeibt_praid_leader						*praid_leader = &praid->praid_leader;
 	struct nvmeibt_praid_lot						*praid_lot = &praid_leader->baseline_praid_lot;
 	struct nvmeibt_praid_topo_ctx					*praid_topo = &praid_lot->topo_ctx;
@@ -871,6 +904,11 @@ enum nvmeibt_add_rv nvmeibt_praid_upd_committed_topo(struct nvmeibt_praid_serial
 	committed_topo->registrants_sync_cmd = praid_topo_ptr->registrants_sync_cmd;
 	committed_topo->leader_did_all_segs_sync_registrants = praid_topo_ptr->leader_did_all_segs_sync_registrants;
 	committed_topo->is_activated = praid_topo_ptr->is_activated;
+	committed_topo->topo_idx_updated = praid_topo_ptr->topo_idx_updated;
+	/* CDV allocator identity (zero on every pRAID that is not a CDV first pRAID). */
+	memcpy(committed_topo->allocator_toma_id, praid_topo_ptr->allocator_toma_id,
+	       sizeof(committed_topo->allocator_toma_id));
+	committed_topo->allocator_generation = praid_topo_ptr->allocator_generation;
 	praid->was_praid_ever_activated |= praid_topo_ptr->is_activated;
 
 	rv = NVMEIBT_ADD_MODIFIED;

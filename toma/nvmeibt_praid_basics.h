@@ -10,6 +10,8 @@
 #include "nvmeibt_params.h"
 #include "nvmeibt_ds.h"
 #include "nvmeibt_str.h"
+#include "nvmeibt_disk_segment_basics.h"	/* struct nvmeibt_serialized_seg_leader_topo (flex array) */
+#include "../common/nvmeib_hash.h"
 #include "nvmeibt_mm_json.h"
 #include "../autogen/clnt/nvmeibc_mcs_stub.h"
 #include "clnt/nvmeibt_client_protocol.h"
@@ -48,6 +50,13 @@ struct nvmeibt_praid_topo_ctx {
 	int										praid_version_minor;	// Increased upon every praid change
 	enum PRAID_REGISTRANTS_SYNC_CMD			registrants_sync_cmd;
 	int										leader_did_all_segs_sync_registrants;	// Used only ib the leader's context
+	/* CDV-allocator identity — meaningful only for a CDV's first pRAID
+	 * (stripe_idx==0 && blkdev->from_config.is_cdv). Zero on every other pRAID.
+	 * Written by the RAFT leader in cdv_alloc_elect(); delivered to every TOMA
+	 * via AppendEntries; applied in update_applied_topology() which triggers
+	 * the allocator role transition on the chosen TOMA. See design/EmbedAllocatorInRaft.md. */
+	char									allocator_toma_id[NVMEIB_HOST_NAME_LEN];
+	uint64_t								allocator_generation;
 };
 
 struct nvmeibt_praid_config {
@@ -66,12 +75,32 @@ struct nvmeibt_praid_serialized_topo {
 	int										praid_version_minor;					// 32
 	int										leader_did_all_segs_sync_registrants;	// 36
 	enum PRAID_REGISTRANTS_SYNC_CMD			registrants_sync_cmd:32;				// 40
-    int										res_2;									// 44
-    short									res_3;									// 48
-	BOOL									is_activated;							// 49
-    int8_t									segs_num;								// 50
-	struct nvmeibt_serialized_seg_leader_topo		segs[0] __attribute__((aligned(8)));	// 56
+	int										res_2;									// 44
+	int16_t									res_3;									// 46
+	BOOL									is_activated;							// 47
+	int8_t									segs_num;								// 48
+	int64_t									topo_idx_updated;						// 56
+	/* CDV-allocator identity (v0x340+). Zero on every pRAID that is not a CDV first pRAID. */
+	char									allocator_toma_id[NVMEIB_HOST_NAME_LEN];	// 120
+	uint64_t								allocator_generation;					// 128
+	struct nvmeibt_serialized_seg_leader_topo		segs[0] __attribute__((aligned(8)));	// 128
 } __attribute__((packed, aligned(8)));
+
+// Size of the old praid serialized topo (v0x310), before topo_idx_updated was added.
+// The old struct had segs[0] at offset 48 (after segs_num at 47), with aligned(8) having no effect since packed.
+// Used for backward compatibility during hot upgrade when parsing wire data from older TOMAs.
+#define NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x310	48
+
+// Size of the v0x320/v0x330 praid serialized topo, before allocator_toma_id/allocator_generation
+// were added. segs[0] was at offset 56 (after topo_idx_updated). Used for backward compatibility
+// during hot upgrade when parsing wire data from v0x330-and-earlier TOMAs.
+#define NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x330	56
+
+static inline int8_t nvmeibt_praid_wire_get_n_segs(const struct nvmeibt_praid_serialized_topo *praid)
+{
+	return LE_SWAP8(praid->segs_num);
+}
+
 
 #define NVMEIBT_PRAID_TOPO_DUMP(name, _uuid, _which_str, _topo) do {					\
 	if (_topo) {																		\

@@ -20,6 +20,7 @@
 #include "nvmeibt_cdv_alloc.h"
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
+#include "nvmeibt_praid_basics.h"	/* struct nvmeibt_praid_topo_ctx (field access) */
 #include "nvmeibt_register.h"		/* struct nvmeibt_register_msg, nvmeibt_register_send_msg_to_registrant */
 #include "nvmeibt_toma.h"		/* nvmeibt_toma_send_msg_to_client, nvmeibt_global_get_global */
 #include "nvmeibt_global.h"		/* struct nvmeibt_topology (full definition) */
@@ -31,7 +32,7 @@
 #include "utils/nvmeibt_uuid.h"		/* nvmeibt_urn_uuid_str_to_union_uuid */
 #include "nvmeibt_wq.h"		/* struct nvmeibt_wq, nvmeibt_wq_addw */
 #include "nvmeibt_node.h"	/* nvmeibt_node_get_node_by_id, nvmeibt_node_name */
-#include "nvmeibt_raft.h"	/* nvmeibt_raft_send_cdv_alloc_notify */
+#include "nvmeibt_raft.h"	/* nvmeibt_raft_get_current_term */
 
 /* ── Forward declarations ────────────────────────────────────────────────── */
 
@@ -1421,6 +1422,7 @@ int nvmeibt_cdv_alloc_remove_extent(const char *cdv_uuid, uint64_t extent_index)
 }
 
 static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid);
+static void cdv_send_attach_satellite_request(struct nvmeibt_cdv_alloc *alloc);
 
 int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 				    const char  *tpv_uuid,
@@ -1438,27 +1440,41 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
 	if (!alloc) {
 		/*
-		 * No in-memory allocator.  This happens when the CDV was
-		 * detached and re-attached (e.g. last TPV detached, then a
-		 * TPV re-attached).  Rebuild state from on-disk extent
-		 * records — the same cold-recovery path used at election.
+		 * No in-memory allocator on this TOMA.  Under the RAFT-embedded
+		 * allocator identity design, the alloc entry is created exclusively
+		 * by nvmeibt_cdv_alloc_on_topo_applied once this TOMA has processed
+		 * the committed topology naming an allocator for this CDV.  If no
+		 * entry exists here, topology has not yet been applied (cold-start
+		 * race with client requests, or this CDV is unknown to us).  Do
+		 * NOT create a zero-initialized entry — that historically led to
+		 * scan loops against an unattached CDV.  Return EAGAIN and let the
+		 * client retry after the topology push arrives.
 		 */
-		alloc = find_or_create_alloc(cdv_uuid);
-		if (!alloc)
-			return -ENOMEM;
+		N_Wf(cdv_list_no_alloc,
+		     "CDV-alloc: list cdv=@STR tpv=@STR no alloc entry yet; returning EAGAIN",
+		     cdv_uuid, tpv_uuid);
+		return -EAGAIN;
 	}
 
 	if (!alloc->ondisk_loaded) {
-		cdv_ondisk_scan_async(cdv_uuid, alloc);
 		/*
-		 * Scan dispatched to worker thread (or already in flight.
-		 * We cannot distinguish "fresh CDV" from "restart race" until
-		 * the scan completes — return -EAGAIN so the client retries
-		 * once the scan finishes and ondisk_loaded becomes true.
+		 * Alloc entry exists but the allocator metadata has not yet been
+		 * loaded.  If we are the elected allocator stuck in
+		 * AWAITING_SATELLITE_ATTACH (e.g. Stage B came back with a
+		 * transient INTERNAL_ERR because the previous allocator's client
+		 * hadn't released the satellite yet), opportunistically re-fire
+		 * Stage A on this incoming client request so the handshake can
+		 * make progress without waiting on another RAFT topology change.
+		 * Management caches only OK / terminal responses, so repeated
+		 * INTERNAL_ERR requests with the same requestId re-run the
+		 * underlying attach.  Idempotent on the management side.
+		 * Mirrors the re-fire in handle_cdv_alloc_extent().
 		 */
+		if (alloc->state == NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH)
+			cdv_send_attach_satellite_request(alloc);
 		N_Wf(cdv_list_not_ready,
-		     "CDV-alloc: list cdv=@STR tpv=@STR ondisk scan in progress (n_alloc=@LLU); returning EAGAIN",
-		     cdv_uuid, tpv_uuid, alloc->n_allocated);
+		     "CDV-alloc: list cdv=@STR tpv=@STR not yet loaded (state=@INT n_alloc=@LLU); returning EAGAIN",
+		     cdv_uuid, tpv_uuid, (int)alloc->state, alloc->n_allocated);
 		return -EAGAIN;
 	}
 
@@ -1488,33 +1504,6 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 	*out_indices = indices;
 	*out_count   = n;
 	return 0;
-}
-
-void nvmeibt_cdv_alloc_set_generation(const char *cdv_uuid, uint64_t generation)
-{
-	struct nvmeibt_cdv_alloc *alloc;
-
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
-	if (!alloc) {
-		alloc = NNVMEIBT_BM_CALLOC(cdv_alloc_set_gen_alloc, sizeof(*alloc));
-		if (!alloc) {
-			N_Ef(cdv_alloc_set_gen_oom,
-			     "CDV-alloc: set_generation calloc failed cdv=@STR",
-			     cdv_uuid);
-			return;
-		}
-		strncpy(alloc->cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
-		alloc->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
-		alloc->cdv_fd = -1;
-		XDLIST_HEAD_INIT(&alloc->extents);
-		nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
-	}
-
-	N_If(cdv_alloc_set_gen,
-	     "CDV-alloc: set generation cdv=@STR old=@LLU new=@LLU",
-	     cdv_uuid, alloc->allocator_generation, generation);
-
-	alloc->allocator_generation = generation;
 }
 
 /* ── CDV removal ────────────────────────────────────────────────────────── */
@@ -1670,43 +1659,32 @@ static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
 int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 			    const char **candidates,
 			    int n_candidates,
-			    uint64_t *out_proposed_gen)
+			    struct nvmeibt_praid_topo_ctx *topo_ctx)
 {
-	struct nvmeibt_cdv_alloc *alloc;
 	const char *chosen;
 	int i;
 
+	if (!topo_ctx) {
+		N_Ef(cdv_alloc_elect_null_topo,
+		     "CDV-alloc: elect with NULL topo_ctx cdv=@STR", cdv_uuid);
+		return -EINVAL;
+	}
 	if (n_candidates <= 0) {
 		N_Ef(cdv_alloc_elect_no_cand,
 		     "CDV-alloc: elect with 0 candidates cdv=@STR", cdv_uuid);
 		return -EINVAL;
 	}
 
-	alloc = find_or_create_alloc(cdv_uuid);
-	if (!alloc)
-		return -ENOMEM;
-
 	/* Sticky rule: keep the current allocator if it is still a candidate. */
-	if (alloc->allocator_toma_id[0]) {
+	if (topo_ctx->allocator_toma_id[0]) {
 		for (i = 0; i < n_candidates; i++) {
-			if (strncmp(alloc->allocator_toma_id, candidates[i],
-				    NVMEIBT_CDV_HOSTNAME_LEN) == 0) {
+			if (strncmp(topo_ctx->allocator_toma_id, candidates[i],
+				    sizeof(topo_ctx->allocator_toma_id)) == 0) {
 				N_If(cdv_alloc_elect_sticky,
 				     "CDV-alloc: elect sticky cdv=@STR allocator=@STR gen=@LLU",
-				     cdv_uuid, alloc->allocator_toma_id,
-				     alloc->allocator_generation);
-				/*
-				 * No change to allocator — but still scan the CDV
-				 * if we haven't loaded the on-disk extent records yet
-				 * (e.g. first call after TOMA restart when topology was
-				 * already stable and the disk I/O path was not ready on
-				 * the previous attempt).
-				 */
-				if (!alloc->ondisk_loaded)
-					cdv_ondisk_scan_async(cdv_uuid, alloc);
-				if (out_proposed_gen)
-					*out_proposed_gen = alloc->allocator_generation;
-				return 0;   /* 0 = sticky, no push needed */
+				     cdv_uuid, topo_ctx->allocator_toma_id,
+				     topo_ctx->allocator_generation);
+				return 0;   /* 0 = sticky, no topo mutation */
 			}
 		}
 	}
@@ -1715,68 +1693,30 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 	if (n_candidates == 1) {
 		chosen = candidates[0];
 	} else {
-		/*
-		 * Simple deterministic hash (rdtsc-seeded) for randomness.
-		 * TOMA is single-threaded; no race concern.
-		 */
 		uint64_t seed = (uint64_t)nvmeib_public_rdtsc();
 		chosen = candidates[(unsigned int)(seed % (unsigned int)n_candidates)];
 	}
 
 	N_If(cdv_alloc_elect_new,
-	     "CDV-alloc: elect cdv=@STR old=@STR new=@STR gen @LLU -> @LLU (proposed)",
+	     "CDV-alloc: elect cdv=@STR old=@STR new=@STR gen @LLU -> @LLU",
 	     cdv_uuid,
-	     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(none)",
+	     topo_ctx->allocator_toma_id[0] ? topo_ctx->allocator_toma_id : "(none)",
 	     chosen,
-	     alloc->allocator_generation, alloc->allocator_generation + 1);
-
-	strncpy(alloc->allocator_toma_id, chosen, NVMEIBT_CDV_HOSTNAME_LEN - 1);
-	alloc->allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
+	     topo_ctx->allocator_generation,
+	     topo_ctx->allocator_generation + 1);
 
 	/*
-	 * DO NOT bump alloc->allocator_generation here.  handle_notify is the
-	 * sole writer; it commits the proposed gen only after its monotonicity
-	 * guard accepts the notify.  Bumping here would cause the self-apply
-	 * path (leader is also the chosen allocator) to see gen == local and
-	 * reject its own notify as stale, which silently skips Stage A
-	 * (attachSatelliteRequest) of the satellite-attach handshake.
+	 * Stage the new identity into the pRAID topo_ctx.  RAFT AppendEntries
+	 * will deliver it to every follower; the topology-apply hook
+	 * (nvmeibt_cdv_alloc_on_topo_applied) fires the local role transition
+	 * on the chosen TOMA.  No in-memory cdv_alloc_hash writes happen here.
 	 */
-	if (out_proposed_gen)
-		*out_proposed_gen = alloc->allocator_generation + 1;
+	strncpy(topo_ctx->allocator_toma_id, chosen,
+		sizeof(topo_ctx->allocator_toma_id) - 1);
+	topo_ctx->allocator_toma_id[sizeof(topo_ctx->allocator_toma_id) - 1] = '\0';
+	topo_ctx->allocator_generation++;
 
-	/*
-	 * Post-satellite-migration: scan + header-write are NOT done here.
-	 *
-	 * Elect runs on the RAFT leader, which may or may not be the chosen
-	 * allocator.  If the leader is the chosen allocator, the local notify
-	 * dispatch (nvmeibt_cdv_alloc_send_notify_to_elected → handle_notify)
-	 * runs Stage A, which kicks off the satellite-attach handshake whose
-	 * Stage B does the real scan + header-write on the satellite.  If the
-	 * leader is not the chosen allocator, the unicast notify causes the
-	 * chosen TOMA to do the same.  Either way, scanning here would target
-	 * the CDV (which may no longer be attached to the leader) and would
-	 * fail noisily.  Leave the work to Stage B exclusively.
-	 */
-
-	return 1;   /* 1 = newly elected — caller should push CDV_ALLOCATOR_UPDATE */
-}
-
-int nvmeibt_cdv_alloc_get_allocator(const char *cdv_uuid,
-				    char *out_toma_id,
-				    uint64_t *out_generation)
-{
-	struct nvmeibt_cdv_alloc *alloc;
-
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
-	if (!alloc || alloc->allocator_toma_id[0] == '\0') {
-		out_toma_id[0] = '\0';
-		*out_generation = 0;
-		return -ENOENT;
-	}
-
-	strncpy(out_toma_id, alloc->allocator_toma_id, NVMEIBT_CDV_HOSTNAME_LEN);
-	*out_generation = alloc->allocator_generation;
-	return 0;
+	return 1;   /* 1 = newly elected — caller marks topo as changed */
 }
 
 /*
@@ -1871,42 +1811,6 @@ void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx 
 }
 
 /*
- * ── Leader → chosen-allocator unicast (identity propagation) ────────────
- *
- * After a successful election on the RAFT leader, the leader delivers the
- * elected (allocator_toma_id, allocator_generation) to the chosen TOMA via a
- * single unicast RAFT_MSG_CDV_ALLOC_NOTIFY.  Only the chosen TOMA holds CDV
- * allocator state for that CDV; peer TOMAs are not informed.
- *
- * The chosen TOMA is by construction a first-pRAID data-segment owner, so:
- *  - it has a live path to the CDV (cdvTomaAutoAttach attaches it), allowing
- *    cdv_ondisk_scan and cdv_async_write_header to succeed;
- *  - every client that attached the CDV is also registered with it (clients
- *    register with every mirror replica owner), so a local push_to_registrants
- *    fan-out covers all clients.
- *
- * Monotonicity is enforced at the receiver: accept only strictly-higher
- * allocator_generation.  This keeps late or reordered deliveries safe.
- */
-
-static struct nvmeibt_node *
-cdv_find_node_by_hostname(const char *hostname)
-{
-	struct nvmeibt_node *node;
-
-	if (!hostname || !hostname[0])
-		return NULL;
-
-	NVMEIB_HASH_FOREACH(node,
-			    nvmeibt_global_get_global()->nodes_hash_by_uuid) {
-		const char *name = nvmeibt_node_name(node);
-		if (name && strncmp(name, hostname, NVMEIBT_CDV_HOSTNAME_LEN) == 0)
-			return node;
-	}
-	return NULL;
-}
-
-/*
  * cdv_send_attach_satellite_request — Stage A of the satellite attach handshake.
  *
  * Publishes an `attachSatelliteRequest` Kafka message asking management to attach
@@ -1957,66 +1861,113 @@ static void cdv_send_attach_satellite_request(struct nvmeibt_cdv_alloc *alloc)
 	NNVMEIBT_STR_FREE(cdv_sat_req_json_free, json);
 }
 
-void nvmeibt_cdv_alloc_handle_notify(const struct nvmeibt_cdv_alloc_notify_payload *payload)
+/*
+ * nvmeibt_cdv_alloc_on_topo_applied — hook fired from update_applied_topology
+ * on every committed topology change, on every TOMA (leader and followers).
+ *
+ * Called only for the first pRAID of a CDV (the caller filters).  Diffs the
+ * previously-applied (allocator_toma_id, allocator_generation) against the
+ * newly-applied values and drives the local role transition.  On promote
+ * (new allocator is me), transitions to AWAITING_SATELLITE_ATTACH and fires
+ * Stage A of the satellite-attach handshake.  On demote (I was the allocator,
+ * new one is someone else), tears down local allocator-side state.  Pushes
+ * CDV_ALLOCATOR_UPDATE to local clients so they learn the new identity.
+ */
+void nvmeibt_cdv_alloc_on_topo_applied(const char *cdv_uuid,
+				       const struct nvmeibt_praid_topo_ctx *prev_applied,
+				       const struct nvmeibt_praid_topo_ctx *new_applied)
 {
+	const char *my_hostname;
+	bool was_me, is_me;
 	struct nvmeibt_cdv_alloc *alloc;
-	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
-	char     toma_id[NVMEIBT_CDV_HOSTNAME_LEN];
-	uint64_t gen;
-	bool     am_new_allocator;
+	bool toma_changed;
 
-	if (!payload)
+	if (!cdv_uuid || !prev_applied || !new_applied)
 		return;
 
-	/* Defensive NUL-termination into locals. */
-	memcpy(cdv_uuid, payload->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN);
-	cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
-	memcpy(toma_id, payload->allocator_toma_id, NVMEIBT_CDV_HOSTNAME_LEN);
-	toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
-	gen = payload->allocator_generation;
+	toma_changed = strncmp(new_applied->allocator_toma_id,
+			       prev_applied->allocator_toma_id,
+			       sizeof(new_applied->allocator_toma_id)) != 0;
+
+	/* No-op if allocator identity did not change. */
+	if (new_applied->allocator_generation == prev_applied->allocator_generation &&
+	    !toma_changed) {
+		return;
+	}
+
+	/* Generation regression is not expected under RAFT-ordered apply. */
+	if (new_applied->allocator_generation < prev_applied->allocator_generation) {
+		N_Ef(cdv_topo_applied_gen_regress,
+		     "CDV-alloc: topo_applied cdv=@STR gen regressed @LLU -> @LLU",
+		     cdv_uuid, prev_applied->allocator_generation,
+		     new_applied->allocator_generation);
+		return;
+	}
+
+	/* Empty new allocator_toma_id: pRAID is not yet elected (first ever commit
+	 * may carry zero fields).  Nothing to act on locally. */
+	if (!new_applied->allocator_toma_id[0])
+		return;
+
+	my_hostname = nvmeibt_get_my_hostname();
+	is_me  = my_hostname && my_hostname[0] &&
+		 strncmp(new_applied->allocator_toma_id, my_hostname,
+			 sizeof(new_applied->allocator_toma_id)) == 0;
+	was_me = my_hostname && my_hostname[0] && prev_applied->allocator_toma_id[0] &&
+		 strncmp(prev_applied->allocator_toma_id, my_hostname,
+			 sizeof(prev_applied->allocator_toma_id)) == 0;
+
+	N_If(cdv_topo_applied,
+	     "CDV-alloc: topo_applied cdv=@STR new_toma=@STR gen @LLU->@LLU is_me=@BOOL was_me=@BOOL",
+	     cdv_uuid, new_applied->allocator_toma_id,
+	     prev_applied->allocator_generation, new_applied->allocator_generation,
+	     (int)is_me, (int)was_me);
 
 	alloc = find_or_create_alloc(cdv_uuid);
 	if (!alloc) {
-		N_Ef(cdv_notify_oom,
-		     "CDV-alloc: notify cdv=@STR find_or_create_alloc failed",
-		     cdv_uuid);
+		N_Ef(cdv_topo_applied_oom,
+		     "CDV-alloc: topo_applied cdv=@STR find_or_create_alloc failed", cdv_uuid);
 		return;
 	}
 
-	/* Monotonicity guard: accept only strictly-higher generations. */
-	if (gen <= alloc->allocator_generation) {
-		N_Wf(cdv_notify_stale,
-		     "CDV-alloc: notify cdv=@STR stale gen=@LLU local=@LLU; ignoring",
-		     cdv_uuid, gen, alloc->allocator_generation);
-		return;
-	}
-
-	am_new_allocator = (toma_id[0] &&
-			    strncmp(toma_id, nvmeibt_get_my_hostname(),
-				    NVMEIBT_CDV_HOSTNAME_LEN) == 0);
-
-	strncpy(alloc->allocator_toma_id, toma_id,
+	/* Sync local (allocator_toma_id, allocator_generation) from applied topology. */
+	strncpy(alloc->allocator_toma_id, new_applied->allocator_toma_id,
 		NVMEIBT_CDV_HOSTNAME_LEN - 1);
 	alloc->allocator_toma_id[NVMEIBT_CDV_HOSTNAME_LEN - 1] = '\0';
-	alloc->allocator_generation = gen;
+	alloc->allocator_generation = new_applied->allocator_generation;
 
-	N_If(cdv_notify_apply,
-	     "CDV-alloc: notify applied cdv=@STR toma=@STR gen=@LLU me=@BOOL",
-	     cdv_uuid, toma_id, gen, (int)am_new_allocator);
+	if (is_me) {
+		/* Promote: transition to AWAITING_SATELLITE_ATTACH and fire Stage A.
+		 * Tear down any satellite state left from a previous tenure as
+		 * allocator on this CDV so Stage B re-opens the satellite fresh
+		 * (the new attach carries a bumped reservation version at the target). */
+		if (alloc->state == NVMEIBT_CDV_ALLOC_STATE_ACTIVE &&
+		    alloc->satellite_attach_request_id == new_applied->allocator_generation) {
+			/* Already ACTIVE for this generation — nothing to do. */
+			goto push;
+		}
+		if (alloc->io_wq) {
+			nvmeibt_wq_drain(alloc->io_wq);
+			nvmeibt_wq_destroy(alloc->io_wq);
+			alloc->io_wq = NULL;
+		}
+		cdv_close_worker_fds(alloc);
+		alloc->satellite_dev_path[0] = '\0';
+		alloc->satellite_uuid[0]     = '\0';
+		alloc->satellite_reservation_version = 0;
 
-	/*
-	 * If we are NOT the newly-elected allocator: tear down our local
-	 * allocator-side state for this CDV.  The new allocator's
-	 * AttachSatelliteRequest will preempt our exclusive hold on the satellite
-	 * via management's reservation-version bump; subsequent satellite writes
-	 * from us would be rejected at the host TOMAs anyway.  Close our satellite
-	 * fd/WQ proactively so we stop trying.
-	 */
-	if (!am_new_allocator) {
+		alloc->state                       = NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH;
+		alloc->satellite_attach_request_id = new_applied->allocator_generation;
+		alloc->ondisk_loaded               = false;
+
+		cdv_send_attach_satellite_request(alloc);
+	} else if (was_me) {
+		/* Demote: I was the allocator, I no longer am.  The new allocator's
+		 * attachSatelliteRequest will preempt any residual satellite hold via
+		 * the reservation-version bump; tear down our local allocator-side
+		 * state proactively. */
 		alloc->state         = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
 		alloc->ondisk_loaded = false;
-		/* WQ must be drained before closing its fds — the worker thread
-		 * may still be holding references. */
 		if (alloc->io_wq) {
 			nvmeibt_wq_drain(alloc->io_wq);
 			nvmeibt_wq_destroy(alloc->io_wq);
@@ -2028,41 +1979,16 @@ void nvmeibt_cdv_alloc_handle_notify(const struct nvmeibt_cdv_alloc_notify_paylo
 		alloc->satellite_reservation_version = 0;
 		N_If(cdv_alloc_demoted,
 		     "CDV-alloc: demoted cdv=@STR (allocator is now @STR gen=@LLU)",
-		     cdv_uuid, toma_id, gen);
-		return;
+		     cdv_uuid, new_applied->allocator_toma_id,
+		     new_applied->allocator_generation);
 	}
+	/* else: the allocator is still someone else — we just recorded identity. */
 
-	/*
-	 * We are the new allocator.  Begin Stage A: transition to
-	 * AWAITING_SATELLITE_ATTACH and ask management to attach the satellite
-	 * volume to us EXCLUSIVE_READ_WRITE (with preempt over any prior holder).
-	 *
-	 * The on-disk scan and push_to_registrants happen later in Stage B once
-	 * the AttachSatelliteResponse arrives and we have the satellite open.
-	 *
-	 * Allocate a fresh request_id derived from the new generation so retries
-	 * across this transition are idempotent on the management side.
-	 *
-	 * Tear down any satellite state left from a previous tenure as allocator
-	 * on this CDV so Stage B re-opens the satellite fresh.  The new attach
-	 * carries a bumped reservation version at the target; an fd opened before
-	 * that bump would continue to use the old MCS session / version.
-	 */
-	if (alloc->io_wq) {
-		nvmeibt_wq_drain(alloc->io_wq);
-		nvmeibt_wq_destroy(alloc->io_wq);
-		alloc->io_wq = NULL;
-	}
-	cdv_close_worker_fds(alloc);
-	alloc->satellite_dev_path[0] = '\0';
-	alloc->satellite_uuid[0]     = '\0';
-	alloc->satellite_reservation_version = 0;
-
-	alloc->state                       = NVMEIBT_CDV_ALLOC_STATE_AWAITING_SATELLITE_ATTACH;
-	alloc->satellite_attach_request_id = gen;
-	alloc->ondisk_loaded               = false;
-
-	cdv_send_attach_satellite_request(alloc);
+push:
+	/* Push the updated allocator identity to any local registrants so clients
+	 * attached to this TOMA learn the new allocator and redirect their next
+	 * CDV_ALLOC_EXTENT / CDV_LIST_EXTENTS requests accordingly. */
+	nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
 }
 
 /*
@@ -2180,65 +2106,6 @@ void nvmeibt_cdv_alloc_handle_satellite_attach_response(
 	     cdv_uuid, satellite_uuid ? satellite_uuid : "", reservation_version, allocator_generation);
 
 	nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
-}
-
-void nvmeibt_cdv_alloc_send_notify_to_elected(const char *cdv_uuid,
-					      const char *allocator_toma_id,
-					      uint64_t    allocator_generation)
-{
-	struct nvmeibt_cdv_alloc_notify_payload payload;
-	struct nvmeibt_node *dst_node;
-
-	if (!cdv_uuid || !allocator_toma_id || !allocator_toma_id[0]) {
-		N_Ef(cdv_notify_send_bad_args,
-		     "CDV-alloc: send_notify bad args cdv=@STR toma=@STR",
-		     cdv_uuid ? cdv_uuid : "(null)",
-		     allocator_toma_id ? allocator_toma_id : "(null)");
-		return;
-	}
-
-	memset(&payload, 0, sizeof(payload));
-	strncpy(payload.cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
-	strncpy(payload.allocator_toma_id, allocator_toma_id,
-		NVMEIBT_CDV_HOSTNAME_LEN - 1);
-	payload.allocator_generation = allocator_generation;
-
-	/* Short-circuit when the leader is itself the chosen allocator. */
-	if (strncmp(allocator_toma_id, nvmeibt_get_my_hostname(),
-		    NVMEIBT_CDV_HOSTNAME_LEN) == 0) {
-		N_If(cdv_notify_self,
-		     "CDV-alloc: notify self-apply cdv=@STR toma=@STR gen=@LLU",
-		     cdv_uuid, allocator_toma_id, allocator_generation);
-		nvmeibt_cdv_alloc_handle_notify(&payload);
-		return;
-	}
-
-	dst_node = cdv_find_node_by_hostname(allocator_toma_id);
-	if (!dst_node) {
-		N_Wf(cdv_notify_no_node,
-		     "CDV-alloc: notify cdv=@STR dst toma=@STR: node not found; "
-		     "receiver will resync on next elect",
-		     cdv_uuid, allocator_toma_id);
-		return;
-	}
-
-	N_If(cdv_notify_send,
-	     "CDV-alloc: unicast notify cdv=@STR toma=@STR gen=@LLU",
-	     cdv_uuid, allocator_toma_id, allocator_generation);
-	nvmeibt_raft_send_cdv_alloc_notify(dst_node, &payload);
-
-	/*
-	 * Advance leader's local allocator_generation to the proposed value now
-	 * that the notify is in flight.  elect() deliberately does not mutate
-	 * allocator_generation (handle_notify is the sole writer), so without
-	 * this commit the leader's local gen would stay at its pre-election
-	 * value.  The next re-election driven by this leader would then propose
-	 * the same gen it just sent, and the newly-chosen allocator's
-	 * handle_notify monotonicity guard would reject it — silently skipping
-	 * Stage A.  The self-apply branch above does not need this: its
-	 * handle_notify call commits the same value via the guarded write.
-	 */
-	nvmeibt_cdv_alloc_set_generation(cdv_uuid, allocator_generation);
 }
 
 /* ── One-time init / shutdown ────────────────────────────────────────────── */
@@ -2548,18 +2415,25 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	struct nvmeibt_cdv_extent_entry *entry;
 	uint64_t n_released = 0;
 
-	/* ── 1. Find or create the per-CDV allocator; ensure I/O WQ ── */
-	alloc = find_or_create_alloc(cdv_uuid);
-	if (!alloc)
-		return -ENOMEM;
+	/* ── 1. Look up the per-CDV allocator ── */
+	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	if (!alloc) {
+		/* Under the RAFT-embedded identity design, the alloc entry is
+		 * created exclusively by the topology-apply hook.  If no entry
+		 * exists here, this TOMA is not (yet) the allocator for this CDV;
+		 * the elected allocator will handle the same Kafka fan-out. */
+		N_If(cdv_free_all_no_alloc,
+		     "CDV-alloc: free_all_for_tpv cdv=@STR tpv=@STR no alloc entry; skipping (allocator handles it)",
+		     cdv_uuid, tpv_uuid);
+		return 0;
+	}
 
 	/*
-	 * Post-satellite-migration: only the elected allocator TOMA owns the
-	 * satellite write path.  Management's cdvAllocatorFreeAll Kafka message
-	 * is fan-out to all first-pRAID host TOMAs (legacy delivery pattern); on
-	 * non-allocator nodes there is no satellite open and the record/header
-	 * writes would fail.  Silently ignore on non-allocators so the elected
-	 * allocator (which receives the same Kafka) handles the work.
+	 * Only the elected allocator TOMA owns the satellite write path.
+	 * Management's cdvAllocatorFreeAll Kafka message fans out to all
+	 * first-pRAID host TOMAs (legacy delivery pattern); on non-allocator
+	 * nodes the record/header writes would fail.  Silently ignore on
+	 * non-allocators so the elected allocator handles the work.
 	 */
 	if (alloc->state != NVMEIBT_CDV_ALLOC_STATE_ACTIVE) {
 		N_If(cdv_free_all_skip_not_alloc,
@@ -2696,7 +2570,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
 	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
 	uint64_t candidate, total, i;
-	bool     first_alloc, found, occupied;
+	bool     found, occupied;
 	int      rv;
 
 	if (msg->data_length < (int)sizeof(*req)) {
@@ -2776,43 +2650,28 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	first_alloc = (alloc == NULL);
-
 	/*
-	 * No in-memory allocator for this CDV — could be a genuinely new CDV
-	 * or a TOMA restart where elect() hasn't run yet.  Create the alloc
-	 * entry, dispatch a scan to load any pre-existing on-disk records,
-	 * and defer the allocation until the scan completes.  This matches
-	 * the elect() recovery path and prevents double-allocation of
-	 * extent indices that are already allocated on disk.
-	 *
-	 * The client receives WRONG_GEN and retries.  The scan's "fresh CDV"
-	 * heuristic handles new CDVs: first scan finds no header → retries
-	 * once → sets ondisk_loaded=true.  Typically completes within two
-	 * heartbeat cycles.
+	 * No in-memory allocator for this CDV — under the RAFT-embedded identity
+	 * design, the alloc entry is created exclusively by the topology-apply
+	 * hook once this TOMA applies a committed pRAID topology naming us the
+	 * allocator.  If the client reached us before our apply ran (cold-start
+	 * race) or we are not the allocator at all, we reply WRONG_GEN and let
+	 * the client redirect to the correct allocator on its next CDV topology
+	 * push.  Do NOT create a zero-initialized entry here.
 	 */
-	if (first_alloc) {
-		alloc = find_or_create_alloc(cdv_uuid);
-		if (!alloc) {
-			resp.status = NVMEIBT_CDV_ALLOC_ERROR;
-			goto send;
-		}
-		if (alloc->total_data_extents == 0 && req->total_data_extents > 0)
-			alloc->total_data_extents = req->total_data_extents;
-		cdv_ondisk_scan_async(cdv_uuid, alloc);
-		N_Wf(cdv_alloc_first_scan,
-		     "CDV-alloc: first ALLOC cdv=@STR; created alloc + scan dispatched, returning WRONG_GEN",
+	if (!alloc) {
+		N_Wf(cdv_alloc_no_alloc,
+		     "CDV: ALLOC cdv=@STR no alloc entry; returning WRONG_GEN",
 		     cdv_uuid);
 		resp.status = NVMEIBT_CDV_ALLOC_WRONG_GEN;
-		resp.allocator_generation = alloc->allocator_generation;
+		resp.allocator_generation = 0;
 		goto send;
 	}
 
 	/* Ensure per-CDV I/O WQ exists for async persistence.
 	 * Best-effort: writes are fire-and-forget, so failure is non-fatal.
 	 */
-	if (alloc)
-		(void)cdv_ensure_io_wq(cdv_uuid, alloc);
+	(void)cdv_ensure_io_wq(cdv_uuid, alloc);
 
 	/*
 	 * ── Verify we are the elected allocator for this CDV ────────────────
@@ -2821,8 +2680,6 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	 * the allocator has been elected but it's a different node, reject
 	 * with WRONG_GEN so the client re-syncs from the CDV topology push.
 	 */
-	/* first_alloc is always false here — handled above with early return. */
-
 	if (alloc->allocator_toma_id[0] &&
 	    strncmp(alloc->allocator_toma_id, nvmeibt_get_my_hostname(),
 		    NVMEIBT_CDV_HOSTNAME_LEN) != 0) {

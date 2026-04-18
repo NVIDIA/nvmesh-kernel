@@ -8,6 +8,22 @@
 #include "nvmeibt_praid.h"
 #include "nvmeibt_topology.h"
 #include "nvmeibt_topo_bin.h"
+#include <inttypes.h> // For PRIx64
+
+// Get the praid serialized topo header size for a given sw_ver.
+// In v0x310 and earlier, the struct was 48 bytes (no topo_idx_updated).
+// In v0x320..v0x330, the struct was 56 bytes (with topo_idx_updated).
+// In v0x340 and later, the struct is 128 bytes (adds allocator_toma_id + allocator_generation).
+static inline size_t nvmeibt_praid_serialized_topo_hdr_size(unsigned int sw_ver)
+{
+	if (sw_ver <= 0x00000310) {
+		return NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x310;
+	}
+	if (sw_ver <= 0x00000330) {
+		return NVMEIBT_PRAID_SERIALIZED_TOPO_HDR_SIZE_V0x330;
+	}
+	return sizeof(struct nvmeibt_praid_serialized_topo);
+}
 
 #define TOPOLOGY_MAX_PRAIDS_TO_PRINT				50
 #define TOPOLOGY_MAX_SEGS_TO_PRINT					300
@@ -92,6 +108,9 @@ void nvmeibt_praid_print_leader_wire_topo(int (*printf_fn)(void *ctx, const char
 
 void nvmeibt_praid_convert_topo_le_be(struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr)
 {
+	{ _Static_assert(sizeof(struct nvmeibt_praid_serialized_topo) == 128, "Struct nvmeibt_praid_serialized_topo was changed without updating the serializing function! Also check all occurrences of the struct!"); }
+
+	memset(dst_ptr, 0, sizeof(*dst_ptr));
 	nvmeibt_strlcpy(dst_ptr->eyecatcher, src_ptr->eyecatcher, sizeof(dst_ptr->eyecatcher));
 	COPY_SWAP_UUID_STR_FIELD(src_ptr, dst_ptr, uuid);
 	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, praid_version_major);
@@ -100,6 +119,19 @@ void nvmeibt_praid_convert_topo_le_be(struct nvmeibt_praid_serialized_topo *src_
 	COPY_SWAP32_STR_BITFIELD(src_ptr, dst_ptr, registrants_sync_cmd);
 	COPY_SWAP8_STR_FIELD(src_ptr, dst_ptr, is_activated);
 	COPY_SWAP8_STR_FIELD(src_ptr, dst_ptr, segs_num);
+	// topo_idx_updated was added in v0x320. In v0x310 and earlier, bytes at this offset
+	// belong to the first seg, so we must not read them as topo_idx_updated.
+	if (src_sw_ver > 0x00000310) {
+		COPY_SWAP64_STR_FIELD(src_ptr, dst_ptr, topo_idx_updated);
+	}
+	// allocator_toma_id + allocator_generation were added in v0x340. In older versions,
+	// bytes at these offsets belong to the first seg, so we must not read them.
+	if (src_sw_ver >= TOMA_SW_COMPATIBILITY_VER) {
+		/* hostname is a byte-wise string; no endian conversion. */
+		nvmeibt_strlcpy(dst_ptr->allocator_toma_id, src_ptr->allocator_toma_id,
+			            sizeof(dst_ptr->allocator_toma_id));
+		COPY_SWAP64_STR_FIELD(src_ptr, dst_ptr, allocator_generation);
+	}
 	dst_ptr->res_1 = 0;
 	dst_ptr->res_2 = 0;
 	dst_ptr->res_3 = 0;
