@@ -2796,6 +2796,9 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	if (!nvmeibt_cdv_extent_zero_on_free)
 		cdv_maybe_warn_capacity(alloc);  /* may clear the warning flag */
 
+	if (n_released > 0)
+		cdv_publish_alloc_stats(alloc);
+
 	N_If(cdv_free_all_done,
 	     "CDV-alloc: free_all cdv=@STR tpv=@STR released=@LLU zero_on_free=@LLU pending_zero=@LLU total=@LLU",
 	     cdv_uuid, tpv_uuid, n_released, nvmeibt_cdv_extent_zero_on_free,
