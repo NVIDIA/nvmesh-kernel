@@ -228,7 +228,7 @@ static void *hash_add(struct nvmeib_hash_table *hash_tbl, const union nvmeib_has
 	rv_ptr_to_obj = NULL;
 out:
 	nvmeib_hash_tbl_arr_unlock(hash_tbl);
-	NVMEIB_HASH_DUMP_STATISTICS(4cghs89, hash_tbl);
+//	NVMEIB_HASH_DUMP_STATISTICS(4cghs89, hash_tbl);
 	return rv_ptr_to_obj;
 }
 
