@@ -205,7 +205,12 @@ sizeof(struct nvmeibt_client_topo_disk_segment) * N_MAX_RAID_SLICE_LEN*/
 #define NVMEIB_TOMA_REQ_MAX_LEN	(3248)			/* server <--> client */		// EC-3152: Defined by the largest possible message (toma topology to client), but cant include this file
 
 /******************************************************************************/
-#define N_MAX_RAID_SLICE_LEN      (12)	/* Maximum raid length (10+2) Raid6, 16 bits is enough */
+#define N_MAX_RAID_MIRRORS			(2)
+#define N_MAX_RAID_MIRROR_SLICE_LEN	(1 + N_MAX_RAID_MIRRORS)
+#define N_MAX_RAID_EC_DATA_BLOCKS	(10)
+#define N_MAX_RAID_EC_PARITY_BLOCKS	(2)
+#define N_MAX_RAID_EC_SLICE_LEN		(N_MAX_RAID_EC_DATA_BLOCKS + N_MAX_RAID_EC_PARITY_BLOCKS)	/* Maximum EC raid length (10+2=12) Raid6, 16 bits is enough */
+#define N_MAX_RAID_SLICE_LEN		(N_MAX_RAID_EC_SLICE_LEN > N_MAX_RAID_MIRROR_SLICE_LEN ? N_MAX_RAID_EC_SLICE_LEN : N_MAX_RAID_MIRROR_SLICE_LEN)
 #ifndef __bitwise
 	#define __bitwise
 #endif
