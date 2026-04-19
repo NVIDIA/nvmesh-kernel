@@ -13,19 +13,35 @@
 # Environment variables:
 #   PET_VENV         - Virtual environment directory (default: <script_dir>/.venv)
 #   NVIDIA_PYPI_URL  - PyPI index URL (default: nv-shared-pypi on urm.nvidia.com)
-
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-NVIDIA_PYPI_URL="${NVIDIA_PYPI_URL:-https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple}"
-PET_VENV="${PET_VENV:-$SCRIPT_DIR/.venv}"
-
-if [ ! -f "$PET_VENV/bin/python3" ]; then
-    echo "Creating PET virtual environment at $PET_VENV..."
-    python3 -m venv --without-pip --system-site-packages "$PET_VENV"
-    "$PET_VENV/bin/python3" -m pip install --ignore-installed \
-        --index-url "$NVIDIA_PYPI_URL" -r "$SCRIPT_DIR/requirements.txt"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+if [[ -f "$SCRIPT_DIR/pypi_sources.sh" ]]; then
+    source "$SCRIPT_DIR/pypi_sources.sh"
+else
+    source "$SCRIPT_DIR/../../pypi_sources.sh"
 fi
 
-exec "$PET_VENV/bin/python3" "$SCRIPT_DIR/nvmeib_pet_messages.py" "$@"
+PET_VENV="${PET_VENV:-$SCRIPT_DIR/.venv-py${PY:-3}}"
+
+if ! command -v "python${PY:-3}" >/dev/null 2>&1; then
+    echo "${BASH_SOURCE[0]}: python${PY:-3} not found" >&2
+    echo "PY to override the default python version: e.g., PY=3.10 ${BASH_SOURCE[0]}" >&2
+    exit 1
+fi
+
+if ! "python${PY:-3}" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)'; then
+    echo "${BASH_SOURCE[0]}: Python 3.9 or newer required; got $(python${PY:-3} --version 2>&1)" >&2
+    echo "PY to override the default python version: e.g., PY=3.10 ${BASH_SOURCE[0]}" >&2
+    exit 1
+fi
+
+if [[ ! -f "$PET_VENV/bin/python${PY:-3}" ]]; then
+    PYPI_URL=$(get_pypi_url)
+    echo "Creating PET virtual environment at $PET_VENV with PyPI index $PYPI_URL..."
+    python${PY:-3} -m venv --without-pip --system-site-packages "$PET_VENV"
+    "$PET_VENV/bin/python${PY:-3}" -m pip install --ignore-installed \
+        --index-url "$PYPI_URL" -r "$SCRIPT_DIR/requirements.txt"
+fi
+
+exec "$PET_VENV/bin/python${PY:-3}" "$SCRIPT_DIR/nvmeib_pet_messages.py" "$@"

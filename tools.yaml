@@ -33,7 +33,10 @@ tools:
     source: tools/read_dwarf.py
   nvmesh_pet_messages:
     linkdir: /opt/nvmesh/common-repo
+    # consumed by py_to_exec.sh
     source: common/pet/nvmeib_pet_messages.py
+    # consumed by py_to_symlink.sh
+    linked_exec: common/pet/pet_messages.sh
     analysis:
       pathex: ['common/pet']
   memmgr_monitor:

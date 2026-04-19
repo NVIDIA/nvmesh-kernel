@@ -73,6 +73,9 @@ mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/nvmesh_metrics.py %{bui
 mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/tools/nvmesh_client_upgrade_breakdown.py %{buildroot}/opt/nvmesh/common-repo/tools/
 mkdir -p %{buildroot}/opt/nvmesh/common-repo/common/pet
 mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/common/pet/*.py %{buildroot}/opt/nvmesh/common-repo/common/pet/
+mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/common/pet/pet_messages.sh %{buildroot}/opt/nvmesh/common-repo/common/pet/
+mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/common/pet/requirements.txt %{buildroot}/opt/nvmesh/common-repo/common/pet/
+mv -n %{buildroot}/opt/nvmesh/common-repo/common_*/pypi_sources.sh %{buildroot}/opt/nvmesh/common-repo/common/pet/
 cp -rf %{_builddir}/%{name}/bin_client/* %{buildroot}/usr/bin/
 #backward compatible
 mv -n %{buildroot}/usr/bin/nvmesh_clnt_shutdown.py %{buildroot}/usr/bin/nvmesh_clnt_shutdown

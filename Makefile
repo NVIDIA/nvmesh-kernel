@@ -82,7 +82,7 @@ else
     endif
 endif
 
-PY_TO_EXEC_VER ?= "3.10"
+PY_TO_EXEC_VER ?= 3.10
 ifeq ($(CREATE_PYTHON_TOOLS_EXEC),yes)
     PY_TO_EXEC = PY=$(PY_TO_EXEC_VER) ./py_to_exec.sh
     PY_TO_EXEC_INFO = Building python tools as executables with python $(PY_TO_EXEC_VER)
@@ -507,7 +507,7 @@ COMPILE_PAGER = +$(MAKE) -C $(TOOLS_DIR)/traces_post_processor pager NVMESH_SRC_
 COMPILE_FORMATTERS = +$(MAKE) -C $(TOOLS_DIR)/traces_post_processor/formatters SSDA=$(NVMESH_SRC_DIR)
 COMPILE_SHARED_INFRA = +$(MAKE) -C $(TOOLS_DIR)/infra_shared SSDA=$(NVMESH_SRC_DIR)
 COMPILE_NVME= +$(MAKE) -C $(SCRIPTS_DIR)/target/nvme-cli CFLAGS="-std=c99 -Wall"
-COMPILE_PET = +$(MAKE) -C $(PET_DIR) fast_build COMMIT_ID=0x$(COMMIT_ID) COMMIT_ID_STR=$(COMMIT_ID)
+COMPILE_PET = +$(MAKE) -C $(PET_DIR) fast_build COMMIT_ID=0x$(COMMIT_ID) COMMIT_ID_STR=$(COMMIT_ID) PY=$(PY_TO_EXEC_VER)
 # Pass COMMIT_ID so tarball content is under <commit>/ for dictionary binding to log files.
 # To disable PET dictionary build, set PET_MODULE to empty or undefined (PET_MODULE=$(PET_MODULE)). To enable, set it to the module default location (PET_MODULE=clnt/nvmeibc.ko), otherwise PET_MODULE=<path/to/nvmeibc.ko> if client module is built elsewhere.
 PET_MODULE?=clnt/nvmeibc.ko
