@@ -3549,8 +3549,7 @@ static int raft_leader_send_appendentries_to_all_peers(int is_with_raft_log)
 	// Recalc the topology if needed, and the prev topo was applied
 	if (is_with_raft_log && is_prev_topo_committed) {
 		if (TOMA_SW_VER < nvmeibt_raft_get_guaranteed_sw_ver()) {
-			N_Tf(h4shek3, "SW ver=@SOFTWARE_VERSION is old, must be ver=@SOFTWARE_VERSION",
-				 TOMA_SW_VER, nvmeibt_raft_get_guaranteed_sw_ver());
+			N_Tf(h4shek3, "SW ver=@SOFTWARE_VERSION is old, must be ver=@SOFTWARE_VERSION", TOMA_SW_VER, nvmeibt_raft_get_guaranteed_sw_ver());
 			raft_convert_to_follower(NULL, NULL);
 			// I want to be a leader in the case of emergency only, so set a long election timeout
 			my_raft_global.next_election_time = nvmeibt_global_get_cur_event_start_time();
@@ -4239,10 +4238,8 @@ static BOOL is_incoming_msg_valid(struct nvmeibt_big_msg *big_msg,
 	BOOL						rv = 0;
 
 	NFIN;
-	// WARNINGS
-	// Warn if a different software version
-	if (msg->sw_ver != TOMA_SW_VER) {
-		N_Wf(huu876y, "sw_ver mismatch @SOFTWARE_VERSION!=@SOFTWARE_VERSION", msg->sw_ver, TOMA_SW_VER);
+	if (msg->sw_ver > TOMA_SW_VER) {
+		N_Ef(huu876y, "in_sw_ver=@SOFTWARE_VERSION > my_ver=@SOFTWARE_VERSION, This is a bug!", msg->sw_ver, TOMA_SW_VER);
 	}
 	if (strncmp(msg->git_commit_id, GIT_COMMIT_ID, sizeof(msg->git_commit_id))) {
 		static struct timespec	prev_printout_timespec = TIMESPEC_ZERO;

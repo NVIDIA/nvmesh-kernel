@@ -23,7 +23,7 @@ enum PERSISTENCY_SECTION_TYPE {
 
 #define NDUMP_SEGMENT_METADATA_CTRL_STRUCT(name, stc_ptr, prefix_str) \
 		N_Tf(name, "@STR magic_str='@MAGIC_STR' seg_id=@UUID_LE is_shutdown_clean=@IS_SHUTDOWN_CLEAN is_written=@IS_WRITTEN praid_version=@PRAID_VERSION.@PRAID_VERSION " \
-			"hostname=@HOSTNAME save_time_sec=@INT64_TD sw_ver=@SW_VER seg_metadata_ver=@SEG_METADATA_VER metadata_pbyte_s=@UINT64_TX locks_table_s_b=@LOCKS_TABLE_S_B "	\
+			"hostname=@HOSTNAME save_time_sec=@INT64_TD enc_ver=@X seg_metadata_ver=@SEG_METADATA_VER metadata_pbyte_s=@UINT64_TX locks_table_s_b=@LOCKS_TABLE_S_B "	\
 		    "mgmt_db_uuid=@UUID_LE",	\
 			prefix_str,											\
 			(stc_ptr)->header.magic_str,						\
@@ -386,7 +386,7 @@ int nvmeibt_ds_metadata_validate_and_upgrade_persistent_metadata_as_needed(struc
 		}
 	}
 	if (header->encoding_ver != TOMA_ENCODING_VER) {
-		N_IMf(bhduke8, "seg=@UUID_LE TOMA_ENCODING_VER=@UINT expected @UINT", seg_uuid, header->encoding_ver, TOMA_ENCODING_VER);
+		N_IMf(bhduke8, "seg=@UUID_LE TOMA_ENCODING_VER=@X expected @X", seg_uuid, header->encoding_ver, TOMA_ENCODING_VER);
 	}
 	//
 	mgmt_db_uuid_union = *nvmeibt_global_get_mgmt_DB_uuid();

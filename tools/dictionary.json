@@ -17128,15 +17128,6 @@
             "%d": 5
         }
     },
-    "@SW_VER": {
-        "size": 32,
-        "type": "s32",
-        "fmt": "%x",
-        "final": true,
-        "__histogram": {
-            "%x": 43
-        }
-    },
     "@SYNC_CMD": {
         "size": "string",
         "type": "string",

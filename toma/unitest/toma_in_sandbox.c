@@ -1035,12 +1035,8 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 		out_r_msg->dst_node_id =  in_r_msg->src_node_id;
 		out_r_msg->src_node_idx = in_r_msg->dst_node_idx;
 		out_r_msg->dst_node_idx = in_r_msg->src_node_idx;
-		// Peer advertises its sw_ver (binary capability) in raft_msg. The memcpy above
-		// already copied the leader's encoding, so buf_encoding_ver is set correctly.
-		#define TOMA_SIMU_OLD_PEER_SW_VER	0x00000310U		// 3.4.0's sw_ver — decoupled from TOMA_ENCODING_VER
-		out_r_msg->sw_ver = LE_SWAP32(peer->does_support_incremental_topo ? TOMA_SW_VER : TOMA_SIMU_OLD_PEER_SW_VER);
-		// Verify: leader must not send encoding newer than what this peer can decode
-		BUG_ON(LE_SWAP32(in_r_msg->persist_and_wire_buf.buf_encoding_ver) > LE_SWAP32(out_r_msg->sw_ver));
+		out_r_msg->sw_ver = LE_SWAP32(peer->does_support_incremental_topo ? TOMA_SW_VER : TOMA_SW_VER_MIN_FOR_INCREMENTAL-0x20);
+		BUG_ON(LE_SWAP32(in_r_msg->persist_and_wire_buf.buf_encoding_ver) > LE_SWAP32(out_r_msg->sw_ver));	// Verify: leader must not send encoding newer than what this peer can decode
 		switch (in_msg_type) {
 			case RAFT_MSG_REQ_VOTE:
 				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_REQ_VOTE_REP);

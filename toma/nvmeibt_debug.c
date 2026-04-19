@@ -40,7 +40,7 @@ static int num_tracer_sections = 0;
 #define TRACE_LIST_FILENAME				"/tracelist.txt"			// Toma outputs all its traces so developer knows which traces he can turn on/off
 #define TRACE_CONFIG_FILENAME			"toma_trace.config"
 #define	TOMA_CONFIG_PARAMS_FULL_PATH	TOMA_ROOT_DIR "opt/nvmesh/common-repo/tools/toma_rpc.config"
-#define TOMA_SW_VER_STRING				"SW_VER"
+#define TOMA_PARAMS_ENCODING_STRING				"SW_VER"			// Very confusing, but backwards compatible!!!
 
 bool trace_config_updated_by_toma = false;
 char *config_params_full_path = TOMA_CONFIG_PARAMS_FULL_PATH;
@@ -55,11 +55,11 @@ static inline size_t SANITIZE_STR_END(char *str)
 	return len;
 }
 
-static void try_to_read_sw_ver(char *str, uint32_t *sw_ver) {
-	if (!strncmp(str, TOMA_SW_VER_STRING, sizeof(TOMA_SW_VER_STRING) - 1)) {
+static void try_to_read_params_encoding_ver(char *str, uint32_t *ver) {
+	if (!strncmp(str, TOMA_PARAMS_ENCODING_STRING, sizeof(TOMA_PARAMS_ENCODING_STRING) - 1)) {
 		const size_t line_len = SANITIZE_STR_END(str);
-		if (line_len > (strlen(TOMA_SW_VER_STRING) + 3))
-			sscanf(str + strlen(TOMA_SW_VER_STRING) + 1, "%x", sw_ver);
+		if (line_len > (strlen(TOMA_PARAMS_ENCODING_STRING) + 3))
+			sscanf(str + strlen(TOMA_PARAMS_ENCODING_STRING) + 1, "%x", ver);
 	}
 }
 
@@ -100,10 +100,10 @@ void nvmeibt_debug_init_tracer_sections(void)
 	}
 }
 
-static bool __is_unsupported_version(uint32_t sw_ver, bool should_abort)
+static bool __is_unsupported_version_of_params_config(uint32_t ver, bool should_abort)
 {
-	if (sw_ver > TOMA_SW_VER) {
-		N_WTf(hj3a05n, "SW_VER mismatch too high @X > (max=@X)", sw_ver, TOMA_SW_VER);
+	if (ver > TOMA_ENCODING_VER) {
+		N_WTf(hj3a05n, "Params ENC_VER mismatch too high @X > (max=@X), SW_VER=@X", ver, TOMA_ENCODING_VER, TOMA_SW_VER);
 		if (should_abort)
 			nvmeibt_abort(ES_FATAL);
 		return true;
@@ -116,7 +116,7 @@ void read_rpc_config_from_persist(bool is_initial_read)
 	char						config[1024];
 	static struct stat			config_stat_last;
 	struct stat					config_stat;
-	uint32_t					sw_ver = 0;
+	uint32_t					params_encode_ver = 0;
 	FILE						*f = 0;
 	__MEASURE_TOOK_INIT();
 
@@ -139,10 +139,10 @@ void read_rpc_config_from_persist(bool is_initial_read)
 		goto out;
 	}
 
-	try_to_read_sw_ver(config, &sw_ver);
-	if (sw_ver == 0) {				// Support for old config files without version (TOMA_ENCODING_VER_OLDEST_SUPPORTED)
+	try_to_read_params_encoding_ver(config, &params_encode_ver);
+	if (params_encode_ver == 0) {				// Support for old config files without version (TOMA_ENCODING_VER_OLDEST_SUPPORTED)
 		goto continue_reading;
-	} else if (__is_unsupported_version(sw_ver, is_initial_read)) {
+	} else if (__is_unsupported_version_of_params_config(params_encode_ver, is_initial_read)) {
 		goto out;
 	}
 
@@ -213,7 +213,7 @@ void update_traces(void) {
 	FILE					*f = 0;
 	int						saved_errno;
 	struct stat				config_stat;
-	uint32_t				sw_ver = 0;
+	uint32_t				params_encode_ver = 0;
 	static bool				is_initial_read;
 
 	__MEASURE_TOOK_INIT();
@@ -247,10 +247,10 @@ void update_traces(void) {
 		goto out;
 	}
 
-	try_to_read_sw_ver(config, &sw_ver);
-	if (sw_ver == 0) {				// Support for old config files without version (TOMA_ENCODING_VER_OLDEST_SUPPORTED)
+	try_to_read_params_encoding_ver(config, &params_encode_ver);
+	if (params_encode_ver) {				// Support for old config files without version (TOMA_ENCODING_VER_OLDEST_SUPPORTED)
 		goto continue_reading;
-	} else if (__is_unsupported_version(sw_ver, is_initial_read)) {
+	} else if (__is_unsupported_version_of_params_config(params_encode_ver, is_initial_read)) {
 		goto out;
 	}
 
@@ -477,7 +477,7 @@ int nvmeibt_debug_config_params_parse(char *line, int *n_matches)
 void nvmeibt_debug_config_params_print(struct nvmeibt_Str *s, bool print_values, bool print_defaults)
 {
 	int i;
-	nvmeibt_Str_sprintf(s, "%s=%x\n", TOMA_SW_VER_STRING, TOMA_SW_VER);
+	nvmeibt_Str_sprintf(s, "%s=%x\n", TOMA_PARAMS_ENCODING_STRING, TOMA_ENCODING_VER);
 	for (i=0; i<ARRAY_SIZE(oper_params); i++) {
 		struct oper_param_t *param = &oper_params[i];
 

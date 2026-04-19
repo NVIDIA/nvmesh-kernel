@@ -615,8 +615,6 @@ out:
 	return rv;	// 0 if parsed the binary data OK
 }
 
-// Check if a received encoding version is decodable by this binary.
-// Accept: TOMA_ENCODING_VER, TOMA_ENCODING_VER_OLDEST_SUPPORTED, or (TOMA_ENCODING_VER .. TOMA_SW_VER].
 static bool __is_decodable_encoding_ver(uint32_t encoding_ver)
 {
 	if (encoding_ver == TOMA_ENCODING_VER)
@@ -624,11 +622,11 @@ static bool __is_decodable_encoding_ver(uint32_t encoding_ver)
 	if (encoding_ver == TOMA_ENCODING_VER_OLDEST_SUPPORTED) {		// v2.8 backward compat
 		N_Tf(qnbvd68, "Received topo from older TOMA encoding_ver=@HEX08, current=@HEX08", encoding_ver, TOMA_ENCODING_VER);
 		return true;
-	} else if (encoding_ver > TOMA_ENCODING_VER && encoding_ver <= TOMA_SW_VER) {	// Forward compat: newer encoding up to our binary capability
-		N_Tf(qnbvd69, "Received topo with higher encoding_ver=@HEX08 (current=@HEX08, max_decodable=@HEX08)", encoding_ver, TOMA_ENCODING_VER, TOMA_SW_VER);
+	} else if ((encoding_ver > TOMA_ENCODING_VER) && (encoding_ver <= TOMA_SW_VER)) {	// Forward compat: newer encoding up to our binary capability
+		N_Tf(qnbvd69, "Received topo with higher encoding_ver=@X (current=@X, max_decodable=@X)", encoding_ver, TOMA_ENCODING_VER, TOMA_SW_VER);
 		return true;
 	}
-	N_Ef(qnbvd67, "Unknown encoding version=@HEX08 (max decodable=@HEX08)", encoding_ver, TOMA_SW_VER);
+	N_Ef(qnbvd67, "Unknown encoding version=@X (max decodable=@X)", encoding_ver, TOMA_SW_VER);
 	return false;
 }
 

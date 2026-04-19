@@ -1727,7 +1727,7 @@ int apply_json_topo_hdr(struct mm_json_dict *dict)
 		JSON_ASSIGN_PLAIN(hdnvk3k,  "praids_num", header.praids_num, kv->value->num);
 		JSON_LOOP_ITERATION_END(j5wlox3, kv->key);
 	}
-	N_Tf(cvgahew, "topo_hdr encoding_ver=@INT64_TD topo_len=@INT64_TD praids_num=@INT64_TD",
+	N_Tf(cvgahew, "topo_hdr encoding_ver=@X topo_len=@INT64_TD praids_num=@INT64_TD",
 		 header.encoding_ver, header.topo_len, header.praids_num);
 	JSON_ASSIGN_AND_CALL_VALIDATE(9vuwmrd);
 	N_Tf(vgshgwu, "Actually, Nothing to apply in the header. Used for validations");
