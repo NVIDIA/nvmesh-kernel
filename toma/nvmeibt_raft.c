@@ -2790,7 +2790,7 @@ static int raft_send_msg_to_peer(
 	msg = NNVMEIBT_BM_CALLOC(6gwuyj3, total_msg_size);
 	// My_raft state
 	msg->sw_ver = TOMA_SW_VER;		// Advertise binary capability version to peers
-	nvmeibt_strlcpy(msg->git_commit_id, GIT_COMMIT_ID, sizeof(msg->git_commit_id));
+	nvmeibt_strlcpy(msg->build_version, BUILD_VERSION_FOR_MGMT, sizeof(msg->build_version));	// Up to 3.4.0 was GIT_COMMIT_ID
 	msg->src_node_id = *raft_get_my_uuid();
 	msg->src_node_idx = 0; /*cur_topo->my_node->idx_in_cur_topo;*/
 
@@ -4255,10 +4255,10 @@ static BOOL is_incoming_msg_valid(struct nvmeibt_big_msg *big_msg,
 	if (msg->sw_ver > TOMA_SW_VER) {
 		N_Ef(huu876y, "in_sw_ver=@SOFTWARE_VERSION > my_ver=@SOFTWARE_VERSION, This is a bug!", msg->sw_ver, TOMA_SW_VER);
 	}
-	if (strncmp(msg->git_commit_id, GIT_COMMIT_ID, sizeof(msg->git_commit_id))) {
+	if (strncmp(msg->build_version, BUILD_VERSION_FOR_MGMT, sizeof(msg->build_version))) {
 		static struct timespec	prev_printout_timespec = TIMESPEC_ZERO;
 		if (nvmeibt_global_get_cur_event_start_time().tv_sec - prev_printout_timespec.tv_sec > 300) {
-			N_Tf(qy763yr, "git Change-Id mismatch '@GIT_COMMIT_ID!=@GIT_COMMIT_ID'", msg->git_commit_id, GIT_COMMIT_ID);
+			N_Tf(qy763yr, "git build version mismatch '@STR!=@STR'", msg->build_version, BUILD_VERSION_FOR_MGMT);
 			prev_printout_timespec = nvmeibt_global_get_cur_event_start_time();
 	   }
 	}
@@ -4535,7 +4535,7 @@ void convert_raft_msg_header_le_be(struct raft_msg *msg)
 	{ _Static_assert(sizeof(struct raft_msg) == 384, "Struct mm_segment_conf was changed without updating the packing function!"); }
 
 	SWAP32_STR_FIELD(msg, sw_ver);
-	// git_commit_id is a string. No need to touck
+	// build_version is a string. No need to touch
 	SWAP32_STR_BITFIELD(msg, msg_type);
 	SWAP_UUID_STR_FIELD(msg, src_node_id);
 	SWAP32_STR_FIELD(msg, src_node_idx);
