@@ -925,6 +925,8 @@ void nvmeibt_global_idle_time_activities(void)
 	const int64_t				n_calls_at_artificial_full_log = 10;
 	static int					last_kafka_idle_print_time_sec = 0;
 	const int					kafka_idle_time_sec = nvmeibt_global_get_cur_event_start_time().tv_sec - nvmeibt_global_get_global()->kafka_last_activity_time.tv_sec;
+	static int64_t				prev_update_praid_token = -1;
+	int64_t						cur_update_praid_token;
 
 	NFIN;
 	if (n_calls >= n_calls_at_artificial_full_log) {
@@ -950,6 +952,13 @@ void nvmeibt_global_idle_time_activities(void)
 	if (nvmeibt_global_get_global()->is_in_shutdown_active_phase) {
 		goto out;
 	}
+
+	cur_update_praid_token = nvmeibt_kafka_get_update_praid_token_provided_by_mgmt();
+	if (cur_update_praid_token != prev_update_praid_token) {
+		prev_update_praid_token = cur_update_praid_token;
+		nvmeibt_topology_leader_resend_all_praids_report_to_mgmt();
+	}
+
 	nvmeibt_global_issue_leader_report_praids_status_to_mgmt();
 	nvmeibt_recovery_report_rebuild_progress_to_mgmt();
 

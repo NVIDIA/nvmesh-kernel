@@ -19,10 +19,11 @@
 #define MGMT_LOG_MSG_MSG_LEN		256
 
 #define NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN (HOST_NAME_MAX + 30)
-#define KAFKA_PRODUCER_MSG_HEADER_FMT   "\"originType\": \"TOMA\", \"messageType\": \"%s\", \"messageTypeVersion\": %u, \"hostname\": \"%s\", \"tomaToken\": %lld, \"messageSequence\": %lu,  \"leaderToken\": null, "
-#define KAFKA_PRODUCER_MSG_HEADER_FMT_L "\"originType\": \"TOMA\", \"messageType\": \"%s\", \"messageTypeVersion\": %u, \"hostname\": \"%s\", \"tomaToken\": %lld, \"messageSequence\": %lu,  \"leaderToken\": %lld, "
+#define KAFKA_PRODUCER_MSG_HEADER_FMT   "\"originType\": \"TOMA\", \"messageType\": \"%s\", \"messageTypeVersion\": %u, \"hostname\": \"%s\", \"tomaToken\": %lld, \"messageSequence\": %lu, \"leaderToken\": null, "
+#define KAFKA_PRODUCER_MSG_HEADER_FMT_L "\"originType\": \"TOMA\", \"messageType\": \"%s\", \"messageTypeVersion\": %u, \"hostname\": \"%s\", \"tomaToken\": %lld, \"messageSequence\": %lu, \"leaderToken\": %lld, \"updatePRaidToken\": %lld,"
 #define KAFKA_PRODUCER_MSG_HEADER_VAR(  mType, ver) mType, ver, nvmeibt_get_my_hostname(), nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt(), get_next_running_producer_msg_sequence_number()
-#define KAFKA_PRODUCER_MSG_HEADER_VAR_L(mType, ver) mType, ver, nvmeibt_get_my_hostname(), nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt(), get_next_running_producer_msg_sequence_number(), nvmeibt_kafka_get_leader_keepalive_token_provided_by_mgmt()
+#define KAFKA_PRODUCER_MSG_HEADER_VAR_L(mType, ver) mType, ver, nvmeibt_get_my_hostname(), nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt(), get_next_running_producer_msg_sequence_number(), \
+																nvmeibt_kafka_get_leader_keepalive_token_provided_by_mgmt(), nvmeibt_kafka_get_update_praid_token_provided_by_mgmt()
 
 union offset_with_topic_change_no {
 	int8_t		a[8];	// Naturally a[0] is the LSB and a[7] is the MSB
@@ -110,6 +111,7 @@ bool nvmeibt_kafka_is_mgmt_zone_specified(void);
 uint64_t get_next_running_producer_msg_sequence_number(void);
 int64_t nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt(void);
 int64_t nvmeibt_kafka_get_leader_keepalive_token_provided_by_mgmt(void);
+int64_t nvmeibt_kafka_get_update_praid_token_provided_by_mgmt(void);
 int nvmeibt_kafka_generic_log_msg_to_mgmt_send(const char *unique_key, char *header, char *str, enum NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY priority);
 void nvmeibt_kafka_new_kafka_mgmt_zone_number_received (int64_t zone_number);
 

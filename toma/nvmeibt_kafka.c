@@ -212,6 +212,7 @@ static struct nvmeibt_Str			*kafka_mtls_ssl__key_password = NULL;
 
 static int64_t volatile				kafka_follower_keepalive_token_provided_by_mgmt = -1;
 static int64_t volatile				kafka_leader_keepalive_token_provided_by_mgmt = -1;
+static int64_t volatile				kafka_leader_update_praid_token_provided_by_mgmt = -1;
 // Used to affect the main thread
 static volatile int				kafka_applied_init_counter = 0;
 static volatile int				kafka_requested_init_counter = 1;	// When larger than applied_init_counter, all new produce/consume fails
@@ -278,10 +279,17 @@ int64_t nvmeibt_kafka_get_leader_keepalive_token_provided_by_mgmt(void) {	// Cal
 	return kafka_leader_keepalive_token_provided_by_mgmt;
 }
 
-static void kafka_set_leader_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval) {
-	N_Tf(4vs8skl, "token=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX",
-		 kafka_leader_keepalive_token_provided_by_mgmt, new_token, nvmeibt_leader_keep_alive_secs, keepaliveInterval);
-	kafka_leader_keepalive_token_provided_by_mgmt = max(kafka_leader_keepalive_token_provided_by_mgmt, new_token);
+int64_t nvmeibt_kafka_get_update_praid_token_provided_by_mgmt(void) {
+	return kafka_leader_update_praid_token_provided_by_mgmt;
+}
+
+static void kafka_set_leader_keepalive_token_provided_by_mgmt(int64_t leader_keepalive_token, int64_t keepaliveInterval, int64_t update_praid_token) {
+	N_Tf(4vs8skl, "keepalive_token=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX update_praid_token=@INT64_TX-->@INT64_TX",
+		 kafka_leader_keepalive_token_provided_by_mgmt, leader_keepalive_token,
+		 nvmeibt_leader_keep_alive_secs, keepaliveInterval,
+		 kafka_leader_update_praid_token_provided_by_mgmt, update_praid_token);
+	kafka_leader_keepalive_token_provided_by_mgmt = max(kafka_leader_keepalive_token_provided_by_mgmt, leader_keepalive_token);
+	kafka_leader_update_praid_token_provided_by_mgmt = max(kafka_leader_update_praid_token_provided_by_mgmt, update_praid_token);
 	nvmeibt_leader_keep_alive_secs = keepaliveInterval;
 }
 
@@ -1104,6 +1112,7 @@ struct keepAliveToken_params_ctx {
 	int64_t			zone_number;
 	int64_t			token;
 	uint64_t		keepaliveInterval;
+	uint64_t		updatePRaidToken;
 };
 
 static int parse_updateTomaKeepaliveToken(struct mm_json_elem *root, struct keepAliveToken_params_ctx *out, bool is_updateTomaKeepaliveToken_msg)
@@ -1130,6 +1139,9 @@ static int parse_updateTomaKeepaliveToken(struct mm_json_elem *root, struct keep
 			} else if	(!strcmp(payload_kv->key, "keepaliveInterval")) {
 				parsed_mask |= 0x8;
 				out->keepaliveInterval = payload_kv->value->num;
+			} else if	(!strcmp(payload_kv->key, "updatePRaidToken")) {
+				//parsed_mask |= 0x10;
+				out->updatePRaidToken = payload_kv->value->num;
 			} else {
 				N_Tf(cvmau3j, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
@@ -1618,7 +1630,7 @@ static int incremental_VOL_updates_consume(void) {
 	if (strcmp(msg_param.messageType, "updateLeaderKeepaliveToken") == 0) {
 		struct keepAliveToken_params_ctx keepAliveToken_params;			// The token-update messages are internal to toma_kafka. No need for wakeup
 		rv = parse_updateTomaKeepaliveToken(json_tree_root, &keepAliveToken_params, 0);
-		kafka_set_leader_keepalive_token_provided_by_mgmt(keepAliveToken_params.token, keepAliveToken_params.keepaliveInterval);
+		kafka_set_leader_keepalive_token_provided_by_mgmt(keepAliveToken_params.token, keepAliveToken_params.keepaliveInterval, keepAliveToken_params.updatePRaidToken);
 		if (incremental_VOL_updates_last_vol_msg_offset <= k_incremental_VOL_updates.offset_committed) { // The last VOL_XXX msg was committed, so we can commit till this updateLeaderKeepaliveToken msg
 			incremental_VOL_updates_offset_to_commit = k_incremental_VOL_updates.consumer_offset;
 		}
