@@ -389,8 +389,6 @@ static void scenario_evict_rebuild_r1(void) {
 	 * peer would keep pinning seg[1]/seg[2] at OWNER_RECOVERER_DONE and block
 	 * any later topology transitions (e.g. the delete-driven X_ZERO->X_DONE). */
 	peer_toma_simu_clear_seg_injects(sb_cluster_get_conf()->nodes[1].peer);
-
-	SCENARIO_PRINT(__AUTOID__, "done (inert)");
 }
 
 static void scenario_create_remove_r1(void) {
