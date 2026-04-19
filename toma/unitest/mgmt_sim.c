@@ -123,8 +123,8 @@ void mgmt_sim_send_add_volume(int vol_idx) {
 	unsigned c, r, s;
 	int rv = 0;
 	BUG_ON(vol_idx >= m->cfg->n_vols);
-	BUF_ADD("{\"messageType\":\"addVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"version\":1,\"name\":\"%s\",\"blockSize\":4096,",
-		V->name, V->uuid, V->name);
+	BUF_ADD("{\"messageType\":\"addVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"version\":%u,\"name\":\"%s\",\"blockSize\":4096,",
+		V->name, V->uuid, V->conf_version, V->name);
 	BUF_ADD("\"lockServer\":{\"maxNOwners\":%u,\"type\":4,\"locksetShift\":-1},\"blocks\":%u,\"RAIDLevel\":\"Mirrored RAID-1\",\"numberOfMirrors\":%d,\"stripeSize\":32,\"stripeWidth\":%u,",
 		V->chunks->raids->P+1, V->num_blocks, V->chunks->raids->P,  V->chunks->n_raids);
 	BUF_ADD("\"status\":\"unavailable\",\"action\":\"initializing\",\"relativeRebuildPriority\":10,\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null,\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,");
@@ -148,20 +148,19 @@ void mgmt_sim_send_add_volume(int vol_idx) {
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, rv, false);
 }
 
-void mgmt_sim_send_volume_update(int vol_idx, int version,
-	const char *vol_status, const char *vol_action,
-	const struct mgmt_sim_vol_seg_update *segs, int n_segs) {
+void mgmt_sim_send_volume_update(int vol_idx, const char *vol_status, const char *vol_action, const struct mgmt_sim_vol_seg_update *segs, int n_segs) {
 	#define BUF_ADD(...) rv += snprintf(&buf[rv], msg_size-rv, __VA_ARGS__)
 	struct mgmt_sim_state *m = g_mgmt_sim;
-	const struct sb_volume_conf *V = &m->cfg->vols[vol_idx];
+	      struct sb_volume_conf *V = &m->cfg->vols[vol_idx];
 	const struct sb_chunk_conf  *C = &V->chunks[0];
 	const struct sb_praid_conf  *P = &C->raids[0];
 	const size_t msg_size = 2048;
 	char *buf = malloc(msg_size);
 	int rv = 0, i;
+	V->conf_version++;			// Version increased on each volume update
 	BUG_ON(vol_idx >= m->cfg->n_vols || n_segs <= 0);
-	BUF_ADD("{\"messageType\":\"updateVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"version\":%d,\"name\":\"%s\",\"blockSize\":4096,",
-		V->name, V->uuid, version, V->name);
+	BUF_ADD("{\"messageType\":\"updateVolume\",\"messageTypeVersion\":1,\"payload\":{\"_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",\"version\":%u,\"name\":\"%s\",\"blockSize\":4096,",
+		V->name, V->uuid, V->conf_version, V->name);
 	BUF_ADD("\"lockServer\":{\"maxNOwners\":%u,\"type\":4,\"locksetShift\":-1},\"blocks\":%u,\"RAIDLevel\":\"Mirrored RAID-1\",\"numberOfMirrors\":%d,\"stripeSize\":32,\"stripeWidth\":%u,",
 		P->P+1, V->num_blocks, P->P, C->n_raids);
 	BUF_ADD("\"status\":\"%s\",\"action\":\"%s\",\"relativeRebuildPriority\":10,\"reservation\":{\"mode\":0,\"version\":1,\"reservedBy\":null,\"attachedClients\":[],\"lastTransitionDate\":null},\"use_debug_di\":false,",
@@ -175,7 +174,7 @@ void mgmt_sim_send_volume_update(int vol_idx, int version,
 	}
 	rv--;	// Remove the trailing ','
 	BUF_ADD("]}]}]}}");
-	N_IMf(__AUTOID__, "vol=@DEV_NAME sending updateVolume v@INT status=@STR action=@STR n_segs=@INT @INT[b]", V->name, version, vol_status, vol_action, n_segs, rv);
+	N_IMf(__AUTOID__, "vol=@DEV_NAME sending updateVolume conf_ver=@INT status=@STR action=@STR n_segs=@INT @INT[b]", V->name, V->conf_version, vol_status, vol_action, n_segs, rv);
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, buf, rv, false);
 }
 
@@ -463,12 +462,8 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 		struct mm_json_elem *segments = json_get_dict_value(entry, "segments");
 		const char *uuid = json_get_dict_str(entry, "uuid", NULL);
 		struct sb_praid_topo *pr = sb_cluster_get_topo_prd_ptr_from_uuid(m->cfg, uuid);
-		/* Accept any number of segments up to praid capacity -- eviction adds
-		 * a replacement before the deprecated slot is removed, so reports
-		 * can temporarily carry more than D+P entries. */
-		int n_reported;
+		int n_reported = segments->array.len; // Accept any number of segments up to praid capacity -- eviction adds a replacement before the deprecated slot is removed, so reports can temporarily carry more than D+P entries.
 		BUG_ON(!segments || (segments->type != JSON_E_ARRAY));
-		n_reported = segments->array.len;
 		BUG_ON(n_reported > (int)ARRAY_SIZE(pr->cfg->segs));
 		__mongodb_insert_praid_hdr(pr, entry);
 		for (int j = 0; j < n_reported; j++)

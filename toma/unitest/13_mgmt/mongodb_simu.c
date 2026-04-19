@@ -76,6 +76,7 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 			struct sb_volume_conf *pv = &sb->vols[i];
 			pv->uuid = sb_vol_uuid(i);
 			pv->num_chunks = 1;
+			pv->conf_version = 1;									// Real mgmt starts from 1
 			for (c = 0; c < pv->num_chunks; c++) {
 				struct sb_chunk_conf *pc = &pv->chunks[c];
 				pc->n_raids = 1;									// Raid-0, not supported yet. Striping of 1

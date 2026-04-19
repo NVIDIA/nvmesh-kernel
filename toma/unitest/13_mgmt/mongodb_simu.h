@@ -62,6 +62,7 @@ struct sb_cluster_conf {
 		// --------------- Volume config
 		const char* name;
 		uint32_t uuid;								// For simplicity all uuids are u32
+		uint32_t conf_version;						// Ever increasing number
 		unsigned num_blocks;						// Volume size (num of 4KB blocks)
 		unsigned num_chunks;						// Created with ==1
 		struct sb_chunk_conf {

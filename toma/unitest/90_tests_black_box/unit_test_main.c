@@ -265,8 +265,7 @@ static void scenario_evict_rebuild_r1(void) {
 			{ .seg_idx = 2, .praid_idx = 2, .status = "normal" },
 			{ .seg_idx = 3, .praid_idx = 0, .status = "markedForRebuild" },
 		};
-		mgmt_sim_send_volume_update(1, 2, "online", "markedForRebuild",
-			evict_segs, (int)ARRAY_SIZE(evict_segs));
+		mgmt_sim_send_volume_update(1, "online", "markedForRebuild", evict_segs, (int)ARRAY_SIZE(evict_segs));
 	}
 	yield();
 
@@ -317,8 +316,7 @@ static void scenario_evict_rebuild_r1(void) {
 			{ .seg_idx = 2, .praid_idx = 2, .status = "normal" },
 			{ .seg_idx = 3, .praid_idx = 0, .status = "markedForRebuild" },
 		};
-		mgmt_sim_send_volume_update(1, 3, "degraded", "markedForRebuild",
-			post_evict_segs, (int)ARRAY_SIZE(post_evict_segs));
+		mgmt_sim_send_volume_update(1, "degraded", "markedForRebuild", post_evict_segs, (int)ARRAY_SIZE(post_evict_segs));
 	}
 	yield();
 	mgmt_sim_send_leader_keep_alive();
