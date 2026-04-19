@@ -306,12 +306,14 @@ static inline int rd_kafka_wait_destroyed(int n_msec) { (void)n_msec; return 0; 
 enum my_rd_kafka_purge_flags { RD_KAFKA_PURGE_F_INFLIGHT = 0x2, RD_KAFKA_PURGE_F_NON_BLOCKING = 0x4 };
 rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t * rk, int purge_flags);
 enum my_rd_kafka_producer_flags { RD_KAFKA_MSG_F_FREE = 0x1, RD_KAFKA_MSG_F_COPY = 0x2 };
+#define RD_KAFKA_PURGE_F_QUEUE 0x1
+#define RD_KAFKA_PURGE_F_INFLIGHT 0x2
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque);
 rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *rk, char *errstr, size_t errstr_size);
 #define LOG_DEBUG (5)
-static inline int         rd_kafka_version(    void)	{ return 0x20102; }
-static inline const char* rd_kafka_version_str(void)	{ return "0x20102"; }
-
+static inline int         rd_kafka_version(    void)   { return 0x020501ff; }  // hex MM.mm.rr.xx
+static inline const char* rd_kafka_version_str(void)   { return "2.5.1"; }
+rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t *rk, int purge_flags);
 /************************************* udev ************************************/
 #include "interfaces/nvme/nvmeibt_udev.h"
 #define NVMEIBT_TOMA_LIB_UDEV_API_H // #include "interfaces/nvme/nvmeibt_lib_udev_api.h"
