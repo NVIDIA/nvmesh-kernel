@@ -20,7 +20,7 @@ The plan is organized in four phases. Phases 1 and 2 ship together; Phase 3 foll
 - **New `volumeClass: 'CDV_MGMT'`** added to `consts.volumeClass`. Satellites are their own class — makes filter queries straightforward and removes any name-parsing-based typing.
 - **Fields on CDV_MGMT document:** `parentCDVId`, `parentCDVUUID`. No `cdvConfig`, no `tpvCount`, no user-facing mutability.
 - **CDV name length limit = 16 characters.** Enforced in the existing name validator. Add `assertNotReservedCDVSuffix` that rejects user-facing create/rename of any volume whose name ends in `-mgmt`.
-- **Retire `cdvConfig.allocatorSizeGB`** from the create path. The satellite size is fixed at 1 GiB. The field remains readable on pre-migration records but is ignored on new creates.
+- **Retire `cdvConfig.allocatorSizeGiB`** from the create path. The satellite size is fixed at 1 GiB. The field remains readable on pre-migration records but is ignored on new creates.
 
 ### 1.2 Create path — single raw allocation, sliced into N volumes
 
@@ -39,10 +39,10 @@ allocateAndSliceIntoVolumes(
 ```
 
 Semantics:
-- One call to the regular allocator for `totalSize` using the standard placement rules (RAID level, drive class, target class, limit-by-nodes/disks, etc. supplied via `allocationOptions`).
-- The returned chunk plan is **split** into per-slice volume records, in the order the slices are listed. Slice 0 occupies the first `slices[0].size` bytes of the allocation; slice 1 occupies the next `slices[1].size`; and so on.
-- Each output volume record references its own sub-range of the underlying chunks. The first chunk is large enough to contain the entire first slice.
-- Atomic at the allocation layer: either all slices are returned or none (allocator rolls back on any failure).
+- Slices are allocated **sequentially** via the existing `utils.createVolume()` path (the actual implementation in `modules/volume.js` walks the slice list with `async.eachSeries`). Each slice uses the same placement rules (RAID level, drive class, target class, limit-by-nodes/disks, etc. supplied via `allocationOptions`).
+- Slice 0 is allocated first; it therefore lands in the first available chunks and is contiguous with the start of the allocator's placement decision. Slice 1 then consumes the next chunks, and so on.
+- Each output volume record owns its own whole chunks — slices do not share chunks.
+- Atomic at the **plan** level, via rollback-on-failure: if any slice fails to allocate, slices created earlier in the loop are marked for deletion before returning the failure. The outcome from the caller's perspective is all-or-nothing.
 
 **Chunks are not shared between slices.** The output volume records must be indistinguishable from volumes created the normal way — no new fields, no sub-chunk sharing. The allocator is asked for `totalSize`, and the resulting chunk plan is partitioned at slice boundaries so each slice owns whole chunks. For the CDV case this means: allocate 101 GiB for a 100 GiB CDV, the first 1 GiB forms the satellite's chunks, and the remaining 100 GiB forms the CDV's chunks. The allocator must be able to honor a request that the first chunk be sized exactly `slices[0].size`; everything after is allocated with the normal chunking rules.
 
@@ -87,7 +87,7 @@ No change beyond confirming that `updateVolumes` targeting a `CDV_MGMT` volume i
 
 ### 1.5 Attach / detach — private satellite path
 
-- **REST refuses satellite attach.** `routes/clients.js` `attachVolumes` validates `volume.volumeClass !== 'CDV_MGMT'` and rejects with 403.
+- **REST refuses satellite attach.** `modules/client.js` `attachVolumes` filters any target volume with `volumeClass === 'CDV_MGMT'` out of the request, records an error message per filtered row, and lets the standard route response carry a 4xx when everything the caller asked for was refused. The filter is unconditional — there is no `adminManualOperation` override — so user-facing REST cannot attach a satellite by any path.
 - **New internal entry point** `modules/client.js` `attachSatelliteForAllocator(cdvUUID, tomaHostname, allocatorGeneration, requestId)`:
   1. Look up satellite via `cdv.allocatorVolumeId`.
   2. Call the existing exclusive-preempt attach path with `reservation.mode = EXCLUSIVE_READ_WRITE`, `preempt = true`, `isDetachOthers = true`, `clientID = tomaHostname`. Same code path user-driven exclusive preempts take today — no new attach primitive.
@@ -226,7 +226,7 @@ Every allocator-area read or write moves from "CDV block device, offsets `[0, A)
 
 - `cdv_async_write_record`, `cdv_async_write_record_needs_zeroing`, `cdv_async_write_header`, `cdv_zero_execute`: change the `fd` argument from the CDV handle to `alloc->satellite_fd`. Offset formulas unchanged — header at 0, record `i` at `4096 + i * record_size`.
 - `cdv_ondisk_scan` / `cdv_ondisk_scan_async`: same rebase, identical scan logic.
-- **CDV data-extent offsets no longer subtract `A`.** Helpers that compute "physical offset of CDV data extent `i`" (in `nvmeibc_tpv.c` on the client, and any TOMA CDV-stats code) simplify from `A + i*E` to `i*E`. Grep for `allocatorSizeGB`, `A_bytes`, `allocator_size_gb`.
+- **CDV data-extent offsets no longer subtract `A`.** Helpers that compute "physical offset of CDV data extent `i`" (in `nvmeibc_tpv.c` on the client, and any TOMA CDV-stats code) simplify from `A + i*E` to `i*E`. Grep for `allocatorSizeGiB`, `A_bytes`, `allocator_size_gb`.
 
 ### 3.4 Per-satellite I/O work queue
 
