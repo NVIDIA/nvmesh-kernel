@@ -1216,7 +1216,7 @@ static void parse_CMD_report_praid(struct send_praid_report_ctx *rp, const struc
 	}
 }
 
-static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params) {
+static int parse_CMD(const char* msg_type, struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params) {
 	// Somewhat slopy. Parse all the commands parameters at once.  DHS: There are many different cmd messages but a few payloads, so payload parsing code is generic
 	int i, j, k, rv = 0;
 	NFIN;
@@ -1224,7 +1224,7 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
 		if (strcmp(root_kv->key, "payload"))			// We parse only payload, not message type
 			continue;
-		N_Tf(657sniw, "parsing payload");
+		N_Tf(657sniw, "parsing payload of msg=@STR", msg_type);
 		for (j = 0; j < root_kv->value->dict.len; j++) {
 			const struct mm_json_kv_pair *payload_kv = &(root_kv->value->dict.elements[j]);
 			if (!strcmp(payload_kv->key, "drives")) {
@@ -1299,10 +1299,11 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			}
 		}		// Payload parsing
 	}
-	N_Tf(4vsdywb,
-		 LOCAL_DISK_LOG_FMT " vendor=@INT uuid=@STR tomaToken=@INT formatType=@STR formatRequestCounter=@INT @INT+@INT[B] dbUUID=@STR",
-		 LOCAL_DISK_LOG_obj_ARGS(&CMD_params->fmt), CMD_params->fmt.vendor, CMD_params->generic_uuid, CMD_params->tomaToken, CMD_params->fmt.formatType, CMD_params->fmt.formatRequestCounter, CMD_params->fmt.blockSize,
-		 CMD_params->fmt.metadataSize, CMD_params->dbUUID.str);
+	if (!strncmp(msg_type, "formatDrive", 11))
+		N_Tf(4vsdywb,
+			"Format: " LOCAL_DISK_LOG_FMT " vendor=@INT uuid=@STR tomaToken=@INT formatType=@STR formatRequestCounter=@INT @INT+@INT[B] dbUUID=@STR",
+			LOCAL_DISK_LOG_obj_ARGS(&CMD_params->fmt), CMD_params->fmt.vendor, CMD_params->generic_uuid, CMD_params->tomaToken, CMD_params->fmt.formatType, CMD_params->fmt.formatRequestCounter, CMD_params->fmt.blockSize,
+			CMD_params->fmt.metadataSize, CMD_params->dbUUID.str);
 	NFOUT;
 	return rv;
 }
@@ -1410,7 +1411,7 @@ static int CMD_consume(void) {
 	}
 	// All other CMDs, are handled by TOMA's main thread from wakeup. They receive the parsed json tree
 	CMD_params = NNVMEIBT_BM_CALLOC(uzxhn2k, sizeof(*CMD_params));
-	parse_CMD(json_tree_root, CMD_params);
+	parse_CMD(messageType_params.messageType, json_tree_root, CMD_params);
 	if (CMD_params->tomaToken && (CMD_params->tomaToken < nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt())) {
 		N_Tf(koo0o09, "old msg received (token @INT<@INT), skipping", CMD_params->tomaToken, nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt());
 		commit_it_now = 1;
@@ -2621,7 +2622,7 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 	char			encrypt_args[MAX_EXEC_WITH_ARGS_STR_LEN];
 
 	NFIN;
-	if (strcmp(messageType_params->messageType, "formatDrive") == 0) {
+	if (strncmp(messageType_params->messageType, "formatDrive", 11) == 0) {
 		const struct format_disk_cmd_t *fmt = &CMD_params->fmt;
 		wakeup_format_event(&fmt->ldisk_id, fmt->vendor, CMD_params->generic_uuid, fmt->blockSize,
 							fmt->metadataSize, fmt->formatRequestCounter, CMD_params->bootTime, &(CMD_params->dbUUID),
