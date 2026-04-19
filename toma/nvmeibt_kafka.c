@@ -700,6 +700,12 @@ static void producer_close(struct t_producer_impl *k) {
 	}
 }
 
+static void producer_purge_inflight(struct t_producer_impl *k)
+{
+	if (k->msg_to_mgmt_producer)
+		rd_kafka_purge(k->msg_to_mgmt_producer, RD_KAFKA_PURGE_F_QUEUE | RD_KAFKA_PURGE_F_INFLIGHT);
+}
+
 static int high_priority_msg_to_mgmt_producer_init(void) {
 	const struct key_val_strs kv[] = { K_DEFAULT_PRODUCER_CONFIG };
 	char str[128];
@@ -2038,25 +2044,37 @@ static void kafka_poll_all_producers_in_order_to_get_their_cb(int timeout_ms) {
 
 static void kafka_commit_done_offsets_of_all_consumer_queues(void);
 static void kafka_close_all_blocking(void) {
+	int total_producer_wait_msec = 0;
+	bool did_force_purge = false;
 	NFIN;
 	kafka_commit_done_offsets_of_all_consumer_queues();	// Commit whatever we can (An optimization)
 	for (int msec = 100; atomic_read(&kafka_n_sends_in_the_air) > 0; msec++) {		// Do not close things when still in use, Linear backoff
-		N_Tf(jsnewij, "n_sends_in_the_air=@INT. Waiting @INT[msec]", atomic_read(&kafka_n_sends_in_the_air), msec);
-		kafka_poll_all_producers_in_order_to_get_their_cb(min(msec, 1000));			// After 90[sec] start polling at 1[hz]
+		const int max_ms_wait = min(msec, 1000);									// Limit polling at 1[hz]
+		N_Tf(__AUTOID__, "n_sends_in_the_air=@INT. Waiting @INT[msec]", atomic_read(&kafka_n_sends_in_the_air), max_ms_wait);
+		kafka_poll_all_producers_in_order_to_get_their_cb(max_ms_wait);
 		kafka_commit_done_offsets_of_all_consumer_queues();	// Commit whatever we can (An optimization)
+		total_producer_wait_msec += max_ms_wait;
+		if (!did_force_purge && (total_producer_wait_msec > 30*1000)) {	// After 30[sec] speed up shutdown by purging
+			N_Tf(__AUTOID__, "Force purging producers start");
+			producer_purge_inflight(&k_high_priority);
+			producer_purge_inflight(&k_low_priority);
+			producer_purge_inflight(&k_keepalive);
+			N_Tf(__AUTOID__, "Force purging producers end");
+			did_force_purge = true;
+		}
 	}
-	N_Tf(5nduq93, "n_sends_in_the_air=0. Closing.");
+	N_Tf(5nduq93, "n_sends_in_the_air=0. Waited=@INT[sec], force_purge=@BOOL_YN, Closing.", (total_producer_wait_msec/1000), did_force_purge);
 	producer_close(&k_high_priority);
 	producer_close(&k_low_priority);
 	producer_close(&k_keepalive);
-	consumer_close(&k_incremental_VOL_updates);
+	consumer_close(&k_incremental_VOL_updates);		// Takes session.timeout.ms 45[sec]. Consider doing the 4 in parallel (using rd_kafka_queue_new() anc rd_kafka_consumer_close_queue()
 	consumer_close(&k_incremental_TARGET_updates);
 	consumer_close(&k_HW_full_config);
 	consumer_close(&k_CMD);
 	kafka_apply_stop_consuming_leader_VOL_msgs(0);  // Do not affect the requested_is_raft_leader. Turn off the applied_is_raft_leader and close everything
 	kafka_apply_stop_consuming_leader_TARGET_msgs(0);  // Do not affect the requested_is_raft_leader. Turn off the applied_is_raft_leader and close everything
 	if (rd_kafka_wait_destroyed(2000) != 0)	// Since destroy is async. We want a clean shutdown
-		N_Ef(__AUTOID___, "Failed wait for kafka destroy. May stuck on next kafka restart");
+		N_Ef(__AUTOID__, "Failed wait for kafka destroy. May stuck on next kafka restart");
 	NFOUT;
 }
 

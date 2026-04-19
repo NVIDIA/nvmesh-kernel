@@ -446,6 +446,11 @@ int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void
 	return 0;
 }
 
+rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t *k, int purge_flags) {
+	(void)k; (void)purge_flags;
+	return RD_KAFKA_RESP_ERR_NO_ERROR;
+}
+
 rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *k, char *errstr, size_t errstr_size) {
 	(void)k; (void)errstr_size;
 	errstr[0] = 0;
