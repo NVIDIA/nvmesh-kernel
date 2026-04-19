@@ -1036,13 +1036,17 @@ Add a check to NVCK that:
 
 ### 3.1 New Kernel Subdirectory: `clnt/tpv/`
 
-Files:
-- `nvmeibc_tpv.h` — data structures
-- `nvmeibc_tpv.c` — volume attach/detach, block device registration
-- `nvmeibc_tpv_allocator.c` — TPV\_extent map, alloc/free
-- `nvmeibc_tpv_io.c` — IO dispatch, zero-read, write-allocate
-- `nvmeibc_tpv_persist.c` — allocator state serialization to/from CDV
-- `nvmeibc_tpv_recovery.c` — cold recovery of allocator state
+Files (as shipped):
+- `nvmeibc_tpv.h` — data structures, public API
+- `nvmeibc_tpv.c` — volume attach/detach, block-device registration via ATOM, CDV-preempt and NDU hooks
+- `nvmeibc_tpv_allocator.c` — TPV\_extent alloc/free, `cdv_alloc_work`, pending-return drain
+- `nvmeibc_tpv_io.c` — IO dispatch, zero-read, write-allocate, bio split, sync\_flush barrier
+- `nvmeibc_tpv_cdv.c` — CDV transport (read/write/zero-copy helpers against the parent CDV)
+- `nvmeibc_tpv_ib_admin.c` — IB-admin dispatch for `CDV_ALLOC_EXTENT` / `CDV_FREE_EXTENT` / `CDV_LIST_EXTENTS` responses
+- `nvmeibc_tpv_persist.c` — L1/L2 tree serialization (`load_state` / `flush_state`), partial-page flush, deferred `load_state_work` / `persist_work` / `timeout_work`
+- `nvmeibc_tpv_recovery.c` — reconciliation against TOMA's `CDV_LIST_EXTENTS`, orphan extent adoption
+- `nvmeibc_tpv_proc.c` — `/proc/nvmeibc/tpv/<name>/` entries
+- `nvmeibc_tpv_test.c` / `nvmeibc_tpv_test.h` — 5 kernel self-tests triggered via `/proc/.../selftest`
 
 ### 3.2 New Volume Class Handling
 
@@ -1067,62 +1071,186 @@ Add `volume_class` and `is_hidden` to `nvmeibc_volume_header`.
 
 ### 3.3 Core Data Structures
 
+The authoritative definitions live in `clnt/tpv/nvmeibc_tpv.h`; the summaries below are intentionally elided to the fields that matter for the design discussion. Field-level contracts are in-header; this section exists to orient a reader to the shape of the state machine.
+
 ```c
-// A single mapping entry: virtual_extent_index → physical byte offset in CDV.
-// phys_offset == 0 means unmapped (CDV offset 0 is inside the allocator area and is
-// never a valid TPV_extent location — safe sentinel).
+enum nvmeibc_volume_class { NVC_REGULAR = 0, NVC_CDV = 1, NVC_TPV = 2 };
+
+enum nvmeibc_tpv_state {
+    TPV_ATTACHING = 0,
+    TPV_ATTACHED  = 1,
+    TPV_DETACHING = 2,
+    TPV_ORPHAN    = 3,   /* NDU: nvmeibc gone, ATOM buffering bios */
+};
+```
+
+#### Extent mapping
+
+```c
+/* xarray value type: virtual_extent_index V -> nvmeibc_tpv_extent_entry*.
+ * phys_offset == 0 is the unmapped sentinel: CDV offset 0 is inside the
+ * allocator area and is never a valid TPV_extent location.
+ * Freed via kfree_rcu after xa_erase; see §3.3.1 for the RCU protocol. */
 struct nvmeibc_tpv_extent_entry {
-    u64          phys_offset;       // CDV byte offset of the physical slot
-    u64          cdv_extent_index;  // parent CDV_extent index (for ref-count on free)
-    bool         persisted;         // true once flush_state has written this to the L1/L2 tree
-    struct rcu_head rcu;            // deferred free via kfree_rcu after xa_erase
+    u64             phys_offset;
+    u64             cdv_extent_index;  /* parent CDV_extent — lets free decrement the right ref */
+    bool            persisted;         /* true once flush_state has written this leaf */
+    struct rcu_head rcu;
 };
 
-// Sparse map: xarray keyed by virtual extent index → nvmeibc_tpv_extent_entry*.
-struct nvmeibc_tpv_allocator {
-    struct xarray    extent_map;
-    spinlock_t       lock;
-    u32              tpv_extent_size_kb;
-    u64              virtual_extents_total;
-
-    struct list_head cdv_extent_list;      // nvmeibc_cdv_extent_ref entries
-    u64              cdv_extents_count;
-
-    struct list_head free_tpv_extents;     // available physical TPV_extent slots
-    u64              free_tpv_extent_count;
-
-    u64              low_watermark;        // schedule CDV alloc when count drops below
-                                           // default: 50 MB / tpv_extent_size
-};
-
-struct nvmeibc_cdv_extent_ref {
-    u64              extent_index;         // data CDV_extent index i
-    u64              allocated_count;      // TPV_extents in use within this CDV_extent
+/* One available physical slot inside an already-allocated CDV_extent.
+ * Lives on alloc->free_tpv_extents. */
+struct nvmeibc_tpv_free_slot {
+    u64              phys_offset;
+    u64              cdv_extent_index;
     struct list_head node;
 };
 
+/* One CDV_extent allocated from TOMA.  Holds n_slots = E / T slots which may be:
+ *   (a) free — linked on alloc->free_tpv_extents
+ *   (b) a data slot mapped by the xarray
+ *   (c) an L2 table (dynamic-L2 placement; see §3.4.1)
+ *   (d) slot 0 of the L1 extent (pinned; is_l1_extent == true)
+ * allocated_count covers (b) + (c). l2_slots counts (c) only.
+ * Return-to-TOMA eligibility:  allocated_count == 0 && !is_l1_extent. */
+struct nvmeibc_cdv_extent_ref {
+    u64              extent_index;
+    u64              allocated_count;
+    u64              l2_slots;
+    bool             is_l1_extent;
+    struct list_head node;
+};
+```
+
+#### Per-L2 persistence context (for §3.4.3 partial-page flush)
+
+```c
+/* One per in-memory L2 table, kept in alloc->l1_to_l2_ctx (xarray keyed by L1_idx).
+ * dirty_pages is a bitmap over DIV_ROUND_UP(T, 4096) 4 KiB pages; IO-path
+ * alloc/free sets a bit, flush_state clears it after the page is on disk.  A
+ * freshly allocated L2 ctx starts with every bit set so the first flush writes
+ * the full T bytes. */
+struct tpv_l2_ctx {
+    u64              phys;          /* CDV byte offset of this L2 slot */
+    unsigned long   *dirty_pages;
+};
+```
+
+#### Allocator
+
+```c
+struct nvmeibc_tpv_allocator {
+    struct xarray    extent_map;             /* V -> nvmeibc_tpv_extent_entry*; see §3.3.1 */
+    spinlock_t       lock;
+
+    u32              tpv_extent_size_kb;     /* T in KB */
+    u64              virtual_extents_total;  /* ceil(virtual_size / T) */
+
+    /* CDV geometry — received in the AttachVolumes cdvConf payload, constant afterwards. */
+    u32              cdv_extent_size_mb;     /* E in MB */
+    u64              allocator_size_gb;      /* A in GB (byte offset of first data extent) */
+
+    /* Physical slot pool */
+    struct list_head cdv_extent_list;        /* nvmeibc_cdv_extent_ref entries */
+    u64              cdv_extents_count;
+    struct list_head free_tpv_extents;       /* nvmeibc_tpv_free_slot entries */
+    u64              free_tpv_extent_count;
+    struct list_head pending_return_list;    /* refs with allocated_count == 0 awaiting */
+                                             /* CDV_FREE_EXTENT; drained by cdv_alloc_work */
+                                             /* because free_extent runs in IO context */
+    u64              low_watermark;          /* default: 50 MiB / T; triggers cdv_alloc_work */
+
+    /* Per-TPV L1/L2 tree metadata (§3.4.1 / §3.4.3) */
+    u64              l1_extent_index;        /* first CDV_extent ever allocated; holds L1 in slot 0 */
+    u64              n_l2_tables_used;
+    struct xarray    l1_to_l2_ctx;           /* L1_idx -> tpv_l2_ctx* (second xarray!) */
+    unsigned long   *l1_dirty_pages;         /* bitmap over the L1's T-byte slot */
+
+    /* Cached CDV_LIST_EXTENTS result — handed from load_state to recovery to
+     * avoid a second TOMA round-trip; kvmalloc'd. */
+    u64             *toma_extent_list;
+    u64              toma_extent_count;
+
+    /* Statistics (atomic — readable from /proc/nvmeibc/tpv/<name>/stats) */
+    atomic64_t       stat_tpv_alloc_ok, stat_tpv_alloc_eagain, stat_tpv_alloc_enomem;
+    atomic64_t       stat_tpv_free_ok;
+    atomic64_t       stat_cdv_alloc_ok, stat_cdv_alloc_full, stat_cdv_alloc_wgen, stat_cdv_alloc_err;
+    atomic64_t       stat_cdv_free_ok;
+    atomic64_t       stat_cdv_alloc_ns;      /* cumulative CDV alloc RTT */
+};
+```
+
+#### Per-TPV instance
+
+```c
 struct nvmeibc_tpv {
+    struct nvmeiba_atom_os_api    atom;      /* MUST be first — container_of target from gendisk */
     struct nvmeibc_volume        *cdv_vol;
     struct nvmeibc_tpv_allocator  allocator;
-    struct nvmeibc_block_device  *block_dev;
-    char                          tpv_uuid[37];
-    u64                           virtual_size;         // bytes
-    atomic_t                      state;                // ATTACHING / ATTACHED / DETACHING
 
-    // CDV.allocator identity — learned from CDV topology at attach time,
-    // updated via topology push when allocator changes.
-    u8                            allocator_toma_id[...];
+    char                          tpv_uuid[NVMEIBC_BD_UUID_LEN];
+    char                          tpv_name[NVMEIBC_BD_NAME_LEN];
+    u64                           virtual_size;
+    atomic_t                      state;     /* enum nvmeibc_tpv_state */
+
+    /* CDV.allocator identity — set from CDV topology; updated on topology push */
+    char                          allocator_toma_id[NVMEIB_HOST_NAME_LEN];
     u64                           allocator_generation;
     spinlock_t                    allocator_id_lock;
 
+    /* Background CDV_extent allocation work (§3.7) */
     struct work_struct            cdv_alloc_work;
     atomic_t                      cdv_alloc_pending;
 
+    /* Bios parked waiting for a free TPV_extent slot.  Drained by
+     * nvmeibc_tpv_retry_pending_bios() once cdv_alloc_work installs new slots. */
+    struct bio_list               pending_bios;
+    spinlock_t                    pending_bio_lock;
+
+    /* Synchronous L1-barrier mode (default, set from sourceUUID CM field).
+     * When true, data bios for freshly-allocated extents park on
+     * pending_l1_flush_bios until the L1/L2 tree has been persisted, closing
+     * the crash window where data reaches the CDV before the L1 pointer does. */
+    bool                          sync_flush;
+    struct bio_list               pending_l1_flush_bios;
+
+    /* Deferred load of allocator state (tree read + recovery).  Retries while
+     * the CDV block device is not yet available.  state_loaded uses
+     * double-checked locking under pending_bio_lock. */
+    struct delayed_work           load_state_work;
+    bool                          state_loaded;
+
+    /* Deferred persist of dirty allocator state */
     struct work_struct            persist_work;
     spinlock_t                    persist_lock;
     bool                          dirty;
+
+    /* IO timeout for parked bios — uses nvmeibc_io_max_retry_secs module param,
+     * or IO_TIME_OUT_ATTACH (30 s) until state_loaded, or IO_TIME_OUT_NORMAL
+     * afterwards.  Cut to 10 ms at detach for fast drain. */
+    unsigned long                 max_retry_jiffies;
+    struct delayed_work           timeout_work;
+
+    struct list_head              list_node;   /* per-client active-TPV list */
+
+    /* /proc/nvmeibc/tpv/<name>/ entries */
+    struct proc_dir_entry              *proc_dir;
+    struct nvmeib_public_procfs_ent    *proc_status, *proc_allocator;
+    struct nvmeib_public_procfs_ent    *proc_tpv_extent_map, *proc_cdv_extent_map;
+    struct nvmeib_public_procfs_ent    *proc_stats, *proc_selftest;
+
+    /* Private fops copy kept in kzalloc'd memory so it survives NDU (nvmeibc
+     * module unload/reload) — see nvmeibc_tpv_abandon_all_for_inst. */
+    struct block_device_operations tpv_live_fops;
+
+    /* In-flight IO counter for NDU drain.  make_request increments on entry;
+     * decrements after the bio is handed off to the CDV.  Abandon waits for
+     * zero before orphaning the atom to ATOM's buffering mode. */
+    atomic_t                      io_inflight;
 };
 ```
+
+**State-machine touchpoints not visible in the struct.** The per-TPV active list (`list_node`) and the CDV-preempt cleanup hook (`nvmeibc_tpv_handle_cdv_preempted`, §3.8) together enforce the §2.10 preempt cleanup barrier: when a parent CDV's block device enters `NCBD_PREEMPTED`, every TPV riding on it is discovered via the list and torn down so no stale `extent_map` survives to be replayed after re-attach. The NDU path (`nvmeibc_tpv_abandon_all_for_inst` + `TPV_ORPHAN`) uses the same list in reverse: each TPV flushes dirty state, cancels all workers, and hands its atom to ATOM's orphan-buffering mode before the old nvmeibc module unloads.
 
 #### 3.3.1 xarray design rationale and characteristics
 
@@ -1167,6 +1295,8 @@ Maximum depth = ⌈log₆₄(virtual_extents_total)⌉:
 
 For nearly all production TPV sizes the tree is 2–3 levels deep, making `xa_load` a small, cache-friendly pointer chase. The xarray `MARKS` facility is not used.
 
+**Second xarray: `l1_to_l2_ctx`.** The allocator also holds a second xarray, keyed by L1 index → `tpv_l2_ctx *`. It is populated by `load_state` (one entry per L1 slot that references a live L2 table) and grown by `flush_state` (a new entry is inserted when a previously-null L1 index first acquires an L2 table). Unlike `extent_map`, this xarray is **not** on the IO hot path — it is touched only by flush, load, and the per-L2 dirty-page bookkeeping (§3.4.3). Locking is simpler: xarray operations run under the allocator `lock` or the `persist_lock`; no RCU read-side is needed.
+
 ### 3.4 Allocator State Persistence Format (per-TPV L1/L2 Tree)
 
 Each TPV owns a private 2-level mapping tree that is persisted inside CDV\_extents allocated to that TPV. There is **no CDV-wide metadata region** beyond the TOMA CDV.allocator area `[0, A)`; everything from `A` on is TPV-owned. Per-TPV ownership is required because different TPVs on the same CDV may use different `tpvExtentSizeKB` values (and therefore different slot sizes, L1/L2 fanout, etc.), so a single shared tree cannot encode all of them.
@@ -1187,24 +1317,11 @@ Client-only change. The first CDV\_extent allocated to the TPV is a normal data 
 
 L2 tables are allocated lazily from the same free pool any time `flush_state` needs to write an L1\_idx whose L2 slot has not been assigned yet. Each L2 table consumes exactly one TPV\_extent slot — on any CDV\_extent owned by the TPV.
 
-Each `nvmeibc_cdv_extent_ref` carries a per-slot usage bitmap:
+Each `nvmeibc_cdv_extent_ref` records, per extent: the total in-use slot count (data + L2), the number of L2 tables living in this extent, and a flag for the pinned L1-host extent. The full struct appears in §3.3.
 
-```c
-#define TPV_SLOT_DATA  0
-#define TPV_SLOT_L2    1
+**Per-slot "kind" is not tracked explicitly.** An early design kept a `slot_kind` bitmap (one bit per slot = data vs. L2). It was removed: L2 tables in `change 1` are sticky-monotonic — once placed, they are never migrated or freed during the TPV's lifetime — so an extent with `l2_slots > 0` always has `allocated_count > 0` and is not a return candidate regardless. The scalar `l2_slots` plus the `is_l1_extent` flag is sufficient.
 
-struct nvmeibc_cdv_extent_ref {
-    u64           extent_index;
-    u64           allocated_count;     /* data + L2 slots */
-    unsigned long *slot_kind;          /* bitmap: 0 = data, 1 = L2 */
-    u64           l2_slot_count;       /* count of bits set in slot_kind */
-    /* ... */
-};
-```
-
-Slot 0 of the extent holding L1 is marked separately (a dedicated `is_l1_extent` flag on the ref and `l1_slot_index == 0`) because it is pinned for the lifetime of the TPV.
-
-**Free-extent rule.** `CDV_FREE_EXTENT` is sent to TOMA only when the ref's data-slot count reaches zero **and** `l2_slot_count == 0` **and** `is_l1_extent == false`. A data-empty extent that still pins L2 tables stays attached and waits for the L2 tables to be relocated (compaction) or for the TPV to be deleted.
+**Free-extent rule.** A ref is eligible for `CDV_FREE_EXTENT` when `allocated_count == 0 && !is_l1_extent`. Because `allocated_count` covers data *and* L2 slots, the check implicitly rejects any extent that still pins L2 tables. An extent that reaches `allocated_count == 0` is moved to `alloc->pending_return_list` (§3.6) and sent to TOMA from `cdv_alloc_work`, not from the free path itself.
 
 **First-write cost**: 1 CDV\_extent (down from 2). For a TPV that only ever has one mapped virtual extent, the L1 header, one L2 table, and the single data slot all live in the same CDV\_extent (slots 0, 1, and some slot ≥ 2 respectively).
 
@@ -1394,58 +1511,80 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
                               struct nvmeibc_tpv_extent_entry **out)
 {
     // 1. Lock allocator.
-    // 2. Pop one entry from free_tpv_extents.
-    //    If empty: return -EAGAIN, queue bio for retry after CDV_extent arrives.
-    // 3. Build tpv_extent_entry (phys_offset from free entry).
-    // 4. xa_store into extent_map at virt_idx.
-    // 5. Decrement free_tpv_extent_count.
-    // 6. If free_tpv_extent_count < low_watermark: schedule cdv_alloc_work.
-    // 7. Mark dirty (schedule persist_work).
-    // 8. Unlock, return entry.
+    // 2. Re-check extent_map[virt_idx] under the lock (race with concurrent alloc).
+    // 3. Pop one nvmeibc_tpv_free_slot from free_tpv_extents.
+    //    If empty: unlock, return -EAGAIN.  Caller parks bio on tpv->pending_bios.
+    // 4. kzalloc a nvmeibc_tpv_extent_entry (GFP_ATOMIC); on -ENOMEM, return the
+    //    slot and fail with -ENOMEM.
+    // 5. xa_store(extent_map, virt_idx, entry, GFP_ATOMIC).
+    // 6. Bump owning cdv_extent_ref.allocated_count.
+    // 7. If free_tpv_extent_count < low_watermark and no request is in flight,
+    //    schedule cdv_alloc_work.
+    // 8. Mark tpv->dirty; schedule persist_work (deferred) or park bio for
+    //    pending_l1_flush_bios (sync_flush mode).
+    // 9. Set *out = entry; unlock.
 }
 
 int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 {
-    // 1. xa_erase from extent_map.
-    // 2. Enqueue physical offset onto free_tpv_extents.
-    // 3. Decrement allocated_count for the parent CDV_extent in cdv_extent_list.
-    // 4. If allocated_count drops to 0:
-    //      remove from cdv_extent_list, send CDVAllocatorFree to TOMA.
-    // 5. Mark dirty.
+    // 1. Lock allocator.
+    // 2. xa_erase(extent_map, virt_idx) → entry.  If NULL, -ENOENT.
+    // 3. kfree_rcu(entry, rcu)  — deferred free; concurrent rcu_read_lock'd
+    //    readers on the IO path may still be dereferencing the pointer.
+    // 4. Push a fresh nvmeibc_tpv_free_slot back onto free_tpv_extents.
+    // 5. Decrement owning cdv_extent_ref.allocated_count.
+    // 6. If allocated_count drops to 0 AND !is_l1_extent:
+    //      Move ref from cdv_extent_list to pending_return_list.
+    //      (Do NOT send CDV_FREE_EXTENT here — this runs in IO context and
+    //      cannot block on IB admin.)  cdv_alloc_work will drain
+    //      pending_return_list in process context.
+    // 7. Mark tpv->dirty; schedule persist_work.
+    // 8. Unlock.
 }
 ```
 
 ### 3.7 CDV\_extent Request from Client
 
-When `cdv_alloc_work` fires (see §2.8 for message structs):
+`cdv_alloc_work` runs in process context and does two jobs in order:
 
-1. Look up `(allocator_toma_id, allocator_generation)` from `nvmeibc_tpv`. Find admin channel to a disk belonging to that TOMA.
+**Drain `pending_return_list` first** — for each ref there, send `NVMEIBC_MA_CDV_FREE_EXTENT` (fire-and-forget) and free the ref. Keeping this ahead of new allocation requests means a churn workload doesn't grow the CDV's extent count monotonically.
+
+**Then request more slots** if `free_tpv_extent_count < low_watermark` and `cdv_alloc_pending` is clear:
+
+1. Snapshot `(allocator_toma_id, allocator_generation)` under `allocator_id_lock`. Resolve an ADMIN-channel handle to any disk owned by that TOMA.
 2. Send `NVMEIBC_MA_CDV_ALLOC_EXTENT`. Set `cdv_alloc_pending = 1`.
-3. On response:
-   - `WRONG_GENERATION`: re-fetch CDV topology, update `(allocator_toma_id, allocator_generation)`, retry.
-   - `CDV_FULL`: pause write IOs awaiting allocation; resume on topology push after management extends CDV.
-   - `OK`: Compute group index `G` for this CDV\_extent assignment. Install `resp.extent_index` into the appropriate L2 or L3 leaf in the tree (allocating an L2/L2a/L3 table CDV\_extent first if the slot's parent table does not yet exist). Flush the modified tree pages to CDV. Add all $n_{\text{slots}}$ physical slot addresses $A + \text{resp.extent\_index} \times E + s \times T$ for $s \in [0,\, n_{\text{slots}})$ to `free_tpv_extents`. Add CDV\_extent reference to `cdv_extent_list`. Clear `cdv_alloc_pending`. Retry queued bios.
+3. On response (delivered via `nvmeibc_cdv_dispatch_alloc_response`):
+   - **`CDV_ALLOC_WRONG_GEN`** — stale allocator identity; clear `cdv_alloc_pending` and wait. Fresh identity arrives via the `CDV_ALLOCATOR_UPDATE` topology push and triggers `nvmeibc_tpv_update_allocator_for_cdv`, which re-arms `cdv_alloc_work`.
+   - **`CDV_ALLOC_CDV_FULL`** — no capacity on the CDV. Clear `cdv_alloc_pending`; parked bios stay parked. The next free on any TPV on this CDV that releases a whole CDV\_extent will re-arm the work. If none does, the parked bios eventually time out via `timeout_work` and are failed with `-EIO`. A future extension could re-arm on a CDV-capacity-extended notification.
+   - **`CDV_ALLOC_OK`** — build an `nvmeibc_cdv_extent_ref` for `resp.extent_index`, link it on `cdv_extent_list`, and splice all $n_{\text{slots}} = E/T$ slot addresses (`A + extent_index * E + s * T` for `s ∈ [0, n_slots)`) onto `free_tpv_extents`. If this is the TPV's first-ever extent, reserve slot 0 as the L1 host (set `is_l1_extent`, call `nvmeibc_tpv_mark_l1_full_dirty`). Clear `cdv_alloc_pending`. Call `nvmeibc_tpv_retry_pending_bios` to drain parked bios.
 
-When returning a CDV\_extent (all TPV\_extents freed): send `NVMEIBC_MA_CDV_FREE_EXTENT`.
+The tree-install step (the old "compute group index `G`, install into L2/L2a/L3") does not happen at allocation time. Leaves are written into the flat L1 + dynamic-L2 tree by `flush_state` (§3.4.1, §3.4.3), driven by `persist_work` — separate from the CDV\_extent alloc path.
 
 > **Security note:** `CDV_FREE_EXTENT` from the client, and `CDVAllocatorFreeAll` from management on TPV delete, both invoke the TOMA-side release path described in §3.9. On DISCARD (TRIM) the TPV immediately unmaps the virtual extent so reads from the TPV return zeros from the zero-fill path, independent of what is on the CDV. Whether the underlying CDV blocks are scrubbed before reuse is controlled by the `cdv_extent_zero_on_free` TOMA runtime config (Architecture Decision #18); by default the blocks are not rewritten and are overwritten only when the next TPV allocates that slot. This is acceptable for the default deployment assumption that TPVs are encrypted, rendering stale data cryptographically unreadable after rekey. Operators with a different threat model should enable `cdv_extent_zero_on_free`.
 
 ### 3.8 Attach / Detach
 
 **Attach** (`nvmeibc_tpv_attach`):
-1. Look up CDV in per-client CDV registry; assert it is attached and hidden.
-2. Allocate `nvmeibc_tpv`.
-3. Call `nvmeibc_tpv_load_state()` (§3.4); IO stays gated.
-4. For any tree inconsistency detected during load (e.g., `cdv_extent_md` records a DATA extent for this TPV but no corresponding leaf exists in the tree): call `nvmeibc_tpv_recovery()` to reconcile.
-5. Set watermark; schedule initial CDV\_extent request if `free_tpv_extent_count == 0`.
-6. Register block device. Open IO gates.
+1. Resolve the parent CDV via its attached (hidden) `nvmeibc_volume` — the CDV was attached by the preceding `AttachVolumes` with `isHidden=true`.
+2. Allocate `nvmeibc_tpv`; initialise allocator, work items, bio lists, timeout work, and set `sync_flush` from the CM `sourceUUID` field.
+3. Register the block device (`gendisk`) via the ATOM API. IO is accepted immediately but parks on `pending_bios` until `state_loaded` becomes true.
+4. Schedule `load_state_work` with zero delay. The worker runs `nvmeibc_tpv_load_state` (read L1 from the L1 extent, walk L2 tables, populate `extent_map` and `l1_to_l2_ctx`) followed by `nvmeibc_tpv_recovery` (cross-check against `CDV_LIST_EXTENTS` from TOMA; adopt orphan extents present in TOMA but missing from the tree). On CDV-not-ready failure, the worker retries with backoff.
+5. On successful load+recovery the worker sets `state_loaded` under `pending_bio_lock`, drains `pending_bios`, and — if the free pool is below watermark — arms `cdv_alloc_work`.
+6. Register `/proc/nvmeibc/tpv/<name>/` entries; insert the TPV into the per-client active list.
 
-**Detach** (`nvmeibc_tpv_detach`):
-1. Pause block device (quiesce IO).
-2. Flush dirty allocator state to CDV (synchronous persist).
-3. Unregister block device.
-4. Free `extent_map` and `cdv_extent_list`.
-5. Notify management via MCS that detach is complete.
+**Detach** (`nvmeibc_tpv_detach`) — must be idempotent: both the CDV-preempted hook and the subsequent management-driven `DetachVolumes` can call it, and the second entry observes `TPV_DETACHING`/`TPV_DETACHED` and returns without re-running teardown.
+
+1. CAS `state` from `TPV_ATTACHED` → `TPV_DETACHING`; bail out early on any other prior state.
+2. Drop `max_retry_jiffies` to `HZ/100` so parked bios fail fast.
+3. Cancel `load_state_work`, `cdv_alloc_work`, `persist_work`, `timeout_work` (sync).
+4. If dirty, run a final `flush_state` synchronously (best-effort — recovery will reconcile on re-attach if this fails).
+5. Fail every bio on `pending_bios` / `pending_l1_flush_bios` with `-EIO`.
+6. Unregister the `gendisk`, deregister `/proc` entries, remove from per-client list.
+7. Free the `extent_map` (kfree_rcu each entry; `rcu_barrier` before destroy), the `l1_to_l2_ctx` xarray, `cdv_extent_list`, `free_tpv_extents`, `pending_return_list`, and per-L2 dirty-page bitmaps.
+
+**CDV preempt cleanup** (`nvmeibc_tpv_handle_cdv_preempted`) is invoked from `nvmeibc_block.c` when the CDV's block device enters `NCBD_PREEMPTED`. It walks the per-client active-TPV list and calls `nvmeibc_tpv_detach` on every TPV whose `cdv_vol` points at the preempted CDV. This is the cleanup barrier required by `TPV_PerClientCDVPreemption.md` §2.10 — without it, stale `extent_map`s survive in memory and a re-attached client could replay them.
+
+**NDU abandon** (`nvmeibc_tpv_abandon_all_for_inst`) is invoked before the old nvmeibc module's CDV abandon. For every TPV in the instance it: flushes dirty state; cancels all workers; waits for `io_inflight` to reach zero; calls `nvmeiba_os_api_orphan_abandon()` (which swaps the live fops with a buffering stub so bios are queued by ATOM instead of routed to nvmeibc); and transitions state to `TPV_ORPHAN`. The new nvmeibc module's attach path observes the orphaned atom and re-binds it.
 
 ### 3.9 TPV.Delete
 
