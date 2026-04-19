@@ -1626,28 +1626,39 @@ The `cdv_zero_execute` worker logs a one-shot warning per CDV when invoked in th
 
 ## Part 4 — Testing
 
-### Unit / Integration Tests (management)
+### Shipped kernel self-tests (`clnt/tpv/nvmeibc_tpv_test.c`)
 
-Add to `nvmesh-management/test/`:
+Five tests, triggered by writing to `/proc/nvmeibc/tpv/<name>/selftest`. CDV transport is stubbed by an in-memory buffer in the test file; the production `nvmeibc_tpv_cdv.c` path is not exercised by these tests.
 
-- `test/tpv_lifecycle.js` — create CDV, create TPV, attach, detach, delete TPV, delete CDV
-- `test/tpv_quota.js` — attempt to create 513th TPV on a CDV, expect rejection
-- `test/tpv_extend.js` — extend TPV, verify schema update; verify UpdateVolume MCS is sent if attached
-- `test/tpv_attach_hidden_cdv.js` — verify CDV hidden-attach message precedes TPV exclusive-attach message
+| Test | Covers |
+|---|---|
+| `tpv_ktest_alloc_free` | xarray `xa_store`/`xa_load`/`xa_erase` round-trip via `nvmeibc_tpv_alloc_extent` / `nvmeibc_tpv_free_extent`, slot accounting |
+| `tpv_ktest_persist` | `flush_state` → `load_state` round-trip; verifies L1/L2 tree is rebuilt with identical mappings |
+| `tpv_ktest_pool_exhaustion` | All slots consumed → next alloc returns `-EAGAIN`; freeing one slot re-enables alloc; `cdv_alloc_work` re-arm accounting |
+| `tpv_ktest_double_free` | Second free of the same `virt_idx` returns `-ENOENT` |
+| `tpv_ktest_recovery` | Orphan adoption: TOMA's `CDV_LIST_EXTENTS` reports an extent that is absent from the on-disk tree → recovery creates the ref + free slots |
 
-### Bad-Path Tests (kernel)
+### Planned / not-yet-shipped tests
 
-- Crash after write to TPV\_extent but before tree flush → recovery on re-attach re-walks the L1/L2/L3 tree; the unflushed mapping entry is absent, leaving that virtual extent unmapped (reads return zero). Physical slot is not visible in the tree and may be reclaimed if the parent data CDV\_extent shows no other mapped slots.
-- `cdv_alloc_req` in-flight when allocator TOMA crashes → RAFT elects new allocator, client receives topology update, retries. New allocator cold-recovered; `req_id` provides idempotency.
-- CDV\_extent allocated by TOMA (`cdv_extent_md` updated) but client crashes before installing the tree leaf → on re-attach, `cdv_extent_md` shows the extent as owned by this TPV but no L2/L3 leaf exists. NVCK detects as orphan; recovery clears the `cdv_extent_md` entry.
-- TPV detach races with ongoing write → verify IO drains before tree state flushes.
-- Force-delete TPV while 511 other TPVs are active on same CDV → TOMA scans only matching extents, no cross-TPV interference.
+The scenarios below are called out as design intent. None of them are currently implemented; they remain open work.
 
-### Scale Tests
+**Management (`nvmesh-management/test/`):**
+- `tpv_lifecycle.js` — create CDV, create TPV, attach, detach, delete TPV, delete CDV
+- `tpv_quota.js` — attempt to create the `maxTPVs + 1`-th TPV on a CDV, expect rejection
+- `tpv_extend.js` — extend TPV, verify schema update and that `UpdateVolume` MCS is sent when attached
+- `tpv_attach_hidden_cdv.js` — verify hidden CDV attach precedes TPV exclusive attach
 
+**Kernel / cluster-level bad-paths** (require a real cluster or a TOMA/RAFT stub richer than what the in-tree self-tests provide):
+- Crash after a TPV write but before the corresponding tree flush — verify `load_state` + recovery leaves the virtual extent unmapped (READ-as-zero) and makes the physical slot reclaimable.
+- `CDV_ALLOC_EXTENT` in flight when the allocator TOMA crashes — verify RAFT elects a new allocator, `CDV_ALLOCATOR_UPDATE` topology push updates the client, `cdv_alloc_work` re-arms against the new generation, and `req_id` prevents double-counting.
+- CDV\_extent allocated on TOMA but client crashes before installing the L2 leaf — verify NVCK flags the orphan and recovery reconciles it.
+- TPV detach races ongoing writes — verify the detach idempotency gate (§3.8) plus `io_inflight` draining leaves no lingering bios.
+- Force-delete one TPV while many others are active on the same CDV — verify `CDVAllocatorFreeAll` only touches the deleted TPV's extents.
+
+**Scale targets** (not automated yet):
 - 512 clients simultaneously attached to distinct TPVs on one CDV.
-- CDV at 90% capacity: `CDVCapacityWarning` fires, management extends CDV, TOMA resumes allocation.
-- 1000 concurrent writes across a single TPV: validate no allocator lock contention deadlock.
+- CDV at the warn threshold: `CDVCapacityWarning` fires, management extends CDV, TOMA resumes allocation, and the warning clears at the 85% hysteresis boundary.
+- 1000 concurrent writes to a single TPV: no allocator lock-contention deadlock, `/proc/.../stats` reflects expected counters.
 
 ---
 
@@ -3496,58 +3507,27 @@ $$\text{totalDataExtents} = \frac{\text{CDV capacity} - \text{allocatorSizeGiB} 
 
 $$\text{maxAdditional} = \text{maxAddressable} - \text{totalDataExtents}$$
 
-Both `maxAddressable` and `totalDataExtents` are included in the TOMA stats message (§10.4) and stored in `runtimeStats`. The UI computes `maxAdditional` as a simple subtraction — no formula logic needed in the frontend.
+The design intent is to include both `maxAddressable` and `totalDataExtents` in the TOMA stats message (§10.4) and store both in `runtimeStats`, so the UI can compute `maxAdditional` as a simple subtraction.
 
-If `maxAdditional` is 0, the CDV has reached its allocator addressing limit and cannot benefit from expansion without increasing `allocatorSizeGiB` (which requires CDV recreation).
+**Shipped status:** the TOMA→management stats payload and `handleCDVAllocatorStats()` currently carry only `allocatedExtents` and `totalDataExtents` — `maxAddressableExtents` is **not** yet included, so the "Max Additional" column described in §10.7 cannot be populated end-to-end. The CDV page ships with an **"Over-Provision"** column (showing `overprovisionRatio = virtual-capacity-demand / totalDataExtents`) in its place; "Max Additional" remains planned. Closing this gap requires adding `maxAddressableExtents` to the Kafka stats message and to the Mongo `runtimeStats` write.
+
+If `maxAdditional` were 0, the CDV would have reached its allocator addressing limit and could not benefit from expansion without increasing `allocatorSizeGiB` (which requires CDV recreation).
 
 ### 10.7 UI Changes
 
-#### CDV screen — `Volumes.jsx`
+#### CDV screen — `pages/thinProvisioning/CDVs.jsx`
 
-The existing CDV annotation in the Name column (`(0/512 TPVs)`) is extended with allocation stats. Add three new columns visible only when the CDV filter is active (or always, with `—` for non-CDV volumes):
+Shipped columns (visible only when the CDV filter is active):
 
-```jsx
-{
-    name: 'Allocated',
-    field: 'runtimeStats.allocatedExtents',
-    filterable: false,
-    className: 'fixed-size-column sx-column',
-    rowClassName: 'fixed-size-column',
-    value: vol => vol.volumeClass === consts.volumeClass.CDV && vol.runtimeStats
-        ? vol.runtimeStats.allocatedExtents
-        : '—',
-},
-{
-    name: 'Free',
-    field: 'runtimeStats.totalDataExtents',
-    filterable: false,
-    className: 'fixed-size-column sx-column',
-    rowClassName: 'fixed-size-column',
-    value: vol => {
-        if (vol.volumeClass !== consts.volumeClass.CDV || !vol.runtimeStats) return '—';
-        const { totalDataExtents, allocatedExtents } = vol.runtimeStats;
-        return (totalDataExtents != null && allocatedExtents != null)
-            ? totalDataExtents - allocatedExtents
-            : '—';
-    },
-},
-{
-    name: 'Max Additional',
-    field: 'runtimeStats.maxAddressableExtents',
-    filterable: false,
-    className: 'fixed-size-column sx-column',
-    rowClassName: 'fixed-size-column',
-    value: vol => {
-        if (vol.volumeClass !== consts.volumeClass.CDV || !vol.runtimeStats) return '—';
-        const { maxAddressableExtents, totalDataExtents } = vol.runtimeStats;
-        return (maxAddressableExtents != null && totalDataExtents != null)
-            ? maxAddressableExtents - totalDataExtents
-            : '—';
-    },
-},
-```
+| Column | Source | Notes |
+|---|---|---|
+| **Allocated Extents** | `runtimeStats.allocatedExtents` | Direct from TOMA stats. |
+| **Free Extents** | `runtimeStats.totalDataExtents − runtimeStats.allocatedExtents` | Computed in the cell renderer. |
+| **Over-Provision** | `overprovisionRatio` (server-side computed) | Virtual-capacity demand over physical data-extent capacity. |
 
-These columns show `—` until TOMA has processed the first alloc/free for the CDV (before that, `runtimeStats` is absent). A newly created CDV with no TPVs will show `—` until the first TPV allocates an extent.
+"Max Additional" (design §10.6) is **not yet shipped** — it waits on `maxAddressableExtents` being added to the Kafka stats message. "Over-Provision" currently occupies the third column slot.
+
+All three columns show `—` until TOMA has processed the first alloc/free for the CDV (`runtimeStats` absent). A newly created CDV with no TPVs will show `—` until the first TPV allocates an extent.
 
 #### TPV screen — `ThinProvisioning.jsx`
 
@@ -4202,11 +4182,15 @@ class CDVConfig(SdkObject):
 class TPVConfig(SdkObject):
     cdvId           : str    # required; parent CDV name/_id
     tpvExtentSizeKB : int    # power-of-2: 64–65536 KB
-    virtualSizeGB   : float  # required; current virtual size
+    cdvName         : str    # readonly; denormalized from parent CDV for display
+    exclusiveClient : str    # readonly; set by management on attach, cleared on detach
+    # virtualSizeGB removed — TPV virtual size is now stored in Volume.capacity
+    # (bytes), consistent with regular volumes.  The CLI's `tpv create` takes a
+    # top-level `capacity` param, not a nested tpvConfig field.
     # maxVirtualSizeGB removed — no longer part of the data model
 ```
 
-Note: `SdkObject` field names must use the exact camelCase the server expects (`cdvId`, `tpvExtentSizeKB`, `virtualSizeGB`) — nested fields bypass the `rest2infra` mapping.
+Note: `SdkObject` field names must use the exact camelCase the server expects (`cdvId`, `tpvExtentSizeKB`) — nested fields bypass the `rest2infra` mapping. Virtual size lives on `Volume.capacity`; `cdvName` and `exclusiveClient` are populated by management for display purposes and are not writable from the CLI.
 
 Add to `Volume` body after `metadata` (~line 501):
 
@@ -4265,6 +4249,7 @@ CDV:
     - capacity
     - tpvCount
     - cdvConfig
+    - runtimeStats       # populated by TOMA stats handler — see §10.4
   ops:
     rebuild:
       help: Rebuild a CDV
@@ -4340,15 +4325,19 @@ TPV:
         values: ['online', 'offline', 'degraded', 'unavailable']
         is_matching: true
       params:
+        - capacity           # top-level Volume.capacity — virtual size in bytes
         - tpvConfig          # recurses into TPVConfig → --tpv-config-* options; create-only
+        - isEncrypted        # per-TPV LUKS; see TPV_EncryptionPlan.md
+        - encryption         # encryption sub-object (e.g., headerSize)
 ```
 
 Design notes:
 - CDV uses `*volume_params` as its base, making all standard volume fields updatable. `cdvConfig` is deliberately excluded from `params` (create-only).
-- TPV base `params` is minimal (name + description only). `tpvConfig` is create-only.
+- TPV base `params` is minimal (name + description only). `tpvConfig`, `capacity`, and encryption fields are create-only.
+- Virtual size is `Volume.capacity` (bytes), not a nested `tpvConfig.virtualSizeGB` — consistent with regular volumes.
 - TPV `delete` uses `route: tpv/delete` so `_delete_many → do_operation('delete')` POSTs to `/volumes/tpv/delete` automatically.
 - CDV `rebuild` follows the same pattern as Volume rebuild (`route: rebuildVolumes`, `style: keys`).
-- TPV `extend` is a standard op with `style: one`.
+- TPV `extend` is a standard op with `style: one`; `newSizeGB` payload field uses the literal camelCase key name (`newSizeGb` in CLI opts, rendered as `newSizeGB` in the route payload).
 - TPV `update` is handled in Python (§13.5) because it must go to `/volumes/tpv/update`, not `/volumes/update`.
 
 ### 13.4 `rest_click.py` — Extend `waitable`
@@ -4623,7 +4612,7 @@ and get back the candidate CDVs already filtered and sorted server-side. Fields 
 | `driver/consts.py` | Add `VOLUME_CLASS_TPV/CDV/REGULAR`, extent-size bounds, parameter-name constants. |
 | `driver/config.py` | Add `TPV_DEFAULT_EXTENT_KB`. |
 | `deploy/kubernetes/helm/.../templates/storageclass.yaml` | Add example TPV StorageClass (`volumeClass: TPV`, `cdvNameRegex: "^pool-"`). |
-| `test/integration/` | New cases: TPV create/attach/detach/extend/delete; pool with 0 matches → `ResourceExhausted`; access-mode rejection; extend past CDV capacity → `FailedPrecondition`. |
+| `test/integration/` | *Planned*. New cases: TPV create/attach/detach/extend/delete; pool with 0 matches → `ResourceExhausted`; access-mode rejection; extend past CDV capacity → `FailedPrecondition`. Not yet present in the repo as of 2026-04-19. |
 
 ### 14.5 Controller RPC Changes (detail)
 
@@ -4659,13 +4648,13 @@ else:
 
 None. A TPV presents as an ordinary NVMesh block device after attach; mount, format, `NodeGetVolumeStats`, and `NodeExpandVolume` all work unchanged. Filesystem resize after `ControllerExpandVolume` exercises the existing `NodeExpandVolume` path — which re-reads the block device size from sysfs — and is expected to work because the kernel client's `extendTPV` updates the gendisk capacity in-place.
 
-### 14.7 Capacity Warnings Surfaced to Kubernetes
+### 14.7 Capacity Warnings Surfaced to Kubernetes — *planned*
 
-The CSI driver cannot subscribe to the Kafka `CDVCapacityWarning` topic directly. Instead, the driver's existing management-WebSocket client (`mgmt_websocket_client.py`) already receives CDV state updates; extend the subscriber to watch the `capacityWarning` field and, when set, emit a Kubernetes `Event` of type `Warning` on each PVC whose `volume_context.cdvUuid` points at the affected CDV. No new RPC surface; reuses the `kubernetes` client already imported by the driver.
+**Not yet shipped.** The CSI driver cannot subscribe to the Kafka `CDVCapacityWarning` topic directly. The planned approach is to extend the driver's existing management-WebSocket client (`mgmt_websocket_client.py`) — which already receives CDV state updates — to watch the `capacityWarning` field and, when set, emit a Kubernetes `Event` of type `Warning` on each PVC whose `volume_context.cdvUuid` points at the affected CDV. No new RPC surface; reuses the `kubernetes` client already imported by the driver. No grep match for `capacityWarning` or `CDVCapacityWarning` in the driver today (as of 2026-04-19) — this remains open.
 
-### 14.8 Immutability and ModifyVolume
+### 14.8 Immutability and ModifyVolume — *deferred*
 
-`ControllerModifyVolume` (CSI 1.10+): accept only `description`. Every `tpvConfig` field is immutable and must be rejected with `InvalidArgument`. `cdvConfig` is fully immutable.
+**Not yet shipped.** `ControllerModifyVolume` (CSI 1.10+) is not implemented in `controller_service.py`. When added, the intent is: accept only `description`; every `tpvConfig` field is immutable and must be rejected with `InvalidArgument`; `cdvConfig` is fully immutable. Tracking this until the CSI spec version used by the driver's protos catches up and Kubernetes consumers start issuing `ControllerModifyVolume` RPCs in practice.
 
 ### 14.9 Known Pitfalls
 
