@@ -1067,7 +1067,10 @@ Add `volume_class` and `is_hidden` to `nvmeibc_volume_header`.
 // phys_offset == 0 means unmapped (CDV offset 0 is inside the allocator area and is
 // never a valid TPV_extent location — safe sentinel).
 struct nvmeibc_tpv_extent_entry {
-    u64 phys_offset;
+    u64          phys_offset;       // CDV byte offset of the physical slot
+    u64          cdv_extent_index;  // parent CDV_extent index (for ref-count on free)
+    bool         persisted;         // true once flush_state has written this to the L1/L2 tree
+    struct rcu_head rcu;            // deferred free via kfree_rcu after xa_erase
 };
 
 // Sparse map: xarray keyed by virtual extent index → nvmeibc_tpv_extent_entry*.
@@ -1115,6 +1118,49 @@ struct nvmeibc_tpv {
     bool                          dirty;
 };
 ```
+
+#### 3.3.1 xarray design rationale and characteristics
+
+`extent_map` is a Linux `xarray` (radix tree) keyed by **virtual extent index** (`virt_idx = virt_offset / tpv_extent_size_kb / 1024`). It was chosen over alternatives for four reasons:
+
+1. **Sparse by design.** An unwritten virtual extent consumes no memory — `xa_load` returns NULL, which the IO path interprets as unmapped. A flat array would waste memory proportional to virtual size, not actual usage.
+2. **Lockless reads via RCU.** `xa_load` is safe under `rcu_read_lock()` alone. The IO hot path therefore acquires no spinlock on the common read/mapped-write case.
+3. **Ordered iteration.** `xa_for_each` visits entries in ascending key order, which the persist path relies on when scanning the xarray to build the L1/L2 tree snapshot.
+4. **`kfree_rcu` integration.** `nvmeibc_tpv_extent_entry` carries an `rcu_head` field so the free path can call `kfree_rcu(entry, rcu)` after `xa_erase`, deferring the actual `kfree` until all concurrent RCU readers have finished dereferencing the pointer — no use-after-free.
+
+**Locking model:**
+
+| Operation | Lock held |
+|---|---|
+| `xa_load` (IO hot path) | `rcu_read_lock()` only |
+| `xa_store` (alloc) | `alloc->lock` spinlock |
+| `xa_erase` (free / DISCARD) | `alloc->lock` spinlock |
+| `xa_for_each` (proc / persist) | `rcu_read_lock()` only |
+
+The `rcu_read_lock` / `rcu_read_unlock` bracket in `tpv_handle_one_bio` covers only the `xa_load` and the subsequent read of `entry->phys_offset`; it is released before submitting the bio to the CDV block layer.
+
+**Memory usage:**
+
+Each mapped extent consumes one `nvmeibc_tpv_extent_entry` (≈ 32 bytes: 2 × u64 + bool + `rcu_head`). The xarray radix tree uses 64-way branching (6 bits per level); nodes are allocated lazily at ≈ 512 bytes each.
+
+| Virtual size | Extent size | Max `virt_idx` | Entry memory (fully dense) | Radix nodes |
+|---|---|---|---|---|
+| 256 GiB | 64 KiB | 4 Mi | 128 MiB | ~32 MiB |
+| 1 TiB | 64 KiB | 16 Mi | 512 MiB | ~128 MiB |
+| 1 TiB | 256 KiB | 4 Mi | 128 MiB | ~32 MiB |
+
+Sparse TPVs (typical case) use memory proportional to *written* capacity, not virtual size.
+
+**Radix tree depth:**
+
+Maximum depth = ⌈log₆₄(virtual_extents_total)⌉:
+
+- Up to 64 extents → 1 level
+- Up to 4 096 extents (64² ) → 2 levels
+- Up to 262 144 extents (64³ ) → 3 levels (covers 16 GiB at 64 KiB)
+- Up to 16 Mi extents (64⁴ ) → 4 levels (covers 1 TiB at 64 KiB)
+
+For nearly all production TPV sizes the tree is 2–3 levels deep, making `xa_load` a small, cache-friendly pointer chase. The xarray `MARKS` facility is not used.
 
 ### 3.4 Allocator State Persistence Format (per-TPV L1/L2 Tree)
 
@@ -1287,15 +1333,25 @@ static blk_qc_t nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bi
 
     // For each extent-aligned segment of the bio:
     //   virt_idx = virt_offset / extent_size
-    //   entry    = xa_load(&tpv->allocator.extent_map, virt_idx)
     //
-    //   READ  + entry == NULL → complete bio with zero pages (no CDV IO)
-    //   WRITE + entry == NULL → nvmeibc_tpv_alloc_extent(tpv, virt_idx, &entry)
+    //   rcu_read_lock();
+    //   entry = xa_load(&tpv->allocator.extent_map, virt_idx);
+    //   // entry is RCU-protected: safe to dereference until rcu_read_unlock().
+    //   // entry is freed via kfree_rcu, so it cannot disappear under us.
+    //
+    //   READ  + entry == NULL → rcu_read_unlock(); complete bio with zero pages (no CDV IO)
+    //   WRITE + entry == NULL → rcu_read_unlock(); nvmeibc_tpv_alloc_extent(tpv, virt_idx, &entry)
+    //                           (alloc takes alloc->lock spinlock; does xa_store GFP_ATOMIC)
     //                           then fall through to mapped case
-    //   mapped                → rewrite bio sector to (entry->phys_offset + intra_extent_offset)
+    //   mapped                → snapshot phys_offset; rcu_read_unlock();
+    //                           rewrite bio sector to (phys_offset + intra_extent_offset)
     //                           submit to cdv_vol's block layer
-    //   DISCARD               → nvmeibc_tpv_free_extent(tpv, virt_idx)
+    //   DISCARD               → rcu_read_unlock(); nvmeibc_tpv_free_extent(tpv, virt_idx)
+    //                           (free takes alloc->lock; does xa_erase + kfree_rcu)
     //                           complete bio immediately
+    //
+    // xa_load is called on EVERY bio — it is the hot path.  The RCU read-side critical
+    // section is kept as short as possible: just the load + phys_offset snapshot.
 }
 ```
 
