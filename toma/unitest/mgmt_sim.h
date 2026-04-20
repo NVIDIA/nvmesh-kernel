@@ -53,8 +53,7 @@ void mgmt_sim_reset_v_r1_report_state(void);
 /** Per-segment snapshot extracted from the latest updatePRaidReport for V_R1. */
 struct mgmt_sim_praid_report_seg {
 	u32  uuid;
-	char status[32];		// "normal" | "deprecated" | "replacement" | "under_recovery" | ...
-	char vitality[16];		// "up" | "down"
+	enum seg_topo_state status1;
 };
 
 struct mgmt_sim_praid_report_snapshot {

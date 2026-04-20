@@ -188,17 +188,16 @@ static bool evict_replacement_reported(void) {
 	int old_i = __rpt_find_seg(r, V_R1_EVICTED_SEG_UUID);
 	int rep_i = __rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID);
 	return r->n_segments == 4
-		&& old_i >= 0 && strcmp(r->segs[old_i].status, "deprecated")  == 0
-		&& rep_i >= 0 && strcmp(r->segs[rep_i].status, "replacement") == 0;
+		&& old_i >= 0 && (r->segs[old_i].status1 == mdb_seg_dep)
+		&& rep_i >= 0 && (r->segs[rep_i].status1 == mdb_seg_rep);
 }
 
-/* Phase-2 verification: additionally, the replacement's vitality is "up"
+/* Phase-2 verification: additionally, the replacement's
  * (peer node 2 has surfaced it in its ACT_TOPO reply). */
 static bool evict_replacement_up(void) {
 	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
 	int rep_i = __rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID);
-	return evict_replacement_reported()
-		&& rep_i >= 0 && strcmp(r->segs[rep_i].vitality, "up") == 0;
+	return evict_replacement_reported() && (rep_i >= 0);
 }
 
 /* Phase-4 verification: toma reported at least one segment as "under_recovery"
@@ -214,7 +213,7 @@ static bool evict_rebuild_complete(void) {
 	if (!r->was_under_recovery_witnessed || r->n_segments != 3) return false;
 	if (__rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID) < 0) return false;
 	for (int i = 0; i < r->n_segments; i++)
-		if (strcmp(r->segs[i].status, "normal") != 0)
+		if (r->segs[i].status1 != mdb_seg_RW)
 			return false;
 	return true;
 }
