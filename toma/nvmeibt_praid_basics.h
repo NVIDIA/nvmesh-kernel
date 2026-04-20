@@ -79,7 +79,7 @@ struct nvmeibt_praid_serialized_topo {
 // serialized struct stays at 48 bytes -- wire-compatible with old TOMAs that silently ignore reserved fields.
 static inline int64_t nvmeibt_praid_serialized_get_topo_idx_updated(const struct nvmeibt_praid_serialized_topo *p)
 {
-	return ((int64_t)p->topo_idx_updated_hi << 32) | ((uint32_t)p->topo_idx_updated_lo);
+	return (int64_t)(((uint64_t)p->topo_idx_updated_hi << 32) | ((uint32_t)p->topo_idx_updated_lo));
 }
 
 static inline void nvmeibt_praid_serialized_set_topo_idx_updated(struct nvmeibt_praid_serialized_topo *p, int64_t val)
