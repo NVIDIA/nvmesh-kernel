@@ -35,8 +35,8 @@ void mgmt_sim_send_delete_volume_r1(void);
 void mgmt_sim_send_delete_volume_completed_r1(void);
 
 struct mgmt_sim_vol_seg_update {
-	int seg_idx;			// index into sb_praid_conf.segs[]
-	int praid_idx;			// pRaidIndex field emitted in JSON
+	int seg_idx;			// Index into disk segments array (sb_praid_conf.segs[])
+	int praid_idx;			// Location inside raid {D0,D1,...DN,P,Q}. Example seg[seg_idx=D+P] can replace D5 (praid_dx=5).
 	const char *status;		// e.g. "normal" | "markedForRebuild" | "markedForRebuild_old"
 };
 
