@@ -1913,6 +1913,7 @@ void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add
 	}
 	member = NNVMEIBT_TOMA_CALLOC(trvsau2, 1, sizeof(*member));
 	nvmeibt_strlcpy(member->hostname, hostname, sizeof(member->hostname));
+	nvmeibt_strlcpy(member->build_version, "Unknown", sizeof(member->build_version));
 	member->uuid = *uuid;
 	member->urn_uuid = nvmeibt_union_uuid_to_urn_uuid(uuid);
 	member->kafka_offset = kafka_offset;
@@ -3682,6 +3683,8 @@ void nvmeibt_raft_convert_to_leader(void)
 		if (nvmeibt_toma_is_running_as_a_utility()) {
 			goto out;
 		}
+		nvmeibt_global_get_global()->last_raft_members_version_change_is_applied = 0;
+		nvmeibt_global_get_global()->last_raft_members_version_change_timestamp_sec = nvmeibt_global_get_cur_event_start_time().tv_sec;
 		raft_leader_send_appendentries_to_all_peers(0); // Heartbeat only - no valid topo
 
 		/* inform dumper (recorder) of change of leader */
@@ -4324,6 +4327,12 @@ static int dispatch_raft_msg(struct raft_msg *msg, struct nvmeibt_node *src_node
 		if (src_member->is_ignored) {
 			N_Tf(hu8723n, "raft_member=@STR is ignored", nvmeibt_raft_member_name(src_member));
 			goto out;
+		}
+		if (strncmp(src_member->build_version, msg->build_version, sizeof(src_member->build_version) - 1)) {
+			N_Tf(i990km1, "raft_member=@STR build version changed (@STR-->@STR)", nvmeibt_raft_member_name(src_member), src_member->build_version, msg->build_version);
+			nvmeibt_global_get_global()->last_raft_members_version_change_timestamp_sec = nvmeibt_global_get_cur_event_start_time().tv_sec;
+			nvmeibt_global_get_global()->last_raft_members_version_change_is_applied = 0;
+			nvmeibt_strlcpy(src_member->build_version, msg->build_version, sizeof(src_member->build_version));
 		}
 	} else {
 		N_Tf(6cvwsk5, "Unknown member id=@UUID_LE src_node=@SRC_NODE. I might be new to this raft domain. Accepting.",

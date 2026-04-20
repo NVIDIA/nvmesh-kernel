@@ -162,6 +162,7 @@
 #define TIMESPEC_MAX_C99 ((struct timespec){TIMESPEC_SEC_MAX, 999999999LL})
 #define TIMESPEC_ZERO ((struct timespec){0LL, 0LL})
 #define MSEC_TO_NSEC(m) (1LL * (m) * 1000 * 1000)
+#define NSEC_TO_SEC(n) ((1LL * (n) + 500000000) / 1000000000)
 #define NSEC_TO_MSEC(n)	((1LL * (n) + 500000) / 1000000)
 #define NSEC_TO_USEC(n)	((1LL * (n) + 500) / 1000)
 #define SEC_TO_NSEC(s) (1LL * (s) * NSEC_IN_1_SEC)

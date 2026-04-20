@@ -61,6 +61,7 @@ enum RAFT_ROLE_TYPE {
 
 struct nvmeibt_raft_member {
 	char									hostname[NVMEIB_HOST_NAME_LEN];
+	char									build_version[24];
 	union nvmeib_uuid						uuid;
 	struct nvmeibt_urn_uuid					urn_uuid;
 	struct nvmeibt_node						*its_node;

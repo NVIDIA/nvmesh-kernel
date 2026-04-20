@@ -62,6 +62,7 @@ struct nvmeibt_topology {
 	BOOL								is_any_rebuild_progress_report_to_mgmt_due;
 	BOOL								is_valid_topo_config_received;
 	BOOL								is_in_shutdown_active_phase;
+	BOOL								last_raft_members_version_change_is_applied;
 	unsigned long long					running_report_target_ID;
 	unsigned long long					last_sent_report_target_ID;
 	BOOL								should_send_segment_report;
@@ -108,6 +109,7 @@ struct nvmeibt_topology {
 	int64_t						startup_timestamp_msec;
 	int64_t						highest_seen_committed_kafka_mgmt_config_idx;
 	int64_t						highest_seen_committed_topo_config_idx;
+	int64_t						last_raft_members_version_change_timestamp_sec;
 	int							config_tag;		// monotonic counter to mark objects added to the hash
 	atomic_t					in_transmission_cnt;
 	atomic_t					in_transmission_rep_cnt;
