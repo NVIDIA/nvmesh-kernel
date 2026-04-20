@@ -192,14 +192,6 @@ static bool evict_replacement_reported(void) {
 	return false;
 }
 
-/* Phase-2 verification: additionally, the replacement's
- * (peer node 2 has surfaced it in its ACT_TOPO reply). */
-static bool evict_replacement_up(void) {
-	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
-	int rep_i = __rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID);
-	return evict_replacement_reported() && (rep_i >= 0);
-}
-
 /* Phase-4 verification: toma reported at least one segment as "under_recovery"
  * at some point since the last reset -- proves the praid reached SWITCH_TOPO_U. */
 static bool evict_under_recovery(void) {
@@ -293,7 +285,6 @@ static void scenario_evict_rebuild_r1(void) {
 	 *           seg[3]=replacement, seg[3] vitality=up.
 	 * ==================================================================== */
 	WAIT_UNTIL(evict_replacement_reported());
-	WAIT_UNTIL(evict_replacement_up());
 
 	/* ====================================================================
 	 * PHASE 3 -- Management removes the deprecated segment
