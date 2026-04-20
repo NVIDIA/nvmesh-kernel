@@ -504,14 +504,18 @@ static ssize_t _netlink_recv_msg_from_toma(int fd, const void *buf, size_t n, of
 		if (exec_rv > 0)
 			n_payload_bytes_remainig -= (int)exec_rv;		// Mark Consumed bytes
 	} else if (req_msg->opcode == csc_t2s_blocking_msg_req_info) {
-		const union nvmeib_nl_msg_to_srvr_payload *pay = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
+		const union nvmeib_nl_msg_to_srvr_payload *pay = (typeof(pay))req_msg->data;
 		n_payload_bytes_remainig -= sizeof(pay->req_info);
 		TSB_netlink_handle_req_info(req_msg);
 	} else if (req_msg->opcode == csc_remove_disk_ack) {
 		// Toma acknowledges disk removal - no response needed
-		const union nvmeib_nl_msg_to_srvr_payload *pay = (const union nvmeib_nl_msg_to_srvr_payload *)req_msg->data;
+		const union nvmeib_nl_msg_to_srvr_payload *pay = (typeof(pay))req_msg->data;
 		n_payload_bytes_remainig -= sizeof(pay->rmv_disk_ack);
 		N_Tf(nl_rm_ack, "Netlink remove_disk_ack received for disk_id=@STR", pay->rmv_disk_ack.disk_id);
+	} else if (req_msg->opcode == csc_t2s_local_client) {
+		struct nvmeib_msg_tom_2_local_clnt *pay = (typeof(pay))req_msg->data;
+		n_payload_bytes_remainig -= sizeof(pay->toma_client);
+		N_Ef(__AUTOID__, "Netlink local client attach msg not supported yet (@PTR, n_pages=@INT)....", pay->toma_client.data, pay->toma_client.n_pages);
 	} else {
 		BUG_ON(true);		// Not implemented yet in sandbox
 	}
