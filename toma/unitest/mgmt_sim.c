@@ -435,7 +435,7 @@ static void __mongodb_insert_praid_seg(struct sb_cluster_conf *cfg, struct mm_js
 	const char *uuid = json_get_dict_str(j, "segmentID", NULL);
 	const char *status = json_get_dict_str(j, "status",   "unknown");	// Generated with nvmeibt_mm_segment_persistent_status_to_str()
 	const char *vital =  json_get_dict_str(j, "vitality", "unknown");
-	struct sb_seg_topo *ps = sb_cluster_get_topo_seg_ptr_from_uuid(cfg, uuid);
+	struct sb_seg_topo *ps = sb_cluster_get_topo_seg_ptr_from_uuid_s(cfg, uuid);
 	if      (!strncmp(vital, "up",   2))	ps->vitality = true;
   //else if (!strncmp(vital, "down", 4))	ps->vitality = false;		// Removed
 	else BUG_ON(true);						// Unknown invalid value
@@ -484,7 +484,7 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 				struct mgmt_sim_praid_report_seg *out = &m->v_r1_report.segs[m->v_r1_report.n_segments++];
 				const char *uuid_s = json_get_dict_str(js, "segmentID", "0");
 				sscanf(uuid_s, "%x", &out->uuid);
-				out->status1 = sb_cluster_get_topo_seg_ptr_from_uuid(m->cfg, uuid_s)->status;
+				out->status1 = sb_cluster_get_topo_seg_ptr_from_uuid_n(m->cfg, out->uuid)->status;
 				if (out->status1 == mdb_WRITE)
 					m->v_r1_report.was_under_recovery_witnessed = true;
 			}

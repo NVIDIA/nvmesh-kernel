@@ -122,10 +122,14 @@ struct sb_praid_topo* sb_cluster_get_topo_prd_ptr_from_uuid(struct sb_cluster_co
 	return &D->vols[((u>>16)&0xF)-1].topo_chunks[((u>>8)&0xF)-1].raids[((u>>4)&0xF)-1];
 }
 
-struct sb_seg_topo* sb_cluster_get_topo_seg_ptr_from_uuid( struct sb_cluster_conf *D, const char *seg_uuid) {
+struct sb_seg_topo* sb_cluster_get_topo_seg_ptr_from_uuid_n(struct sb_cluster_conf *D, uint32_t u) {
+	return &D->vols[((u>>16)&0xF)-1].topo_chunks[((u>>8)&0xF)-1].raids[((u>>4)&0xF)-1].segs[((u)&0xF)-1];
+}
+
+struct sb_seg_topo* sb_cluster_get_topo_seg_ptr_from_uuid_s(struct sb_cluster_conf *D, const char *seg_uuid) {
 	unsigned u;
 	BUG_ON(sscanf(seg_uuid, "%x", &u) != 1);	// Scan 1 argument
-	return &D->vols[((u>>16)&0xF)-1].topo_chunks[((u>>8)&0xF)-1].raids[((u>>4)&0xF)-1].segs[((u)&0xF)-1];
+	return sb_cluster_get_topo_seg_ptr_from_uuid_n(D, u);
 }
 
 int sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *sb, const char *host_name) {
