@@ -16,7 +16,7 @@
 
 #include <string.h>
 #include <errno.h>
-#include <unistd.h>			/* usleep for scan retry backoff */
+#include <time.h>			/* nanosleep for scan retry backoff */
 #include "nvmeibt_cdv_alloc.h"
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
@@ -300,8 +300,13 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 	e->n_results = 0;
 
 	/* Backoff delay from the previous failed scan (100ms → 1000ms). */
-	if (e->pre_sleep_ms)
-		usleep((useconds_t)e->pre_sleep_ms * 1000);
+	if (e->pre_sleep_ms) {
+		struct timespec ts = {
+			.tv_sec  = e->pre_sleep_ms / 1000,
+			.tv_nsec = (e->pre_sleep_ms % 1000) * 1000000L,
+		};
+		nanosleep(&ts, NULL);
+	}
 
 	/* Open the CDV volume (lazy, cached in alloc->cdv_fd). */
 	fd = cdv_worker_open_fd(e->alloc);
