@@ -41,6 +41,20 @@ static struct toma_simu_inject_seg_state_t *__find_seg_inject(struct peer_toma_s
 	}
 	return NULL;
 }
+static inline void __progress_seg_init_mode(enum NVMEIBT_MEM_TBL_INIT_MODE *s, enum NVMEIBT_SEGMENT_DIRTY_BITS_STATE seg_state) {
+	const enum NVMEIBT_MEM_TBL_INIT_MODE actionable = NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER |
+		NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON | NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF |
+		NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO | NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST;
+	const enum NVMEIBT_MEM_TBL_INIT_MODE do_nothing = NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE | NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT;
+	if (*s & actionable) {
+		*s = NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
+	} else if (seg_state == NVMEIBT_SEG_DIRTY_BITS_STATE_DEAD) {	// For Dead seg, just clean the RAM, no instruction how.
+		BUG_ON(*s != NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);		// Do nothing, Leader has to give proper instruction
+		// *s = NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
+	} else {
+		BUG_ON((*s & do_nothing) == 0);		// Invalid enum value sent
+	}
+}
 
 static void __gen_seg_reply_to_leader(struct peer_toma_simu *T, const struct sb_seg_conf *sb_seg, const struct nvmeibt_serialized_seg_leader_topo *ld_seg, struct nvmeibt_serialized_seg_active_topo *act_seg) {
 	struct toma_simu_inject_seg_state_t *inj = __find_seg_inject(T, sb_seg->uuid);
@@ -56,29 +70,11 @@ static void __gen_seg_reply_to_leader(struct peer_toma_simu *T, const struct sb_
 	act_seg->active_seg_flags.are_praid_registrants_aligned_with_sync_cmd = 1;
 
 	// Now Apply the injected changes according to unitest scenario
-	if (!T->ignore_segs_initialization) {
-		/* The leader issues mem-tbl init commands (FIRST_USE_EVER for brand-new
-		 * segments, TURN_ALL_ON/OFF and FROM_PERSIST during recovery) that the
-		 * real peer executes locally and then reports as INIT_DONE. Simulate
-		 * that completion by collapsing every actionable init_mode to
-		 * INIT_DONE in the reply. Without this the leader stays in
-		 * leader_is_waiting_for_any_remote_seg_to_apply_topo() because it sees
-		 * the init command still outstanding. */
-		const unsigned actionable = NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER |
-			NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON  |
-			NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF |
-			NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST;
-		const bool was_fresh = (act_seg->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER);
-		if (act_seg->dirty_bits_init_mode  & actionable) act_seg->dirty_bits_init_mode  = NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
-		if (act_seg->stale_locks_init_mode & actionable) act_seg->stale_locks_init_mode = NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
-		/* For segments the peer is seeing for the first time (init_mode was
-		 * FIRST_USE_EVER) with the leader still at UNKNOWN, simulate the real
-		 * peer finishing its local format+GPT by reporting OWNER_IDLE. Without
-		 * this, the leader's nvmeibt_seg_lot_leader_convert_unusable_to_dead
-		 * trap marks the segment DEAD during eviction's replacement flow
-		 * (leader_switch_to_replacement_seg) and recovery never starts. */
-		if (was_fresh && act_seg->dirty_bits_state == NVMEIBT_SEG_DIRTY_BITS_STATE_UNKNOWN)
-			act_seg->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_IDLE;
+	if (!T->ignore_segs_initialization) {		// The leader issues mem-tbl init commands (FIRST_USE_EVER for brand-new segments, TURN_ALL_ON/OFF and FROM_PERSIST during recovery) that the real peer executes locally and then reports as INIT_DONE. Simulate that completion by collapsing every actionable init_mode to INIT_DONE in the reply. Otherwise leader stays in leader_is_waiting_for_any_remote_seg_to_apply_topo() because it sees the init command still outstanding
+		__progress_seg_init_mode(&act_seg->dirty_bits_init_mode,  ld_seg->dirty_bits_state);
+		__progress_seg_init_mode(&act_seg->stale_locks_init_mode, ld_seg->dirty_bits_state);
+		if ((ld_seg->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER) && (ld_seg->dirty_bits_state == NVMEIBT_SEG_DIRTY_BITS_STATE_UNKNOWN))
+			act_seg->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_IDLE;				// For segments the peer is seeing for the first time (FIRST_USE_EVER) with the leader still at UNKNOWN, simulate the real peer finishing its local format+GPT by reporting OWNER_IDLE. Without this, the leader's nvmeibt_seg_lot_leader_convert_unusable_to_dead trap marks the segment DEAD during eviction's replacement flow (leader_switch_to_replacement_seg) and recovery never starts.
 	}
 	if (ld_seg->dirty_bits_state == NVMEIBT_SEG_DIRTY_BITS_STATE_X_ZERO)
 		act_seg->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_X_DONE;						// Toma done zeroing this disk segment

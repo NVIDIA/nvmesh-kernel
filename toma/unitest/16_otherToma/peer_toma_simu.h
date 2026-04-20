@@ -32,8 +32,4 @@ struct nvmeibt_topology_serialized_topo_header;
 int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, const struct nvmeibt_topology_serialized_topo_header *leader_topo_data, int leader_topo_len, char *out_buf, int out_buf_size);
 
 void peer_toma_simu_set_seg_inject(struct peer_toma_simu *peer, const struct toma_simu_inject_seg_state_t *inj);
-
-/** Drop every dirty_bits override previously installed via set_seg_inject().
- *  Use at the end of a scenario phase that injected a transient state so the
- *  peer resumes echoing the leader's normal topology. */
 void peer_toma_simu_clear_seg_injects(struct peer_toma_simu *peer);
