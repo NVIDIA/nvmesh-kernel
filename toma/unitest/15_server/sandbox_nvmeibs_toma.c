@@ -58,6 +58,8 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 		msg_buf->type = me->msgs.q[me->msgs.n_sent % ring_size];
 		if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_SUBSCRIBER_CHANGE) {
 			*msg_buf = me->msgs.p[me->msgs.n_sent % ring_size];
+		} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_CLIENT_DISCONNECT) {
+			*msg_buf = me->msgs.p[me->msgs.n_sent % ring_size];
 		} else if (msg_buf->type == NVMEIBS_TOMA_TRIGGER_JGC) {
 			struct nvmeibs_msg_s2t_launch_JGC *pl = &msg_buf->trigger_JGC_cmd;
 			strcpy(pl->disk_segment_urn_uuid_str, "todo_disk_seg");
@@ -140,17 +142,27 @@ static ssize_t _srvr_simu_nvmeibs_toma_client_proc_recv(int fd, const void *buf,
 
 void nvmeibs_simu_subscribe_client(u64 handle, const char *host_name, const struct sb_disk_conf *disk, bool is_subscribe) {
 	struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
-	struct nvmeibs_toma_server_proc_buf *msg = &s->msgs.p[s->msgs.n_total % (int)ARRAY_SIZE(s->msgs.p)];
-	struct nvmeibs_msg_s2t_subscriber_change *sc = &msg->subscriber_change_msg;
-	msg->type = NVMEIBS_TOMA_REPORT_EVENT_SUBSCRIBER_CHANGE;
-	msg->is_clnt = 0;
-	memset(sc, 0, sizeof(*sc));
-	sc->client_uuid.ints[0] = sc->cid = (uint32_t)(handle >> 32);
-	sc->is_subscribe = is_subscribe;
-	sc->toma_conn_proc_handle = handle;
-	nvmeib_strlcpy(sc->host_name, host_name, sizeof(sc->host_name));
-	scnprintf(sc->disk_name, sizeof(sc->disk_name), "%s.%d", disk->serial, disk->name_space_id);
-	nvmeibs_simu_send_msg(msg->type);
+	if (1) {						// Emulation of prepare_subscriber_evt_msg() function
+		struct nvmeibs_toma_server_proc_buf *msg = &s->msgs.p[s->msgs.n_total % (int)ARRAY_SIZE(s->msgs.p)];
+		struct nvmeibs_msg_s2t_subscriber_change *sc = &msg->subscriber_change_msg;
+		msg->type = NVMEIBS_TOMA_REPORT_EVENT_SUBSCRIBER_CHANGE;
+		msg->is_clnt = 0;
+		memset(sc, 0, sizeof(*sc));
+		sc->client_uuid.ints[0] = sc->cid = (uint32_t)(handle >> 32);
+		sc->is_subscribe = is_subscribe;
+		sc->toma_conn_proc_handle = handle;
+		nvmeib_strlcpy(sc->host_name, host_name, sizeof(sc->host_name));
+		scnprintf(sc->disk_name, sizeof(sc->disk_name), "%s.%d", disk->serial, disk->name_space_id);
+		nvmeibs_simu_send_msg(msg->type);
+	}
+	if (is_subscribe == false) {	// emulation of prepare_client_disconnect_msg() function
+		struct nvmeibs_toma_server_proc_buf *msg = &s->msgs.p[s->msgs.n_total % (int)ARRAY_SIZE(s->msgs.p)];
+		msg->type = NVMEIBS_TOMA_REPORT_EVENT_CLIENT_DISCONNECT;
+		msg->is_clnt = 0;
+		msg->client_disconnect_msg_hdr.cid = (uint32_t)(handle >> 32);
+		msg->client_disconnect_msg_hdr.payload_len = 0;
+		nvmeibs_simu_send_msg(msg->type);
+	}
 }
 
 /********************************* /dev/ utils *******************************/
