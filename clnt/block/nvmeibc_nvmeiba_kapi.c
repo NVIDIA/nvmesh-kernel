@@ -109,7 +109,7 @@ static int nvmeiba_try_attach_ops(void)
 	nvmeiba_sym_refs[nvmeiba_sym_nrefs++] = attach_sym;
 	kapi_iface_mode = NVMEIBA_KAPI_IFACE_OPS;
 	_NT(trace_nvmeiba_kapi_init_via_atom_attach,
-	    "Succesfully resolved nvmeiba via atom_attach. Fn table: @PTR", &nvmeiba_kapi);
+	    "Successfully resolved nvmeiba via atom_attach. Fn table: @PTR", &nvmeiba_kapi);
 	return 0;
 }
 
@@ -142,7 +142,7 @@ static int nvmeiba_bind_legacy(void)
 
 	kapi_iface_mode = NVMEIBA_KAPI_IFACE_LEGACY;
 	_NT(trace_nvmeiba_kapi_init_via_legacy_bind,
-	    "Succesfully resolved all nvmeiba symbols (legacy bind). Fn table: @PTR", &nvmeiba_kapi);
+	    "Successfully resolved all nvmeiba symbols (legacy bind). Fn table: @PTR", &nvmeiba_kapi);
 	return 0;
 err:
 	return rv;
