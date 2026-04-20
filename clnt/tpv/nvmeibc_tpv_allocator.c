@@ -247,9 +247,9 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	kfree(slot);	/* xa_store succeeded; slot info is now in the entry */
 
 	/* Schedule CDV_extent pre-fetch if below watermark. */
-	if (alloc->free_tpv_extent_count < alloc->low_watermark)
-		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
-			schedule_alloc = true;
+	if (alloc->free_tpv_extent_count < alloc->low_watermark &&
+	    !atomic_xchg(&tpv->cdv_alloc_pending, 1))
+		schedule_alloc = true;
 
 	spin_unlock(&alloc->lock);
 
@@ -456,9 +456,8 @@ out_unlock:
 	spin_unlock(&tpv->persist_lock);
 
 	/* Defer CDV_FREE_EXTENT send to the work function. */
-	if (schedule_work_flag)
-		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
-			schedule_work(&tpv->cdv_alloc_work);
+	if (schedule_work_flag && !atomic_xchg(&tpv->cdv_alloc_pending, 1))
+		schedule_work(&tpv->cdv_alloc_work);
 
 	atomic64_inc(&alloc->stat_tpv_free_ok);
 	return 0;
@@ -535,7 +534,7 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 {
 	struct nvmeibc_tpv_allocator  *alloc = &tpv->allocator;
 	struct nvmeibc_cdv_extent_ref *ref;
-	struct nvmeibc_tpv_free_slot  *fs, *fstmp;
+	struct nvmeibc_tpv_free_slot  *fs;
 	LIST_HEAD(batch);
 	u64 n_slots;
 	u64 s;
@@ -604,7 +603,8 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 		for (s = first_free_slot; s < n_slots; s++) {
 			fs = kzalloc(sizeof(*fs), GFP_NOIO);
 			if (!fs) {
-				list_for_each_entry_safe(fs, fstmp, &batch, node) {
+				while (!list_empty(&batch)) {
+					fs = list_first_entry(&batch, struct nvmeibc_tpv_free_slot, node);
 					list_del(&fs->node);
 					kfree(fs);
 				}
@@ -662,7 +662,8 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 	for (s = 0; s < n_slots; s++) {
 		fs = kzalloc(sizeof(*fs), GFP_NOIO);
 		if (!fs) {
-			list_for_each_entry_safe(fs, fstmp, &batch, node) {
+			while (!list_empty(&batch)) {
+				fs = list_first_entry(&batch, struct nvmeibc_tpv_free_slot, node);
 				list_del(&fs->node);
 				kfree(fs);
 			}

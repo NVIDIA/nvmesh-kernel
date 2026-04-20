@@ -143,7 +143,7 @@ extern int (*nvmeibc_tpv_cdv_test_sync_write_fn)(struct nvmeibc_tpv *tpv,
 						   u64 cdv_offset,
 						   const void *buf, u64 len);
 
-static int ktest_cdv_sync_read(struct nvmeibc_tpv *tpv,
+static int ktest_cdv_sync_read(struct nvmeibc_tpv *tpv __maybe_unused,
 			       u64 cdv_offset, void *buf, u64 len)
 {
 	if (!g_tc.cdv_buf)
@@ -154,7 +154,7 @@ static int ktest_cdv_sync_read(struct nvmeibc_tpv *tpv,
 	return 0;
 }
 
-static int ktest_cdv_sync_write(struct nvmeibc_tpv *tpv,
+static int ktest_cdv_sync_write(struct nvmeibc_tpv *tpv __maybe_unused,
 				u64 cdv_offset, const void *buf, u64 len)
 {
 	if (!g_tc.cdv_buf)
@@ -173,8 +173,8 @@ static int ktest_cdv_sync_write(struct nvmeibc_tpv *tpv,
  * Installed as nvmeibc_tpv_test_cdv_alloc_fn hook during self-tests.
  */
 static int ktest_cdv_alloc_extent(
-	struct nvmeibc_volume                *cdv,
-	const char                           *toma_id,
+	struct nvmeibc_volume                *cdv __maybe_unused,
+	const char                           *toma_id __maybe_unused,
 	const struct nvmeibc_cdv_alloc_req   *req,
 	struct nvmeibc_cdv_alloc_resp        *resp)
 {
@@ -205,9 +205,9 @@ static int ktest_cdv_alloc_extent(
  * CDV extent return to TOMA: always succeeds in tests.
  */
 static int ktest_cdv_free_extent(
-	struct nvmeibc_volume                *cdv,
-	const char                           *toma_id,
-	const struct nvmeibc_cdv_free_req    *req)
+	struct nvmeibc_volume                *cdv __maybe_unused,
+	const char                           *toma_id __maybe_unused,
+	const struct nvmeibc_cdv_free_req    *req __maybe_unused)
 {
 	return 0;
 }
@@ -221,8 +221,8 @@ extern int (*nvmeibc_tpv_test_cdv_list_fn)(
 	const char *tpv_uuid, u64 **out_indices, u64 *out_count);
 
 static int ktest_cdv_list_extents(
-	struct nvmeibc_volume *cdv,
-	const char            *toma_id,
+	struct nvmeibc_volume *cdv __maybe_unused,
+	const char            *toma_id __maybe_unused,
 	const char            *tpv_uuid,
 	u64                  **out_indices,
 	u64                   *out_count)
@@ -1002,7 +1002,7 @@ cleanup:
  * arg is the nvmeibc_tpv * registered at proc creation time (unused here;
  * tests construct their own TPV instances for full isolation).
  */
-ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
+ssize_t nvmeibc_tpv_run_selftests(void *arg __maybe_unused, char *buf, size_t len)
 {
 	struct tpv_ktest_output kto = {
 		.buf      = buf,

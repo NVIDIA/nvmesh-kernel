@@ -473,6 +473,36 @@ static void cdv_close_worker_fds(struct nvmeibt_cdv_alloc *alloc)
 	}
 }
 
+static void cdv_scan_apply_zeroing(struct nvmeibt_cdv_alloc *alloc,
+				   const char *cdv_uuid,
+				   struct cdv_scan_result_entry *r)
+{
+	struct nvmeibt_cdv_extent_entry *ext;
+
+	XDLIST_FOREACH(ext, &alloc->extents) {
+		if (ext->extent_index != r->extent_index)
+			continue;
+		ext->needs_zeroing = true;
+		alloc->n_pending_zeroing++;
+		if (r->zeroing_allocator_size_gib && r->zeroing_cdv_extent_size_mib) {
+			if (alloc->allocator_size_gib == 0)
+				alloc->allocator_size_gib = r->zeroing_allocator_size_gib;
+			if (alloc->cdv_extent_size_mib == 0)
+				alloc->cdv_extent_size_mib = r->zeroing_cdv_extent_size_mib;
+			cdv_dispatch_zero_extent(alloc, r->extent_index,
+						 r->tpv_uuid,
+						 r->zeroing_allocator_size_gib,
+						 r->zeroing_cdv_extent_size_mib);
+		} else {
+			N_Wf(cdv_scan_fin_zero_no_geom,
+			     "CDV-alloc: scan cdv=@STR idx=@LLU NEEDS_ZEROING "
+			     "but geometry missing; will zero on next free_all",
+			     cdv_uuid, r->extent_index);
+		}
+		break;
+	}
+}
+
 static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct cdv_ondisk_scan_wq_entry *e =
@@ -587,32 +617,8 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 		n_loaded++;
 
-		if (r->needs_zeroing) {
-			struct nvmeibt_cdv_extent_entry *ext;
-
-			XDLIST_FOREACH(ext, &alloc->extents) {
-				if (ext->extent_index == r->extent_index) {
-					ext->needs_zeroing = true;
-					alloc->n_pending_zeroing++;
-					if (r->zeroing_allocator_size_gib && r->zeroing_cdv_extent_size_mib) {
-						if (alloc->allocator_size_gib == 0)
-							alloc->allocator_size_gib = r->zeroing_allocator_size_gib;
-						if (alloc->cdv_extent_size_mib == 0)
-							alloc->cdv_extent_size_mib = r->zeroing_cdv_extent_size_mib;
-						cdv_dispatch_zero_extent(alloc, r->extent_index,
-									 r->tpv_uuid,
-									 r->zeroing_allocator_size_gib,
-									 r->zeroing_cdv_extent_size_mib);
-					} else {
-						N_Wf(cdv_scan_fin_zero_no_geom,
-						     "CDV-alloc: scan cdv=@STR idx=@LLU NEEDS_ZEROING "
-						     "but geometry missing; will zero on next free_all",
-						     e->cdv_uuid, r->extent_index);
-					}
-					break;
-				}
-			}
-		}
+		if (r->needs_zeroing)
+			cdv_scan_apply_zeroing(alloc, e->cdv_uuid, r);
 	}
 
 	alloc->ondisk_loaded = true;

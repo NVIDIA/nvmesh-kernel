@@ -657,10 +657,9 @@ static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 	tpv->atom.status = nvmeiba_status_live;
 
 	/* A13. Kick background CDV extent pre-fetch if pool is low. */
-	if (tpv->allocator.free_tpv_extent_count < tpv->allocator.low_watermark) {
-		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
-			schedule_work(&tpv->cdv_alloc_work);
-	}
+	if (tpv->allocator.free_tpv_extent_count < tpv->allocator.low_watermark &&
+	    !atomic_xchg(&tpv->cdv_alloc_pending, 1))
+		schedule_work(&tpv->cdv_alloc_work);
 
 	/* A14. Optionally reconcile state — schedule load_state for recovery. */
 	if (tpv->dirty) {

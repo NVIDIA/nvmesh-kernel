@@ -596,9 +596,11 @@ persist_find_or_create_le(struct list_head *le_list,
 {
 	struct persist_load_extent *le;
 
-	list_for_each_entry(le, le_list, node) {
-		if (le->extent_index == extent_index)
-			return le;
+	if (!list_empty(le_list)) {
+		list_for_each_entry(le, le_list, node) {
+			if (le->extent_index == extent_index)
+				return le;
+		}
 	}
 
 	le = kzalloc(sizeof(*le), GFP_NOIO);
@@ -625,9 +627,10 @@ persist_find_or_create_le(struct list_head *le_list,
 
 static void persist_free_le_list(struct list_head *le_list)
 {
-	struct persist_load_extent *le, *tmp;
+	struct persist_load_extent *le;
 
-	list_for_each_entry_safe(le, tmp, le_list, node) {
+	while (!list_empty(le_list)) {
+		le = list_first_entry(le_list, struct persist_load_extent, node);
 		list_del(&le->node);
 		bitmap_free(le->used_bm);
 		bitmap_free(le->l2_bm);

@@ -180,7 +180,7 @@ static int tpv_cdv_sync_io(struct nvmeibc_tpv *tpv, u64 cdv_off,
 
 		init_completion(&ctx.done);
 		ctx.error       = 0;
-		bio->bi_end_io  = tpv_cdv_bio_end;
+		bio->bi_end_io  = &tpv_cdv_bio_end;
 		bio->bi_private = &ctx;
 
 		CALL_SUBMIT_BIO_FN(os->atom.queue, disk, bio);
