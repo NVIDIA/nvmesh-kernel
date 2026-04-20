@@ -745,10 +745,13 @@ ssize_t __nvmeibt_pread_atomic(int fd, void *buf, size_t n, off_t offset,  BOOL 
 #define NNVMEIBT_PWRITE(name, __fd, __buf, __n, __offset, __min_offset) ({				\
 	ssize_t		__rv__;																	\
 	__MEASURE_TOOK_INIT();																\
+	_Pragma("GCC diagnostic push")														\
+	_Pragma("GCC diagnostic ignored \"-Wtype-limits\"")								\
 	if ((uint64_t)__offset < (uint64_t)__min_offset) {												\
 		N_Ef(name ## _err, "offset=@OFFSET_INT min_offset=@OFFSET_INT", __offset, __min_offset);	\
 		nvmeibt_abort(ES_FATAL);																	\
 	}																								\
+	_Pragma("GCC diagnostic pop")														\
 	__rv__ = __nvmeibt_pwrite((__fd), (__buf), (__n), (__offset));						\
 	__MEASURE_TOOK(N_IMf(name ## _measure, "pwrite(@FD) Took @LLD ms", (__fd), NSEC_TO_MSEC(__measure_took_time_took_nsec)));		\
 	__rv__;																				\

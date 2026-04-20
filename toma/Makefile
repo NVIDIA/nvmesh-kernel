@@ -455,7 +455,7 @@ endif
 # Traces
 $(TRAGET_ROOT)/$(I_ROOT)/$1/$(BDIR)/%.i: %.c $(ALL_MAKEFILES)
 	@mkdir -p $$(dir $$@)
-	$(TRACE)$(CC) $$(CFLAGS) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER -o $$@ $$<
+	$(TRACE)$(CC) $$(CFLAGS) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -D_NVMEIB_TRACE_BACKEND_USER -MMD -MP -MF $$(dir $$@).$$(notdir $$@).d -o $$@ $$<
 
 PREPROCESSED_$1 =  $(patsubst %.c,$(TRAGET_ROOT)/$(I_ROOT)/$1/$(BDIR)/%.i,$(shell find . -name '*.c'))
 PREPROCESSED_$1 += $(patsubst %.c,$(TRAGET_ROOT)/$(I_ROOT)/$1/$(BDIR)/%.i,$(PROJECT_DIRS_INCLUDES_$1))
@@ -492,5 +492,8 @@ FORCE:
 
 # Autodepend
 -include $(foreach bin,$(BINS),$(shell find $(TRAGET_ROOT)/$(OBJ_ROOT)/$(bin)/$(BDIR) -name '*.d' 2> /dev/null))
+# Header dep files for .i preprocessing (same fix as scripts/trace.mk): without this,
+# header changes do not invalidate .i files, causing stale trace line numbers.
+-include $(foreach bin,$(BINS),$(shell find $(TRAGET_ROOT)/$(I_ROOT)/$(bin)/$(BDIR) -name '.*.i.d' 2> /dev/null))
 
 
