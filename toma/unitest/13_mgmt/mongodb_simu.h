@@ -11,7 +11,7 @@
 #define SB_CLUSTER_CONF_MAX_VOLS      (4)			// Maximum number of volumes in the cluster configuration
 #define SB_CLUSTER_CONF_MAX_CHUNKS    (2)			// Maximum number of chunks in a volume, For now, 2 chunks only, Support for volume extend once
 #define SB_CLUSTER_CONF_MAX_PR_SEGS   (4)			// Maximum number of segments in protection raid. Up to R1-3Mirror+1seg for replacement, for now
-
+#define SB_CLUSTER_CONF_N_CLNTS_TOTAL (3)			// Each Node can be a client. Either local to live toma or remote
 struct sb_cluster_conf {
 	struct sb_node_conf {
 		char hostname[64];		// Easily recognizable host name
@@ -21,6 +21,7 @@ struct sb_cluster_conf {
 			uint32_t uuid;
 		} nics[2];				// Each node has exactly 2 nics
 		struct sb_disk_conf {	// Each node has up to 3 local disks, represents what management knows
+			// --------------- disk config
 			char serial[16];							// Unique for each disk
 			uint32_t uuid;
 			struct sandbox_nvme_device *local_nvme;		// Direct pointer to local nvme configuration, for verification that Toma reported correctly the disk to mgmt
@@ -31,10 +32,14 @@ struct sb_cluster_conf {
 			u16 vendor;
 			u16 name_space_id;							// When formatted to NVMesh namespace id will change (nvmesh namespace is 1)
 			bool is_out_of_service;
+			// --------------- disk per client usage
+			struct sb_disk_subscription {				// Each client can be attached to multiple volumes/segments on this disk (subscribed to many segments)
+				int n_ref;								// ref-count
+			} clnts[SB_CLUSTER_CONF_N_CLNTS_TOTAL];
 		} disks[3];
 		struct peer_toma_simu *peer;				// Relevant for other node only (not the live toma). Pointer to peer Toma
 		struct clnt_simu      *clnt;				// Client running on this node. on 'live' node local client is mandatory for recoveries. On other nodes those are remote clients simulating attach/io's
-	} nodes[SB_CLUSTER_CONF_N_NODES_TOTAL], *live, *other;
+	} nodes[SB_CLUSTER_CONF_N_NODES_TOTAL], *live, *other;	// nodes[0] is live toma, followed by 2 others
 	int n_nodes;
 	struct sb_volume_conf {							// All volumes configuration
 		// --------------- Volume config
@@ -65,7 +70,7 @@ struct sb_cluster_conf {
 			struct nvmeibc_reservation reserv;		// Todo: Use this to test enforcing reservation version attached by Toma
 			bool ioEnabled;							// Client reports that its IO is enabled (after conversation with Toma).
 			bool is_recovery_attach;
-		} clnts[SB_CLUSTER_CONF_N_NODES_TOTAL];		//
+		} clnts[SB_CLUSTER_CONF_N_CLNTS_TOTAL];		// All possible clients (shared-RW mode), though in exclusive mode only 1 client is attached
 		// --------------- Toma reports
 		struct sb_chunk_topo {
 			struct sb_praid_topo {
@@ -89,8 +94,9 @@ int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void);
       struct sb_cluster_conf *sb_cluster_get_conf(void);
 int  sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *, const char *disk_name);
-int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *, const char *disk_uuid);
-int  sb_cluster_get_node_idx_from_disk_uuid(const struct sb_cluster_conf *, uint32_t    disk_uuid);
+int  sb_cluster_get_disk_idx_from_disk_uuid_s(const struct sb_cluster_conf *, const char *disk_uuid);
+int  sb_cluster_get_node_idx_from_disk_uuid(  const struct sb_cluster_conf *, uint32_t    disk_uuid);
+int  sb_cluster_get_disk_idx_from_disk_uuid_n(const struct sb_cluster_conf *, uint32_t    disk_uuid);
 bool sb_cluster_update_disk_namespace_from_name(     struct sb_disk_conf *, const char *disk_name);
 void sb_cluster_update_disk_vendor_and_verify(       struct sb_disk_conf *, const char *vendor);
 void sb_cluster_praid_alloc_replacement_seg(      struct sb_cluster_conf *, struct sb_praid_conf* pr /*, Todo: give destination disk here */ );
@@ -102,5 +108,6 @@ const struct sb_seg_conf*   sb_cluster_get_seg_ptr_from_uuid(const struct sb_clu
 
 bool sb_cluster_topo_prd_is_ioable(const struct sb_praid_topo*);
 bool sb_cluster_vol_has_any_live_toma_local_segs(const struct sb_cluster_conf *sb, uint32_t vol_idx);
+static inline bool sb_cluster_node_is_live_toma(unsigned node_idx) { return node_idx == 0; }
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation

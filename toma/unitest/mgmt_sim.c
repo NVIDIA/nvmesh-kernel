@@ -199,7 +199,7 @@ static struct mgmt_sim_disk_status *__lookup_disk_by_name(const char *drive_name
 }
 
 static struct mgmt_sim_disk_status *__lookup_disk_by_uuid(const char *disk_uuid) {
-	return &g_mgmt_sim->disks_st[sb_cluster_get_disk_idx_from_disk_uuid(g_mgmt_sim->cfg, disk_uuid)];
+	return &g_mgmt_sim->disks_st[sb_cluster_get_disk_idx_from_disk_uuid_s(g_mgmt_sim->cfg, disk_uuid)];
 }
 
 static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
