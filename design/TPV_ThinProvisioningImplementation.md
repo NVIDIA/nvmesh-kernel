@@ -11,7 +11,7 @@ Authoritative merged document. Supersedes ThinProvisioningImplementation1.md and
 | Term | Meaning |
 |------|---------|
 | **CDV** | Carrier Direct Volume — thick-provisioned shared volume holding capacity for TPVs |
-| **CDV\_extent** | Allocation unit carved from CDV; size is configurable per-CDV (`cdvExtentSizeMiB`), power-of-2, between 64 MB and 64 GB |
+| **CDV\_extent** | Allocation unit carved from CDV; size is configurable per-CDV (`cdvExtentSizeMib`), power-of-2, between 64 MB and 64 GB |
 | **TPV** | Thin-Provisioned Volume — virtual volume riding on a CDV, exclusively attached to one client |
 | **TPV\_extent** | Fine-grained allocation unit within the TPV; size is configurable per-TPV (`tpvExtentSizeKB`), power-of-2, between 64 KB and 64 MB |
 | **CDV.allocator** | Central allocator running on a TOMA node; manages CDV\_extent allocation |
@@ -22,7 +22,7 @@ Authoritative merged document. Supersedes ThinProvisioningImplementation1.md and
 ## Architecture Decisions (resolved)
 
 1. **CDV.allocator placement**: Dedicated TOMA node (central, not distributed).
-2. **CDV.allocator persistence**: A configurable area at the start of the CDV of size `allocatorSizeGiB` GB (default 1 GB). Max addressable data extents = $(\texttt{allocatorSizeGiB} \times 1\,\text{GB} - 4\,\text{KB}) / 24$ (see §2.2). Decoupled from `cdvExtentSizeMiB` so the allocator area size can be chosen independently of the allocation granularity.
+2. **CDV.allocator persistence**: A configurable area at the start of the CDV of size `allocatorSizeGib` GB (default 1 GB). Max addressable data extents = $(\texttt{allocatorSizeGib} \times 1\,\text{GB} - 4\,\text{KB}) / 24$ (see §2.2). Decoupled from `cdvExtentSizeMib` so the allocator area size can be chosen independently of the allocation granularity.
 3. **Management → kernel channel**: Existing MCS over Kafka (`AttachVolumes` / `DetachVolumes` / `UpdateVolume` messages extended with new fields).
 4. **CDV attach mode**: Hidden shared-RW to clients with a TPV on that CDV (so the kernel thin-provisioning code can access CDV data); non-hidden shared-RW to TOMA nodes that are candidate allocators (so TOMA can perform block I/O to the allocator metadata area).
 5. **TPV\_extent size**: Variable — configurable per-TPV at creation time (`tpvExtentSizeKB`). Different TPVs on the same CDV may use different TPV\_extent sizes.
@@ -94,8 +94,8 @@ volumeClass: {
 // CDV-specific fields (present when volumeClass === 'CDV')
 cdvConfig: {
     maxTPVs:          { type: Number, default: 512 },   // mutable cap on hosted TPVs; default 512
-    cdvExtentSizeMiB:  { type: Number, required: true }, // power-of-2, 64–65536 MB
-    allocatorSizeGiB:  { type: Number, default: 1 },     // allocator area size in GB; integer >= 1
+    cdvExtentSizeMib:  { type: Number, required: true }, // power-of-2, 64–65536 MB
+    allocatorSizeGib:  { type: Number, default: 1 },     // allocator area size in GB; integer >= 1
 },
 
 // TPV-specific fields (present when volumeClass === 'TPV')
@@ -103,7 +103,7 @@ tpvConfig: {
     cdvId:               { type: String, required: true },  // _id of parent CDV
     cdvUUID:             { type: String, required: true },
     tpvExtentSizeKB:     { type: Number, required: true }, // power-of-2, 64–65536 KB
-    // Constraint: tpvExtentSizeKB <= cdv.cdvConfig.cdvExtentSizeMiB * 1024
+    // Constraint: tpvExtentSizeKB <= cdv.cdvConfig.cdvExtentSizeMib * 1024
     virtualSizeGB:       { type: Number, required: true },  // current virtual size
     maxVirtualSizeGB:    { type: Number, default: 1000 },   // hard cap (1 TB default)
     exclusiveClient:     { type: String, default: null },   // clientID when attached
@@ -153,7 +153,7 @@ POST /volumes/tpv/extend
     Kafka message to client with updated virtualSizeGB.
 ```
 
-CDV create, update, delete, and extend all use the existing `/volumes` endpoints (`POST /volumes/save`, `POST /volumes/update`, `POST /volumes/delete`, `POST /volumes/extend`). The `updateVolume()` handler in `modules/volume.js` branches on `volumeClass === 'CDV'` to apply CDV-specific update logic: `maxTPVs` is mutable; `cdvExtentSizeMiB` and `allocatorSizeGiB` are immutable and ignored if present in the payload. If `maxTPVs` is set below the current `tpvCount`, the update is accepted — existing excess TPVs are unaffected, and new TPV creation is blocked until `tpvCount` drops below the new limit. Backend enforces "all TPVs must be deleted first" for CDV delete and returns a standard error if violated; no special UI handling.
+CDV create, update, delete, and extend all use the existing `/volumes` endpoints (`POST /volumes/save`, `POST /volumes/update`, `POST /volumes/delete`, `POST /volumes/extend`). The `updateVolume()` handler in `modules/volume.js` branches on `volumeClass === 'CDV'` to apply CDV-specific update logic: `maxTPVs` is mutable; `cdvExtentSizeMib` and `allocatorSizeGib` are immutable and ignored if present in the payload. If `maxTPVs` is set below the current `tpvCount`, the update is accepted — existing excess TPVs are unaffected, and new TPV creation is blocked until `tpvCount` drops below the new limit. Backend enforces "all TPVs must be deleted first" for CDV delete and returns a standard error if violated; no special UI handling.
 
 #### Modified endpoints
 
@@ -220,8 +220,8 @@ Sent from management to TOMA when a TPV is deleted (force-reclaim all CDV\_exten
 {
     cdvUUID:          string,
     tpvUUID:          string,
-    allocatorSizeGiB: number,  // needed so TOMA can recompute CDV-extent physical offsets
-    cdvExtentSizeMiB:  number,  // without a management round-trip back to the CDV config
+    allocatorSizeGib: number,  // needed so TOMA can recompute CDV-extent physical offsets
+    cdvExtentSizeMib:  number,  // without a management round-trip back to the CDV config
 }
 ```
 
@@ -249,16 +249,16 @@ Extend `createVolume()` to handle CDV and TPV:
 ```js
 // After existing field validation:
 if (volumeData.volumeClass === consts.volumeClass.CDV) {
-    const { cdvExtentSizeMiB, allocatorSizeGiB, maxTPVs } = volumeData.cdvConfig || {};
+    const { cdvExtentSizeMib, allocatorSizeGib, maxTPVs } = volumeData.cdvConfig || {};
 
-    if (!consts.cdvExtentSizeMiBValues.includes(cdvExtentSizeMiB))
-        throw new Error('cdvExtentSizeMiB must be a power-of-2 between 64 and 65536 MB');
-    if (!Number.isInteger(allocatorSizeGiB) || allocatorSizeGiB < 1)
-        throw new Error('allocatorSizeGiB must be a positive integer (minimum 1)');
+    if (!consts.cdvExtentSizeMibValues.includes(cdvExtentSizeMib))
+        throw new Error('cdvExtentSizeMib must be a power-of-2 between 64 and 65536 MB');
+    if (!Number.isInteger(allocatorSizeGib) || allocatorSizeGib < 1)
+        throw new Error('allocatorSizeGib must be a positive integer (minimum 1)');
 
     volumeData.tpvCount = 0;
     volumeData.cdvConfig.maxTPVs = maxTPVs ?? 512;
-    volumeData.cdvConfig.allocatorSizeGiB = allocatorSizeGiB ?? 1;
+    volumeData.cdvConfig.allocatorSizeGib = allocatorSizeGib ?? 1;
 
     // After volume is created and chunk layout is known:
     await cdvTomaAutoAttach.initCDV(createdVolume);   // §5
@@ -276,8 +276,8 @@ if (volumeData.volumeClass === consts.volumeClass.TPV) {
 
     if (!consts.tpvExtentSizeKBValues.includes(tpvExtentSizeKB))
         throw new Error('tpvExtentSizeKB must be a power-of-2 between 64 and 65536 KB');
-    if (tpvExtentSizeKB > cdv.cdvConfig.cdvExtentSizeMiB * 1024)
-        throw new Error(`tpvExtentSizeKB (${tpvExtentSizeKB}) cannot exceed cdvExtentSizeMiB * 1024`);
+    if (tpvExtentSizeKB > cdv.cdvConfig.cdvExtentSizeMib * 1024)
+        throw new Error(`tpvExtentSizeKB (${tpvExtentSizeKB}) cannot exceed cdvExtentSizeMib * 1024`);
 
     volumeData.tpvConfig.cdvUUID = cdv.uuid;
     volumeData.capacity = virtualSizeGB;
@@ -299,7 +299,7 @@ Extend `updateVolume()` to handle CDV-specific fields, and add new exported func
 ```js
 // In updateVolume(), branch on volumeClass === 'CDV':
 //   Mutable: name, description, cdvConfig.maxTPVs
-//   Immutable: cdvExtentSizeMiB, allocatorSizeGiB — strip from payload before update
+//   Immutable: cdvExtentSizeMib, allocatorSizeGib — strip from payload before update
 //   If maxTPVs < current tpvCount: accept; no error.
 //     Existing TPVs are unaffected; createTPV will reject new ones until tpvCount < maxTPVs.
 
@@ -315,7 +315,7 @@ async function deleteTPVs(ids, user) {
     // For each id:
     //   1. Load TPV; error if not found or not TPV class
     //   2. Require tpvConfig.exclusiveClient === null
-    //   3. sendCDVAllocatorFreeAll(cdvUUID, tpvUUID, allocatorSizeGiB, cdvExtentSizeMiB)  [via modules/kafka.js]
+    //   3. sendCDVAllocatorFreeAll(cdvUUID, tpvUUID, allocatorSizeGib, cdvExtentSizeMib)  [via modules/kafka.js]
     //   4. db.volumes.updateOne({ _id: cdvId }, { $inc: { tpvCount: -1 } })
     //   5. db.volumes.deleteOne({ _id })
     // Return aggregate result (same shape as existing deleteVolumes)
@@ -406,14 +406,14 @@ All three involuntary detach paths in `modules/client.js` call `cleanupTPVRefere
 #### `modules/kafka.js`
 
 - Register consumer handler for `CDVCapacityWarning` messages from TOMA. On receipt: trigger CDV extend flow (reuse existing volume extend logic).
-- Add `sendCDVAllocatorFreeAll(cdvUUID, tpvUUID, allocatorSizeGiB, cdvExtentSizeMiB)` — publishes `CDVAllocatorFreeAll` message to TOMA.
+- Add `sendCDVAllocatorFreeAll(cdvUUID, tpvUUID, allocatorSizeGib, cdvExtentSizeMib)` — publishes `CDVAllocatorFreeAll` message to TOMA.
 
 ### 1.5 UI Changes
 
 See Part 8 for complete file-by-file implementation detail. Summary:
 
 - **Regular Volumes table (`/volumes`)**: Two filter checkboxes to the right of the Delete/Rebuild buttons: "Show regular volumes" and "Show CDVs", both checked by default. TPVs are never shown in this table (they have their own page).
-- **Create/Edit Volume dialog**: "Use as CDV" toggle appears on new-volume forms. When toggled on, CDV-specific fields appear (`cdvExtentSizeMiB`, `allocatorSizeGiB`, `maxTPVs`). In edit mode, `cdvExtentSizeMiB` and `allocatorSizeGiB` are shown read-only; `maxTPVs` remains editable. Any RAID level is allowed.
+- **Create/Edit Volume dialog**: "Use as CDV" toggle appears on new-volume forms. When toggled on, CDV-specific fields appear (`cdvExtentSizeMib`, `allocatorSizeGib`, `maxTPVs`). In edit mode, `cdvExtentSizeMib` and `allocatorSizeGib` are shown read-only; `maxTPVs` remains editable. Any RAID level is allowed.
 - **New "Thin Provisioning" sidebar section** (top-level, after Volumes): one sub-item "TPV List" at `/thin-provisioning/tpv`.
 - **TPV list page**: FiltSortTable with columns Name, Parent CDV, Virtual Size, Max Size, Client, Status. Parent CDV column is filterable.
 - **Attach dialog**: Informational note when selecting a TPV to attach.
@@ -457,7 +457,7 @@ This is a real server-side admission check — not sender-trusted — keyed on a
 
 #### 1.5.4.1 Volume layout
 
-- Every CDV has a **satellite volume** named `<CDV>-mgmt`. It is `1 GiB` in size (matches today's default `allocatorSizeGiB = 1`). Future sizing parity: if `allocatorSizeGiB` becomes tunable, the satellite volume size tracks it one-for-one.
+- Every CDV has a **satellite volume** named `<CDV>-mgmt`. It is `1 GiB` in size (matches today's default `allocatorSizeGib = 1`). Future sizing parity: if `allocatorSizeGib` becomes tunable, the satellite volume size tracks it one-for-one.
 - The CDV itself **no longer reserves `[0, A)` for the allocator**. The CDV's user-visible capacity equals its on-disk data capacity; the leading allocator-area region is gone from the CDV on-disk layout. All user-facing presentations of CDV size (UI, CLI, REST, mNDU, CSI) show the CDV capacity without any satellite overhead.
 - The satellite volume holds exactly what used to live in `[0, A)`: the 4 KB header and the `cdv_extent_md[]` array. Offset math in `nvmeibt_cdv_alloc.c` is relative to the satellite volume's offset 0 (not to the CDV's offset 0). Data extents now start at CDV offset `0`.
 
@@ -513,7 +513,7 @@ This "allocate raw + write two docs + single rollback" discipline keeps the Mong
 
 ### 1.5.5 What This Supersedes
 
-- **§2.2 On-Disk Format:** The allocator area moves out of the CDV and into the satellite. The `allocatorSizeGiB` CDV property is replaced by the fixed-1-GiB satellite size; `cdvConfig.allocatorSizeGiB` becomes obsolete (retained in the schema only for pre-migration volumes, if any).
+- **§2.2 On-Disk Format:** The allocator area moves out of the CDV and into the satellite. The `allocatorSizeGib` CDV property is replaced by the fixed-1-GiB satellite size; `cdvConfig.allocatorSizeGib` becomes obsolete (retained in the schema only for pre-migration volumes, if any).
 - **§2.6 Election and Identity Propagation:** Election unchanged. Identity propagation simplifies: no need for `CDV_ALLOCATOR_NOTIFY` unicast; the attach-satellite Kafka request + preempt is the propagation mechanism. The on-disk header-generation monotonicity guard stays as belt-and-suspenders but is not safety-critical.
 - **§2.7 Split-Brain Protection:** Write-before-respond stays. The RAFT-majority gate (`nvmeibt_raft_is_raft_valid`) stays but is no longer load-bearing — the reservation-version check at the target is the authority.
 - **Part 5 CDV Auto-Attachment:** Becomes "Allocator Volume Attachment" and applies only to the satellite. The CDV is no longer auto-attached to TOMAs.
@@ -524,7 +524,7 @@ This "allocate raw + write two docs + single rollback" discipline keeps the Mong
 
 ### 2.1 Overview
 
-The CDV.allocator is a role held by exactly one TOMA at any time. It owns all CDV\_extent allocation and reclamation, persists its state in the first `allocatorSizeGiB` GB of the CDV (a configurable property, default 1 GB), and is the sole authority on which extents are free, allocated, or pending zeroing.
+The CDV.allocator is a role held by exactly one TOMA at any time. It owns all CDV\_extent allocation and reclamation, persists its state in the first `allocatorSizeGib` GB of the CDV (a configurable property, default 1 GB), and is the sole authority on which extents are free, allocated, or pending zeroing.
 
 **Communication**: Clients send allocation requests to the allocator TOMA via the **per-disk ADMIN channel** — the same channel already used for journal range queries, resource location, and other control-plane operations. No Kafka is involved in the allocation hot path.
 
@@ -534,10 +534,10 @@ The CDV.allocator is a role held by exactly one TOMA at any time. It owns all CD
 
 ### 2.2 On-Disk Format (Allocator Area)
 
-The allocator area occupies the first `allocatorSizeGiB` GiB of the CDV (bytes `0` to `A`). Data CDV\_extents follow immediately after. Two independent size parameters:
+The allocator area occupies the first `allocatorSizeGib` GiB of the CDV (bytes `0` to `A`). Data CDV\_extents follow immediately after. Two independent size parameters:
 
-- $A = \texttt{allocatorSizeGiB} \times 1\,\text{GiB}$ — allocator area size (configurable CDV property, default 1 GiB)
-- $E = \texttt{cdvExtentSizeMiB} \times 1\,\text{MiB}$ — CDV\_extent size (configurable CDV property)
+- $A = \texttt{allocatorSizeGib} \times 1\,\text{GiB}$ — allocator area size (configurable CDV property, default 1 GiB)
+- $E = \texttt{cdvExtentSizeMib} \times 1\,\text{MiB}$ — CDV\_extent size (configurable CDV property)
 
 The allocator region is organised as an array of 4 KiB blocks — the smallest atomic unit the CDV block stack guarantees. The first block is the header; each subsequent block is one record describing one CDV\_extent. This wastes space relative to a packed 24-byte layout, but each header/record write is atomic on its own, which eliminates torn-write concerns during allocate/free and during allocator migration between TOMAs (§2.6).
 
@@ -584,7 +584,7 @@ struct cdv_alloc_ondisk_header {
 } __attribute__((packed));
 ```
 
-The header stores the allocator-identity handshake state (`allocator_toma_id`, `allocator_generation`) as the durable source of truth across full cluster restart (see §2.6). Geometry parameters `allocatorSizeGiB` and `cdvExtentSizeMiB` are CDV-volume properties carried in the Kafka `AddVolume`/`UpdateVolume` path and are not repeated in the on-disk header.
+The header stores the allocator-identity handshake state (`allocator_toma_id`, `allocator_generation`) as the durable source of truth across full cluster restart (see §2.6). Geometry parameters `allocatorSizeGib` and `cdvExtentSizeMib` are CDV-volume properties carried in the Kafka `AddVolume`/`UpdateVolume` path and are not repeated in the on-disk header.
 
 #### Per-extent record
 
@@ -1301,7 +1301,7 @@ For nearly all production TPV sizes the tree is 2–3 levels deep, making `xa_lo
 
 Each TPV owns a private 2-level mapping tree that is persisted inside CDV\_extents allocated to that TPV. There is **no CDV-wide metadata region** beyond the TOMA CDV.allocator area `[0, A)`; everything from `A` on is TPV-owned. Per-TPV ownership is required because different TPVs on the same CDV may use different `tpvExtentSizeKB` values (and therefore different slot sizes, L1/L2 fanout, etc.), so a single shared tree cannot encode all of them.
 
-Let $T = \texttt{tpvExtentSizeKB} \times 1024$ (per-TPV slot size in bytes), $E = \texttt{cdvExtentSizeMiB} \times 1024^2$ (CDV\_extent size in bytes), $A = \texttt{allocatorSizeGiB} \times 1024^3$ (allocator area size in bytes, CDV-wide).
+Let $T = \texttt{tpvExtentSizeKB} \times 1024$ (per-TPV slot size in bytes), $E = \texttt{cdvExtentSizeMib} \times 1024^2$ (CDV\_extent size in bytes), $A = \texttt{allocatorSizeGib} \times 1024^3$ (allocator area size in bytes, CDV-wide).
 
 $n_{\text{slots}} = E / T$ — slots per CDV\_extent. Slot $s$ within (1-based) data CDV\_extent $i$ occupies CDV bytes $[A + (i-1) \times E + s \times T,\; A + (i-1) \times E + (s+1) \times T)$.
 
@@ -1590,7 +1590,7 @@ The tree-install step (the old "compute group index `G`, install into L2/L2a/L3"
 
 From management (no client attach needed):
 1. Verify `tpvConfig.exclusiveClient === null`.
-2. Send `CDVAllocatorFreeAll(cdvUUID, tpvUUID, allocatorSizeGiB, cdvExtentSizeMiB)` to TOMA.
+2. Send `CDVAllocatorFreeAll(cdvUUID, tpvUUID, allocatorSizeGib, cdvExtentSizeMib)` to TOMA.
 3. TOMA iterates its in-memory allocator for this CDV and releases every extent owned by `tpvUUID`. The release path is gated by the `cdv_extent_zero_on_free` TOMA runtime config parameter (registered in `oper_params[]`, settable via `toma_rpc`):
    - **`cdv_extent_zero_on_free = 0` (default):** TOMA writes a free on-disk record for each extent, removes it from the allocator's in-memory list, and decrements `n_allocated`. The CDV physical blocks are not rewritten; stale data remains visible at those offsets until the next allocation overwrites them.
    - **`cdv_extent_zero_on_free != 0`:** TOMA persists an `ALLOCATED|NEEDS_ZEROING` record (geometry carried in the record's `reserved2` area, not CRC-covered), dispatches a background zero write (1 MiB chunks on the per-CDV I/O work queue), and leaves the entry in the allocator's extent list — blocking reallocation of that slot. When the zero completes, `cdv_zero_finalize` writes a free record, removes the entry, and decrements `n_allocated` and `n_pending_zeroing`.
@@ -1982,7 +1982,7 @@ void ramDiskSim_init_cdv_allocator(ramDiskSimulator *rd,
 
 ### 7.5 New Simulator Test Scenarios
 
-**`test_tpv_lifecycle.c`**: Create CDV (`cdvExtentSizeMiB=64`) → TOMA attach → create/attach TPV (`tpvExtentSizeKB=512`) → write pattern → detach (verify flush) → re-attach (verify reconstruction) → delete TPV (verify zeroing/reclaim).
+**`test_tpv_lifecycle.c`**: Create CDV (`cdvExtentSizeMib=64`) → TOMA attach → create/attach TPV (`tpvExtentSizeKB=512`) → write pattern → detach (verify flush) → re-attach (verify reconstruction) → delete TPV (verify zeroing/reclaim).
 
 **`test_tpv_allocator_recovery.c`**: Write data → `clientSim_tpv_crash` (no flush) → re-attach (verify `load_state` re-walks L1/L2/L3 tree and reconstructs extent_map) → verify read-back. Also test orphan case: TOMA allocated extent (`cdv_extent_md` updated) but client crashed before installing the tree leaf → verify NVCK detects orphan and `cdv_extent_md` entry is cleared.
 
@@ -2014,7 +2014,7 @@ consts.volumeClass = {
 };
 
 // Valid power-of-2 values for CDV and TPV extent sizes
-consts.cdvExtentSizeMiBValues  = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+consts.cdvExtentSizeMibValues  = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
 consts.tpvExtentSizeKBValues  = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
 ```
 
@@ -2150,7 +2150,7 @@ const CDV_EXTENT_SIZE_OPTIONS = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 1638
 
 #### useForm default values
 
-The existing `useForm({ mode: 'all', defaultValues: volume })` call already receives `volume` as defaults. Since `volumeClass` and `cdvConfig` are now fields on volume records, they populate automatically. For new volumes `volumeClass` defaults to `'REGULAR'` and `cdvConfig.allocatorSizeGiB` defaults to `1`.
+The existing `useForm({ mode: 'all', defaultValues: volume })` call already receives `volume` as defaults. Since `volumeClass` and `cdvConfig` are now fields on volume records, they populate automatically. For new volumes `volumeClass` defaults to `'REGULAR'` and `cdvConfig.allocatorSizeGib` defaults to `1`.
 
 #### CDV toggle (create only)
 
@@ -2190,7 +2190,7 @@ Insert **after the name/description block and before the RAID level selector**:
             label="CDV Extent Size"
             hint="Allocation unit carved from the CDV. Power-of-2, 64 MB – 64 GB.">
             <Controller
-                name="cdvConfig.cdvExtentSizeMiB"
+                name="cdvConfig.cdvExtentSizeMib"
                 control={control}
                 rules={{ required: formData.volumeClass === consts.volumeClass.CDV }}
                 render={({ field }) => (
@@ -2205,9 +2205,9 @@ Insert **after the name/description block and before the RAID level selector**:
 
         <FormControl
             label="Allocator Size (GB)"
-            hint="Space reserved at the start of the CDV for allocator metadata. Integer >= 1, default 1 GB. Determines how many CDV extents can be tracked: (allocatorSizeGiB * 1 GB - 4 KB) / 24.">
+            hint="Space reserved at the start of the CDV for allocator metadata. Integer >= 1, default 1 GB. Determines how many CDV extents can be tracked: (allocatorSizeGib * 1 GB - 4 KB) / 24.">
             <Controller
-                name="cdvConfig.allocatorSizeGiB"
+                name="cdvConfig.allocatorSizeGib"
                 control={control}
                 rules={{
                     required: formData.volumeClass === consts.volumeClass.CDV,
@@ -2485,7 +2485,7 @@ const CreateTPVModal = ({ tpv = {}, onClose, onSuccess }) => {
                 />
                 {selectedCdv && (
                     <small className="text-muted">
-                        CDV extent: {selectedCdv.cdv.cdvConfig?.cdvExtentSizeMiB} MB
+                        CDV extent: {selectedCdv.cdv.cdvConfig?.cdvExtentSizeMib} MB
                     </small>
                 )}
             </FormControl>
@@ -2493,7 +2493,7 @@ const CreateTPVModal = ({ tpv = {}, onClose, onSuccess }) => {
             <FormControl
                 label="TPV Extent Size"
                 hint={selectedCdv
-                    ? `Power-of-2, 64 KB – ${selectedCdv.cdv.cdvConfig?.cdvExtentSizeMiB * 1024} KB (<= CDV extent size)`
+                    ? `Power-of-2, 64 KB – ${selectedCdv.cdv.cdvConfig?.cdvExtentSizeMib * 1024} KB (<= CDV extent size)`
                     : 'Power-of-2, 64 KB – 64 MB'}
                 error={formState.errors['tpvConfig.tpvExtentSizeKB']?.message}>
                 <Controller
@@ -2502,7 +2502,7 @@ const CreateTPVModal = ({ tpv = {}, onClose, onSuccess }) => {
                     rules={{
                         required: 'TPV extent size is required',
                         validate: v => {
-                            const cdvMB = selectedCdv?.cdv.cdvConfig?.cdvExtentSizeMiB;
+                            const cdvMB = selectedCdv?.cdv.cdvConfig?.cdvExtentSizeMib;
                             if (cdvMB && v > cdvMB * 1024)
                                 return `Cannot exceed CDV extent size (${cdvMB * 1024} KB)`;
                             return true;
@@ -2512,7 +2512,7 @@ const CreateTPVModal = ({ tpv = {}, onClose, onSuccess }) => {
                         <Select
                             {...field}
                             options={TPV_EXTENT_SIZE_OPTIONS.filter(o =>
-                                !selectedCdv || o.value <= selectedCdv.cdv.cdvConfig?.cdvExtentSizeMiB * 1024
+                                !selectedCdv || o.value <= selectedCdv.cdv.cdvConfig?.cdvExtentSizeMib * 1024
                             )}
                             placeholder="Select TPV extent size"
                             isDisabled={!isCreate}
@@ -3302,7 +3302,7 @@ TOMA's in-memory `nvmeibt_cdv_alloc` struct provides:
 - `total_data_extents` — total CDV data capacity in extents
 - `extents` xdlist — per-extent entries with `tpv_uuid`, from which per-TPV CDV extent counts are derived
 
-The `maxAddressableExtents` is computed from the allocator area geometry: one 4 KiB header block + one 4 KiB record per extent slot = `(allocatorSizeGiB × 1 GiB / 4 KiB) − 1`.
+The `maxAddressableExtents` is computed from the allocator area geometry: one 4 KiB header block + one 4 KiB record per extent slot = `(allocatorSizeGib × 1 GiB / 4 KiB) − 1`.
 
 #### New Kafka message: `TOMAToManagement_TP.cdvAllocatorStats`
 
@@ -3325,7 +3325,7 @@ Published by TOMA after every `CDV_ALLOC_EXTENT` and `CDV_FREE_EXTENT` operation
 The `perTPV` array is built by iterating the `extents` xdlist and counting entries per `tpv_uuid`. This runs on TOMA's single main thread, so no additional locking is needed.
 
 Trigger frequency is appropriate because:
-- CDV extent allocations are infrequent (one alloc per `cdvExtentSizeMiB` of new writes — 64 MB minimum)
+- CDV extent allocations are infrequent (one alloc per `cdvExtentSizeMib` of new writes — 64 MB minimum)
 - The dedup mechanism further coalesces multiple operations into one message
 
 #### TOMA implementation (`nvmeibt_cdv_alloc.c`)
@@ -3495,13 +3495,13 @@ Note: `runtimeStats.cdvExtents` on the TPV document is written by the CDV stats 
 
 **Max addressable extents** is the upper limit on how many CDV data extents the allocator area can track, regardless of current CDV physical capacity. It is determined by the on-disk allocator format (one 4 KiB record per extent, plus a 4 KiB header):
 
-$$\text{maxAddressable} = \frac{\text{allocatorSizeGiB} \times 1\,\text{GiB}}{4\,\text{KiB}} - 1$$
+$$\text{maxAddressable} = \frac{\text{allocatorSizeGib} \times 1\,\text{GiB}}{4\,\text{KiB}} - 1$$
 
-For the default `allocatorSizeGiB = 1`: 262,143 extent slots.
+For the default `allocatorSizeGib = 1`: 262,143 extent slots.
 
 **Total data extents** is how many CDV data extents actually exist given current CDV capacity:
 
-$$\text{totalDataExtents} = \frac{\text{CDV capacity} - \text{allocatorSizeGiB} \times 1\,\text{GiB}}{\text{cdvExtentSizeMiB} \times 1\,\text{MiB}}$$
+$$\text{totalDataExtents} = \frac{\text{CDV capacity} - \text{allocatorSizeGib} \times 1\,\text{GiB}}{\text{cdvExtentSizeMib} \times 1\,\text{MiB}}$$
 
 **Max additional** is the gap — how many more data extents could exist if the CDV volume were expanded:
 
@@ -3511,7 +3511,7 @@ The design intent is to include both `maxAddressable` and `totalDataExtents` in 
 
 **Shipped status:** the TOMA→management stats payload and `handleCDVAllocatorStats()` currently carry only `allocatedExtents` and `totalDataExtents` — `maxAddressableExtents` is **not** yet included, so the "Max Additional" column described in §10.7 cannot be populated end-to-end. The CDV page ships with an **"Over-Provision"** column (showing `overprovisionRatio = virtual-capacity-demand / totalDataExtents`) in its place; "Max Additional" remains planned. Closing this gap requires adding `maxAddressableExtents` to the Kafka stats message and to the Mongo `runtimeStats` write.
 
-If `maxAdditional` were 0, the CDV would have reached its allocator addressing limit and could not benefit from expansion without increasing `allocatorSizeGiB` (which requires CDV recreation).
+If `maxAdditional` were 0, the CDV would have reached its allocator addressing limit and could not benefit from expansion without increasing `allocatorSizeGib` (which requires CDV recreation).
 
 ### 10.7 UI Changes
 
@@ -4175,8 +4175,8 @@ Add after `EncryptionObj` (~line 70):
 
 ```python
 class CDVConfig(SdkObject):
-    cdvExtentSizeMiB : int    # power-of-2: 64–65536 MB
-    allocatorSizeGiB : int    # default 1
+    cdvExtentSizeMib : int    # power-of-2: 64–65536 MB
+    allocatorSizeGib : int    # default 1
     maxTPVs         : int    # default 512
 
 class TPVConfig(SdkObject):
@@ -4237,7 +4237,7 @@ CDV:
   rest2infra:
     <<: *volume_r2i
   # All standard volume params are mutable on a CDV.
-  # cdvConfig (cdvExtentSizeMiB, allocatorSizeGiB, maxTPVs) is immutable post-creation
+  # cdvConfig (cdvExtentSizeMib, allocatorSizeGib, maxTPVs) is immutable post-creation
   # and therefore lives only under ops.create.params, not here.
   params: *volume_params
   display:
@@ -4544,7 +4544,7 @@ Append:
 - **`SdkObject` field names**: `TPVConfig` fields must use the exact camelCase the server expects (`cdvId`, `tpvExtentSizeKB`, `virtualSizeGB`) — nested fields bypass `rest2infra` mapping.
 - **`volumeClass` passthrough**: `volumeClass` has no `rest2infra` entry, so `infra2rest.get('volumeClass', 'volumeClass')` returns `'volumeClass'` — exactly what the server expects.
 - **TPV create required fields**: Server validates `tpvConfig.cdvId` and `tpvConfig.virtualSizeGB` are present. Server error messages will surface if omitted; consider adding a `default_templates.yaml` entry.
-- **CDV create required**: Server requires `capacity` and `cdvConfig.cdvExtentSizeMiB`. Consider a template entry.
+- **CDV create required**: Server requires `capacity` and `cdvConfig.cdvExtentSizeMib`. Consider a template entry.
 - **`_get_filter` prepend order**: `[MongoObj('volumeClass', ...)] + super()._get_filter(...)` — the volumeClass filter comes first; the server ANDs all filter objects, so order doesn't affect correctness.
 
 ---
@@ -4569,7 +4569,7 @@ Snapshot/clone and auto-create-CDV are explicitly out of scope.
 | `volumeClass` | A | yes | Must be `TPV`. Absent or `REGULAR` → today's regular-volume path. |
 | `cdvName` | A | one of two | Exact CDV name (Phase A). |
 | `cdvNameRegex` | B | one of two | JavaScript-compatible regex matched against CDV `name` (Phase B). Mutually exclusive with `cdvName`. |
-| `tpvExtentSizeKB` | A | optional | Power-of-2, [64, 65536]. Default from driver config. Must satisfy `tpvExtentSizeKB ≤ parent.cdvExtentSizeMiB × 1024`. |
+| `tpvExtentSizeKB` | A | optional | Power-of-2, [64, 65536]. Default from driver config. Must satisfy `tpvExtentSizeKB ≤ parent.cdvExtentSizeMib × 1024`. |
 
 The TPV virtual-size ceiling is the parent CDV's `capacity` — enforced server-side in `modules/volume.js` (`createTPV`: "TPV capacity cannot exceed parent CDV capacity") and again on `/tpv/extend`. No driver-side cap.
 
@@ -4625,7 +4625,7 @@ if params.volumeClass == TPV:
     cdv = pool_selector(candidates)          # §14.3
     if cdv is None:
         raise CsiError(ResourceExhausted, "no eligible CDV matches pool")
-    validate_extent_size(params.tpvExtentSizeKB, cdv.cdvConfig.cdvExtentSizeMiB)
+    validate_extent_size(params.tpvExtentSizeKB, cdv.cdvConfig.cdvExtentSizeMib)
     tpv = mgmt.create_tpv(name=req.name,
                           cdv_uuid=cdv._id,
                           virtual_size_gb=ceil_gib(req.capacity_range),
@@ -4660,7 +4660,7 @@ None. A TPV presents as an ordinary NVMesh block device after attach; mount, for
 
 - **Reference-ID namespace:** do not generate `tpv:<uuid>` reference IDs in the CSI driver. Management constructs those internally in `attachTPV()`; the driver passes its own CSI reference ID exactly as it does for regular volumes.
 - **CDV auto-managed attach:** management's `/clients/attach` rejects direct CDV attach requests (`volumeClass === 'CDV'` → error). The CSI driver must never issue one — that path belongs to `cdvTomaAutoAttach.js` only.
-- **Extent-size compatibility:** `tpvExtentSizeKB` must be a power of two and ≤ `cdvExtentSizeMiB × 1024`. Validate client-side to produce a clean CSI `InvalidArgument` rather than a generic 500 from management.
+- **Extent-size compatibility:** `tpvExtentSizeKB` must be a power of two and ≤ `cdvExtentSizeMib × 1024`. Validate client-side to produce a clean CSI `InvalidArgument` rather than a generic 500 from management.
 - **Access-mode coercion:** some CSI consumers pass `MULTI_NODE_READER_ONLY` for read workloads. Do not silently downgrade — reject, because a second reader would violate `exclusiveClient` and succeed only sporadically depending on management race windows.
 - **Pool empty result:** zero candidates after filtering → `ResourceExhausted` (retriable by k8s), not `FailedPrecondition`. Admin action (extending the pool) resolves it without manifest changes.
 - **WebSocket vs. REST consistency:** the pool selector reads CDV state via REST; the capacity-warning watcher reads via WebSocket. Treat WebSocket as the source of truth for `capacityWarning` (more timely) and REST for `tpvCount` (authoritative counter). Do not cross-reconcile on every `CreateVolume` — the small race window is harmless because management re-validates `tpvCount < maxTPVs` server-side.

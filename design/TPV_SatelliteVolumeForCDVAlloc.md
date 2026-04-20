@@ -20,7 +20,7 @@ The plan is organized in four phases. Phases 1 and 2 ship together; Phase 3 foll
 - **New `volumeClass: 'CDV_MGMT'`** added to `consts.volumeClass`. Satellites are their own class — makes filter queries straightforward and removes any name-parsing-based typing.
 - **Fields on CDV_MGMT document:** `parentCDVId`, `parentCDVUUID`. No `cdvConfig`, no `tpvCount`, no user-facing mutability.
 - **CDV name length limit = 16 characters.** Enforced in the existing name validator. Add `assertNotReservedCDVSuffix` that rejects user-facing create/rename of any volume whose name ends in `-mgmt`.
-- **Retire `cdvConfig.allocatorSizeGiB`** from the create path. The satellite size is fixed at 1 GiB. The field remains readable on pre-migration records but is ignored on new creates.
+- **Retire `cdvConfig.allocatorSizeGib`** from the create path. The satellite size is fixed at 1 GiB. The field remains readable on pre-migration records but is ignored on new creates.
 
 ### 1.2 Create path — single raw allocation, sliced into N volumes
 
@@ -226,7 +226,7 @@ Every allocator-area read or write moves from "CDV block device, offsets `[0, A)
 
 - `cdv_async_write_record`, `cdv_async_write_record_needs_zeroing`, `cdv_async_write_header`, `cdv_zero_execute`: change the `fd` argument from the CDV handle to `alloc->satellite_fd`. Offset formulas unchanged — header at 0, record `i` at `4096 + i * record_size`.
 - `cdv_ondisk_scan` / `cdv_ondisk_scan_async`: same rebase, identical scan logic.
-- **CDV data-extent offsets no longer subtract `A`.** Helpers that compute "physical offset of CDV data extent `i`" (in `nvmeibc_tpv.c` on the client, and any TOMA CDV-stats code) simplify from `A + i*E` to `i*E`. Grep for `allocatorSizeGiB`, `A_bytes`, `allocator_size_gib`.
+- **CDV data-extent offsets no longer subtract `A`.** Helpers that compute "physical offset of CDV data extent `i`" (in `nvmeibc_tpv.c` on the client, and any TOMA CDV-stats code) simplify from `A + i*E` to `i*E`. Grep for `allocatorSizeGib`, `A_bytes`, `allocator_size_gib`.
 
 ### 3.4 Per-satellite I/O work queue
 

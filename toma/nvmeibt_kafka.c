@@ -1418,9 +1418,9 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 				nvmeibt_strlcpy(CMD_params->cdv_free_all.cdv_uuid, payload_kv->value->str, sizeof(CMD_params->cdv_free_all.cdv_uuid));
 			} else if (!strcmp(payload_kv->key, "tpvUUID")) {
 				nvmeibt_strlcpy(CMD_params->cdv_free_all.tpv_uuid, payload_kv->value->str, sizeof(CMD_params->cdv_free_all.tpv_uuid));
-			} else if (!strcmp(payload_kv->key, "allocatorSizeGiB")) {
+			} else if (!strcmp(payload_kv->key, "allocatorSizeGib")) {
 				CMD_params->cdv_free_all.allocator_size_gib = (uint32_t)payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "cdvExtentSizeMiB")) {
+			} else if (!strcmp(payload_kv->key, "cdvExtentSizeMib")) {
 				CMD_params->cdv_free_all.cdv_extent_size_mib = (uint32_t)payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "satelliteUUID")) {
 				/* attachSatelliteResponse — overlaps cdv_free_all.tpv_uuid in the union;
