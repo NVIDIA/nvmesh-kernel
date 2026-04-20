@@ -267,12 +267,12 @@ class ClientControlAgent(Daemon):
 		cdv_extents = int(parts[0].strip()) if parts else 0
 
 		tpv_extent_size_kb = int(fields.get('tpv_extent_size_kb', '0'))
-		cdv_extent_size_mb = int(fields.get('cdv_extent_size_mb', '0'))
+		cdv_extent_size_mib = int(fields.get('cdv_extent_size_mib', '0'))
 		free_tpv_slots = int(fields.get('free_tpv_slots', '0'))
 		virtual_extents = int(fields.get('virtual_extents', '0'))
 
-		if tpv_extent_size_kb > 0 and cdv_extent_size_mb > 0:
-			n_slots = (cdv_extent_size_mb * 1024) // tpv_extent_size_kb
+		if tpv_extent_size_kb > 0 and cdv_extent_size_mib > 0:
+			n_slots = (cdv_extent_size_mib * 1024) // tpv_extent_size_kb
 			tpv_extents_in_use = max(0, (cdv_extents * n_slots) - free_tpv_slots)
 		else:
 			tpv_extents_in_use = 0

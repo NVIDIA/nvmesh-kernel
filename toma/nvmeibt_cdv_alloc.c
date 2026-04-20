@@ -961,7 +961,7 @@ struct cdv_zero_wq_entry {
 	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
 	uint64_t extent_index;
 	uint64_t data_offset;		/* CDV byte offset of the data extent */
-	uint32_t extent_size_mb;	/* size of this data extent in MiB */
+	uint32_t extent_size_mib;	/* size of this data extent in MiB */
 
 	/* Output set by worker. */
 	int      rv;
@@ -974,7 +974,7 @@ static void cdv_zero_execute(struct nvmeibt_wq_entry *wq_entry)
 	uint8_t *zbuf;
 	uint32_t chunk_size = 1U << 20; /* 1 MiB */
 	uint64_t written = 0;
-	uint64_t total = (uint64_t)e->extent_size_mb << 20;
+	uint64_t total = (uint64_t)e->extent_size_mib << 20;
 	int fd;
 
 	/*
@@ -1133,7 +1133,7 @@ static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
 	e->alloc          = alloc;
 	e->extent_index   = extent_index;
 	e->data_offset    = cdv_data_extent_offset(extent_index, allocator_size_gib, cdv_extent_size_mib);
-	e->extent_size_mb = cdv_extent_size_mib;
+	e->extent_size_mib = cdv_extent_size_mib;
 
 	strncpy(e->cdv_uuid, alloc->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
 	e->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
