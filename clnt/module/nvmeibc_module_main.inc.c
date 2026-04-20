@@ -161,7 +161,6 @@ static void nvmeibc_module_procs_destroy(struct t_main_module_single_instance_gl
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.dict_sign_proc);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.isnt_list);
 	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.echo_proc);
-	PROC_FILE_REMOVE(_mg, _mg->proc_dir.files.pages_alloc_stats);
 	/* Remove /proc/nvmeibc/tpv/ before removing its parent /proc/nvmeibc/.
 	 * The per-TPV subdirs are gone by now (nvmeibc_tpv_detach_all_for_inst
 	 * was called during volume shutdown, which invoked proc_deregister). */

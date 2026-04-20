@@ -11,7 +11,6 @@
 #include "nvmeibt_ds.h"
 #include "nvmeibt_str.h"
 #include "nvmeibt_disk_segment_basics.h"	/* struct nvmeibt_serialized_seg_leader_topo (flex array) */
-#include "../common/nvmeib_hash.h"
 #include "nvmeibt_mm_json.h"
 #include "../autogen/clnt/nvmeibc_mcs_stub.h"
 #include "clnt/nvmeibt_client_protocol.h"

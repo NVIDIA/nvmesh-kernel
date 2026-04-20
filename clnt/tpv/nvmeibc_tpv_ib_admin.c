@@ -138,7 +138,7 @@ static struct nvmeibc_disk_segment *cdv_find_segment_for_toma(
 		if (!fallback)
 			fallback = seg;
 		if (toma_id && toma_id[0] && seg->disk) {
-			const char *host = seg->disk->ops.get_host_name(seg->disk);
+			const char *host = seg->disk->disk_host;
 
 			if (host && strncmp(host, toma_id, NVMEIB_HOST_NAME_LEN) == 0)
 				return seg;
@@ -176,7 +176,7 @@ static int cdv_toma_send(struct nvmeibc_disk_segment *seg,
 	if (!seg || !seg->toma_reg || !is_toma_reg_valid(seg->toma_reg))
 		return -ENODEV;
 
-	r1 = nvmeibc_disk_segment_get_praid(seg);
+	r1 = nvmeibc_get_raid1_of_seg(seg);
 	t = seg->chunk->topology;
 
 	total_size = sizeof(*msg) + payload_size;

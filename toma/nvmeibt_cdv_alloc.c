@@ -30,8 +30,8 @@
 #include "nvmeibt_local_disk.h"		/* struct nvmeibt_local_disk */
 #include "nvmeibt_seg_active.h"		/* struct nvmeibt_seg_active, registrant iteration */
 #include "../common/nvmeib_hash.h"
-#include "vol/nvmeibt_block_device.h"	/* nvmeibt_block_device_get_block_device_by_id, nvmeibt_blkdev_is_being_deleted */
-#include "utils/nvmeibt_uuid.h"		/* nvmeibt_urn_uuid_str_to_union_uuid */
+#include "nvmeibt_block_device.h"	/* nvmeibt_block_device_get_block_device_by_id, nvmeibt_blkdev_is_being_deleted */
+#include "nvmeibt_uuid.h"		/* nvmeibt_urn_uuid_str_to_union_uuid */
 #include "nvmeibt_wq.h"		/* struct nvmeibt_wq, nvmeibt_wq_addw */
 #include "nvmeibt_node.h"	/* nvmeibt_node_get_node_by_id, nvmeibt_node_name */
 #include "nvmeibt_raft.h"	/* nvmeibt_raft_get_current_term */

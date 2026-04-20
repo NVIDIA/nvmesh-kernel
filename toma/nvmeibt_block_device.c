@@ -8,7 +8,7 @@
 #include "nvmeibt_topology.h"
 #include "nvmeibt_global.h"
 #include "nvmeibt_seg_active.h"
-#include "../nvmeibt_cdv_alloc.h"
+#include "nvmeibt_cdv_alloc.h"
 
 BOOL nvmeibt_block_device_is_deprecated_in_config(struct nvmeibt_block_device *block_device)
 {

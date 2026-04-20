@@ -1532,3 +1532,20 @@ int nvmeibc_block_get_cpu_masks(const struct nvmeibc_block_device *dev, struct n
 {
 	return nvmeibc_b_cp_cpu_masks_get_all_for_volume(__get_from_params_blok_globals_container(dev->cips)->cpu_masks, &dev->cpu_masks, mask_infos, max_masks);
 }
+
+static int nvmeibc_icore_toma_send(struct nvmeibc_icore_ops const *ops,
+				   struct nvmeibc_disk *disk, u64 handle,
+				   struct nvmeibc_disk_toma_send_params *params)
+{
+	(void)ops;
+	return nvmeibc_pd_toma_send(disk, handle, params);
+}
+
+static const struct nvmeibc_icore_ops nvmeibc_core_ops_instance = {
+	.toma_send = nvmeibc_icore_toma_send,
+};
+
+struct nvmeibc_icore_ops const *nvmeibc_core_ops_get(void)
+{
+	return &nvmeibc_core_ops_instance;
+}
