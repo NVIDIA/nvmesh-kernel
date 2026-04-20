@@ -6,7 +6,7 @@
 #pragma once
 #include <errno.h>
 #include <stdio.h>
-#include <assert.h> 
+#include <assert.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <libgen.h>
@@ -21,10 +21,11 @@ struct fspath{
 static inline struct fspath __attribute__((format (printf, 1, 2)))
 fspath_create(const char* fmt, ...){
     struct fspath result = {0};
+    int rc = 0;
 
 	va_list args;
 	va_start(args, fmt);
-	int const rc = vsnprintf(result.path, sizeof(result.path)-1, fmt, args);
+	rc = vsnprintf(result.path, sizeof(result.path)-1, fmt, args);
 	va_end(args);
 	if (rc <0 ){
         return (struct fspath){.error = ENAMETOOLONG};

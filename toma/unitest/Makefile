@@ -88,6 +88,11 @@ else
 endif
 LIBS  = -lpthread -lm -ldl
 
+# ********** Trace compression (LZ4) *********
+COMPRESS_LIB := $(SSDA)/tools/trace_compress_lib/libcompress.a
+LZ4_LIB      := $(SSDA)/tools/lz4/lib/liblz4.a
+STATIC_LIBS  := $(COMPRESS_LIB) $(LZ4_LIB)
+
 # Note: USE_SANITIZERS makes executable much larger, affects profiling
 USE_SANITIZERS ?= 1
 USE_GCOV ?= 0
@@ -296,9 +301,23 @@ $(AUTOGEN_DIR)/toma/nvmeibt_mcs_stub.h: $(PROC_SCHEME_PATH) $(AUTOGEN_DIR)/$(TOM
 autogen: $(AUTOGEN_TARGETS)
 	@printf "Autogen code \e[0;32m Done\e[0;0m\n"
 
+# ********** Trace compression library *********
+.PHONY: build_compress_lib build_lz4
+build_lz4:
+	$(MAKE) -C $(SSDA)/tools/lz4 BUILD_SHARED=no BUILD_STATIC=yes lib-release
+
+$(LZ4_LIB): build_lz4
+	@true
+
+build_compress_lib:
+	$(MAKE) NVMESH_SRC_DIR=$(SSDA) -C $(SSDA)/tools/trace_compress_lib
+
+$(COMPRESS_LIB): build_compress_lib
+	@true
+
 # ********** Autogen done *********
 TRACES_DIR=_root/var/log/nvmesh/trace_daemon/
-$(EXE_NAME): $(OBJECTS) $(OBJ_DIR)/$(FMTLIB) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
+$(EXE_NAME): $(OBJECTS) $(OBJ_DIR)/$(FMTLIB) $(TEST_STOCK_DISK_IMAGE_OUTPUT) $(COMPRESS_LIB) $(LZ4_LIB)
 # Merge all individual trace JSONs
 	@printf "Merging all trace JSONs to \e[0;32m$(FILE_TR_JSON)\e[0;0m\n"
 	$(MERGE_MULTI_GEN) $(FILE_TR_JSON) $(OBJ_DIR_ROOT)/$(BDIR) $(OBJECTS)
@@ -313,7 +332,7 @@ $(EXE_NAME): $(OBJECTS) $(OBJ_DIR)/$(FMTLIB) $(TEST_STOCK_DISK_IMAGE_OUTPUT)
 	@printf "Compiling \e[0;32mtraces_ids.o\e[0;0m\n"
 	$(CC) $(CFLAGS) $(INCLUDES) -c $(OBJ_DIR)/traces_ids.c -o $(OBJ_DIR)/traces_ids.o
 # Link everything
-	@$(CC) $(LDFLAGS) -T$(TDIR)/tracer.ld $(OBJECTS) $(OBJ_DIR)/traces_ids.o -o $(EXE_NAME) $(LIBS_PATH) $(LIBS)
+	@$(CC) $(LDFLAGS) -T$(TDIR)/tracer.ld $(OBJECTS) $(OBJ_DIR)/traces_ids.o $(STATIC_LIBS) -o $(EXE_NAME) $(LIBS_PATH) $(LIBS)
 	printf "Linking \e[0;32m$@\e[0;0m done\n"
 
 # Make each object depend on its corresponding gen_events header, This creates the dependency so headers are built before objects in parallel builds

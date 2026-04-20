@@ -63,6 +63,11 @@ SRC := \
 	$(PROJ_ROOT)/tools/nvmeib_trace_userspace.c \
 	$(PROJ_ROOT)/tools/nvmeib_trace_userspace_poller.c
 
+# Trace compression (LZ4) static libraries
+COMPRESS_LIB := $(PROJ_ROOT)/tools/trace_compress_lib/libcompress.a
+LZ4_LIB      := $(PROJ_ROOT)/tools/lz4/lib/liblz4.a
+STATIC_LIBS  := $(COMPRESS_LIB) $(LZ4_LIB)
+
 OBJ := $(call objfile,$(SRC))
 DEP := $(call depfile,$(SRC))
 I   := $(call ifile,$(SRC))
@@ -71,10 +76,16 @@ I   := $(call ifile,$(SRC))
 
 all: $(DST)
 
-$(DST): $(OBJ) $(TRACER_O)
+$(LZ4_LIB):
+	$(MAKE) -C $(PROJ_ROOT)/tools/lz4 BUILD_SHARED=no BUILD_STATIC=yes lib-release
+
+$(COMPRESS_LIB):
+	$(MAKE) NVMESH_SRC_DIR=$(PROJ_ROOT) -C $(PROJ_ROOT)/tools/trace_compress_lib
+
+$(DST): $(OBJ) $(TRACER_O) $(COMPRESS_LIB) $(LZ4_LIB)
 	$(TRACE) \
 	mkdir -p $(dir $@) && \
-	$(LD) $^ -o "$@" $(LDFLAGS)
+	$(LD) $^ -o "$@" $(STATIC_LIBS) $(LDFLAGS)
 
 $(OBJDIR)/%.o: %.c $(GEN_EVENTS) Makefile
 	$(TRACE) \

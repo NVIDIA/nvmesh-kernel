@@ -8,6 +8,9 @@
 #include "nvmeib_trace_userspace.h"
 
 #include <stdio.h>
+#include <stdbool.h>
+
+struct compressor; // Forward declaration for optional LZ4 compressor
 
 // Descriptor of trace channel + poller properties
 struct nvmeib_trace_channel_descriptor {
@@ -18,6 +21,8 @@ struct nvmeib_trace_channel_descriptor {
 	long bufs_per_log;         // After how many buffers dumped we start a new log
 	long resume_old;           // Whether to keep old logs or drop them and start from 0
 	long place_markers;        // Whether or not to place marker files to identify logger restart
+	struct compressor *compressor;    // Optional LZ4 compressor instance (NULL = no compression capability)
+	const bool *compress_enabled;     // Pointer to runtime enable/disable flag (NULL = always disabled)
 };
 
 /**
@@ -43,5 +48,8 @@ struct nvmeib_trace_channel_descriptor {
 void nvmeib_trace_poll_to_fd_loop(struct trace_channel *ch, FILE *fd);
 int nvmeib_trace_poll_to_file_loop(struct trace_channel *ch, const char *filename);
 int nvmeib_trace_poll_to_logrotated_file_loop(struct nvmeib_trace_channel_descriptor *ctx);
+
+// Destroy the compressor owned by a channel descriptor (safe to call with NULL compressor)
+void nvmeib_trace_channel_descriptor_cleanup(struct nvmeib_trace_channel_descriptor *desc);
 
 #endif /*NVMEIB_TRACE_USERSPACE_POLLER_H*/
