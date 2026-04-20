@@ -5,6 +5,7 @@
 
 #include "nvmeiba_main.h"
 #include "nvmeiba_nvmesh_api.h"
+#include "nvmeiba_atom_iface.h"
 #include "common/compat/kr_incs_time.h"
 
 MODULE_AUTHOR("NVIDIA CORPORATION");
@@ -409,3 +410,31 @@ void nvmeiba_os_apis_set_detaching_pops(const struct block_device_operations **f
 	(*fops) = &all.detaching_fops;
 }
 #endif
+
+static const struct nvmeiba_atom_ops nvmeiba_atom_ops_publish = {
+	.version = NVMEIBA_ATOM_OPS_VERSION_1,
+	.size = sizeof(struct nvmeiba_atom_ops),
+	.v1 = {
+		.os_api_constructor = nvmeiba_os_api_constructor,
+		.os_api_destructor = nvmeiba_os_api_destructor,
+		.os_api_orphan_abandon = nvmeiba_os_api_orphan_abandon,
+		.os_api_is_queue_orphan = nvmeiba_os_api_is_queue_orphan,
+		.os_api_set_detaching = nvmeiba_os_api_set_detaching,
+		.os_api_exec_for_each_atom = nvmeiba_os_api_exec_for_each_atom,
+		.os_api_orphan_adopt = nvmeiba_os_api_orphan_adopt,
+		.atom_users_to_string = nvmeiba_atom_users_to_string,
+		.atom_open = nvmeiba_atom_open,
+		.atom_close = nvmeiba_atom_close,
+		.atom_part_add = nvmeiba_atom_part_add,
+		.atom_part_del = nvmeiba_atom_part_del,
+		.os_do_on_nvmeibc_up = nvmeiba_os_do_on_nvmeibc_up,
+		.os_do_on_nvmeibc_down = nvmeiba_os_do_on_nvmeibc_down,
+	},
+	/* .v2 — extend nvmeiba_atom_ops_v2 when adding VERSION_2 fields */
+};
+
+const struct nvmeiba_atom_ops *nvmeiba_atom_attach(void)
+{
+	return &nvmeiba_atom_ops_publish;
+}
+EXPORT_SYMBOL_GPL(nvmeiba_atom_attach);

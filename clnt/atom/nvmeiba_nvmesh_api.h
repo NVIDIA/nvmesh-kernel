@@ -113,6 +113,8 @@ ssize_t nvmeiba_atom_users_to_string(void *_atom, char *buf, size_t len);	// con
 
 int  nvmeiba_atom_open( struct BLK_MODE_OPEN_OBJ_T *bdev, const char *name);
 void nvmeiba_atom_close(struct gendisk *disk);
+void nvmeiba_atom_part_add(struct nvmeiba_atom_os_api *atom);
+void nvmeiba_atom_part_del(struct nvmeiba_atom_os_api *atom);
 
 /*********************** API for List of all ATOMS ****************************/
 /* Get the git commit version of nvmeiba module (for future compatibility)*/
