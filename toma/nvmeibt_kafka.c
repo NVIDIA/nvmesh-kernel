@@ -1421,7 +1421,7 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			} else if (!strcmp(payload_kv->key, "allocatorSizeGiB") ||
 				   !strcmp(payload_kv->key, "allocatorSizeGB")) { /* backward compat */
 				CMD_params->cdv_free_all.allocator_size_gb = (uint32_t)payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "cdvExtentSizeMB")) {
+			} else if (!strcmp(payload_kv->key, "cdvExtentSizeMiB")) {
 				CMD_params->cdv_free_all.cdv_extent_size_mb = (uint32_t)payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "satelliteUUID")) {
 				/* attachSatelliteResponse — overlaps cdv_free_all.tpv_uuid in the union;
