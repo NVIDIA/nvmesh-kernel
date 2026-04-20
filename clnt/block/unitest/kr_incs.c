@@ -2138,7 +2138,13 @@ static bool __cancel_delayed_work_sync(struct delayed_work *dwork)
 	mutex_lock(&wq->add_mutex);
 	list_for_each_entry_safe(work_iter, work_iter_next, &wq->w_list, entry) {
 		if (work_iter == &dwork->work) {
-			list_del(&work_iter->entry);
+			/* list_del_init rather than list_del: __queue_delayed_work's
+			 * BUG_ON checks list_empty(&work->entry), and list_del
+			 * poisons the entry (so list_empty would return false).
+			 * Using list_del_init leaves the entry in the "empty" state
+			 * so a subsequent mod_delayed_work / schedule_delayed_work
+			 * on the same dwork is legal. */
+			list_del_init(&work_iter->entry);
 			ret = true;
 			wq->num_canceled++;
 			wq->num_pending_works--;
@@ -2324,8 +2330,24 @@ void workqueue_dump_works_to_log(struct workqueue_struct *wq, void (*print_fn)(c
 	mutex_unlock(&wq->add_mutex);
 }
 
-void flush_workqueue(struct workqueue_struct *wq) { (void)wq;
-	BUG();		/* Not implemented yet! can use drain_workqueue() as first approximation. Maybe it is good enough */
+void flush_workqueue(struct workqueue_struct *wq) {
+	/*
+	 * Kernel flush_workqueue semantics: wait until every currently-queued
+	 * work has BOTH been dequeued and finished executing.  The simulator's
+	 * drain_workqueue only waits for num_pending_works to reach 0, which
+	 * races with a work that was just popped but is still executing on the
+	 * worker thread.  That race caused use-after-free prints (phys values
+	 * of 0xfafafafafafafafa) when persist_work's flush_state walked the
+	 * xarray while the main thread was mutating it.
+	 *
+	 * Wait for the queue to drain, then also wait until curr_work is NULL
+	 * (i.e. no work is currently executing).
+	 */
+	if (!wq)
+		return;
+	drain_workqueue(wq);
+	while (__concurrent_load(wq->curr_work) != NULL)
+		schedule();
 }
 
 typedef struct {

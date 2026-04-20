@@ -56,7 +56,16 @@
 	void *kcalloc(size_t n, size_t size, gfp_t flags);
 	void vfree(  const void *addr);
 	void kfree(  const void *addr);
-	static inline void kvfree(const void *addr) { kfree(addr); }
+	/* kvfree: dispatch to vfree/kfree based on allocation type, matching
+	 * kernel semantics.  The simulator's memory tracker BUGs if we call
+	 * the wrong deallocator on a vmalloc'd region, so we must check
+	 * is_vmalloc_addr() first. */
+	static inline void kvfree(const void *addr) {
+		if (addr && is_vmalloc_addr(addr))
+			vfree(addr);
+		else
+			kfree(addr);
+	}
 	size_t ksize(const void *addr);
 
 	#define __get_free_page(flags) __get_free_pages(flags, 0)

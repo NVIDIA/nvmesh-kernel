@@ -306,6 +306,25 @@ void tpv_simu_set_toma_id(struct nvmeibc_tpv *tpv,
 			   const char *toma_id, u64 generation)
 {
 	nvmeibc_tpv_update_allocator_id(tpv, toma_id, generation);
+
+	/*
+	 * Mirror nvmeibc_tpv_update_allocator_for_cdv (the production CDV
+	 * topology-push path): if state_loaded is still false, re-arm
+	 * load_state_work so the next drain can flip it to true.  Otherwise
+	 * re-arm cdv_alloc_work so subsequent allocations observe the new
+	 * allocator identity.  Without this, cdv_alloc_work_fn bails on
+	 * !state_loaded and the pool is never refilled.
+	 *
+	 * Use mod_delayed_work (cancel + requeue) rather than
+	 * schedule_delayed_work: a previous load_state retry is likely still
+	 * pending on its 100ms timer, and the simulator's
+	 * __queue_delayed_work BUGs on a double-queue.  mod_delayed_work
+	 * matches the kernel's pending-idempotent semantics.
+	 */
+	if (!READ_ONCE(tpv->state_loaded))
+		mod_delayed_work(system_wq, &tpv->load_state_work, 0);
+	else if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+		schedule_work(&tpv->cdv_alloc_work);
 }
 
 void tpv_simu_fill_pool(struct nvmeibc_tpv *tpv)
@@ -324,6 +343,40 @@ void tpv_simu_fill_pool(struct nvmeibc_tpv *tpv)
 	}
 	/* Also drain any pending persist_work. */
 	flush_workqueue(system_wq);
+}
+
+/* ── Exhaustion / capacity-return helpers ───────────────────────────────── */
+
+void tpv_simu_exhaust_cdv(void)
+{
+	struct tpv_cdv_sim *sim = g_tpv_cdv_sim;
+	u64 i;
+
+	BUG_ON(!sim);
+
+	for (i = 1; i <= sim->max_extents; i++) {
+		sim->extents[i].allocated = true;
+		strncpy(sim->extents[i].owner_uuid,
+			"cdv-full-test-dummy-tenant-uuid0",
+			sizeof(sim->extents[i].owner_uuid) - 1);
+	}
+}
+
+int tpv_simu_release_one_cdv_extent(u64 extent_index)
+{
+	struct tpv_cdv_sim *sim = g_tpv_cdv_sim;
+
+	BUG_ON(!sim);
+
+	if (extent_index == 0 || extent_index > sim->max_extents)
+		return -EINVAL;
+	if (!sim->extents[extent_index].allocated)
+		return -ENOENT;
+
+	sim->extents[extent_index].allocated = false;
+	memset(sim->extents[extent_index].owner_uuid, 0,
+	       sizeof(sim->extents[extent_index].owner_uuid));
+	return 0;
 }
 
 /* ── Linker stubs for async IB-response paths ───────────────────────────────

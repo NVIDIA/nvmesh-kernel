@@ -100,6 +100,37 @@ TEST_FUNC int unitest_tpv_pool_exhaustion(struct NVMeshSystem *sys);
 TEST_FUNC int unitest_tpv_double_free(struct NVMeshSystem *sys);
 
 /*
+ * unitest_tpv_cdv_full_sustained — verify cdv_alloc_work handles repeated
+ * CDV_FULL responses correctly: stat increments once per call, pool stays
+ * empty, cdv_alloc_pending clears each time (no busy-loop).
+ */
+TEST_FUNC int unitest_tpv_cdv_full_sustained(struct NVMeshSystem *sys);
+
+/*
+ * unitest_tpv_alloc_eagain_under_cdv_full — end-to-end: with pool empty and
+ * the CDV exhausted, nvmeibc_tpv_alloc_extent returns -EAGAIN, schedules
+ * cdv_alloc_work, and the subsequent work run increments stat_cdv_alloc_full
+ * without replenishing the pool.
+ */
+TEST_FUNC int unitest_tpv_alloc_eagain_under_cdv_full(struct NVMeshSystem *sys);
+
+/*
+ * unitest_tpv_cdv_full_then_recovery — capacity-return: CDV full →
+ * stat_cdv_alloc_full increments; an admin-side extent release followed by
+ * a new cdv_alloc_work run refills the pool (stat_cdv_alloc_ok increments,
+ * free_tpv_extent_count > 0).
+ */
+TEST_FUNC int unitest_tpv_cdv_full_then_recovery(struct NVMeshSystem *sys);
+
+/*
+ * unitest_tpv_attach_under_cdv_full — attach a TPV against a pre-exhausted
+ * CDV.  Verify attach reaches TPV_ATTACHED state, initial cdv_alloc_work
+ * returns CDV_FULL without crashing, and subsequent alloc calls return
+ * -EAGAIN (degraded mode).
+ */
+TEST_FUNC int unitest_tpv_attach_under_cdv_full(struct NVMeshSystem *sys);
+
+/*
  * unitest_tpv_AllTests — convenience wrapper that runs all TPV sub-tests.
  * This is the entry point registered in bunitest.c.
  */

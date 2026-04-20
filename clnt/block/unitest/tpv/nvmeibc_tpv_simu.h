@@ -60,7 +60,19 @@
 
 #define TPV_SIMU_CDV_UUID	"cdv-simu-uuid-000000000000000000"
 #define TPV_SIMU_TPV_UUID	"tpv-simu-uuid-000000000000000000"
-#define TPV_SIMU_TPV_NAME	"simu_tpv"
+/*
+ * Simulator gendisk convention: add_disk() → __disk_name_to_index() scans the
+ * name for the last "_0<digit>" token and BUGs if absent.  The TPV disk name
+ * is "nvmesh-tpv/<tpv_name>", so tpv_name must contain "_0<digit>".
+ *
+ * We use "_09" to land in OS bds[] slot 9.  NVMeshSystem setup typically uses
+ * low slot numbers (0, 1, ...) for pre-existing client volumes; slot 9 avoids
+ * those collisions.  A collision leaves client->devs[v] dangling when TPV
+ * tears down (because del_gendisk clears OS bds[v].bd_disk but not
+ * client->devs[v]), which trips the post-suite
+ * clientSimulator_is_stable() BUG_ON.
+ */
+#define TPV_SIMU_TPV_NAME	"simu_tpv_09"
 #define TPV_SIMU_TOMA_ID	"toma-simu-node"
 #define TPV_SIMU_TOMA_GEN	1ULL
 
@@ -142,5 +154,22 @@ void tpv_simu_set_toma_id(struct nvmeibc_tpv *tpv,
  * Calls schedule_work + flush_workqueue in a loop.
  */
 void tpv_simu_fill_pool(struct nvmeibc_tpv *tpv);
+
+/*
+ * tpv_simu_exhaust_cdv — mark every simulator data extent as allocated (to a
+ * dummy non-TPV tenant) so subsequent admin_cdv_alloc_extent() calls return
+ * CDV_FULL naturally.  The dummy UUID differs from the TPV under test so
+ * recovery won't adopt them as orphans.  Used by tests that need a sustained
+ * no-space-left condition.
+ */
+void tpv_simu_exhaust_cdv(void);
+
+/*
+ * tpv_simu_release_one_cdv_extent — clear the allocated flag on one simulator
+ * extent, bypassing ownership checks.  Simulates an admin-side capacity
+ * return.  Returns 0 on success, -EINVAL on bad index, -ENOENT if the extent
+ * was already free.
+ */
+int tpv_simu_release_one_cdv_extent(u64 extent_index);
 
 #endif /* NVMEIBC_TPV_SIMU_H */

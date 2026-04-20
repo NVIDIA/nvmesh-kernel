@@ -269,6 +269,17 @@ TEST_FUNC int unitest_tpv_persist(
 		}
 	}
 
+	/*
+	 * Quiesce the background persist_work before calling flush_state
+	 * explicitly.  Each alloc_extent schedules persist_work, and the
+	 * simulator's worker thread runs it concurrently with the test.  If
+	 * both fire get_or_alloc_l2_ctx before either has xa_store'd, they
+	 * each allocate a fresh L2 slot, and the second xa_store silently
+	 * overwrites the first — leaving one L2 slot orphaned and the L1
+	 * entry pointing at a racy target.
+	 */
+	flush_workqueue(system_wq);
+
 	/* Explicit flush so the CDV RAM reflects the current xarray. */
 	{
 		int frc = nvmeibc_tpv_flush_state(ctx.tpv);
@@ -308,6 +319,14 @@ TEST_FUNC int unitest_tpv_persist(
 		rv = -1;
 		goto out;
 	}
+
+	/*
+	 * Re-seed the allocator TOMA identity on the fresh TPV.  Without this,
+	 * load_state_work_fn sees an empty allocator_toma_id and returns
+	 * -EAGAIN indefinitely — the xarray would remain empty and this test
+	 * could not verify the reload path.
+	 */
+	tpv_simu_set_toma_id(ctx.tpv, TPV_SIMU_TOMA_ID, TPV_SIMU_TOMA_GEN);
 
 	/* Drain any pending work from re-attach (pool replenished by load_state). */
 	flush_workqueue(system_wq);
@@ -603,10 +622,16 @@ TEST_FUNC int unitest_tpv_pool_exhaustion(
 	struct nvmeibc_tpv_allocator *alloc;
 	struct nvmeibc_tpv_extent_entry *entry;
 	/*
-	 * Dynamic L2 placement: the first CDV_extent becomes the L1 extent
-	 * with slot 0 pinned — one fewer addressable slot than N × n_slots.
+	 * Dynamic L2 placement burns two slots out of N × n_slots:
+	 *   • Slot 0 of the first CDV_extent pins the L1 table.
+	 *   • The first flush (scheduled by persist_work after an alloc)
+	 *     calls nvmeibc_tpv_alloc_l2_slot, which pops one data slot
+	 *     to host the L2 table for L1_idx=0.  In a small test with
+	 *     only ~64 virt extents every mapping lives under L1_idx=0,
+	 *     so exactly one L2 slot is consumed.
+	 * Net usable data slots = N × n_slots − 2.
 	 */
-	u64 total_slots = (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS - 1;
+	u64 total_slots = (u64)TPV_SIMU_N_DATA_EXT * TPV_SIMU_N_SLOTS - 2;
 	u64 i;
 	int rc;
 	int rv = 0;
@@ -619,8 +644,22 @@ TEST_FUNC int unitest_tpv_pool_exhaustion(
 
 	alloc = &ctx.tpv->allocator;
 
-	/* Allocate every slot. */
-	for (i = 0; i < total_slots; i++) {
+	/*
+	 * Prime the L2 slot deterministically: alloc virt 0, then run
+	 * flush_state synchronously.  Without this the background
+	 * persist_work races with the alloc loop — it may or may not
+	 * consume an L2 slot mid-loop, so the "free" count after the loop
+	 * is non-deterministic.  Doing one alloc + explicit flush up front
+	 * commits the L2 slot and guarantees total_slots == N*n_slots − 2.
+	 */
+	rc = nvmeibc_tpv_alloc_extent(ctx.tpv, 0, &entry);
+	TPV_CHECK(rc == 0, "prime alloc_extent(0) returned %d", rc);
+	rc = nvmeibc_tpv_flush_state(ctx.tpv);
+	TPV_CHECK(rc == 0, "prime flush_state returned %d", rc);
+	flush_workqueue(system_wq);	/* drain stale bg persist_work */
+
+	/* Allocate every remaining slot. */
+	for (i = 1; i < total_slots; i++) {
 		rc = nvmeibc_tpv_alloc_extent(ctx.tpv, i, &entry);
 		TPV_CHECK(rc == 0, "alloc_extent(%llu) returned %d", i, rc);
 	}
@@ -691,6 +730,252 @@ TEST_FUNC int unitest_tpv_double_free(
 	return rv;
 }
 
+/* ── unitest_tpv_cdv_full_sustained ─────────────────────────────────────────
+ *
+ * Exhaust the CDV (mark all simulator extents allocated to a dummy tenant),
+ * then trigger cdv_alloc_work N times.  Verify:
+ *   • stat_cdv_alloc_full increments exactly N times.
+ *   • free_tpv_extent_count stays at 0.
+ *   • cdv_alloc_pending clears after each work run — no self-rescheduling.
+ */
+TEST_FUNC int unitest_tpv_cdv_full_sustained(
+	__attribute__((__unused__)) struct NVMeshSystem *sys)
+{
+	struct tpv_test_ctx ctx = {0};
+	struct nvmeibc_tpv_allocator *alloc;
+	const int n_trigger = 3;
+	s64 before_full;
+	int i;
+	int rv = 0;
+
+	if (tpv_test_setup(&ctx))
+		return -1;
+
+	alloc = &ctx.tpv->allocator;
+	before_full = atomic64_read(&alloc->stat_cdv_alloc_full);
+
+	tpv_simu_exhaust_cdv();
+	tpv_simu_set_toma_id(ctx.tpv, TPV_SIMU_TOMA_ID, TPV_SIMU_TOMA_GEN);
+
+	/* Drain any initial work scheduled by set_toma_id so the counter is
+	 * aligned before the measured loop. */
+	flush_workqueue(system_wq);
+
+	for (i = 0; i < n_trigger; i++) {
+		if (!atomic_xchg(&ctx.tpv->cdv_alloc_pending, 1))
+			schedule_work(&ctx.tpv->cdv_alloc_work);
+		flush_workqueue(system_wq);
+
+		TPV_CHECK(atomic_read(&ctx.tpv->cdv_alloc_pending) == 0,
+			  "iter %d: cdv_alloc_pending not cleared", i);
+		TPV_CHECK(alloc->free_tpv_extent_count == 0,
+			  "iter %d: pool should stay empty, got %llu",
+			  i, alloc->free_tpv_extent_count);
+	}
+
+	/* Account for one possible CDV_FULL from the initial set_toma_id work. */
+	{
+		s64 got = atomic64_read(&alloc->stat_cdv_alloc_full) - before_full;
+
+		TPV_CHECK(got >= n_trigger,
+			  "stat_cdv_alloc_full delta: expected >= %d, got %lld",
+			  n_trigger, got);
+	}
+
+	unitest_print("*** tpv_cdv_full_sustained: %s\n", rv ? "FAIL" : "PASS");
+	tpv_test_teardown(&ctx);
+	return rv;
+}
+
+/* ── unitest_tpv_alloc_eagain_under_cdv_full ────────────────────────────────
+ *
+ * With the pool empty and the CDV exhausted, nvmeibc_tpv_alloc_extent must
+ * return -EAGAIN and schedule cdv_alloc_work.  The work run then reports
+ * CDV_FULL and leaves the pool empty — the only way out is for TOMA to
+ * release capacity.
+ */
+TEST_FUNC int unitest_tpv_alloc_eagain_under_cdv_full(
+	__attribute__((__unused__)) struct NVMeshSystem *sys)
+{
+	struct tpv_test_ctx ctx = {0};
+	struct nvmeibc_tpv_allocator *alloc;
+	struct nvmeibc_tpv_extent_entry *entry;
+	s64 before_full;
+	int rc;
+	int rv = 0;
+
+	if (tpv_test_setup(&ctx))
+		return -1;
+
+	alloc = &ctx.tpv->allocator;
+
+	/* CDV exhausted, pool empty. */
+	tpv_simu_exhaust_cdv();
+	tpv_simu_set_toma_id(ctx.tpv, TPV_SIMU_TOMA_ID, TPV_SIMU_TOMA_GEN);
+	flush_workqueue(system_wq);	/* drain initial CDV_FULL work */
+
+	TPV_CHECK(alloc->free_tpv_extent_count == 0,
+		  "precondition: pool should be empty, got %llu",
+		  alloc->free_tpv_extent_count);
+
+	before_full = atomic64_read(&alloc->stat_cdv_alloc_full);
+
+	/* Pool empty → alloc must return -EAGAIN and schedule refill work. */
+	rc = nvmeibc_tpv_alloc_extent(ctx.tpv, 0, &entry);
+	TPV_CHECK(rc == -EAGAIN,
+		  "alloc_extent expected -EAGAIN, got %d", rc);
+	TPV_CHECK((s64)atomic64_read(&alloc->stat_tpv_alloc_eagain) >= 1,
+		  "stat_tpv_alloc_eagain should be >= 1");
+
+	flush_workqueue(system_wq);
+
+	TPV_CHECK(atomic64_read(&alloc->stat_cdv_alloc_full) > before_full,
+		  "stat_cdv_alloc_full did not increment after refill attempt");
+	TPV_CHECK(alloc->free_tpv_extent_count == 0,
+		  "pool should still be empty after CDV_FULL, got %llu",
+		  alloc->free_tpv_extent_count);
+
+	unitest_print("*** tpv_alloc_eagain_under_cdv_full: %s\n",
+		      rv ? "FAIL" : "PASS");
+	tpv_test_teardown(&ctx);
+	return rv;
+}
+
+/* ── unitest_tpv_cdv_full_then_recovery ─────────────────────────────────────
+ *
+ * CDV-full followed by admin-side capacity return.  Verify that after one
+ * CDV_FULL response, releasing a simulator extent and re-running
+ * cdv_alloc_work refills the pool and increments stat_cdv_alloc_ok.
+ */
+TEST_FUNC int unitest_tpv_cdv_full_then_recovery(
+	__attribute__((__unused__)) struct NVMeshSystem *sys)
+{
+	struct tpv_test_ctx ctx = {0};
+	struct nvmeibc_tpv_allocator *alloc;
+	s64 before_full, after_full, before_ok, after_ok;
+	int src;
+	int rv = 0;
+
+	if (tpv_test_setup(&ctx))
+		return -1;
+
+	alloc = &ctx.tpv->allocator;
+
+	tpv_simu_exhaust_cdv();
+	tpv_simu_set_toma_id(ctx.tpv, TPV_SIMU_TOMA_ID, TPV_SIMU_TOMA_GEN);
+	flush_workqueue(system_wq);	/* drain initial CDV_FULL work */
+
+	before_full = atomic64_read(&alloc->stat_cdv_alloc_full);
+
+	/* Phase 1: trigger work under CDV_FULL. */
+	if (!atomic_xchg(&ctx.tpv->cdv_alloc_pending, 1))
+		schedule_work(&ctx.tpv->cdv_alloc_work);
+	flush_workqueue(system_wq);
+
+	after_full = atomic64_read(&alloc->stat_cdv_alloc_full);
+	TPV_CHECK(after_full > before_full,
+		  "stat_cdv_alloc_full did not increment (before=%lld after=%lld)",
+		  before_full, after_full);
+	TPV_CHECK(alloc->free_tpv_extent_count == 0,
+		  "pool should be empty after CDV_FULL");
+
+	/* Phase 2: admin-side releases one simulator extent. */
+	src = tpv_simu_release_one_cdv_extent(1);
+	TPV_CHECK(src == 0, "release_one_cdv_extent returned %d", src);
+
+	before_ok = atomic64_read(&alloc->stat_cdv_alloc_ok);
+
+	if (!atomic_xchg(&ctx.tpv->cdv_alloc_pending, 1))
+		schedule_work(&ctx.tpv->cdv_alloc_work);
+	flush_workqueue(system_wq);
+
+	after_ok = atomic64_read(&alloc->stat_cdv_alloc_ok);
+	TPV_CHECK(after_ok > before_ok,
+		  "stat_cdv_alloc_ok did not increment after release (before=%lld after=%lld)",
+		  before_ok, after_ok);
+	TPV_CHECK(alloc->free_tpv_extent_count > 0,
+		  "pool should be > 0 after recovery, got %llu",
+		  alloc->free_tpv_extent_count);
+
+	unitest_print("*** tpv_cdv_full_then_recovery: %s\n",
+		      rv ? "FAIL" : "PASS");
+	tpv_test_teardown(&ctx);
+	return rv;
+}
+
+/* ── unitest_tpv_attach_under_cdv_full ──────────────────────────────────────
+ *
+ * Attach a fresh TPV against a pre-exhausted CDV.  Verify:
+ *   • attach succeeds and the TPV reaches TPV_ATTACHED state.
+ *   • The initial cdv_alloc_work picks up CDV_FULL without crashing.
+ *   • Subsequent alloc_extent returns -EAGAIN (degraded operation).
+ */
+TEST_FUNC int unitest_tpv_attach_under_cdv_full(
+	__attribute__((__unused__)) struct NVMeshSystem *sys)
+{
+	struct tpv_test_ctx ctx = {0};
+	struct nvmeibc_tpv_allocator *alloc;
+	struct nvmeibc_tpv_extent_entry *entry;
+	int rc;
+	int rv = 0;
+
+	/* Manual setup — must exhaust the simulator BEFORE attach. */
+	ctx.sim = tpv_cdv_sim_create();
+	if (!ctx.sim) {
+		pr_err("TPV_TEST: tpv_cdv_sim_create failed\n");
+		return -1;
+	}
+	ctx.cdv = tpv_cdv_vol_create();
+	if (!ctx.cdv) {
+		pr_err("TPV_TEST: tpv_cdv_vol_create failed\n");
+		tpv_cdv_sim_destroy();
+		return -1;
+	}
+
+	tpv_simu_exhaust_cdv();
+
+	ctx.tpv = nvmeibc_tpv_attach(
+		ctx.cdv,
+		TPV_SIMU_TPV_NAME,
+		TPV_SIMU_TPV_UUID,
+		TPV_SIMU_VIRTUAL_MB * 1024ULL * 1024ULL,
+		(u32)TPV_SIMU_TPV_EXTENT_KB,
+		(u32)TPV_SIMU_CDV_EXTENT_MB,
+		(u64)TPV_SIMU_ALLOC_GB,
+		false);
+	TPV_CHECK(ctx.tpv != NULL, "attach under CDV_FULL returned NULL");
+	if (!ctx.tpv) {
+		rv = -1;
+		goto out;
+	}
+
+	/* Drain the initial attach work; no TOMA ID yet so it exits quickly. */
+	flush_workqueue(system_wq);
+
+	tpv_simu_set_toma_id(ctx.tpv, TPV_SIMU_TOMA_ID, TPV_SIMU_TOMA_GEN);
+	flush_workqueue(system_wq);	/* CDV_FULL response lands here */
+
+	alloc = &ctx.tpv->allocator;
+
+	TPV_CHECK(atomic_read(&ctx.tpv->state) == TPV_ATTACHED,
+		  "TPV should be ATTACHED, state=%d",
+		  atomic_read(&ctx.tpv->state));
+	TPV_CHECK((s64)atomic64_read(&alloc->stat_cdv_alloc_full) >= 1,
+		  "stat_cdv_alloc_full should be >= 1 after set_toma_id");
+	TPV_CHECK(alloc->free_tpv_extent_count == 0,
+		  "pool should be empty after attach under CDV_FULL");
+
+	rc = nvmeibc_tpv_alloc_extent(ctx.tpv, 0, &entry);
+	TPV_CHECK(rc == -EAGAIN,
+		  "alloc under CDV_FULL expected -EAGAIN, got %d", rc);
+
+out:
+	unitest_print("*** tpv_attach_under_cdv_full: %s\n",
+		      rv ? "FAIL" : "PASS");
+	tpv_test_teardown(&ctx);
+	return rv;
+}
+
 /* ── unitest_tpv_AllTests ───────────────────────────────────────────────── */
 
 TEST_FUNC int unitest_tpv_AllTests(
@@ -708,6 +993,10 @@ TEST_FUNC int unitest_tpv_AllTests(
 	rv |= unitest_tpv_stat_reset(sys);
 	rv |= unitest_tpv_pool_exhaustion(sys);
 	rv |= unitest_tpv_double_free(sys);
+	rv |= unitest_tpv_cdv_full_sustained(sys);
+	rv |= unitest_tpv_alloc_eagain_under_cdv_full(sys);
+	rv |= unitest_tpv_cdv_full_then_recovery(sys);
+	rv |= unitest_tpv_attach_under_cdv_full(sys);
 
 	unitest_print("=== TPV unit tests end: %s ===\n",
 		      rv ? "FAIL" : "PASS");
