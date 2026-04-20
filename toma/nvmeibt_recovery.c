@@ -1285,8 +1285,8 @@ static void tpv_encrypt_after_exec_cb(struct run_exec_on_blkdev_ctx *exec_ctx)
 	const struct nvmeibt_urn_uuid	*resp_uuid  = vol ? &vol->urn_uuid : &ep->tpv_urn_uuid;
 
 	NFIN;
-	NVMEIBT_LONG_TRACE_WRAPPER(tpv_so1, 1, "STDOUT", nvmeibt_Str_str(exec_ctx->child_stdout_buf), nvmeibt_Str_strlen(exec_ctx->child_stdout_buf));
-	NVMEIBT_LONG_TRACE_WRAPPER(tpv_se1, 1, "STDERR", nvmeibt_Str_str(exec_ctx->child_stderr_buf), nvmeibt_Str_strlen(exec_ctx->child_stderr_buf));
+	NVMEIBT_LONG_TRACE_WRAPPER(tpv_so1, "STDOUT", nvmeibt_Str_str(exec_ctx->child_stdout_buf), nvmeibt_Str_strlen(exec_ctx->child_stdout_buf));
+	NVMEIBT_LONG_TRACE_WRAPPER(tpv_se1, "STDERR", nvmeibt_Str_str(exec_ctx->child_stderr_buf), nvmeibt_Str_strlen(exec_ctx->child_stderr_buf));
 	sanitize_str(&exec_ctx->child_stdout_buf);
 	sanitize_str(&exec_ctx->child_stderr_buf);
 
