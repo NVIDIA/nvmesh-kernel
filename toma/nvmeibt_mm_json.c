@@ -715,8 +715,7 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 	vol->stripeWidth = 1;		// default, as it could be null
 	vol->kafka_offset_or_idx = kafka_offset;		// Default, If arrives from Kafka then use it. From JSON file it is overriden
 	nvmeibt_strlcpy(vol->eyecatcher, "VOL", sizeof(vol->eyecatcher));
-	vol->version_minor = 0;		// When we receive from MGMT, TOMA did not yet make its own config subversions (if at all)
-	if (elem->type != JSON_E_DICT)
+if (elem->type != JSON_E_DICT)
 		return;
 	JSON_LOOP_FOR_DICT(kv, dict) {
 		JSON_LOOP_ITERATION_START(uskt4le, kv->key);

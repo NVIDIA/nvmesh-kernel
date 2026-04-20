@@ -126,9 +126,9 @@ struct cdv_alloc_ondisk_record {
 /* ── Per-CDV allocator ──────────────────────────────────────────────────────
  *
  * One instance per CDV that has had at least one extent allocated.
- * Stored in the global hash table keyed by cdv_uuid (ASCII string).
- * cdv_uuid must be the first field: nvmeib_hash_add_ascii_str requires the
- * key to be a pointer into the object itself.
+ * Stored in the global hash table (cdv_alloc_hash, an XHASHTABLE) keyed by
+ * xhash_str_to_32_bits(cdv_uuid).  The hash_link field is the embedded link
+ * node for the XHASHTABLE; cdv_uuid is used for exact-match within a bucket.
  */
 /* Maximum hostname length — must match NVMEIB_HOST_NAME_LEN (64) on the client side. */
 #define NVMEIBT_CDV_HOSTNAME_LEN  64
@@ -212,6 +212,7 @@ struct nvmeibt_cdv_alloc {
 	struct nvmeibt_wq *io_wq;	/* per-satellite I/O work queue (scan + writes); lifetime tied
 					 * to this TOMA's allocator role on the CDV */
 	XDLIST_DECLARE(, struct nvmeibt_cdv_extent_entry, link) extents;
+	struct xdlist hash_link;	/* embedded link for cdv_alloc_hash (XHASHTABLE) */
 
 	/*
 	 * Per-client CDV preempt (TPV_PerClientCDVPreemption.md §2.10):

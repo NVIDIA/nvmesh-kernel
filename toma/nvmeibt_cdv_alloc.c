@@ -29,7 +29,6 @@
 #include "nvmeibt_kafka.h"		/* nvmeibt_kafka_outgoing_msgs_queue_add, KAFKA_PRODUCER_MSG_HEADER_* */
 #include "nvmeibt_local_disk.h"		/* struct nvmeibt_local_disk */
 #include "nvmeibt_seg_active.h"		/* struct nvmeibt_seg_active, registrant iteration */
-#include "../common/nvmeib_hash.h"
 #include "nvmeibt_block_device.h"	/* nvmeibt_block_device_get_block_device_by_id, nvmeibt_blkdev_is_being_deleted */
 #include "nvmeibt_uuid.h"		/* nvmeibt_urn_uuid_str_to_union_uuid */
 #include "nvmeibt_wq.h"		/* struct nvmeibt_wq, nvmeibt_wq_addw */
@@ -43,8 +42,20 @@ static void cdv_publish_alloc_stats(struct nvmeibt_cdv_alloc *alloc);
 
 /* ── Global state ────────────────────────────────────────────────────────── */
 
-/* cdv_uuid (ASCII string) → nvmeibt_cdv_alloc * */
-static struct nvmeib_hash_table *cdv_alloc_hash;
+/* cdv_uuid (ASCII string) → nvmeibt_cdv_alloc *; 32 buckets (5 bits) */
+static XHASHTABLE_DECLARE(, struct nvmeibt_cdv_alloc, hash_link, 5) cdv_alloc_hash;
+static bool cdv_alloc_inited;
+
+static struct nvmeibt_cdv_alloc *cdv_alloc_search(const char *uuid)
+{
+	struct nvmeibt_cdv_alloc *iter;
+
+	XHASHTABLE_FOR_EACH_POSSIBLE_SAFE(iter, &cdv_alloc_hash, xhash_str_to_32_bits(uuid)) {
+		if (strcmp(iter->cdv_uuid, uuid) == 0)
+			return iter;
+	}
+	return NULL;
+}
 
 /*
  * Runtime config — see nvmeibt_cdv_alloc.h for semantics.
@@ -515,7 +526,7 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 	struct nvmeibt_cdv_alloc *alloc;
 	uint64_t i, n_loaded = 0;
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, e->cdv_uuid);
+	alloc = cdv_alloc_search(e->cdv_uuid);
 	if (!alloc) {
 		/* Allocator was removed while scan was in flight (CDV deleted). */
 		N_Wf(cdv_scan_fin_no_alloc,
@@ -1063,7 +1074,7 @@ static void cdv_zero_finalize(struct nvmeibt_wq_entry *wq_entry)
 		return;
 	}
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, e->cdv_uuid);
+	alloc = cdv_alloc_search(e->cdv_uuid);
 	if (!alloc) {
 		N_Wf(cdv_zero_fin_no_alloc,
 		     "CDV-zero: cdv=@STR idx=@LLU allocator gone; discarding",
@@ -1335,7 +1346,7 @@ static int cdv_alloc_insert(const char *cdv_uuid,
 	struct nvmeibt_cdv_alloc        *alloc;
 	struct nvmeibt_cdv_extent_entry *entry;
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc) {
 		alloc = NNVMEIBT_BM_CALLOC(cdv_alloc_insert_alloc, sizeof(*alloc));
 		if (!alloc) {
@@ -1351,7 +1362,7 @@ static int cdv_alloc_insert(const char *cdv_uuid,
 		XDLIST_HEAD_INIT(&alloc->extents);
 		alloc->n_allocated = 0;
 		pthread_mutex_init(&alloc->handler_lock, NULL);
-		nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
+		XHASHTABLE_ADD(&cdv_alloc_hash, alloc, xhash_str_to_32_bits(alloc->cdv_uuid));
 		N_Tf(cdv_alloc_new_cdv, "CDV-alloc: new per-CDV allocator cdv=@STR",
 		     cdv_uuid);
 	}
@@ -1397,7 +1408,7 @@ static int cdv_alloc_insert(const char *cdv_uuid,
 
 struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup(const char *cdv_uuid)
 {
-	return nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	return cdv_alloc_search(cdv_uuid);
 }
 
 struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup_or_create_with_floor(
@@ -1405,7 +1416,7 @@ struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup_or_create_with_floor(
 {
 	struct nvmeibt_cdv_alloc *alloc;
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (alloc) {
 		/* Seed floor if this is our first knowledge of the CDV. */
 		if (!alloc->admission_floor_seeded) {
@@ -1433,7 +1444,7 @@ struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup_or_create_with_floor(
 	pthread_mutex_init(&alloc->handler_lock, NULL);
 	alloc->admission_floor        = initial_floor;
 	alloc->admission_floor_seeded = true;
-	nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
+	XHASHTABLE_ADD(&cdv_alloc_hash, alloc, xhash_str_to_32_bits(alloc->cdv_uuid));
 	N_If(cdv_alloc_preempt_created,
 	     "CDV-alloc: created-on-preempt cdv=@STR floor=@LLU",
 	     cdv_uuid, initial_floor);
@@ -1522,23 +1533,18 @@ int nvmeibt_cdv_alloc_preempt_client(const char *cdv_uuid,
 	 * by-client hash was considered and rejected per §2.10.5 (cost-of-
 	 * maintenance > benefit-on-this-rare-control-plane-path).
 	 *
-	 * NVMEIB_HASH_FOREACH is safe against in-iteration deletion (see the
-	 * macro comment in common/nvmeib_hash.h). terminate_reg_ctx removes
-	 * the entry from active_registrants_hash_by_handle, which is exactly
-	 * what the macro is designed to tolerate.
+	 * XHASHTABLE_FOR_EACH_SAFE tolerates removal of the current entry during
+	 * iteration. terminate_registrant calls remove_active_registrant which
+	 * removes reg_ctx from active_registrants, which is exactly the case here.
 	 */
-	NVMEIB_HASH_FOREACH(local_disk,
-			nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-		NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
+	XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+		XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
 			if (nvmeibt_seg_active_get_cdv_alloc(seg_active) != alloc)
 				continue;
-			NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_handle) {
+			XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants) {
 				if (strcmp(reg_ctx->registrant_node_id.str, client_id) != 0)
 					continue;
-				nvmeibt_register_terminate_reg_ctx(reg_ctx,
-					/*is_deleting_seg_active=*/false,
-					NVMEIBT_REGISTER_REGISTRANT_TYPE_ACTIVE,
-					/*is_move_from_active_reg_hash_to_stale_reg_hash=*/false);
+				nvmeibt_register_terminate_registrant(reg_ctx, /*is_force=*/true);
 				terminated++;
 			}
 		}
@@ -1676,7 +1682,7 @@ int nvmeibt_cdv_alloc_remove_extent(const char *cdv_uuid, uint64_t extent_index)
 	struct nvmeibt_cdv_alloc        *alloc;
 	struct nvmeibt_cdv_extent_entry *entry;
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc) {
 		N_Wf(cdv_alloc_rm_no_cdv,
 		     "CDV-alloc: remove on unknown cdv=@STR idx=@LLU",
@@ -1721,7 +1727,7 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 	*out_indices = NULL;
 	*out_count   = 0;
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc) {
 		/*
 		 * No in-memory allocator on this TOMA.  Under the RAFT-embedded
@@ -1797,10 +1803,10 @@ void nvmeibt_cdv_alloc_remove(const char *cdv_uuid)
 	struct nvmeibt_cdv_alloc        *alloc;
 	struct nvmeibt_cdv_extent_entry *entry;
 
-	if (!cdv_alloc_hash)
+	if (!cdv_alloc_inited)
 		return;
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc) {
 		N_If(cdv_alloc_remove_notfound,
 		     "CDV-alloc: remove called for unknown cdv=@STR (already absent)", cdv_uuid);
@@ -1832,7 +1838,7 @@ void nvmeibt_cdv_alloc_remove(const char *cdv_uuid)
 	if (alloc->satellite_fd >= 0)
 		NNVMEIBT_CLOSE(cdv_alloc_remove_sat_close, alloc->satellite_fd);
 
-	nvmeib_hash_delete_ascii_str(cdv_alloc_hash, cdv_uuid);
+	XHASHTABLE_DEL(&cdv_alloc_hash, &alloc->hash_link);
 	NNVMEIBT_BM_FREE(cdv_alloc_remove_alloc, alloc);
 }
 
@@ -1852,15 +1858,15 @@ void nvmeibt_cdv_alloc_gc_stale_entries(void)
 	int n_stale = 0;
 	int i;
 
-	if (!cdv_alloc_hash)
+	if (!cdv_alloc_inited)
 		return;
 
 	/*
 	 * First pass: collect stale UUIDs.  We must not call
 	 * nvmeibt_cdv_alloc_remove() (which modifies the hash) while
-	 * NVMEIB_HASH_FOREACH is active.
+	 * XHASHTABLE_FOR_EACH_SAFE is active.
 	 */
-	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+	XHASHTABLE_FOR_EACH_SAFE(alloc, &cdv_alloc_hash) {
 		union nvmeib_uuid bdev_uuid;
 		struct nvmeibt_block_device *bdev;
 
@@ -1919,7 +1925,7 @@ static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
 {
 	struct nvmeibt_cdv_alloc *alloc;
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (alloc)
 		return alloc;
 
@@ -1937,7 +1943,7 @@ static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
 	alloc->state        = NVMEIBT_CDV_ALLOC_STATE_NOT_ALLOCATOR;
 	XDLIST_HEAD_INIT(&alloc->extents);
 	pthread_mutex_init(&alloc->handler_lock, NULL);
-	nvmeib_hash_add_ascii_str(cdv_alloc_hash, alloc->cdv_uuid, alloc);
+	XHASHTABLE_ADD(&cdv_alloc_hash, alloc, xhash_str_to_32_bits(alloc->cdv_uuid));
 	return alloc;
 }
 
@@ -2016,7 +2022,7 @@ void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid)
 	struct nvmeibt_cdv_alloc *alloc;
 	struct nvmeibt_cdv_allocator_update msg;
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc || alloc->allocator_toma_id[0] == '\0') {
 		N_Wf(cdv_push_no_alloc,
 		     "CDV-alloc: push_to_registrants cdv=@STR no allocator elected",
@@ -2044,9 +2050,9 @@ void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid)
 		struct nvmeibt_seg_active   *seg_active;
 		struct nvmeibt_registrant_ctx *reg_ctx;
 
-		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-				NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
+		XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+			XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
+				XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants) {
 					if (nvmeibt_register_is_processing_registrant_removal(reg_ctx))
 						continue;
 					nvmeibt_register_send_msg_to_registrant(
@@ -2071,7 +2077,7 @@ void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx 
 {
 	struct nvmeibt_cdv_alloc *alloc;
 
-	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+	XHASHTABLE_FOR_EACH_SAFE(alloc, &cdv_alloc_hash) {
 		struct nvmeibt_cdv_allocator_update msg;
 
 		if (alloc->allocator_toma_id[0] == '\0')
@@ -2303,7 +2309,7 @@ void nvmeibt_cdv_alloc_handle_satellite_attach_response(
 		return;
 	}
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc) {
 		N_Wf(cdv_sat_resp_no_alloc,
 		     "CDV-alloc: attachSatelliteResponse cdv=@STR has no local alloc entry; ignoring",
@@ -2397,15 +2403,8 @@ void nvmeibt_cdv_alloc_handle_satellite_attach_response(
 
 int nvmeibt_cdv_alloc_one_time_init(void)
 {
-	cdv_alloc_hash = NVMEIB_HASH_CREATE(cdv_alloc_hash_create,
-					    5,                /* 32 initial buckets */
-					    "cdv_alloc_hash",
-					    -1,               /* ASCII / string key */
-					    false);           /* main-thread only */
-	if (!cdv_alloc_hash) {
-		N_Ef(cdv_alloc_init_hash, "CDV-alloc: hash_create failed");
-		return -ENOMEM;
-	}
+	XHASHTABLE_INIT(&cdv_alloc_hash);
+	cdv_alloc_inited = true;
 
 	/* In-memory state starts empty.  It is rebuilt lazily per-CDV:
 	 * - On allocator election (async scan from nvmeibt_cdv_alloc_elect)
@@ -2417,44 +2416,31 @@ int nvmeibt_cdv_alloc_one_time_init(void)
 
 void nvmeibt_cdv_alloc_destroy(void)
 {
-	struct nvmeibt_cdv_extent_entry *entry;
-	int i;
-
-	if (!cdv_alloc_hash)
+	if (!cdv_alloc_inited)
 		return;
 
-	/*
-	 * Walk the hash array directly to avoid reading freed pointers during
-	 * NVMEIB_HASH_FOREACH's internal pointer-equality check after each free.
-	 */
-	for (i = 0; i < cdv_alloc_hash->n_arr_entries; i++) {
+	{
 		struct nvmeibt_cdv_alloc *alloc;
+		struct nvmeibt_cdv_extent_entry *entry;
 
-		if (!hash_is_entry_OCCUPIED(&cdv_alloc_hash->arr[i]))
-			continue;
-		alloc = cdv_alloc_hash->arr[i].ptr_to_obj;
-		if (!alloc)
-			continue;
-
-		/* Drain and destroy the per-CDV I/O WQ before freeing state. */
-		if (alloc->io_wq) {
-			nvmeibt_wq_drain(alloc->io_wq);
-			nvmeibt_wq_destroy(alloc->io_wq);
-			alloc->io_wq = NULL;
+		XHASHTABLE_FOR_EACH_SAFE(alloc, &cdv_alloc_hash) {
+			XHASHTABLE_DEL(&cdv_alloc_hash, &alloc->hash_link);
+			if (alloc->io_wq) {
+				nvmeibt_wq_drain(alloc->io_wq);
+				nvmeibt_wq_destroy(alloc->io_wq);
+				alloc->io_wq = NULL;
+			}
+			if (alloc->cdv_fd >= 0)
+				NNVMEIBT_CLOSE(cdv_alloc_destroy_close, alloc->cdv_fd);
+			while (!XDLIST_EMPTY(&alloc->extents)) {
+				entry = XDLIST_FIRST(&alloc->extents);
+				XDLIST_ELEM_DEL(&alloc->extents, entry);
+				NNVMEIBT_BM_FREE(cdv_alloc_destroy_entry, entry);
+			}
+			NNVMEIBT_BM_FREE(cdv_alloc_destroy_alloc, alloc);
 		}
-
-		if (alloc->cdv_fd >= 0)
-			NNVMEIBT_CLOSE(cdv_alloc_destroy_close, alloc->cdv_fd);
-
-		while (!XDLIST_EMPTY(&alloc->extents)) {
-			entry = XDLIST_FIRST(&alloc->extents);
-			XDLIST_ELEM_DEL(&alloc->extents, entry);
-			NNVMEIBT_BM_FREE(cdv_alloc_destroy_entry, entry);
-		}
-		NNVMEIBT_BM_FREE(cdv_alloc_destroy_alloc, alloc);
 	}
-
-	NVMEIB_HASH_TBL_FREE(cdv_alloc_hash_free, cdv_alloc_hash);
+	cdv_alloc_inited = false;
 }
 
 /* ── Capacity monitoring ─────────────────────────────────────────────────── */
@@ -2576,7 +2562,7 @@ void nvmeibt_cdv_alloc_startup_scan(void)
 	uint64_t n_cdvs         = 0;
 	uint64_t n_extents_total = 0;
 
-	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+	XHASHTABLE_FOR_EACH_SAFE(alloc, &cdv_alloc_hash) {
 		N_If(cdv_startup_cdv,
 		     "CDV startup: cdv=@STR n_allocated=@LLU",
 		     alloc->cdv_uuid, alloc->n_allocated);
@@ -2607,12 +2593,12 @@ void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt,
 		     "CDV ALLOCATOR (this node: %s)\n",
 		     nvmeibt_get_my_hostname());
 
-	if (!cdv_alloc_hash || nvmeib_hash_get_n_elements(cdv_alloc_hash) == 0) {
+	if (!cdv_alloc_inited || XHASHTABLE_EMPTY(&cdv_alloc_hash)) {
 		(*printf_fn)(printf_ctx, "\t(no CDVs)\n");
 		return;
 	}
 
-	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+	XHASHTABLE_FOR_EACH_SAFE(alloc, &cdv_alloc_hash) {
 		unsigned int used_pct = 0;
 		const char *cdv_name = alloc->dev_path[0] ?
 			alloc->dev_path + strlen(CDV_DEV_PATH_PREFIX) : "(unknown)";
@@ -2646,12 +2632,12 @@ void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const c
 		     "CDV ALLOCATOR DETAILED (this node: %s)\n",
 		     nvmeibt_get_my_hostname());
 
-	if (!cdv_alloc_hash || nvmeib_hash_get_n_elements(cdv_alloc_hash) == 0) {
+	if (!cdv_alloc_inited || XHASHTABLE_EMPTY(&cdv_alloc_hash)) {
 		(*printf_fn)(printf_ctx, "\t(no CDVs)\n");
 		return;
 	}
 
-	NVMEIB_HASH_FOREACH(alloc, cdv_alloc_hash) {
+	XHASHTABLE_FOR_EACH_SAFE(alloc, &cdv_alloc_hash) {
 		struct nvmeibt_cdv_extent_entry *entry;
 		unsigned int used_pct = 0;
 		const char *cdv_name = alloc->dev_path[0] ?
@@ -2701,7 +2687,7 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	uint64_t n_released = 0;
 
 	/* ── 1. Look up the per-CDV allocator ── */
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc) {
 		/* Under the RAFT-embedded identity design, the alloc entry is
 		 * created exclusively by the topology-apply hook.  If no entry
@@ -2896,7 +2882,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	alloc       = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc       = cdv_alloc_search(cdv_uuid);
 
 	/*
 	 * Allocator-state gate: only serve ALLOC when we are in the ACTIVE state.
@@ -3128,7 +3114,7 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 	memcpy(tpv_uuid, req->tpv_uuid, NVMEIBT_CDV_UUID_STRLEN);
 	tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
 
-	alloc = nvmeib_hash_search_ascii_str(cdv_alloc_hash, cdv_uuid);
+	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc) {
 		N_Wf(cdv_free_no_cdv,
 		     "CDV: FREE cdv=@STR idx=@LLU no allocator found (already freed?)",

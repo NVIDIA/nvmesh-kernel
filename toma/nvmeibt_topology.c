@@ -1818,21 +1818,20 @@ void nvmeibt_topology_calc_topology(void)
 									       &praid_leader->calculated_praid_lot.topo_ctx);
 					if (elect_rv > 0) {
 						/*
-						 * New election: bump praid_version_minor and
-						 * topo_idx_updated so is_topo_changed is true,
-						 * we_have_a_new_baseline ships the new identity,
-						 * and follower's upd_committed_topo version check
-						 * does not skip as ALREADY_UP_TO_DATE.  Propagate
-						 * the new version_minor to every seg_lot so on-wire
-						 * seg entries carry the matching version.  Mirrors
-						 * the version-bump pattern in praid.c:2354.
+						 * New election: bump praid_version_minor so
+						 * is_topo_changed is true, we_have_a_new_baseline
+						 * ships the new identity, and follower's
+						 * upd_committed_topo version check does not skip as
+						 * ALREADY_UP_TO_DATE.  Propagate the new
+						 * version_minor to every seg_lot so on-wire seg
+						 * entries carry the matching version.  Mirrors the
+						 * version-bump pattern in praid.c:2354.
 						 */
 						struct nvmeibt_seg_lot *calculated_seg_lot;
 						struct nvmeibt_praid_topo_ctx *calculated_praid_topo =
 							&praid_leader->calculated_praid_lot.topo_ctx;
 
 						++(calculated_praid_topo->praid_version_minor);
-						calculated_praid_topo->topo_idx_updated = leader_get_next_topology_version();
 						XDLIST_FOREACH(calculated_seg_lot,
 							&(praid_leader->calculated_praid_lot.all_seg_lot_list)) {
 							calculated_seg_lot->seg_topo.seg_praid_version_minor =
