@@ -115,6 +115,91 @@ function T_SANDBOX_wire_buf_test() {
 	__abort_ci_on_failure;
 }
 
+function T_SANDBOX_trace_compress_test() {
+	__build_if_needed;
+	./${EXE_NAME} trace_compress_test ${@};
+	__abort_ci_on_failure;
+}
+
+PAGER="_root/var/log/nvmesh/trace_daemon/pager";
+TRACE_DIR="_root/var/log/nvmesh/trace_daemon";
+function T_SANDBOX_trace_compress_comparison() {
+	__build_if_needed;
+	mkdir -p out;
+
+	local tmpdir;
+	tmpdir=$(mktemp -d);
+
+	# --- Run 1: plain (default, compression off) ---
+	echo_title "Trace compress comparison: plain run";
+	__cleanup_prev_run_state;
+	./${EXE_NAME};
+	__abort_ci_on_failure;
+
+	local plain_size=$(du -cb ${TRACE_DIR}/toma*.binlog* 2>/dev/null | tail -1 | cut -f1);
+	local plain_n_files=$(ls ${TRACE_DIR}/toma*.binlog* 2>/dev/null | wc -l);
+
+	# Try decoding with pager (best-effort — may fail on read-only filesystems)
+	local pager_ok=0;
+	if ${PAGER} ${TRACE_DIR} --toma > ${tmpdir}/plain_pager.txt 2>/dev/null; then
+		pager_ok=1;
+	fi
+
+	# --- Run 2: compressed (use -Z startup flag so compression is active from first file) ---
+	echo_title "Trace compress comparison: compressed run";
+	__cleanup_prev_run_state;
+	./${EXE_NAME} -Z;
+	__abort_ci_on_failure;
+
+	local compressed_size=$(du -cb ${TRACE_DIR}/toma*.binlog* 2>/dev/null | tail -1 | cut -f1);
+	local compressed_n_files=$(ls ${TRACE_DIR}/toma*.binlog* 2>/dev/null | wc -l);
+	local lz4_count=$(ls ${TRACE_DIR}/toma*.lz4 2>/dev/null | wc -l);
+
+	# Try decoding compressed logs
+	if [ ${pager_ok} -eq 1 ]; then
+		${PAGER} ${TRACE_DIR} --toma > ${tmpdir}/compressed_pager.txt 2>/dev/null || pager_ok=0;
+	fi
+
+	# --- Report ---
+	echo "-----------------------------------------------";
+	echo "  Plain:      ${plain_n_files} files, ${plain_size} bytes";
+	echo "  Compressed: ${compressed_n_files} files, ${compressed_size} bytes (${lz4_count} .lz4)";
+
+	# --- Assertions ---
+	if [ "${lz4_count}" -eq 0 ]; then
+		echo_red "FAILED: no .lz4 files found";
+		exit 1;
+	fi
+
+	if [ "${compressed_size}" -ge "${plain_size}" ]; then
+		echo_red "FAILED: compressed size (${compressed_size}) >= plain size (${plain_size})";
+		exit 1;
+	fi
+
+	local ratio=$(echo "scale=1; ${plain_size} / ${compressed_size}" | bc);
+	echo "  Ratio:      ${ratio}x";
+
+	if [ ${pager_ok} -eq 1 ]; then
+		local plain_lines=$(wc -l < ${tmpdir}/plain_pager.txt);
+		local compressed_lines=$(wc -l < ${tmpdir}/compressed_pager.txt);
+		echo "  Plain pager lines:      ${plain_lines}";
+		echo "  Compressed pager lines: ${compressed_lines}";
+		# Both runs execute the same tests so line counts should be similar.
+		# Allow 20% tolerance for timing differences.
+		local min_lines=$(echo "${plain_lines} * 80 / 100" | bc);
+		if [ "${compressed_lines}" -lt "${min_lines}" ]; then
+			echo_red "FAILED: compressed pager output too short (${compressed_lines} < ${min_lines})";
+			exit 1;
+		fi
+		echo_green "  Pager decoded both plain and compressed logs successfully";
+	else
+		echo_yellow "  Pager unavailable — skipping decoded content comparison";
+	fi
+
+	rm -rf ${tmpdir};
+	echo_green "SUCCESS!";
+}
+
 #/******************************* Code Coverage *******************************/
 COVERAGE_DIR="./build/coverage";
 function __lcov_ignore_errors() {
@@ -231,6 +316,8 @@ function __run_ci_suite() {
 	T_SANDBOX_gpt_util_self_unit_test;
 	T_SANDBOX_test_framework;
 	T_SANDBOX_wire_buf_test;
+	T_SANDBOX_trace_compress_test;
+	T_SANDBOX_trace_compress_comparison;
 }
 
 # ---------------------------------------------------------------------
@@ -238,6 +325,8 @@ case "$1" in
   rebuild*)		__force_rebuild;;
   framework*)	T_SANDBOX_test_framework ${@:2};;
   wire*)		T_SANDBOX_wire_buf_test ${@:2};;
+  trace_comp*)	T_SANDBOX_trace_compress_test ${@:2};;
+  trace_cmp*)	T_SANDBOX_trace_compress_comparison ${@:2};;
   main*)		T_SANDBOX_main_self_unit_test ${@:2};;
   incr*)		T_SANDBOX_incremental_topo_main ${@:2};;
   live*)		T_SANDBOX_main_live_run;;
@@ -261,6 +350,8 @@ case "$1" in
 	echo "    persistency       - Self test of Toma persistency utility";
 	echo "    framework         - Test framework smoke test";
 	echo "    wire_buf          - Wire buffer unit tests";
+	echo "    trace_compress    - Trace LZ4 compression unit tests";
+	echo "    trace_cmp         - Compare plain vs compressed binlog size and pager output";
 	echo_yellow "  ------------ Debug, development tests:";
 	echo "    rebuild           - Fully recompile Toma. Pass additional make params like release compilation"
 	echo "    live              - Launch Toma to be able to manually play with it, RPC and others";

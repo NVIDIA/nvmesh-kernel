@@ -1502,6 +1502,7 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 		{"use-libibcm",				no_argument,		0,	'i'},
 		{"num-bin_logs",			required_argument,	0,	'z'},
 		{"bin_log-size",			required_argument,	0,	'x'},
+		{"trace-compress",			no_argument,		0,	'Z'},
 		{"cfg-id",					required_argument,	0,	'C'},
 		{"cfg-name",				required_argument,	0,	'D'},
 		{"cfg-version",				required_argument,	0,	'E'},
@@ -1515,7 +1516,7 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 		{0, 0, 0, 0}
 	};
 
-	static const char short_options[] = "l:n:s:c:k:auiz:x:C:D:E:N:t:f:F:pj";
+	static const char short_options[] = "l:n:s:c:k:auiz:x:C:D:E:N:t:f:F:pjZ";
 	static int long_idx = -1;
 
 	for (i = 0; i < argc; ++i) {
@@ -1569,6 +1570,10 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 				toma_bin_log_file_size_mega = TOMA_BIN_LOG_MIN_SIZE;
 			}
 			fprintf(stdout, "TOMA bin log size is %d[mb]\n", toma_bin_log_file_size_mega);
+			break;
+		case 'Z':
+			nvmeibt_binary_tracing_set_trace_compress(1);
+			fprintf(stdout, "TOMA trace compression enabled\n");
 			break;
 		case 'c':
 			nvmeibt_local_disk_set_is_periodic_smart_polling_enabled(strcasecmp(optarg, "Yes") != 0 &&
@@ -2649,6 +2654,7 @@ extern int gpt_util_main(int argc, char *argv[]);
 #if defined(TOMA_SIMULATOR_SANDBOX)
 extern int test_framework_smoke_main(int argc, char *argv[]);
 extern int wire_buf_test_main(int argc, char *argv[]);
+extern int trace_compress_test_main(int argc, char *argv[]);
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 
 static int run_dummy_empty(int argc, char *argv[])
@@ -2667,6 +2673,7 @@ struct {
 #if defined(TOMA_SIMULATOR_SANDBOX)
 		{ "test_framework", test_framework_smoke_main },
 		{ "wire_buf_test", wire_buf_test_main },
+		{ "trace_compress_test", trace_compress_test_main },
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 		{ "dummy", run_dummy_empty },
 };
