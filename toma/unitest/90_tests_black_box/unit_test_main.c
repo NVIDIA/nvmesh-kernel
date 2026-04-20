@@ -13,6 +13,7 @@
 #include "../16_otherToma/peer_toma_simu.h"
 #include "nvmeibt_disk_segment_basics.h"	// NVMEIBT_SEG_DIRTY_BITS_STATE_* used by eviction Phase 5
 #include "../kafka/sandbox_kafka_internal.h"
+#include "../17_clnt/clnt_simu.h"
 #ifdef __cplusplus
 	#ifdef NDEBUG
 		#undef _FORTIFY_SOURCE			// https://github.com/sagemath/cysignals/issues/73#issuecomment-371909263, otherwise false positive detection of stack corruption on longjump
@@ -148,18 +149,27 @@ void scenario_nvmeibs_messages(void) {
 }
 
 void scenario_attach_good_path_io_detach_on_volume(int v) {
-	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
+	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
 	const struct sb_volume_conf *vol = &cfg->vols[v];
 	const struct sb_praid_conf *pr_c = &vol->chunks[0].raids[0];
 	const struct sb_praid_topo *pr_t = &vol->topo_chunks[0].raids[0];
 	SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME {@INT+@INT} to be ioable", vol->name, pr_c->D, pr_c->P);
-	/*for (unsigned s = 0; s < (pr_c->D + pr_c->P); s++ ) {
-		int node_idx = sb_cluster_get_node_idx_from_disk_uuid(cfg, pr_c->segs[s].disk_uuid);
-		peer_toma_simu_set_seg_inject(cfg->nodes[node_idx].peer, {pr_c->segs[s].uuid, });	// Inject degraded mode
-	}*/
 	WAIT_UNTIL(sb_cluster_topo_prd_is_ioable(pr_t));
 	if (sb_cluster_vol_has_any_live_toma_local_segs(cfg, v)) {		// Otherwise no work will be done by the real toma.
-		SCENARIO_PRINT(__AUTOID__, "Attaching clients, todo...");
+		int n_clnts = 2;											// 1 local, 1 remote
+		SCENARIO_PRINT(__AUTOID__, "Attaching @INT clients, to vol[@INT]", n_clnts, v);
+		for (int c = 0; c < n_clnts; c++) {
+			clnt_simu_vol_attach(cfg, c, v);
+			yield();
+		}
+		SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME io_enabled on all clients", vol->name);
+		yield();	// Let Toma process subscriber change
+		// Todo.... register segments and Do IO here
+		SCENARIO_PRINT(__AUTOID__, "Detaching @INT clients, to vol[@INT]", n_clnts, v);
+		for (int c = 0; c < n_clnts; c++) {
+			clnt_simu_vol_detach(cfg, c, v);
+			yield();
+		}
 	}
 }
 
