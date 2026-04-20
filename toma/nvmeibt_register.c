@@ -2661,7 +2661,7 @@ static BOOL check_cdv_admission_floor(struct nvmeibt_registrant_ctx *incoming_re
 	return 1;	/* admissible (BOOL true) */
 }
 
-static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ctx, struct nvmeibt_registrant_ctx *existing_active_reg_ctx)
+static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ctx, struct nvmeibt_registrant_ctx *existing_reg_ctx)
 {
 	int								rv = 0;
 	struct nvmeibt_seg_active		*seg_active = incoming_reg_ctx->seg_active;

@@ -93,12 +93,12 @@ void nvmeibt_disk_segment_convert_active_bin_topo_le_be(struct nvmeibt_serialize
 
 	/* -------------------- PRAID --------------------*/
 
-void nvmeibt_praid_print_leader_wire_topo(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, struct nvmeibt_praid_serialized_topo *praid_wire_topo)
+void nvmeibt_praid_print_leader_wire_topo(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, struct nvmeibt_praid_serialized_topo *praid_wire_topo, u32 src_sw_ver)
 {
 	struct nvmeibt_urn_uuid					praid_uuid;
 	struct nvmeibt_praid_serialized_topo 	serialized;
 
-	nvmeibt_praid_convert_topo_le_be(praid_wire_topo, &serialized);
+	nvmeibt_praid_convert_topo_le_be(praid_wire_topo, &serialized, src_sw_ver);
 	praid_uuid = nvmeibt_union_uuid_to_urn_uuid(&(serialized.uuid));
 	(*printf_fn)(printf_ctx, "praid=%s ver=(%x,%x) sync_cmd=%s is_sync=%d act=%d n_seg=%d\n",
 				 praid_uuid.str, serialized.praid_version_major, serialized.praid_version_minor,
@@ -106,7 +106,7 @@ void nvmeibt_praid_print_leader_wire_topo(int (*printf_fn)(void *ctx, const char
 				 serialized.is_activated, serialized.segs_num);
 }
 
-void nvmeibt_praid_convert_topo_le_be(struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr)
+void nvmeibt_praid_convert_topo_le_be(struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr, u32 src_sw_ver)
 {
 	{ _Static_assert(sizeof(struct nvmeibt_praid_serialized_topo) == 128, "Struct nvmeibt_praid_serialized_topo was changed without updating the serializing function! Also check all occurrences of the struct!"); }
 
@@ -169,7 +169,7 @@ void nvmeibt_topology_print(int (*printf_fn)(void *ctx, const char *fmt, ...), v
 		(*printf_fn)(printf_ctx, "PRAIDS:\n");
 		praid_wire_topo_ptr = (struct nvmeibt_praid_serialized_topo *)(wire_header_ptr + 1);
 		for (i = 0; i < serialized_header.praids_num; i++) {
-			nvmeibt_praid_print_leader_wire_topo(printf_fn, printf_ctx, praid_wire_topo_ptr);
+			nvmeibt_praid_print_leader_wire_topo(printf_fn, printf_ctx, praid_wire_topo_ptr, serialized_header.sw_ver);
 			seg_wire_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)(praid_wire_topo_ptr + 1);
 
 			for (j = 0; j < LE_SWAP8(praid_wire_topo_ptr->segs_num); j++) {
@@ -326,7 +326,7 @@ void nvmeibt_convert_topo_le_be(void *src_topo, void* dst_topo, BOOL is_src_the_
 	praids_num = is_src_the_usable ? src_header_ptr->praids_num : dst_header_ptr->praids_num;
 	
 	for (i = 0; i < praids_num; i++) {
-		nvmeibt_praid_convert_topo_le_be(src_praid_topo_ptr, dst_praid_topo_ptr);
+		nvmeibt_praid_convert_topo_le_be(src_praid_topo_ptr, dst_praid_topo_ptr, src_header_ptr->sw_ver);
 		if (is_src_the_usable) {
 			serialize_praid_topo_to_persist_and_wire(src_praid_topo_ptr, JSON_output);
 		} else {
