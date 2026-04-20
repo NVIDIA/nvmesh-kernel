@@ -248,7 +248,7 @@ void update_traces(void) {
 	}
 
 	try_to_read_params_encoding_ver(config, &params_encode_ver);
-	if (params_encode_ver) {				// Support for old config files without version (TOMA_ENCODING_VER_OLDEST_SUPPORTED)
+	if (params_encode_ver == 0) {				// Support for old config files without version (TOMA_ENCODING_VER_OLDEST_SUPPORTED)
 		goto continue_reading;
 	} else if (__is_unsupported_version_of_params_config(params_encode_ver, is_initial_read)) {
 		goto out;
