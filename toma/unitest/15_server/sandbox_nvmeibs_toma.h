@@ -16,9 +16,10 @@ struct TSB_server_toma_status_req_simu {		// Mechanism for server to request Tom
 	int expecting_reply_cookie;					// If sent a message to toma and expecting a reply, store it
 	int max_reply_length_bytes;
 	int n_msgs_to_registrants;
-	struct server_msg_type_ring_buf_t {
+	struct server_msg_type_ring_buf_t {			// Msgs originated from the server
 		int n_sent, n_total;
-		enum nvmeibs_toma_server_msg_type q[8];
+		enum nvmeibs_toma_server_msg_type q[8];	// Message type
+		struct nvmeibs_toma_server_proc_buf p[8];// buffer to send
 	} msgs;
 	struct TSB_os_mmap_impl toma_to_fill_buf;	// mmap between kernel server and toma
 };
@@ -49,5 +50,7 @@ void nvmeibs_simu_do_periodic(void);
 void nvmeibs_simu_send_extended_msg(const char *something);
 void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type);
 
+struct sb_disk_conf;
+void nvmeibs_simu_subscribe_client(u64 handle, const char *host_name, const struct sb_disk_conf *disk, bool is_subscribe);
 struct TSB_os_mmap_impl* nvmeibs_simu_get_mem_for_status_file_by_name(const char*file_path);
 struct TSB_os_mmap_impl* nvmeibs_simu_get_mem_for_status_file_by_ptr( void* ptr);

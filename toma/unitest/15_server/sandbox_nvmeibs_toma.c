@@ -6,6 +6,7 @@
 #include "nvmeibt_debug.h"				// Binary traces
 #include "sandbox_nvmeibs_toma.h"
 #include "../10_local_hw/nvme_disk_simu.h"
+#include "../13_mgmt/mongodb_simu.h"
 
 static struct nvmeibs_simulator *g_srvr_simu = NULL;
 
@@ -15,9 +16,9 @@ static void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_r
 
 void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type) {
 	struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
-	BUG_ON(s->msgs.n_total >= ARRAY_SIZE(s->msgs.q));
 	N_Tf(__AUTOID__, "Schedule: srvr_q[@INT]<=msg[@INT] ", s->msgs.n_total, msg_type);
-	s->msgs.q[s->msgs.n_total++] = msg_type;
+	s->msgs.q[s->msgs.n_total % (int)ARRAY_SIZE(s->msgs.q)] = msg_type;
+	s->msgs.n_total++;
 }
 
 static bool server_simu_has_next_msg_for_toma(void) {
@@ -52,37 +53,43 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 	BUG_ON(n <= sizeof(*msg_buf));
 	BUG_ON(me->msgs.n_sent >= me->msgs.n_total);				// Why did epoll wake Toma if there is no message ready. Bug in epoll/select simulator implementation! Toma is trying to read a non existing message
 	memset(msg_buf, 0, sizeof(*msg_buf));
-	msg_buf->type = me->msgs.q[me->msgs.n_sent++];
-	if (msg_buf->type == NVMEIBS_TOMA_TRIGGER_JGC) {
-		struct nvmeibs_msg_s2t_launch_JGC *pl = &msg_buf->trigger_JGC_cmd;
-		strcpy(pl->disk_segment_urn_uuid_str, "todo_disk_seg");
-		strcpy(pl->disk_id_str, "todo_disk_id");
-		// Currently not expecting reply.
-	} else if (msg_buf->type == NVMEIBS_TOMA_WRITE_STATUS_REQ) {
-		struct nvmeibs_msg_s2t_toma_status_req *pl = &msg_buf->status_req_msg;
-		BUG_ON(me->expecting_reply_cookie);			// Still waiting for previous reply
-		me->expecting_reply_cookie = 0x1000 + me->msgs.n_sent;
-		pl->type = NVMEIBS_TOMA_STATUS_RAFT;	// NVMEIBS_TOMA_STATUS_ALL_JSON
-		pl->handle = 0 - me->expecting_reply_cookie;
-		pl->handle_req = me->expecting_reply_cookie;
-		strcpy(pl->fname, STATUS_REPLY_PROC_FILE);
-		pl->max_length = me->max_reply_length_bytes;
-	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE) {	// Simulates deprecated: nvmeibs_toma_report_event_disk_change()
-		strcpy(msg_buf->disk_change_msg.disk_id, "dummy_simu_disk");
-		msg_buf->disk_change_msg.op = 'a';							// Add
-	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_PORT_GID_CHANGE) {
-		strncpy(msg_buf->port_gid_change_msg.gid_str, "todo_gid_str", 32);
-	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_NIC_CHANGE) {
-		struct nvmeibs_msg_s2t_nic_change *pl = &msg_buf->nic_change_msg;
-		strncpy(pl->ib_dev, "todo_ib_dev", 32);
-		pl->add = true;
-	} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_SERJIO_RANGE_CLEANED) {
-		strncpy(msg_buf->serjio_range_cleaned_msg.seg_id, "todo_disk_seg", 32);
-	} else {
-		BUG_ON(true); // Not supported yet
+	if (1) {
+		const int ring_size = (int)ARRAY_SIZE(me->msgs.q); // Dispatch the next server event message
+		msg_buf->type = me->msgs.q[me->msgs.n_sent % ring_size];
+		if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_SUBSCRIBER_CHANGE) {
+			*msg_buf = me->msgs.p[me->msgs.n_sent % ring_size];
+		} else if (msg_buf->type == NVMEIBS_TOMA_TRIGGER_JGC) {
+			struct nvmeibs_msg_s2t_launch_JGC *pl = &msg_buf->trigger_JGC_cmd;
+			strcpy(pl->disk_segment_urn_uuid_str, "todo_disk_seg");
+			strcpy(pl->disk_id_str, "todo_disk_id");
+			// Currently not expecting reply.
+		} else if (msg_buf->type == NVMEIBS_TOMA_WRITE_STATUS_REQ) {
+			struct nvmeibs_msg_s2t_toma_status_req *pl = &msg_buf->status_req_msg;
+			BUG_ON(me->expecting_reply_cookie);			// Still waiting for previous reply
+			me->expecting_reply_cookie = 0x1000 + me->msgs.n_sent;
+			pl->type = NVMEIBS_TOMA_STATUS_RAFT;	// NVMEIBS_TOMA_STATUS_ALL_JSON
+			pl->handle = 0 - me->expecting_reply_cookie;
+			pl->handle_req = me->expecting_reply_cookie;
+			strcpy(pl->fname, STATUS_REPLY_PROC_FILE);
+			pl->max_length = me->max_reply_length_bytes;
+		} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_DISK_CHANGE) {	// Simulates deprecated: nvmeibs_toma_report_event_disk_change()
+			strcpy(msg_buf->disk_change_msg.disk_id, "dummy_simu_disk");
+			msg_buf->disk_change_msg.op = 'a';							// Add
+		} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_PORT_GID_CHANGE) {
+			strncpy(msg_buf->port_gid_change_msg.gid_str, "todo_gid_str", 32);
+		} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_NIC_CHANGE) {
+			struct nvmeibs_msg_s2t_nic_change *pl = &msg_buf->nic_change_msg;
+			strncpy(pl->ib_dev, "todo_ib_dev", 32);
+			pl->add = true;
+		} else if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_SERJIO_RANGE_CLEANED) {
+			strncpy(msg_buf->serjio_range_cleaned_msg.seg_id, "todo_disk_seg", 32);
+		} else {
+			BUG_ON(true); // Not supported yet
+		}
+		N_Tf(__AUTOID__, "Delivering: srvr_q[@INT]=>msg[@INT] ", me->msgs.n_sent, msg_buf->type);
+		me->msgs.n_sent++;
+		return sizeof(*msg_buf);
 	}
-	N_Tf(__AUTOID__, "Delivering: srvr_q[@INT]=>msg[@INT] ", me->msgs.n_sent-1, msg_buf->type);
-	return sizeof(*msg_buf);
 }
 
 static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf, size_t n, off_t offset, int flags) {
@@ -129,6 +136,21 @@ static ssize_t _srvr_simu_nvmeibs_toma_client_proc_recv(int fd, const void *buf,
 	if (!cid)		{ errno = EINVAL;	return -1; }
 	if (0)			{ errno = ENXIO;	return -1; }	// Send fail to client
 	return n;
+}
+
+void nvmeibs_simu_subscribe_client(u64 handle, const char *host_name, const struct sb_disk_conf *disk, bool is_subscribe) {
+	struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
+	struct nvmeibs_toma_server_proc_buf *msg = &s->msgs.p[s->msgs.n_total % (int)ARRAY_SIZE(s->msgs.p)];
+	struct nvmeibs_msg_s2t_subscriber_change *sc = &msg->subscriber_change_msg;
+	msg->type = NVMEIBS_TOMA_REPORT_EVENT_SUBSCRIBER_CHANGE;
+	msg->is_clnt = 0;
+	memset(sc, 0, sizeof(*sc));
+	sc->client_uuid.ints[0] = sc->cid = (uint32_t)(handle >> 32);
+	sc->is_subscribe = is_subscribe;
+	sc->toma_conn_proc_handle = handle;
+	nvmeib_strlcpy(sc->host_name, host_name, sizeof(sc->host_name));
+	scnprintf(sc->disk_name, sizeof(sc->disk_name), "%s.%d", disk->serial, disk->name_space_id);
+	nvmeibs_simu_send_msg(msg->type);
 }
 
 /********************************* /dev/ utils *******************************/
