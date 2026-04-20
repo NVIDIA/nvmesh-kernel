@@ -163,16 +163,6 @@ void scenario_attach_good_path_io_detach_on_volume(int v) {
 	}
 }
 
-/* Well-known V_R1 UUIDs, named by their *role* in the eviction scenario.
- * V_R1 lives at sb_cluster_conf.vols[1] with one chunk + one praid; the SB_*
- * macros (mongodb_simu.h) encode that into the sandbox's u32 UUID scheme. */
-#define V_R1_SEG_UUID(seg_idx)     sb_seg_uuid(/*vol*/1, /*chunk*/0, /*raid*/0, (seg_idx))
-#define V_R1_PRAID_UUID            sb_praid_uuid(1, 0, 0)
-#define V_R1_EVICTED_SEG_UUID      V_R1_SEG_UUID(0)   /* node 0 disk 1 */
-#define V_R1_SURVIVOR1_SEG_UUID    V_R1_SEG_UUID(1)   /* node 1 disk 0 */
-#define V_R1_SURVIVOR2_SEG_UUID    V_R1_SEG_UUID(2)   /* node 1 disk 1 */
-#define V_R1_REPLACEMENT_SEG_UUID  V_R1_SEG_UUID(3)   /* node 2 disk 0 (dormant fixture, promoted in Phase 1) */
-
 /* Locate the segment in the V_R1 snapshot by u32 uuid */
 static int __rpt_find_seg(const struct mgmt_sim_praid_report_snapshot *r, u32 uuid) {
 	for (int i = 0; i < r->n_segments; i++)
@@ -183,7 +173,7 @@ static int __rpt_find_seg(const struct mgmt_sim_praid_report_snapshot *r, u32 uu
 
 /* Phase-2 verification: toma has promoted seg[3] and reports the evicted slot
  * as deprecated + the replacement as "replacement" in the latest V_R1 report. */
-static bool evict_replacement_reported(void) {
+static bool evict_replacement_reported(uint32_t V_R1_EVICTED_SEG_UUID, uint32_t V_R1_REPLACEMENT_SEG_UUID) {
 	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
 	if (r->n_segments == 4) {			// This should be not 4 but: (seg->D + seg->P + 1)
 		return (r->segs[__rpt_find_seg(r, V_R1_EVICTED_SEG_UUID)    ].status1 == mdb_seg_dep)
@@ -200,7 +190,7 @@ static bool evict_under_recovery(void) {
 
 /* Phase-6 verification: recovery actually happened AND the praid converged back
  * to 3 normal segments, with the replacement present. */
-static bool evict_rebuild_complete(void) {
+static bool evict_rebuild_complete(uint32_t V_R1_REPLACEMENT_SEG_UUID) {
 	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
 	if (!r->was_under_recovery_witnessed || r->n_segments != 3) return false;
 	if (__rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID) < 0) return false;
@@ -227,13 +217,16 @@ static bool evict_rebuild_complete(void) {
  *   [VERIFY]  what the scenario waits for (expressed on the pRaidReport snapshot)
  */
 static void scenario_evict_rebuild_r1(void) {
-	const struct mgmt_sim_vol_seg_update evict_segs[] = {		// Replace seg[0] by new seg[3]
+	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
+	const struct sb_praid_conf *pr = &cfg->vols[1].chunks[0].raids[0];		// Going to replace segs of this praid, todo: Consider for loop on praids/vols/segs
+	const int seg_idx_from = 0, seg_idx_to = 3;								// Replace seg[0] by new seg[3]. Todo: All indices should be properly controlled via for loop
+	const struct mgmt_sim_vol_seg_update evict_segs[] = {					// D+P+1 array size - all initialized initialize to normal, idx_to/idx_from initialize differently
 		{ .seg_idx = 0, .praid_idx = 0, .status = "markedForRebuild_old" },
 		{ .seg_idx = 1, .praid_idx = 1, .status = "normal" },
 		{ .seg_idx = 2, .praid_idx = 2, .status = "normal" },
 		{ .seg_idx = 3, .praid_idx = 0, .status = "markedForRebuild" },
 	};
-	SCENARIO_PRINT(__AUTOID__, "start (inert outline -- phases go live incrementally)");
+	SCENARIO_PRINT(__AUTOID__, "start: seg-replacement uuids @X -> @X ", pr->segs[seg_idx_from].uuid, pr->segs[seg_idx_to].uuid);
 
 	/* ====================================================================
 	 * PHASE 1 -- Management triggers eviction + rebuild
@@ -282,7 +275,7 @@ static void scenario_evict_rebuild_r1(void) {
 	 * [VERIFY]  WAIT_UNTIL snapshot shows 4 segments with seg[0]=deprecated,
 	 *           seg[3]=replacement, seg[3] vitality=up.
 	 * ==================================================================== */
-	WAIT_UNTIL(evict_replacement_reported());
+	WAIT_UNTIL(evict_replacement_reported(pr->segs[seg_idx_from].uuid, pr->segs[seg_idx_to].uuid));
 
 	/* ====================================================================
 	 * PHASE 3 -- Management removes the deprecated segment
@@ -336,15 +329,13 @@ static void scenario_evict_rebuild_r1(void) {
 	 *           the next ACT_TOPO reply is processed).
 	 * ==================================================================== */
 	SCENARIO_PRINT(__AUTOID__, "Phase 5: forcing OWNER_RECOVERER_DONE on node 1's surviving mirrors");
-	{
+	{	// This should be a 'for' loop on all segs which are not local to live toma
 		struct peer_toma_simu *p1 = sb_cluster_get_conf()->nodes[1].peer;
 		peer_toma_simu_set_seg_inject(p1, &(struct toma_simu_inject_seg_state_t){
-			.uuid = V_R1_SURVIVOR1_SEG_UUID,
-			.dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
+			.uuid = pr->segs[1].uuid, .dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
 		});
 		peer_toma_simu_set_seg_inject(p1, &(struct toma_simu_inject_seg_state_t){
-			.uuid = V_R1_SURVIVOR2_SEG_UUID,
-			.dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
+			.uuid = pr->segs[2].uuid, .dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
 		});
 	}
 	mgmt_sim_send_leader_keep_alive();
@@ -361,7 +352,7 @@ static void scenario_evict_rebuild_r1(void) {
 	 * [VERIFY]  WAIT_UNTIL snapshot has was_under_recovery_witnessed
 	 *           AND n_segments==3 AND seg[3] present AND all "normal".
 	 * ==================================================================== */
-	WAIT_UNTIL(evict_rebuild_complete());
+	WAIT_UNTIL(evict_rebuild_complete(pr->segs[seg_idx_to].uuid));
 	SCENARIO_PRINT(__AUTOID__, "Phase 6: V_R1 segment replacement rebuild complete");
 	/* Drop the Phase 5 overrides now that rebuild is verified; otherwise the
 	 * peer would keep pinning seg[1]/seg[2] at OWNER_RECOVERER_DONE and block
