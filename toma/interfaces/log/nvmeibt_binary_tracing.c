@@ -9,6 +9,11 @@
 #include <signal.h>
 #include "linux/limits.h"
 
+// Forward-declare from trace_compress_lib/compressor.h
+// (full include avoided: libgen.h redefines basename as a macro conflicting with struct field names)
+struct compressor;
+extern struct compressor *compressor_create_lz4(size_t max_in_size);
+
 struct trace_channel *nvmeibt_trace_long;
 struct trace_channel *nvmeibt_trace_eph;
 struct trace_channel *nvmeibt_trace_eter;		// Toma Error / Warning, Possible info
@@ -19,6 +24,7 @@ pthread_t long_poller, eph_poller, eter_poller;
 int64_t tracer_nvmeibt_requested_debug_level = TRACER_DEBUG_LEVEL_DEFAULT;
 int tracer_nvmeibt_debug_level; 	// For the logging level see "tools/pre_processor/gen_probes2.py"
 static bool is_logging_on = 1;
+static bool is_trace_compress_enabled = 0;	// LZ4 compression of binlog files (kill switch: toggle via RPC)
 
 #include <unistd.h>
 #include <sys/syscall.h>
@@ -64,6 +70,7 @@ start:
 	rv = nvmeib_trace_poll_to_logrotated_file_loop((struct nvmeib_trace_channel_descriptor *)param);
 	if (rv < 0)
 		fprintf(stderr, "TOMA's trace poller activation failed rv=%d", rv);
+	nvmeib_trace_channel_descriptor_cleanup((struct nvmeib_trace_channel_descriptor *)param);
 	long_poller = 0;
 	free(param);
 	return NULL;
@@ -78,7 +85,10 @@ static int __start_trace_pollers(pthread_t *poller_long, pthread_t *poller_eph, 
 	nvmeibt_trace_eph =  nvmeib_init_trace_channel(TRACE_BUFFER_SIZE, TRACE_CHANNEL_BUFS, 0, 1);
 	nvmeibt_trace_long = nvmeib_init_trace_channel(TRACE_BUFFER_SIZE, TRACE_CHANNEL_BUFS, 0, 0);
 	nvmeibt_trace_eter = nvmeib_init_trace_channel(TRACE_BUFFER_SIZE, TRACE_CHANNEL_BUFS, 0, 0);
-	#define init_channel(which, f_name) nvmeib_init_trace_channel_descriptor(which, f_name, TOMA_BINLOG_DIR, total_size, file_s, .resume_old = 1, .place_markers = 1)
+	#define init_channel(which, f_name) nvmeib_init_trace_channel_descriptor(which, f_name, TOMA_BINLOG_DIR, total_size, file_s, \
+		.resume_old = 1, .place_markers = 1, \
+		.compressor = compressor_create_lz4(TRACE_BUFFER_SIZE), \
+		.compress_enabled = &is_trace_compress_enabled)
 	if (is_running_as_a_utility) {
 		descriptor_long = init_channel(nvmeibt_trace_long, "toma_util.binlog");
 		descriptor_eter = init_channel(nvmeibt_trace_eter, "toma_util.eter.binlog");
@@ -88,6 +98,8 @@ static int __start_trace_pollers(pthread_t *poller_long, pthread_t *poller_eph, 
 		descriptor_eter = init_channel(nvmeibt_trace_eter, "toma.eter.binlog");
 		descriptor_eph =  init_channel(nvmeibt_trace_eph,  "toma.eph.binlog");
 	}
+	if (!descriptor_long->compressor || !descriptor_eter->compressor || !descriptor_eph->compressor)
+		fprintf(stderr, "Warning: LZ4 compressor creation failed, trace compression will be unavailable\n");
 
 	// Start pollers
 	if ((rv = pthread_create(poller_long, NULL, trace_poller_thread, descriptor_long)) != 0) {
@@ -217,4 +229,20 @@ void nvmeibt_binary_tracing_enforce_active_tracer_nvmeibt_debug_level(int64_t tr
 int64_t nvmeibt_binary_tracing_get_tracer_debug_level(void)
 {
 	return tracer_nvmeibt_requested_debug_level;
+}
+
+void nvmeibt_binary_tracing_set_trace_compress(int64_t is_enabled)
+{
+	bool new_val = is_enabled;
+
+	if (is_trace_compress_enabled != new_val) {
+		N_IMf(u66tc1, "is_trace_compress_enabled: @BOOL-->@BOOL (takes effect on next log rotation)",
+			  is_trace_compress_enabled, new_val);
+		is_trace_compress_enabled = new_val;
+	}
+}
+
+int64_t nvmeibt_binary_tracing_get_trace_compress(void)
+{
+	return is_trace_compress_enabled;
 }

@@ -49,6 +49,11 @@ DICT_JSON  := $(NVMESH_SRC_DIR)/tools/dictionary.json
 
 EXTRA_SOURCES=$(TOOLS_DIR)/nvmeib_trace_userspace.o $(TOOLS_DIR)/nvmeib_trace_userspace_poller.o
 
+# Trace compression (LZ4) static libraries
+COMPRESS_LIB := $(NVMESH_SRC_DIR)/tools/trace_compress_lib/libcompress.a
+LZ4_LIB      := $(NVMESH_SRC_DIR)/tools/lz4/lib/liblz4.a
+STATIC_LIBS  := $(COMPRESS_LIB) $(LZ4_LIB)
+
 # The programs to create
 BINS = nvmeibt_toma
 
@@ -324,6 +329,10 @@ JDR_STATIC_LIB_PATH := $(JDR_BUILD_DIR)/$(JDR_STATIC_LIB)
 $(JDR_STATIC_LIB_PATH):
 	$(MAKE) -C $(JDR_DIR)
 
+# Build trace compression static library
+$(COMPRESS_LIB):
+	$(MAKE) NVMESH_SRC_DIR=$(NVMESH_SRC_DIR) -C $(NVMESH_SRC_DIR)/tools/trace_compress_lib
+
 # this is the main BIN generation template...
 define BIN_template
 # Important: = not :=
@@ -380,7 +389,7 @@ $(BIN)/$1: $(BIN)/nm_udp.so $(BIN)/nm_ibud.so $$(call allexclude,$(PROJECT_DIRS_
 	$(TRACE)$(CC) -shared -Wl,--no-as-needed -libverbs -lrdmacm -Ttracer.ld -o $(BIN)/nw_ibud.so  $(TRAGET_ROOT)/$(OBJ_ROOT)/$1/$(BDIR)/nvmeibt_nm_ibud.o
 	# now we can safly link
 	@echo $(TRACE)$(CC) $$(LDFLAGS) $(LDFLAGS_$(ARCH)) -o $$@ $$(filter-out %.so,$$^) $$(ID_TRACES_O_$1)  $$(LDLIBS) $$(LINKER_PASS)
-	$(TRACE)$(CC) $$(LDFLAGS) $(LDFLAGS_$(ARCH)) -o $$@ $$(filter-out %.so,$$^) $$(JDR_STATIC_LIB_PATH) $$(ID_TRACES_O_$1)  $$(LDLIBS) $$(LINKER_PASS)
+	$(TRACE)$(CC) $$(LDFLAGS) $(LDFLAGS_$(ARCH)) -o $$@ $$(filter-out %.so,$$^) $$(JDR_STATIC_LIB_PATH) $$(ID_TRACES_O_$1) $(STATIC_LIBS) $$(LDLIBS) $$(LINKER_PASS)
 ifeq ($(MOD),$(RELEASE_STR))
 	cp $$@ $$@.with_symbols
 	## One solution is to create a symbols_only file

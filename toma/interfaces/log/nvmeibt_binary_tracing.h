@@ -31,5 +31,9 @@ void nvmeibt_binary_tracing_set_tracer_debug_level(int64_t tracer_debug_level);
 void nvmeibt_binary_tracing_enforce_active_tracer_nvmeibt_debug_level(int64_t tracer_debug_level);
 int64_t nvmeibt_binary_tracing_get_tracer_debug_level(void);
 
+// Trace compression (LZ4) — kill switch
+void nvmeibt_binary_tracing_set_trace_compress(int64_t is_enabled);
+int64_t nvmeibt_binary_tracing_get_trace_compress(void);
+
 #endif // NVMEIBT_BINARY_TRACING_H
 

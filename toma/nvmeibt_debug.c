@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include "nvmeibt_toma.h"
+#include "interfaces/log/nvmeibt_binary_tracing.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_topology.h"
 #include "nvmeibt_global.h"
@@ -414,6 +415,8 @@ struct oper_param_t {
 				&nvmeibt_topology_freeze_topo, NULL, NULL},
 		{"is_incremental_wire_buf",							0,
 				NULL, nvmeibt_raft_set_incremental_wire_buf_enabled, nvmeibt_raft_get_incremental_wire_buf_enabled},
+		{"trace_compress",									0,
+				NULL, nvmeibt_binary_tracing_set_trace_compress, nvmeibt_binary_tracing_get_trace_compress},
 #ifdef TOMA_IB_ROCE
 		{"enable_networking_periodic_traces",				ENABLE_NETWORKING_PERIODIC_TRACES_DEFAULT,
 			&ibud_enable_periodic_traces, NULL, NULL},
