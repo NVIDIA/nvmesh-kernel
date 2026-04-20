@@ -191,10 +191,12 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index)
 	for (s = first_s; s < n_slots; s++) {
 		fs = kzalloc(sizeof(*fs), GFP_NOIO);
 		if (!fs) {
+			struct nvmeibc_tpv_free_slot *tmp;
+
 			while (!list_empty(&batch)) {
-				fs = list_first_entry(&batch, struct nvmeibc_tpv_free_slot, node);
-				list_del(&fs->node);
-				kfree(fs);
+				tmp = list_first_entry(&batch, struct nvmeibc_tpv_free_slot, node);
+				list_del(&tmp->node);
+				kfree(tmp);
 			}
 			kfree(ref);
 			return -ENOMEM;

@@ -627,10 +627,9 @@ persist_find_or_create_le(struct list_head *le_list,
 
 static void persist_free_le_list(struct list_head *le_list)
 {
-	struct persist_load_extent *le;
+	struct persist_load_extent *le, *next;
 
-	while (!list_empty(le_list)) {
-		le = list_first_entry(le_list, struct persist_load_extent, node);
+	list_for_each_entry_safe(le, next, le_list, node) {
 		list_del(&le->node);
 		bitmap_free(le->used_bm);
 		bitmap_free(le->l2_bm);
