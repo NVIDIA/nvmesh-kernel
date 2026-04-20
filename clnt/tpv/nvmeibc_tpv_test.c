@@ -38,8 +38,8 @@
  *      exercises the specific code path, and tears down cleanly.
  *
  * Test geometry (mirrors the userspace simulator):
- *   A = 0 GB   allocator_size_gb = 0  (no metadata region)
- *   E = 1 MB   cdv_extent_size_mb = 1
+ *   A = 0 GB   allocator_size_gib = 0  (no metadata region)
+ *   E = 1 MB   cdv_extent_size_mib = 1
  *   T = 64 KB  tpv_extent_size_kb = 64
  *   n_slots = E / T = 16  slots per CDV_extent
  *   tree    = CDV_extent 1  (L1 in slot 0, L2 in slots 1+)
@@ -297,8 +297,8 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	spin_lock_init(&alloc->lock);
 
 	alloc->tpv_extent_size_kb    = TPV_KTEST_TPV_EXT_KB;
-	alloc->cdv_extent_size_mb    = TPV_KTEST_CDV_EXT_MB;
-	alloc->allocator_size_gb     = TPV_KTEST_ALLOC_GB;
+	alloc->cdv_extent_size_mib    = TPV_KTEST_CDV_EXT_MB;
+	alloc->allocator_size_gib     = TPV_KTEST_ALLOC_GB;
 	alloc->virtual_extents_total = TPV_KTEST_VIRT_SIZE /
 				       ((u64)TPV_KTEST_TPV_EXT_KB << 10);
 

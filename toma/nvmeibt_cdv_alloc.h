@@ -78,7 +78,7 @@ struct nvmeibt_cdv_extent_entry {
 /* ── On-CDV metadata format ─────────────────────────────────────────────────
  *
  * Extent allocation records are stored at the beginning of the CDV volume
- * (the "allocator region", bytes 0 to allocator_size_gb * 1 GiB - 1).
+ * (the "allocator region", bytes 0 to allocator_size_gib * 1 GiB - 1).
  *
  * Layout on the CDV:
  *   Offset 0:                    Header  (CDV_ONDISK_BLOCK_SIZE bytes)
@@ -118,8 +118,8 @@ struct cdv_alloc_ondisk_record {
 	 * Stored here so the zeroing worker can recover geometry on restart without
 	 * requiring a separate management query.
 	 */
-	uint32_t zeroing_allocator_size_gb;
-	uint32_t zeroing_cdv_extent_size_mb;
+	uint32_t zeroing_allocator_size_gib;
+	uint32_t zeroing_cdv_extent_size_mib;
 	uint8_t  reserved2[CDV_ONDISK_BLOCK_SIZE - 1 - 7 - 64 - 4 - 4 - 4];
 } __attribute__((__packed__));
 
@@ -198,8 +198,8 @@ struct nvmeibt_cdv_alloc {
 	 * Needed by the background zero worker to compute per-extent byte offsets
 	 * when re-dispatching zeroing after a TOMA restart.
 	 */
-	uint32_t allocator_size_gb;	/* size of on-CDV allocator region in GiB */
-	uint32_t cdv_extent_size_mb;	/* size of each data CDV extent in MiB */
+	uint32_t allocator_size_gib;	/* size of on-CDV allocator region in GiB */
+	uint32_t cdv_extent_size_mib;	/* size of each data CDV extent in MiB */
 	uint64_t n_pending_zeroing;	/* extents with needs_zeroing=true (not yet re-usable) */
 	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread.
 					 * Currently still used by cdv_zero_execute (data-extent
@@ -519,7 +519,7 @@ void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx 
  * The function:
  *   1. Finds (or creates) the per-CDV allocator; scans on-disk state if not yet
  *      loaded (handles TOMA-restart-before-handler race).
- *   2. Stores the CDV geometry (@allocator_size_gb, @cdv_extent_size_mb) in
+ *   2. Stores the CDV geometry (@allocator_size_gib, @cdv_extent_size_mib) in
  *      the allocator struct for use by the background zero worker.
  *   3. Iterates the in-memory extent list; for each extent owned by @tpv_uuid:
  *      - sets entry->needs_zeroing = true and increments n_pending_zeroing
@@ -540,8 +540,8 @@ void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx 
  */
 int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 					const char *tpv_uuid,
-					uint32_t    allocator_size_gb,
-					uint32_t    cdv_extent_size_mb);
+					uint32_t    allocator_size_gib,
+					uint32_t    cdv_extent_size_mib);
 
 /*
  * nvmeibt_cdv_alloc_startup_scan — log in-memory state.

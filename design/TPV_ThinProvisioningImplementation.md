@@ -601,8 +601,8 @@ struct cdv_alloc_ondisk_record {
      * Stored here so the zeroing worker can recover geometry on restart without
      * requiring a separate management query.
      */
-    uint32_t zeroing_allocator_size_gb;
-    uint32_t zeroing_cdv_extent_size_mb;
+    uint32_t zeroing_allocator_size_gib;
+    uint32_t zeroing_cdv_extent_size_mib;
     uint8_t  reserved2[CDV_ONDISK_BLOCK_SIZE - 1 - 7 - 64 - 4 - 4 - 4];
 } __attribute__((packed));
 ```
@@ -1147,8 +1147,8 @@ struct nvmeibc_tpv_allocator {
     u64              virtual_extents_total;  /* ceil(virtual_size / T) */
 
     /* CDV geometry — received in the AttachVolumes cdvConf payload, constant afterwards. */
-    u32              cdv_extent_size_mb;     /* E in MB */
-    u64              allocator_size_gb;      /* A in GB (byte offset of first data extent) */
+    u32              cdv_extent_size_mib;     /* E in MB */
+    u64              allocator_size_gib;      /* A in GB (byte offset of first data extent) */
 
     /* Physical slot pool */
     struct list_head cdv_extent_list;        /* nvmeibc_cdv_extent_ref entries */
@@ -1806,7 +1806,7 @@ Created in `nvmeibc_tpv.c` when the TPV block device is registered.
 virtual_size_gb:       200
 virtual_extents_total: 409600
 tpv_extent_size_kb:    512
-cdv_extent_size_mb:    1024
+cdv_extent_size_mib:    1024
 cdv_extents_count:     3
 free_tpv_extents:      1842
 low_watermark:         102
@@ -1844,7 +1844,7 @@ Created in `toma/nvmeibt_cdv_allocator.c` when the allocator is initialized.
 
 ```
 cdv_name:             mycdv
-cdv_extent_size_mb:   1024
+cdv_extent_size_mib:   1024
 total_extents:        1000
 allocated_extents:    6
 free_extents:         992
@@ -1882,7 +1882,7 @@ Add CDV allocator state:
 ```c
 struct toma_cdv_alloc_sim {
     u8               cdv_uuid[16];
-    u64              cdv_extent_size_mb;
+    u64              cdv_extent_size_mib;
     u64              total_extents;
     unsigned long   *free_bitmap;
     struct {
@@ -1922,8 +1922,8 @@ Add CDV and TPV volume descriptors to the config database:
 ```c
 struct sim_cdv_config {
     u8   cdv_uuid[16];
-    u32  allocator_size_gb;  // default 1
-    u32  cdv_extent_size_mb;
+    u32  allocator_size_gib;  // default 1
+    u32  cdv_extent_size_mib;
     u32  capacity_mb;
     u32  max_tpvs;
 };
@@ -1975,8 +1975,8 @@ Add initializer helper:
 
 ```c
 void ramDiskSim_init_cdv_allocator(ramDiskSimulator *rd,
-                                   u32 allocator_size_gb,
-                                   u32 cdv_extent_size_mb,
+                                   u32 allocator_size_gib,
+                                   u32 cdv_extent_size_mib,
                                    u64 total_extents);
 ```
 
@@ -3418,7 +3418,7 @@ The client kernel driver's `nvmeibc_tpv_allocator` struct provides:
 - `cdv_extents_count` — CDV extents held by this TPV
 - `free_tpv_extent_count` — free TPV extent slots within allocated CDV extents
 - `virtual_extents_total` — total virtual extents in the TPV
-- TPV extents in use = `(cdv_extents_count × n_slots) − free_tpv_extent_count`, where `n_slots = cdv_extent_size_mb × 1024 / tpv_extent_size_kb`
+- TPV extents in use = `(cdv_extents_count × n_slots) − free_tpv_extent_count`, where `n_slots = cdv_extent_size_mib × 1024 / tpv_extent_size_kb`
 
 These are exposed via `/proc/nvmeibc/tpv/<name>/allocator` (already implemented in `nvmeibc_tpv_proc.c`).
 

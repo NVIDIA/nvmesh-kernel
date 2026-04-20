@@ -77,12 +77,12 @@ static inline bool tpv_is_detaching(const struct nvmeibc_tpv *tpv)
 
 static inline u64 persist_alloc_bytes(const struct nvmeibc_tpv_allocator *a)
 {
-	return a->allocator_size_gb << 30;		/* A in bytes */
+	return a->allocator_size_gib << 30;		/* A in bytes */
 }
 
 static inline u64 persist_extent_bytes(const struct nvmeibc_tpv_allocator *a)
 {
-	return (u64)a->cdv_extent_size_mb << 20;	/* E in bytes */
+	return (u64)a->cdv_extent_size_mib << 20;	/* E in bytes */
 }
 
 static inline u64 persist_slot_bytes(const struct nvmeibc_tpv_allocator *a)

@@ -27,9 +27,9 @@
  *   conf->blocks        - virtual size in 4 KiB management blocks
  *   conf->mdvUUID       - parent CDV UUID (for lookup in the volumes list)
  *   conf->stripeSize    - TPV extent size in KiB  (tpv_extent_size_kb)
- *   conf->dataBlocks    - CDV extent size in MiB  (cdv_extent_size_mb)
+ *   conf->dataBlocks    - CDV extent size in MiB  (cdv_extent_size_mib)
  *   conf->parityBlocks  - allocator area size in GiB within the CDV
- *                         (allocator_size_gb; 0 under satellite design —
+ *                         (allocator_size_gib; 0 under satellite design —
  *                         allocator metadata lives on the <cdv>-mgmt volume)
  *
  * The CDV must already be attached as a regular (hidden) volume before this
@@ -43,8 +43,8 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	struct nvmeibc_tpv *tpv;
 	u64 virtual_size_bytes;
 	u32 tpv_extent_size_kb;
-	u32 cdv_extent_size_mb;
-	u64 allocator_size_gb;
+	u32 cdv_extent_size_mib;
+	u64 allocator_size_gib;
 	bool sync_flush;
 
 	/* Locate the parent CDV by the UUID encoded in conf->mdvUUID. */
@@ -68,27 +68,27 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 
 	/* Decode repurposed fields. */
 	tpv_extent_size_kb  = (u32)conf->stripeSize;
-	cdv_extent_size_mb  = (u32)conf->dataBlocks;
-	allocator_size_gb   = (u64)(unsigned int)conf->parityBlocks;
+	cdv_extent_size_mib  = (u32)conf->dataBlocks;
+	allocator_size_gib   = (u64)(unsigned int)conf->parityBlocks;
 
 	/* sourceUUID is repurposed for TPVs: "sync_flush" → WAL-ordered
 	 * L1 metadata writes; empty → deferred background flush.       */
 	sync_flush = (strncmp(conf->sourceUUID, "sync_flush",
 			      sizeof(conf->sourceUUID)) == 0);
 
-	/* allocator_size_gb may legitimately be 0 under the satellite design
+	/* allocator_size_gib may legitimately be 0 under the satellite design
 	 * (A = 0 — data extents start at CDV offset 0).                     */
-	if (!virtual_size_bytes || !tpv_extent_size_kb || !cdv_extent_size_mb) {
+	if (!virtual_size_bytes || !tpv_extent_size_kb || !cdv_extent_size_mib) {
 		_NE(tpv_setup_bad_params,
 		    "TPV @STR: invalid params vsize=@LLU tpv_ext_kb=@UINT cdv_ext_mb=@UINT alloc_gb=@LLU",
 		    conf->name, virtual_size_bytes,
-		    tpv_extent_size_kb, cdv_extent_size_mb, allocator_size_gb);
+		    tpv_extent_size_kb, cdv_extent_size_mib, allocator_size_gib);
 		return -EINVAL;
 	}
 
 	tpv = nvmeibc_tpv_attach(cdv, conf->name, conf->uuid,
 				 virtual_size_bytes, tpv_extent_size_kb,
-				 cdv_extent_size_mb, allocator_size_gb,
+				 cdv_extent_size_mib, allocator_size_gib,
 				 sync_flush);
 	if (!tpv) {
 		_NE(tpv_setup_attach_failed,

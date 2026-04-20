@@ -167,7 +167,7 @@ bool          admission_floor_seeded;   // NEW
 struct mutex  handler_lock;             // NEW — see Lock ordering below
 ```
 
-Today `nvmeibt_cdv_alloc` is created lazily on the first `CDV_ALLOC_EXTENT`. Change to **eager** creation on CDV topology arrival (the path that today delivers `cdv_extent_size_mb`, `allocator_size_gb`, etc., for CDV bookkeeping). This places the admission floor in the same struct as the rest of the CDV's per-TOMA metadata.
+Today `nvmeibt_cdv_alloc` is created lazily on the first `CDV_ALLOC_EXTENT`. Change to **eager** creation on CDV topology arrival (the path that today delivers `cdv_extent_size_mib`, `allocator_size_gib`, etc., for CDV bookkeeping). This places the admission floor in the same struct as the rest of the CDV's per-TOMA metadata.
 
 - If eager creation turns out to be too invasive (e.g., the CDV-arrival path does not currently have a per-CDV hook on every TOMA, only on the allocator TOMA), fall back to a sibling hash `nvmeibt_cdv_state` keyed by `cdv_uuid`, populated from the same topology message. Cost: one extra hash lookup per `REGISTER` on a CDV segment. Prototype before committing.
 

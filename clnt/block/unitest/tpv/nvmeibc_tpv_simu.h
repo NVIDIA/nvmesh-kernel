@@ -23,8 +23,8 @@
  *
  * Test geometry (fixed for simplicity):
  *   T = tpv_extent_size_kb = 64 KiB
- *   E = cdv_extent_size_mb = 1 MiB  →  n_slots = E/T = 16 per CDV extent
- *   A = allocator_size_gb  = 0      →  L1 tree at CDV byte offset 0
+ *   E = cdv_extent_size_mib = 1 MiB  →  n_slots = E/T = 16 per CDV extent
+ *   A = allocator_size_gib  = 0      →  L1 tree at CDV byte offset 0
  *   virtual_size            = 4 MiB →  64 virtual extents
  *   N data CDV extents      = 4     →  indices 1..4, 64 slots total
  *   CDV total               = 5 MiB (L1 at 0..1MiB, data at 1..5MiB)

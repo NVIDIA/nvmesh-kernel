@@ -276,8 +276,8 @@ static u64 nvmeibc_tpv_calc_watermark(u32 tpv_extent_size_kb)
 static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 				       u32 tpv_extent_size_kb,
 				       u64 virtual_size_bytes,
-				       u32 cdv_extent_size_mb,
-				       u64 allocator_size_gb)
+				       u32 cdv_extent_size_mib,
+				       u64 allocator_size_gib)
 {
 	xa_init(&alloc->extent_map);
 	spin_lock_init(&alloc->lock);
@@ -286,8 +286,8 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 	alloc->virtual_extents_total   = virtual_size_bytes /
 					 ((u64)tpv_extent_size_kb << 10);
 
-	alloc->cdv_extent_size_mb      = cdv_extent_size_mb;
-	alloc->allocator_size_gb       = allocator_size_gb;
+	alloc->cdv_extent_size_mib      = cdv_extent_size_mib;
+	alloc->allocator_size_gib       = allocator_size_gib;
 
 	INIT_LIST_HEAD(&alloc->cdv_extent_list);
 	alloc->cdv_extents_count       = 0;
@@ -771,8 +771,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					const char *tpv_uuid,
 					u64 virtual_size_bytes,
 					u32 tpv_extent_size_kb,
-					u32 cdv_extent_size_mb,
-					u64 allocator_size_gb,
+					u32 cdv_extent_size_mib,
+					u64 allocator_size_gib,
 					bool sync_flush)
 {
 	struct nvmeibc_tpv *tpv;
@@ -913,8 +913,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 
 	/* ── 3a. Initialise allocator ───────────────────────────────────── */
 	nvmeibc_tpv_allocator_init(&tpv->allocator, tpv_extent_size_kb,
-				   virtual_size_bytes, cdv_extent_size_mb,
-				   allocator_size_gb);
+				   virtual_size_bytes, cdv_extent_size_mib,
+				   allocator_size_gib);
 
 	/* ── 3a-check. Verify 2-level L1/L2 tree can address all virtual extents. */
 	{
@@ -922,7 +922,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		u64 n_l1   = (T - sizeof(struct tpv_l1_header)) /
 			     sizeof(struct tpv_tree_entry);
 		u64 n_l2   = T / sizeof(struct tpv_tree_entry);
-		u64 n_sl   = ((u64)cdv_extent_size_mb << 20) / T;
+		u64 n_sl   = ((u64)cdv_extent_size_mib << 20) / T;
 		u64 max_ve = n_l1 * n_l2 * n_sl;
 
 		if (tpv->allocator.virtual_extents_total > max_ve) {
@@ -967,8 +967,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	    tpv_name, tpv_uuid,
 	    virtual_size_bytes >> 20,
 	    tpv_extent_size_kb,
-	    cdv_extent_size_mb,
-	    allocator_size_gb,
+	    cdv_extent_size_mib,
+	    allocator_size_gib,
 	    tpv->allocator.low_watermark,
 	    (int)tpv->sync_flush);
 

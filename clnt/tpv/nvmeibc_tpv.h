@@ -122,8 +122,8 @@ struct nvmeibc_tpv_allocator {
 	 * Needed to compute n_slots and physical offsets of each TPV_extent slot
 	 * within a newly allocated CDV_extent.
 	 */
-	u32              cdv_extent_size_mb;	/* E in MB; CDV property */
-	u64              allocator_size_gb;	/* A in GB; byte offset of first data extent */
+	u32              cdv_extent_size_mib;	/* E in MB; CDV property */
+	u64              allocator_size_gib;	/* A in GB; byte offset of first data extent */
 
 	struct list_head cdv_extent_list;	/* nvmeibc_cdv_extent_ref entries */
 	u64              cdv_extents_count;
@@ -390,7 +390,7 @@ void nvmeibc_tpv_forward_l1_flush_bios(struct nvmeibc_tpv *tpv);
 
 /*
  * Returns the new nvmeibc_tpv on success, NULL on error.
- * cdv_extent_size_mb and allocator_size_gb are properties of the parent CDV,
+ * cdv_extent_size_mib and allocator_size_gib are properties of the parent CDV,
  * received from management in the AttachVolumes MCS cdvConf payload.
  */
 struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
@@ -398,8 +398,8 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					const char *tpv_uuid,
 					u64 virtual_size_bytes,
 					u32 tpv_extent_size_kb,
-					u32 cdv_extent_size_mb,
-					u64 allocator_size_gb,
+					u32 cdv_extent_size_mib,
+					u64 allocator_size_gib,
 					bool sync_flush);
 
 /*

@@ -101,12 +101,12 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 
 	/* Compute total data extents available in the CDV (same formula as the
 	 * CDV_ALLOC_EXTENT request: subtract allocator region, divide by extent size). */
-	if (tpv->cdv_vol && alloc->cdv_extent_size_mb > 0) {
+	if (tpv->cdv_vol && alloc->cdv_extent_size_mib > 0) {
 		u64 cdv_bytes  = (u64)nvmeibc_volume_get_size(tpv->cdv_vol)
 				  << NVMEIBC_SECTOR_SHIFT;
-		u64 meta_bytes = alloc->allocator_size_gb << 30;
+		u64 meta_bytes = alloc->allocator_size_gib << 30;
 		u64 data_bytes = (cdv_bytes > meta_bytes) ? cdv_bytes - meta_bytes : 0;
-		cdv_extents_total = data_bytes / ((u64)alloc->cdv_extent_size_mb << 20);
+		cdv_extents_total = data_bytes / ((u64)alloc->cdv_extent_size_mib << 20);
 	}
 
 	BUF_ADD("name:                %s\n",  tpv->tpv_name);
@@ -116,8 +116,8 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("sync_flush:          %s\n",  tpv->sync_flush ? "yes" : "no");
 	BUF_ADD("virtual_size_mb:     %llu\n", tpv->virtual_size >> 20);
 	BUF_ADD("tpv_extent_size_kb:  %u\n",  alloc->tpv_extent_size_kb);
-	BUF_ADD("cdv_extent_size_mb:  %u\n",  alloc->cdv_extent_size_mb);
-	BUF_ADD("allocator_size_gb:   %llu\n", alloc->allocator_size_gb);
+	BUF_ADD("cdv_extent_size_mib:  %u\n",  alloc->cdv_extent_size_mib);
+	BUF_ADD("allocator_size_gib:   %llu\n", alloc->allocator_size_gib);
 	BUF_ADD("virtual_extents:     %llu\n", alloc->virtual_extents_total);
 	BUF_ADD("low_watermark:       %llu\n", alloc->low_watermark);
 	BUF_ADD("cdv_extents_allocated: %llu / %llu\n",

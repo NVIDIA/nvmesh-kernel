@@ -27,8 +27,8 @@
  *                                    always taken AFTER releasing allocator.lock
  *
  * CDV geometry (from nvmeibc_tpv_allocator fields):
- *   A = allocator_size_gb × 1 GiB — byte offset of first data CDV_extent
- *   E = cdv_extent_size_mb × 1 MiB — size of one data CDV_extent
+ *   A = allocator_size_gib × 1 GiB — byte offset of first data CDV_extent
+ *   E = cdv_extent_size_mib × 1 MiB — size of one data CDV_extent
  *   T = tpv_extent_size_kb × 1 KiB — size of one TPV_extent (= one slot)
  *   n_slots = E / T                  — TPV_extents per CDV_extent
  *
@@ -47,12 +47,12 @@
 
 static inline u64 tpv_alloc_area_bytes(const struct nvmeibc_tpv_allocator *a)
 {
-	return a->allocator_size_gb << 30;		/* A in bytes */
+	return a->allocator_size_gib << 30;		/* A in bytes */
 }
 
 static inline u64 tpv_cdv_extent_bytes(const struct nvmeibc_tpv_allocator *a)
 {
-	return (u64)a->cdv_extent_size_mb << 20;	/* E in bytes */
+	return (u64)a->cdv_extent_size_mib << 20;	/* E in bytes */
 }
 
 static inline u64 tpv_extent_bytes(const struct nvmeibc_tpv_allocator *a)
@@ -773,10 +773,10 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	 * Post-satellite-migration the allocator metadata lives on the
 	 * <cdv>-mgmt satellite volume, so the full CDV is available as data.
 	 */
-	if (alloc->cdv_extent_size_mb > 0) {
+	if (alloc->cdv_extent_size_mib > 0) {
 		u64 cdv_bytes   = (u64)nvmeibc_volume_get_size(tpv->cdv_vol)
 				  << NVMEIBC_SECTOR_SHIFT;
-		req.total_data_extents = cdv_bytes / ((u64)alloc->cdv_extent_size_mb << 20);
+		req.total_data_extents = cdv_bytes / ((u64)alloc->cdv_extent_size_mib << 20);
 	}
 
 	_NT(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU total_extents=@LLU free=@LLU wm=@LLU cdv_extents=@LLU",

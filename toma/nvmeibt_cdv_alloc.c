@@ -254,8 +254,8 @@ struct cdv_scan_result_entry {
 	uint64_t extent_index;
 	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
 	bool     needs_zeroing;
-	uint32_t zeroing_allocator_size_gb;
-	uint32_t zeroing_cdv_extent_size_mb;
+	uint32_t zeroing_allocator_size_gib;
+	uint32_t zeroing_cdv_extent_size_mib;
 };
 
 /* WQ entry for async CDV ondisk scan. */
@@ -417,8 +417,8 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 			NVMEIBT_CDV_UUID_STRLEN);
 		if (rec->flags & CDV_ONDISK_RECORD_FLAG_NEEDS_ZEROING) {
 			results[n_results].needs_zeroing = true;
-			results[n_results].zeroing_allocator_size_gb  = rec->zeroing_allocator_size_gb;
-			results[n_results].zeroing_cdv_extent_size_mb = rec->zeroing_cdv_extent_size_mb;
+			results[n_results].zeroing_allocator_size_gib  = rec->zeroing_allocator_size_gib;
+			results[n_results].zeroing_cdv_extent_size_mib = rec->zeroing_cdv_extent_size_mib;
 		}
 		n_results++;
 
@@ -449,8 +449,8 @@ static void cdv_ondisk_scan_async(const char *cdv_uuid,
 static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
 				     uint64_t extent_index,
 				     const char *tpv_uuid,
-				     uint32_t allocator_size_gb,
-				     uint32_t cdv_extent_size_mb);
+				     uint32_t allocator_size_gib,
+				     uint32_t cdv_extent_size_mib);
 
 /*
  * cdv_scan_finalize — main thread: apply scan results to the allocator.
@@ -594,15 +594,15 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 				if (ext->extent_index == r->extent_index) {
 					ext->needs_zeroing = true;
 					alloc->n_pending_zeroing++;
-					if (r->zeroing_allocator_size_gb && r->zeroing_cdv_extent_size_mb) {
-						if (alloc->allocator_size_gb == 0)
-							alloc->allocator_size_gb = r->zeroing_allocator_size_gb;
-						if (alloc->cdv_extent_size_mb == 0)
-							alloc->cdv_extent_size_mb = r->zeroing_cdv_extent_size_mb;
+					if (r->zeroing_allocator_size_gib && r->zeroing_cdv_extent_size_mib) {
+						if (alloc->allocator_size_gib == 0)
+							alloc->allocator_size_gib = r->zeroing_allocator_size_gib;
+						if (alloc->cdv_extent_size_mib == 0)
+							alloc->cdv_extent_size_mib = r->zeroing_cdv_extent_size_mib;
 						cdv_dispatch_zero_extent(alloc, r->extent_index,
 									 r->tpv_uuid,
-									 r->zeroing_allocator_size_gb,
-									 r->zeroing_cdv_extent_size_mb);
+									 r->zeroing_allocator_size_gib,
+									 r->zeroing_cdv_extent_size_mib);
 					} else {
 						N_Wf(cdv_scan_fin_zero_no_geom,
 						     "CDV-alloc: scan cdv=@STR idx=@LLU NEEDS_ZEROING "
@@ -898,16 +898,16 @@ static void cdv_async_write_header(struct nvmeibt_cdv_alloc *alloc)
  * offset 0 can remain the header — see cdv_ondisk_record_offset).
  * Post-satellite-migration the allocator metadata lives on the <cdv>-mgmt
  * satellite, so the entire CDV is data:
- *   Byte offset = (extent_index - 1) * cdv_extent_size_mb * 1 MiB
- * @allocator_size_gb is retained in the signature for call-site compatibility
+ *   Byte offset = (extent_index - 1) * cdv_extent_size_mib * 1 MiB
+ * @allocator_size_gib is retained in the signature for call-site compatibility
  * but is no longer consulted.
  */
 static inline uint64_t cdv_data_extent_offset(uint64_t extent_index,
-					       uint32_t allocator_size_gb,
-					       uint32_t cdv_extent_size_mb)
+					       uint32_t allocator_size_gib,
+					       uint32_t cdv_extent_size_mib)
 {
-	(void)allocator_size_gb;
-	return (extent_index - 1) * (uint64_t)cdv_extent_size_mb * (1ULL << 20);
+	(void)allocator_size_gib;
+	return (extent_index - 1) * (uint64_t)cdv_extent_size_mib * (1ULL << 20);
 }
 
 /*
@@ -917,8 +917,8 @@ static inline uint64_t cdv_data_extent_offset(uint64_t extent_index,
 static void cdv_async_write_record_needs_zeroing(struct nvmeibt_cdv_alloc *alloc,
 						  uint64_t extent_index,
 						  const char *tpv_uuid,
-						  uint32_t allocator_size_gb,
-						  uint32_t cdv_extent_size_mb)
+						  uint32_t allocator_size_gib,
+						  uint32_t cdv_extent_size_mib)
 {
 	struct cdv_alloc_ondisk_record *rec;
 
@@ -933,8 +933,8 @@ static void cdv_async_write_record_needs_zeroing(struct nvmeibt_cdv_alloc *alloc
 	rec->crc32 = crc32_seedless(rec,
 		offsetof(struct cdv_alloc_ondisk_record, crc32));
 	/* Geometry fields are after crc32, not CRC-covered. */
-	rec->zeroing_allocator_size_gb  = allocator_size_gb;
-	rec->zeroing_cdv_extent_size_mb = cdv_extent_size_mb;
+	rec->zeroing_allocator_size_gib  = allocator_size_gib;
+	rec->zeroing_cdv_extent_size_mib = cdv_extent_size_mib;
 
 	cdv_dispatch_write(alloc, rec, cdv_ondisk_record_offset(extent_index));
 }
@@ -945,7 +945,7 @@ static void cdv_async_write_record_needs_zeroing(struct nvmeibt_cdv_alloc *alloc
  * background before being made available for a new TPV.  This prevents data
  * leakage between TPVs sharing the same CDV.
  *
- * The zero WQ entry writes the full CDV extent (cdv_extent_size_mb MiB) in
+ * The zero WQ entry writes the full CDV extent (cdv_extent_size_mib MiB) in
  * 1 MiB chunks using an aligned calloc buffer.  On success the finalize
  * callback writes a free ondisk record and removes the extent from the
  * in-memory list.  On failure the entry is left in place so the next
@@ -1108,8 +1108,8 @@ static void cdv_zero_free(struct nvmeibt_wq_entry *wq_entry)
 static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
 				     uint64_t extent_index,
 				     const char *tpv_uuid,
-				     uint32_t allocator_size_gb,
-				     uint32_t cdv_extent_size_mb)
+				     uint32_t allocator_size_gib,
+				     uint32_t cdv_extent_size_mib)
 {
 	struct cdv_zero_wq_entry *e;
 
@@ -1132,8 +1132,8 @@ static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
 
 	e->alloc          = alloc;
 	e->extent_index   = extent_index;
-	e->data_offset    = cdv_data_extent_offset(extent_index, allocator_size_gb, cdv_extent_size_mb);
-	e->extent_size_mb = cdv_extent_size_mb;
+	e->data_offset    = cdv_data_extent_offset(extent_index, allocator_size_gib, cdv_extent_size_mib);
+	e->extent_size_mb = cdv_extent_size_mib;
 
 	strncpy(e->cdv_uuid, alloc->cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
 	e->cdv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
@@ -1144,7 +1144,7 @@ static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
 
 	N_If(cdv_zero_dispatched,
 	     "CDV-zero: queued cdv=@STR idx=@LLU offset=@LLU size_mb=@UINT",
-	     alloc->cdv_uuid, extent_index, e->data_offset, cdv_extent_size_mb);
+	     alloc->cdv_uuid, extent_index, e->data_offset, cdv_extent_size_mib);
 }
 
 /* Forward declaration — defined in the incoming-message handler section. */
@@ -2682,8 +2682,8 @@ void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const c
 
 int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 					const char *tpv_uuid,
-					uint32_t    allocator_size_gb,
-					uint32_t    cdv_extent_size_mb)
+					uint32_t    allocator_size_gib,
+					uint32_t    cdv_extent_size_mib)
 {
 	struct nvmeibt_cdv_alloc        *alloc;
 	struct nvmeibt_cdv_extent_entry *entry;
@@ -2717,10 +2717,10 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	}
 
 	/* Cache CDV geometry for use by the background zero worker. */
-	if (allocator_size_gb && !alloc->allocator_size_gb)
-		alloc->allocator_size_gb = allocator_size_gb;
-	if (cdv_extent_size_mb && !alloc->cdv_extent_size_mb)
-		alloc->cdv_extent_size_mb = cdv_extent_size_mb;
+	if (allocator_size_gib && !alloc->allocator_size_gib)
+		alloc->allocator_size_gib = allocator_size_gib;
+	if (cdv_extent_size_mib && !alloc->cdv_extent_size_mib)
+		alloc->cdv_extent_size_mib = cdv_extent_size_mib;
 
 	/* Best-effort: set up I/O WQ for async writes + zeroing. */
 	(void)cdv_ensure_io_wq(cdv_uuid, alloc);
@@ -2764,13 +2764,13 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 
 			cdv_async_write_record_needs_zeroing(alloc, entry->extent_index,
 							     tpv_uuid,
-							     allocator_size_gb,
-							     cdv_extent_size_mb);
+							     allocator_size_gib,
+							     cdv_extent_size_mib);
 
 			cdv_dispatch_zero_extent(alloc, entry->extent_index,
 						 tpv_uuid,
-						 allocator_size_gb,
-						 cdv_extent_size_mb);
+						 allocator_size_gib,
+						 cdv_extent_size_mib);
 			n_released++;
 		}
 	} else {

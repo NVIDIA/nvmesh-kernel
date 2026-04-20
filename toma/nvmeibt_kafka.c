@@ -1207,8 +1207,8 @@ struct generic_CMD_params_ctx {
 		struct cdv_free_all_t {
 			char							cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
 			char							tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
-			uint32_t						allocator_size_gb;
-			uint32_t						cdv_extent_size_mb;
+			uint32_t						allocator_size_gib;
+			uint32_t						cdv_extent_size_mib;
 		} cdv_free_all;
 		/*
 		 * attachSatelliteResponse — management's reply to TOMA's
@@ -1418,11 +1418,10 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 				nvmeibt_strlcpy(CMD_params->cdv_free_all.cdv_uuid, payload_kv->value->str, sizeof(CMD_params->cdv_free_all.cdv_uuid));
 			} else if (!strcmp(payload_kv->key, "tpvUUID")) {
 				nvmeibt_strlcpy(CMD_params->cdv_free_all.tpv_uuid, payload_kv->value->str, sizeof(CMD_params->cdv_free_all.tpv_uuid));
-			} else if (!strcmp(payload_kv->key, "allocatorSizeGiB") ||
-				   !strcmp(payload_kv->key, "allocatorSizeGB")) { /* backward compat */
-				CMD_params->cdv_free_all.allocator_size_gb = (uint32_t)payload_kv->value->num;
+			} else if (!strcmp(payload_kv->key, "allocatorSizeGiB")) {
+				CMD_params->cdv_free_all.allocator_size_gib = (uint32_t)payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "cdvExtentSizeMiB")) {
-				CMD_params->cdv_free_all.cdv_extent_size_mb = (uint32_t)payload_kv->value->num;
+				CMD_params->cdv_free_all.cdv_extent_size_mib = (uint32_t)payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "satelliteUUID")) {
 				/* attachSatelliteResponse — overlaps cdv_free_all.tpv_uuid in the union;
 				 * safe because the two message types are dispatched separately.        */
@@ -2823,20 +2822,20 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 		const struct cdv_free_all_t *cfa = &CMD_params->cdv_free_all;
 
 		N_If(cdv_free_all_cmd,
-		     "CDV: cdvAllocatorFreeAll cdv=@STR tpv=@STR allocator_size_gb=@UINT cdv_extent_size_mb=@UINT",
-		     cfa->cdv_uuid, cfa->tpv_uuid, cfa->allocator_size_gb, cfa->cdv_extent_size_mb);
+		     "CDV: cdvAllocatorFreeAll cdv=@STR tpv=@STR allocator_size_gib=@UINT cdv_extent_size_mib=@UINT",
+		     cfa->cdv_uuid, cfa->tpv_uuid, cfa->allocator_size_gib, cfa->cdv_extent_size_mib);
 
 		if (cfa->cdv_uuid[0] == '\0' || cfa->tpv_uuid[0] == '\0') {
 			N_Ef(cdv_free_all_cmd_bad,
 			     "CDV: cdvAllocatorFreeAll missing cdv_uuid or tpv_uuid; ignoring");
-		} else if (cfa->allocator_size_gb == 0 || cfa->cdv_extent_size_mb == 0) {
+		} else if (cfa->allocator_size_gib == 0 || cfa->cdv_extent_size_mib == 0) {
 			N_Ef(cdv_free_all_cmd_bad_geo,
-			     "CDV: cdvAllocatorFreeAll cdv=@STR invalid geometry allocator_size_gb=@UINT cdv_extent_size_mb=@UINT; ignoring",
-			     cfa->cdv_uuid, cfa->allocator_size_gb, cfa->cdv_extent_size_mb);
+			     "CDV: cdvAllocatorFreeAll cdv=@STR invalid geometry allocator_size_gib=@UINT cdv_extent_size_mib=@UINT; ignoring",
+			     cfa->cdv_uuid, cfa->allocator_size_gib, cfa->cdv_extent_size_mib);
 		} else {
 			nvmeibt_cdv_alloc_free_all_for_tpv(cfa->cdv_uuid, cfa->tpv_uuid,
-							   cfa->allocator_size_gb,
-							   cfa->cdv_extent_size_mb);
+							   cfa->allocator_size_gib,
+							   cfa->cdv_extent_size_mib);
 		}
 	} else if (strcmp(messageType_params->messageType, "preemptClientFromCDV") == 0) {
 		uint32_t terminated = 0;
