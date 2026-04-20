@@ -10,6 +10,7 @@
 #define SB_CLUSTER_CONF_N_NODES_TOTAL (3)			// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n39
 #define SB_CLUSTER_CONF_MAX_VOLS      (4)			// Maximum number of volumes in the cluster configuration
 #define SB_CLUSTER_CONF_MAX_CHUNKS    (2)			// Maximum number of chunks in a volume, For now, 2 chunks only, Support for volume extend once
+#define SB_CLUSTER_CONF_MAX_PR_SEGS   (4)			// Maximum number of segments in protection raid. Up to R1-3Mirror+1seg for replacement, for now
 
 struct sb_cluster_conf {
 	struct sb_node_conf {
@@ -55,7 +56,7 @@ struct sb_cluster_conf {
 					uint32_t uuid;					// My disk segment uuid
 					unsigned block_start;			// Disk block address of segment start
 					unsigned block_end;				// All disk segments in chunk have identical length
-				} segs[4];							// Up to R1-3Mirror+1seg for replacement, for now
+				} segs[SB_CLUSTER_CONF_MAX_PR_SEGS];
 			} raids[1];								// For now, each chunk has only 1 praid. Dont support Raid-0
 		} chunks[SB_CLUSTER_CONF_MAX_CHUNKS];
 		// --------------- Client reports
@@ -92,6 +93,7 @@ int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *, cons
 int  sb_cluster_get_node_idx_from_disk_uuid(const struct sb_cluster_conf *, uint32_t    disk_uuid);
 bool sb_cluster_update_disk_namespace_from_name(     struct sb_disk_conf *, const char *disk_name);
 void sb_cluster_update_disk_vendor_and_verify(       struct sb_disk_conf *, const char *vendor);
+void sb_cluster_praid_alloc_replacement_seg(      struct sb_cluster_conf *, struct sb_praid_conf* pr /*, Todo: give destination disk here */ );
 
 const struct sb_seg_conf*   sb_cluster_get_seg_ptr_from_uuid(const struct sb_cluster_conf *, uint32_t  seg_uuid);
       struct sb_praid_topo* sb_cluster_get_topo_prd_ptr_from_uuid( struct sb_cluster_conf *, const char *raid_uuid);

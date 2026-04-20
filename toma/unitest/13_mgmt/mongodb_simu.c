@@ -74,18 +74,18 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 			}
 			pv->num_blocks = pv->chunks[pv->num_chunks-1].vlba_end + 1;
 		}
-		/* Dormant V_R1 seg[3] for the drive-eviction scenario (NVMESH-8156).
-		 * Sits in segs[3] but is not counted in D+P, so it doesn't appear in
-		 * the initial topology. The scenario activates it via updateVolume v2.
-		 */
-		{
-			struct sb_seg_conf *ps3 = &sb->vols[1].chunks[0].raids[0].segs[3];
-			ps3->disk_uuid   = sb->nodes[2].disks[0].uuid;
-			ps3->block_start = 0;
-			ps3->block_end   = ps3->block_start + disk_seg_n_blocks - 1;
-			ps3->uuid        = ps3[-1].uuid + 1;		// Should allocate it in the loop
-		}
 	}
+}
+
+void sb_cluster_praid_alloc_replacement_seg(struct sb_cluster_conf *sb, struct sb_praid_conf* pr) {
+	unsigned n_segs = pr->D + pr->P;
+	struct sb_seg_conf *rep = &pr->segs[n_segs];
+	unsigned disk_seg_n_blocks = rep[-1].block_end - rep[-1].block_start + 1;	// Same length as other segs
+	BUG_ON(n_segs >= SB_CLUSTER_CONF_MAX_PR_SEGS);
+	rep->disk_uuid   = sb->nodes[2].disks[0].uuid;
+	rep->block_start = 0;
+	rep->block_end   = rep->block_start + disk_seg_n_blocks - 1;
+	rep->uuid        = rep[-1].uuid + 1;		// Should allocate it in the loop
 }
 
 const struct sb_seg_conf* sb_cluster_get_seg_ptr_from_uuid(const struct sb_cluster_conf *D, uint32_t u) { // The above uuid design was for easy retrieval of object by uuid.

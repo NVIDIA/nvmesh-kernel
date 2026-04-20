@@ -217,8 +217,8 @@ static bool evict_rebuild_complete(uint32_t V_R1_REPLACEMENT_SEG_UUID) {
  *   [VERIFY]  what the scenario waits for (expressed on the pRaidReport snapshot)
  */
 static void scenario_evict_rebuild_r1(void) {
-	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
-	const struct sb_praid_conf *pr = &cfg->vols[1].chunks[0].raids[0];		// Going to replace segs of this praid, todo: Consider for loop on praids/vols/segs
+	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
+	struct sb_praid_conf *pr = &cfg->vols[1].chunks[0].raids[0];			// Going to replace segs of this praid, todo: Consider for loop on praids/vols/segs
 	const int seg_idx_from = 0, seg_idx_to = 3;								// Replace seg[0] by new seg[3]. Todo: All indices should be properly controlled via for loop
 	const struct mgmt_sim_vol_seg_update evict_segs[] = {					// D+P+1 array size - all initialized initialize to normal, idx_to/idx_from initialize differently
 		{ .seg_idx = 0, .praid_idx = 0, .status = "markedForRebuild_old" },
@@ -226,6 +226,7 @@ static void scenario_evict_rebuild_r1(void) {
 		{ .seg_idx = 2, .praid_idx = 2, .status = "normal" },
 		{ .seg_idx = 3, .praid_idx = 0, .status = "markedForRebuild" },
 	};
+	sb_cluster_praid_alloc_replacement_seg(cfg, pr);
 	SCENARIO_PRINT(__AUTOID__, "start: seg-replacement uuids @X -> @X ", pr->segs[seg_idx_from].uuid, pr->segs[seg_idx_to].uuid);
 
 	/* ====================================================================
