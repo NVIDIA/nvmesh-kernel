@@ -164,6 +164,7 @@ SOURCES += ./nvmeibc_tracer_unitest.c
 # Production code: /utils/
 UTILS_DIR := $(SSDA)/utils
 SOURCES += $(UTILS_DIR)/nvmeib_jdr/nvmeib_jdr.c
+SOURCES += $(UTILS_DIR)/nvmeib_jdr/nvmeib_txt.c
 
 # Production code: /common/
 CMDIR = $(SSDA)/common
