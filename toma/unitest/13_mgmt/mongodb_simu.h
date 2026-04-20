@@ -11,29 +11,6 @@
 #define SB_CLUSTER_CONF_MAX_VOLS      (4)			// Maximum number of volumes in the cluster configuration
 #define SB_CLUSTER_CONF_MAX_CHUNKS    (2)			// Maximum number of chunks in a volume, For now, 2 chunks only, Support for volume extend once
 
-/* Sandbox UUID encoding -- all uuids are 32-bit integers built from 0-based
- * array indices. First 3 nibbles = node {f37 (liveToma), 2 other Tomas: f38,
- * f39}. Volumes (block devices) have first 4 nibbles as bdXX where XX is
- * volume index (up to 256 vols), last 4 nibbles are 0CRS where C, R, S are
- * chunk, raid and seg indices respectively. Counting in the encoded UUID
- * starts from 1.
- *   node:   0xf3{N+7}000c{N}              N = node index in sb_cluster_conf.nodes[]
- *   disk:   0xf3{N+7}000d{D}              D = disk index in sb_node_conf.disks[]
- *   vol:    0xbd{V+1}0000                 V = volume index in sb_cluster_conf.vols[]
- *   praid:  0xbd{V+1}{C+1}{R+1}0          C, R = chunk and praid indices
- *   seg:    0xbd{V+1}{C+1}{R+1}{S+1}      S = segment index in sb_praid_conf.segs[]
- *
- * Tests should refer to objects via these helpers instead of dealing with the
- * bit positions, and instead of dereferencing sb_cluster_conf for the UUID.
- * Each component is a single hex nibble after the +1 shift, so any index
- * >= 15 would corrupt the encoding -- the BUG_ONs catch that.
- */
-uint32_t sb_node_uuid (int n);
-uint32_t sb_disk_uuid (int n, int d);
-uint32_t sb_vol_uuid  (int v);
-uint32_t sb_praid_uuid(int v, int c, int r);
-uint32_t sb_seg_uuid  (int v, int c, int r, int s);
-
 struct sb_cluster_conf {
 	struct sb_node_conf {
 		char hostname[64];		// Easily recognizable host name
@@ -78,7 +55,7 @@ struct sb_cluster_conf {
 					uint32_t uuid;					// My disk segment uuid
 					unsigned block_start;			// Disk block address of segment start
 					unsigned block_end;				// All disk segments in chunk have identical length
-				} segs[4];							// Up to 3+1 EC, for now
+				} segs[4];							// Up to R1-3Mirror+1seg for replacement, for now
 			} raids[1];								// For now, each chunk has only 1 praid. Dont support Raid-0
 		} chunks[SB_CLUSTER_CONF_MAX_CHUNKS];
 		// --------------- Client reports
@@ -109,9 +86,7 @@ void sb_cluster_conf_create( struct sb_cluster_conf *);
 void sb_cluster_conf_destroy(struct sb_cluster_conf *);
 int  sb_cluster_conf_find_node_idx_by_name(const struct sb_cluster_conf *, const char *host_name);
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void);
-/* Mutable accessor -- used by scenarios that need to flip simulator-only state
- * such as sb_disk_conf.is_out_of_service before sending a HW config update. */
-struct sb_cluster_conf       *sb_cluster_get_conf(void);
+      struct sb_cluster_conf *sb_cluster_get_conf(void);
 int  sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *, const char *disk_name);
 int  sb_cluster_get_disk_idx_from_disk_uuid(const struct sb_cluster_conf *, const char *disk_uuid);
 int  sb_cluster_get_node_idx_from_disk_uuid(const struct sb_cluster_conf *, uint32_t    disk_uuid);
