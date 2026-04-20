@@ -1851,6 +1851,7 @@ void send_keepalive_msgs_as_needed(void)
 	static struct timespec		last_leader_keepalive_ts = TIMESPEC_ZERO;
 	static struct timespec		now;
 	static struct nvmeibt_Str	*json_payload = NULL;
+	struct nvmeibt_raft_member	*member;
 
 	if (!json_payload) {
 		json_payload = NNVMEIBT_STR_ALLOC(4vc7usk);
@@ -1881,10 +1882,19 @@ void send_keepalive_msgs_as_needed(void)
 		snprintf(unique_key, sizeof(unique_key), "%s.TOMA.leaderKeepalive", nvmeibt_get_my_hostname());		// Exact key format agreed with Mgmt-Team. Dont touch!
 		nvmeibt_Str_reuse(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT_L
-							"\"keepaliveInterval\": %lld, \"payload\": {\"raftTerm\": %lld, \"zone\": \"%ld\", \"featureCompatibilityVersion\": \"%ld\", \"tomaSoftwareVersion\": \"%ld\", \"version\": \"%s\", \"buildNumber\": \"%s\"}}",
+							"\"keepaliveInterval\": %lld, \"payload\": {\"raftTerm\": %lld, \"zone\": \"%ld\", \"featureCompatibilityVersion\": \"%ld\", \"tomaSoftwareVersion\": \"%ld\", \"version\": \"%s\", \"buildNumber\": \"%s\", "
+							"\"isReady\": %d, \"raftMembers\": [",
 							KAFKA_PRODUCER_MSG_HEADER_VAR_L("leaderKeepalive", 1),
 							nvmeibt_leader_keep_alive_secs, nvmeibt_raft_get_current_term(),
-							kafka_mgmt_zone_number, nvmeibt_raft_get_guaranteed_sw_ver() >> 16, nvmeibt_raft_get_guaranteed_sw_ver() & 0xFFFF, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT);
+							kafka_mgmt_zone_number, nvmeibt_raft_get_guaranteed_sw_ver() >> 16, nvmeibt_raft_get_guaranteed_sw_ver() & 0xFFFF,
+							BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT, nvmeibt_global_get_global()->last_raft_members_version_change_is_applied);
+
+		NVMEIB_HASH_FOREACH(member, nvmeibt_raft_get_my_raft()->raft_members_hash_by_uuid) {
+			nvmeibt_Str_sprintf(json_payload, "{ \"memberID\" : \"%s\", \"version\" : \"%s\"},", member->hostname, member->build_version);
+		}
+		nvmeibt_Str_chop_last_char(json_payload);
+		nvmeibt_Str_sprintf(json_payload, "]}}");
+
 		N_Tf(fbdsiuh, "leader___to_mgmt, last_update=@LLD[sec] ago, msg=@STR", now.tv_sec - last_leader_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
 		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE);
 		last_leader_keepalive_ts = now;
