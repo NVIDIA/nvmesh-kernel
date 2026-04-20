@@ -314,6 +314,7 @@ static ssize_t tpv_proc_stats_reset(void *arg, char *buf, size_t len)
 {
 	struct nvmeibc_tpv           *tpv   = arg;
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	(void)buf;
 
 	atomic64_set(&alloc->stat_tpv_alloc_ok,    0);
 	atomic64_set(&alloc->stat_tpv_alloc_eagain, 0);
@@ -331,6 +332,11 @@ static ssize_t tpv_proc_stats_reset(void *arg, char *buf, size_t len)
 }
 
 /* ── Public registration / deregistration ───────────────────────────────── */
+
+/* Defined in nvmeibc_tpv_test.c (kernel build) or nvmeibc_tpv_simu.c (simulator).
+ * nvmeibc_tpv_test.h guards the declaration under __KERNEL__, so declare here
+ * unconditionally to cover both builds. */
+ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len);
 
 void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv)
 {

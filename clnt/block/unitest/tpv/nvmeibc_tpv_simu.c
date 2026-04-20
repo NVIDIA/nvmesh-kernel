@@ -49,6 +49,8 @@ int nvmeibc_ib_admin_cdv_alloc_extent(
 {
 	struct tpv_cdv_sim *sim = g_tpv_cdv_sim;
 	u64 i;
+	(void)cdv;
+	(void)toma_id;
 
 	BUG_ON(!sim);
 
@@ -95,6 +97,8 @@ int nvmeibc_ib_admin_cdv_free_extent(
 {
 	struct tpv_cdv_sim *sim = g_tpv_cdv_sim;
 	u64 i = req->extent_index;
+	(void)cdv;
+	(void)toma_id;
 
 	BUG_ON(!sim);
 
@@ -130,6 +134,8 @@ int nvmeibc_ib_admin_cdv_list_extents(
 	u64 *arr;
 	u64 count = 0;
 	u64 i;
+	(void)cdv;
+	(void)toma_id;
 
 	BUG_ON(!sim);
 
@@ -170,6 +176,7 @@ int nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 			       u64 cdv_offset, void *buf, u64 len)
 {
 	struct tpv_cdv_sim *sim = g_tpv_cdv_sim;
+	(void)tpv;
 
 	BUG_ON(!sim);
 
@@ -188,6 +195,7 @@ int nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 				u64 cdv_offset, const void *buf, u64 len)
 {
 	struct tpv_cdv_sim *sim = g_tpv_cdv_sim;
+	(void)tpv;
 
 	BUG_ON(!sim);
 
@@ -311,9 +319,39 @@ void tpv_simu_fill_pool(struct nvmeibc_tpv *tpv)
 		flush_workqueue(system_wq);
 
 		/* Stop once CDV_FULL is returned at least once. */
-		if (atomic64_read(&tpv->allocator.stat_cdv_alloc_full) > prev_full)
+		if (atomic64_read(&tpv->allocator.stat_cdv_alloc_full) > (long long)prev_full)
 			break;
 	}
 	/* Also drain any pending persist_work. */
 	flush_workqueue(system_wq);
+}
+
+/* ── Linker stubs for async IB-response paths ───────────────────────────────
+ *
+ * In the simulator, CDV alloc/list operations are synchronous (implemented
+ * above).  The async response-dispatch functions called from nvmeibc_topology.c
+ * are never reached; stub them out to satisfy the linker.
+ */
+
+void nvmeibc_cdv_dispatch_alloc_response(const struct nvmeibc_cdv_alloc_resp *rsp)
+{
+	(void)rsp;
+	BUG_ON(1); /* should never be called in the simulator */
+}
+
+void nvmeibc_cdv_dispatch_list_response(const struct nvmeibc_cdv_list_resp *rsp,
+					 const u64 *indices, u64 n_idx)
+{
+	(void)rsp;
+	(void)indices;
+	(void)n_idx;
+	BUG_ON(1); /* should never be called in the simulator */
+}
+
+ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
+{
+	(void)arg;
+	(void)buf;
+	(void)len;
+	return -ENOSYS; /* kernel self-tests (nvmeibc_tpv_test.c) not compiled in simulator */
 }

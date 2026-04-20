@@ -56,6 +56,7 @@
 	void *kcalloc(size_t n, size_t size, gfp_t flags);
 	void vfree(  const void *addr);
 	void kfree(  const void *addr);
+	static inline void kvfree(const void *addr) { kfree(addr); }
 	size_t ksize(const void *addr);
 
 	#define __get_free_page(flags) __get_free_pages(flags, 0)

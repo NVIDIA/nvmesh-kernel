@@ -1327,6 +1327,13 @@ void schedule_work_on_sys_wq_rand_cpu(struct work_struct *work);
 static inline bool schedule_delayed_work_on(int cpu, struct delayed_work *dwork, unsigned long delay){ return queue_delayed_work_on(cpu, system_wq, dwork, delay); }
 static inline bool schedule_delayed_work(            struct delayed_work *dwork, unsigned long delay){ return queue_delayed_work(        system_wq, dwork, delay); }
 bool cancel_delayed_work_sync(struct delayed_work *dwork);	// return true if dwork was pending, false otherwise.
+static inline bool cancel_delayed_work(struct delayed_work *dwork) { return cancel_delayed_work_sync(dwork); }
+static inline bool mod_delayed_work(struct workqueue_struct *wq, struct delayed_work *dwork, unsigned long delay) {
+	cancel_delayed_work_sync(dwork); return queue_delayed_work(wq, dwork, delay);
+}
+static inline struct delayed_work *to_delayed_work(struct work_struct *work) {
+	return container_of(work, struct delayed_work, work);
+}
 bool cancel_work(struct workqueue_struct *wq, struct work_struct *work);
 bool flush_work(struct workqueue_struct *wq, struct work_struct *work);
 /*
@@ -1678,6 +1685,14 @@ struct block_device_operations {
 #endif
 };
 
+struct bio_set { unsigned pool_size; };
+#define BIO_POOL_SIZE		16
+#define BIOSET_NEED_BVECS	4
+static inline int  bioset_init(struct bio_set *bs, unsigned pool_size, unsigned front_pad, int flags) {
+	bs->pool_size = pool_size; (void)front_pad; (void)flags; return 0;
+}
+static inline void bioset_exit(struct bio_set *bs) { (void)bs; }
+
 #define BIO_CLONED	4		/* doesn't own data */
 #define BIO_USER_MAPPED 6	/* contains user pages, simulated user space app will blocks until bio completes */
 #define BIO_OWNS_VEC	13	/* bio_free() should free bvec */
@@ -1752,6 +1767,24 @@ void bio_list_merge_head(    struct bio_list *bl, struct bio_list *bl2);
 static inline struct bio *bio_list_peek(   struct bio_list *bl){ return bl->head;}
 struct bio *bio_list_pop(    struct bio_list *bl);
 struct bio *bio_list_get(    struct bio_list *bl);
+
+static inline struct bio *bio_split(struct bio *bio, int sectors, gfp_t gfp,
+				    struct bio_set *bs) {
+	(void)bio; (void)sectors; (void)gfp; (void)bs; BUG_ON(1); return NULL;
+}
+static inline void bio_chain(struct bio *b, struct bio *parent) { (void)b; (void)parent; }
+static inline void generic_make_request(struct bio *bio) { (void)bio; BUG_ON(1); }
+static inline void zero_fill_bio(struct bio *bio) {
+	int i;
+	for (i = 0; i < bio->bi_vcnt; i++) {
+		struct bio_vec *bv = &bio->bi_io_vec[i];
+		if (bv->bv_page)
+			memset((u8 *)page_address(bv->bv_page) + bv->bv_offset, 0, bv->bv_len);
+	}
+}
+static inline void blk_queue_chunk_sectors(struct request_queue *q, unsigned int chunk_sectors) {
+	(void)q; (void)chunk_sectors;
+}
 
 // 512B Support
 #define bio_iovec_idx(bio, idx)    (&((bio)->bi_io_vec[(idx)]))

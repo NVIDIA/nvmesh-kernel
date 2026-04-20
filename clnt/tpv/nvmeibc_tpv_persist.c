@@ -566,6 +566,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		rcu_read_lock();
 		xa_for_each(&alloc->extent_map, xi, e)
 			WRITE_ONCE(e->persisted, true);
+		(void)xi;
 		rcu_read_unlock();
 	}
 
@@ -1223,6 +1224,8 @@ EXPORT_SYMBOL(nvmeibc_tpv_load_state_work_fn);
 int nvmeibc_tpv_install_data_extent(struct nvmeibc_tpv *tpv,
 				    u64 extent_index)
 {
+	(void)tpv;
+	(void)extent_index;
 	return 0;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_install_data_extent);

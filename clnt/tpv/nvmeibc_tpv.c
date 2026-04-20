@@ -332,6 +332,7 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 	xa_for_each(&alloc->extent_map, idx, entry)
 		kfree(entry);
 	xa_destroy(&alloc->extent_map);
+	(void)idx;
 
 	/* Free CDV_extent reference list (active and pending-return). */
 	list_for_each_entry_safe(ref, tmp, &alloc->cdv_extent_list, node) {
@@ -364,6 +365,7 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 			}
 		}
 		xa_destroy(&alloc->l1_to_l2_ctx);
+		(void)li;
 	}
 	bitmap_free(alloc->l1_dirty_pages);
 	alloc->l1_dirty_pages = NULL;
@@ -462,7 +464,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	disk->private_data = tpv;
 	queue->queuedata   = tpv;
 
-	snprintf(disk->disk_name, DISK_NAME_LEN, "%s/%.30s",
+	snprintf(disk->disk_name, DISK_NAME_LEN, "%s/%.20s",
 		 NVMEIBC_TPV_DISK_PREFIX, tpv->tpv_name);
 
 	strncpy(atom->dev_name, tpv->tpv_name, sizeof(atom->dev_name) - 1);
@@ -580,6 +582,7 @@ static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 					      bool sync_flush)
 {
 	unsigned long flags;
+	(void)sync_flush;
 
 	/* A1. Sanity: verify UUID matches. */
 	if (strncmp(tpv->tpv_uuid, tpv_uuid, NVMEIBC_BD_UUID_LEN) != 0) {

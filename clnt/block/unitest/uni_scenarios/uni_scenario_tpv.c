@@ -112,6 +112,7 @@ static u64 tpv_test_count_mapped(struct nvmeibc_tpv *tpv)
 
 	xa_for_each(&alloc->extent_map, idx, entry)
 		count++;
+	(void)idx;
 	return count;
 }
 

@@ -22,7 +22,7 @@
 		#define BUG_ON(condition) 		WARN(condition, "************************** BUG!!!! in %s() line %d, condition=%s\n", __FUNCTION__, __LINE__, #condition)
 	#endif
 	#if !defined(WARN_ON)
-		#define WARN_ON(condition)		BUG_ON(condition)
+		#define WARN_ON(condition) ({ int _c = !!(condition); if (_c) BUG(); _c; })
 	#endif
 	#if !defined(WARN_ON_ONCE)
 		#define WARN_ON_ONCE(condition)		BUG_ON(condition)
