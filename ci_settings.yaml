@@ -16,5 +16,4 @@
 suite: "gitlab-ci-ec"
 phases: ["IB", "ROCE", "TCP"]
 build-with:
-  management: "3.4.0"
-  nvmeshum: "master"
+  management: "excelero/users/yaniv/management:tp2"
