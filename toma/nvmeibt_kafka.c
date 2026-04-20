@@ -1890,7 +1890,10 @@ void send_keepalive_msgs_as_needed(void)
 							BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT, nvmeibt_global_get_global()->last_raft_members_version_change_is_applied);
 
 		NVMEIB_HASH_FOREACH(member, nvmeibt_raft_get_my_raft()->raft_members_hash_by_uuid) {
-			nvmeibt_Str_sprintf(json_payload, "{ \"memberID\" : \"%s\", \"version\" : \"%s\"},", member->hostname, member->build_version);
+			if (member->build_version[0]) // new format 
+				nvmeibt_Str_sprintf(json_payload, "{ \"memberID\" : \"%s\", \"version\" : \"%s\"},", member->hostname, member->build_version);
+			else
+				nvmeibt_Str_sprintf(json_payload, "{ \"memberID\" : \"%s\", \"version\" : null},", member->hostname);
 		}
 		nvmeibt_Str_chop_last_char(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "]}}");
