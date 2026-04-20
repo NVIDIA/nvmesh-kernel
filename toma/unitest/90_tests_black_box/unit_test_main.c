@@ -173,23 +173,23 @@ void scenario_attach_good_path_io_detach_on_volume(int v) {
 #define V_R1_SURVIVOR2_SEG_UUID    V_R1_SEG_UUID(2)   /* node 1 disk 1 */
 #define V_R1_REPLACEMENT_SEG_UUID  V_R1_SEG_UUID(3)   /* node 2 disk 0 (dormant fixture, promoted in Phase 1) */
 
-/* Locate the segment in the V_R1 snapshot by u32 uuid, or -1 if absent. */
+/* Locate the segment in the V_R1 snapshot by u32 uuid */
 static int __rpt_find_seg(const struct mgmt_sim_praid_report_snapshot *r, u32 uuid) {
 	for (int i = 0; i < r->n_segments; i++)
 		if (r->segs[i].uuid == uuid)
-			return i;
-	return -1;
+			return i;				// Remove this entire function and use sb_cluster_get_topo_seg_ptr_from_uuid_n
+	BUG_ON(true); return -1;
 }
 
 /* Phase-2 verification: toma has promoted seg[3] and reports the evicted slot
  * as deprecated + the replacement as "replacement" in the latest V_R1 report. */
 static bool evict_replacement_reported(void) {
 	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
-	int old_i = __rpt_find_seg(r, V_R1_EVICTED_SEG_UUID);
-	int rep_i = __rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID);
-	return r->n_segments == 4
-		&& old_i >= 0 && (r->segs[old_i].status1 == mdb_seg_dep)
-		&& rep_i >= 0 && (r->segs[rep_i].status1 == mdb_seg_rep);
+	if (r->n_segments == 4) {			// This should be not 4 but: (seg->D + seg->P + 1)
+		return (r->segs[__rpt_find_seg(r, V_R1_EVICTED_SEG_UUID)    ].status1 == mdb_seg_dep)
+			&& (r->segs[__rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID)].status1 == mdb_seg_rep);	// 'r' is not needed: Just use sb_cluster_get_topo_seg_ptr_from_uuid_n()
+	}
+	return false;
 }
 
 /* Phase-2 verification: additionally, the replacement's
