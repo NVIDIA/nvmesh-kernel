@@ -227,7 +227,7 @@ static int cdv_worker_open_cdv_fd_for_zeroing(struct nvmeibt_cdv_alloc *alloc)
  * Layout helpers for extent records on the satellite live in the header
  * (cdv_ondisk_block_offset / cdv_ondisk_record_offset / cdv_ondisk_record_slot).
  *
- * VERSION 2 of the on-disk format packs 32 × 128-byte records per 4 KiB
+ * The on-disk format packs 32 × 128-byte records per 4 KiB
  * block. All record mutations here read the 4 KiB block containing the
  * target record, modify the target slot in place, and write the block
  * back. Concurrency on a shared block is serialised by
@@ -366,10 +366,10 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	/*
-	 * Version gate. VERSION 1 (one record per 4 KiB block) predates the
-	 * packed-record layout. TPV is pre-GA; any VERSION 1 satellite is a
-	 * stale dev/test artifact. Treat as fresh so the operator can
-	 * re-create the CDV instead of silently reinterpreting the old layout.
+	 * Version gate. Treat unrecognised versions as fresh so the operator
+	 * can re-create the CDV instead of silently reinterpreting an
+	 * incompatible layout. Retained for forward compatibility even though
+	 * only one version has ever shipped.
 	 */
 	if (hdr->version != CDV_ONDISK_VERSION) {
 		N_Wf(cdv_async_scan_bad_ver,
@@ -398,10 +398,10 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	/*
-	 * VERSION 2: read one 4 KiB block per 32 extents. Cache the most
+	 * Read one 4 KiB block per 32 extents. Cache the most
 	 * recent block offset so consecutive indices in the same block
 	 * reuse the buffer — typical for sequentially-allocated CDVs this
-	 * cuts satellite read volume by 32× vs. the VERSION 1 per-extent
+	 * cuts satellite read volume by 32× vs. an un-packed per-extent
 	 * loop.
 	 */
 	for (i = 1; i <= total; i++) {
@@ -844,7 +844,7 @@ static void cdv_write_free(struct nvmeibt_wq_entry *wq_entry)
 	NNVMEIBT_BM_FREE(cdv_write_wqe_free, e);
 }
 
-/* ── Async CDV read-modify-write for single records (VERSION 2 packed layout)
+/* ── Async CDV read-modify-write for single records (packed layout)
  *
  * Version 2 packs 32 × 128-byte records into each 4 KiB satellite block.
  * A record update can no longer be a single pwrite — we must read the block
@@ -861,6 +861,18 @@ struct cdv_rmw_wq_entry {
 	uint64_t                  extent_index;	/* 1-based */
 	struct cdv_alloc_ondisk_record new_rec;	/* contents to overwrite slot with */
 	int                       rv;
+	/*
+	 * Optional rollback-on-failure: set by callers that mutate the
+	 * in-memory allocator state BEFORE dispatching the on-disk write
+	 * (e.g. the free path removes the entry from alloc->extents first).
+	 * When .rollback_reinsert_tpv_uuid[0] is non-zero and the worker's
+	 * pread/pwrite fails, the finalize callback re-inserts the extent
+	 * into alloc->extents to keep in-memory and on-disk consistent.
+	 * cdv_uuid is carried as a copy because alloc may be torn down by
+	 * the time finalize runs.
+	 */
+	char                      rollback_reinsert_tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+	char                      rollback_reinsert_cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
 };
 
 static void cdv_rmw_execute(struct nvmeibt_wq_entry *wq_entry)
@@ -911,10 +923,33 @@ static void cdv_rmw_finalize(struct nvmeibt_wq_entry *wq_entry)
 	struct cdv_rmw_wq_entry *e =
 		container_of(wq_entry, struct cdv_rmw_wq_entry, wq_entry);
 
-	if (wq_entry->is_canceled || e->rv < 0)
-		N_Wf(cdv_rmw_fin_err,
-		     "CDV-alloc: RMW extent_index=@LLU rv=@INT canceled=@INT",
-		     e->extent_index, e->rv, wq_entry->is_canceled);
+	if (!wq_entry->is_canceled && e->rv >= 0)
+		return;
+
+	N_Wf(cdv_rmw_fin_err,
+	     "CDV-alloc: RMW extent_index=@LLU rv=@INT canceled=@INT",
+	     e->extent_index, e->rv, wq_entry->is_canceled);
+
+	/*
+	 * Rollback: if the caller pre-mutated the in-memory state
+	 * (removed the entry from alloc->extents) on the assumption
+	 * that the write would succeed, re-insert it so in-memory and
+	 * on-disk stay consistent. cdv_alloc_insert guards against
+	 * duplicate extent_index, so it's safe to call even if another
+	 * path has meanwhile re-added the entry.
+	 */
+	if (e->rollback_reinsert_tpv_uuid[0] &&
+	    e->rollback_reinsert_cdv_uuid[0]) {
+		int rv = cdv_alloc_insert(e->rollback_reinsert_cdv_uuid,
+					   e->extent_index,
+					   e->rollback_reinsert_tpv_uuid);
+
+		if (rv)
+			N_Ef(cdv_rmw_rollback_fail,
+			     "CDV-alloc: rollback re-insert failed cdv=@STR idx=@LLU tpv=@STR rv=@INT — on-disk still ALLOCATED, in-memory free",
+			     e->rollback_reinsert_cdv_uuid, e->extent_index,
+			     e->rollback_reinsert_tpv_uuid, rv);
+	}
 }
 
 static void cdv_rmw_free(struct nvmeibt_wq_entry *wq_entry)
@@ -1021,6 +1056,48 @@ static void cdv_async_write_record(struct nvmeibt_cdv_alloc *alloc,
 		offsetof(struct cdv_alloc_ondisk_record, crc32));
 
 	cdv_dispatch_rmw_record(alloc, extent_index, &rec);
+}
+
+/*
+ * cdv_async_write_record_free_with_rollback — async clear-record RMW that
+ * reinserts the (extent_index, tpv_uuid) entry into alloc->extents if the
+ * on-disk write fails. Callers that remove the in-memory entry BEFORE
+ * dispatching (e.g. handle_cdv_free_extent, free_all_for_tpv) use this
+ * variant to keep in-memory and on-disk consistent on RMW failure.
+ */
+static void cdv_async_write_record_free_with_rollback(
+	struct nvmeibt_cdv_alloc *alloc,
+	uint64_t extent_index,
+	const char *freed_tpv_uuid)
+{
+	struct cdv_rmw_wq_entry *e;
+
+	if (!alloc->io_wq)
+		return;
+
+	e = NNVMEIBT_BM_CALLOC(cdv_rmw_wqe_alloc, sizeof(*e));
+	if (!e)
+		return;
+
+	e->wq_entry.type     = "CDV_RMW_FREE_RECORD";
+	e->wq_entry.execute  = cdv_rmw_execute;
+	e->wq_entry.finalize = cdv_rmw_finalize;
+	e->wq_entry.abort    = nvmeibt_toma_wakeup_wq_abort_func;
+	e->wq_entry.free     = cdv_rmw_free;
+
+	e->alloc        = alloc;
+	e->extent_index = extent_index;
+	memset(&e->new_rec, 0, sizeof(e->new_rec));
+	e->new_rec.crc32 = crc32_seedless(&e->new_rec,
+		offsetof(struct cdv_alloc_ondisk_record, crc32));
+
+	/* Arm the rollback path in finalize. */
+	strncpy(e->rollback_reinsert_cdv_uuid, alloc->cdv_uuid,
+		NVMEIBT_CDV_UUID_STRLEN - 1);
+	strncpy(e->rollback_reinsert_tpv_uuid, freed_tpv_uuid,
+		NVMEIBT_CDV_UUID_STRLEN - 1);
+
+	nvmeibt_wq_addw(alloc->io_wq, &e->wq_entry);
 }
 
 /*
@@ -1324,7 +1401,7 @@ struct cdv_alloc_persist_wq_entry {
 
 	/*
 	 * Record contents prepared by main thread; worker does RMW on the
-	 * 4 KiB block containing extent_index's slot (§2.2 VERSION 2).
+	 * 4 KiB block containing extent_index's slot (§2.2).
 	 */
 	struct cdv_alloc_ondisk_record   new_rec;
 	uint64_t                         extent_index;
@@ -1356,7 +1433,7 @@ static void cdv_alloc_persist_execute(struct nvmeibt_wq_entry *wq_entry)
 
 	/*
 	 * Write the allocation record — this is the critical write.
-	 * VERSION 2 packed layout: RMW the 4 KiB block containing the slot.
+	 * Packed layout: RMW the 4 KiB block containing the slot.
 	 */
 	block = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_alloc_persist_rmw_block,
 					    PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
@@ -1398,9 +1475,19 @@ static void cdv_alloc_persist_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 	if (wq_entry->is_canceled || e->write_rv < 0) {
 		N_Ef(cdv_alloc_persist_fin_err,
-		     "CDV-alloc: ALLOC persist failed rv=@INT canceled=@INT; sending ERROR to client",
+		     "CDV-alloc: ALLOC persist failed rv=@INT canceled=@INT; sending ERROR to client and rolling back in-memory state",
 		     e->write_rv, wq_entry->is_canceled);
 		e->resp.status = NVMEIBT_CDV_ALLOC_ERROR;
+		/*
+		 * Roll back the in-memory extent entry that handle_cdv_alloc_extent
+		 * inserted before dispatching the persist. Without this the phantom
+		 * entry keeps the index reserved forever — the next alloc will pick
+		 * a different (higher) index, and the phantom never clears until
+		 * TOMA restart. Use remove_extent against the recorded cdv_uuid so
+		 * the hash lookup is valid even if alloc has been torn down.
+		 */
+		nvmeibt_cdv_alloc_remove_extent(e->alloc->cdv_uuid,
+						 e->extent_index);
 	}
 
 	/* Send the response to the client — on success the record is on disk. */
@@ -2921,17 +3008,28 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 		}
 	} else {
 		XDLIST_FOREACH_SAFE(entry, &alloc->extents) {
+			uint64_t idx;
+
 			if (strncmp(entry->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN) != 0)
 				continue;
 			if (entry->needs_zeroing)
 				continue;   /* already in the pending-zero flow; let it finish */
 
-			cdv_async_write_record(alloc, entry->extent_index, NULL);
+			idx = entry->extent_index;
 
 			XDLIST_ELEM_DEL(&alloc->extents, entry);
 			alloc->n_allocated--;
 			NNVMEIBT_BM_FREE(cdv_free_all_entry, entry);
 			n_released++;
+
+			/*
+			 * Clear the extent record on the satellite (async). On
+			 * RMW failure the finalize re-inserts the
+			 * (extent_index, tpv_uuid) entry so in-memory and
+			 * on-disk stay consistent.
+			 */
+			cdv_async_write_record_free_with_rollback(alloc, idx,
+								    tpv_uuid);
 		}
 	}
 
@@ -3292,8 +3390,14 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 
 		NNVMEIBT_BM_FREE(cdv_free_entry, entry);
 
-		/* Clear the extent record on the CDV (async, best-effort). */
-		cdv_async_write_record(alloc, req->extent_index, NULL);
+		/*
+		 * Clear the extent record on the satellite (async). On RMW
+		 * failure the finalize re-inserts the (extent_index, tpv_uuid)
+		 * entry so in-memory and on-disk stay consistent.
+		 */
+		cdv_async_write_record_free_with_rollback(alloc,
+							    req->extent_index,
+							    tpv_uuid);
 
 		/*
 		 * Hysteresis check: if the free dropped usage below

@@ -293,7 +293,15 @@ EXPORT_SYMBOL(nvmeibc_tpv_alloc_extent);
  */
 int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out)
 {
-	struct nvmeibc_tpv_allocator  *alloc = &tpv->allocator;
+	/*
+	 * L2 tables live on the side that hosts the tree. In split mode
+	 * that's the metadata CDV; in single-CDV mode nvmeibc_tpv_meta_alloc
+	 * returns the data allocator so this degrades to the pre-split path.
+	 * On -EAGAIN we re-arm the allocator whose free pool was empty —
+	 * data-side cdv_alloc_work in single mode, meta-side in split mode.
+	 */
+	struct nvmeibc_tpv_allocator  *alloc = nvmeibc_tpv_meta_alloc(tpv);
+	const bool is_split = nvmeibc_tpv_is_split(tpv);
 	struct nvmeibc_tpv_free_slot  *slot;
 	struct nvmeibc_cdv_extent_ref *ref;
 
@@ -301,8 +309,13 @@ int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out)
 
 	if (list_empty(&alloc->free_tpv_extents)) {
 		spin_unlock(&alloc->lock);
-		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
-			schedule_work(&tpv->cdv_alloc_work);
+		if (is_split) {
+			if (!atomic_xchg(&tpv->meta_cdv_alloc_pending, 1))
+				schedule_work(&tpv->meta_cdv_alloc_work);
+		} else {
+			if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+				schedule_work(&tpv->cdv_alloc_work);
+		}
 		return -EAGAIN;
 	}
 

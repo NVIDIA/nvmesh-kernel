@@ -75,23 +75,22 @@ struct nvmeibt_cdv_extent_entry {
 #define NVMEIBT_CDV_WARN_PCT       90   /* fire warning at >= 90% used */
 #define NVMEIBT_CDV_WARN_CLEAR_PCT 85   /* clear flag when usage drops below 85% */
 
-/* ── On-CDV metadata format ─────────────────────────────────────────────────
+/* ── On-satellite metadata format ────────────────────────────────────────────
  *
- * Extent allocation records are stored at the beginning of the CDV volume
- * (the "allocator region", bytes 0 to allocator_size_gib * 1 GiB - 1).
+ * Extent allocation records live on the <CDV>-mgmt satellite volume. The
+ * satellite's first 4 KiB block holds the header; each subsequent 4 KiB
+ * block holds 32 packed 128-byte records (extent_index is 1-based, so
+ * block 1 holds records 1..32, block 2 holds 33..64, and so on —
+ * see cdv_ondisk_block_offset / cdv_ondisk_record_slot below).
  *
- * Layout on the CDV:
- *   Offset 0:                    Header  (CDV_ONDISK_BLOCK_SIZE bytes)
- *   Offset CDV_ONDISK_BLOCK_SIZE:  Record for extent_index 0
- *   Offset 2 * CDV_ONDISK_BLOCK_SIZE: Record for extent_index 1
- *   ...
+ * Atomicity of each record mutation comes from NVMesh's whole-bio write
+ * guarantee on the satellite volume plus the per-CDV handler_lock, which
+ * serialises read-modify-write on any shared 4 KiB block.
  *
- * Each block is 4 KiB (PAGE_SIZE), matching the NVMe physical block size
- * for atomic single-block writes.  With an allocator region of
- * `allocatorSizeGib` GiB this supports `allocatorSizeGib * (1 GiB / 4 KiB) - 1`
- * extent slots — e.g. the default 1 GiB gives 262,143 slots; admins
- * raise allocatorSizeGib at CDV create time for very large CDVs at small
- * extent sizes.
+ * With an allocator region of `allocatorSizeGib` GiB this supports
+ * `(allocatorSizeGib * 1 GiB - 4 KiB) / 128` extent slots — e.g. the
+ * default 1 GiB gives ~8,388,576 slots; admins raise allocatorSizeGib at
+ * CDV create time for very large CDVs at small extent sizes.
  */
 
 #define CDV_ONDISK_BLOCK_SIZE           4096U
@@ -99,16 +98,18 @@ struct nvmeibt_cdv_extent_entry {
 #define CDV_ONDISK_RECORDS_PER_BLOCK    (CDV_ONDISK_BLOCK_SIZE / CDV_ONDISK_RECORD_SIZE)  /* 32 */
 #define CDV_ONDISK_MAGIC                0x43444D31U     /* 'CDM1' */
 /*
- * VERSION 1 (historical): one 4 KiB block per extent record. Predated the
- * satellite-volume refactor; at that point the allocator area lived on the
- * raw CDV block device and the 4 KiB block was the smallest atomic unit.
- * VERSION 2 (current): packed 128-byte records, 32 per 4 KiB block.
+ * The on-disk format packs 32 × 128-byte records per 4 KiB satellite block.
  * Atomicity is provided by NVMesh's whole-bio write guarantee on the
  * satellite volume; concurrent record updates on the same block are
  * serialised by nvmeibt_cdv_alloc.handler_lock. See
  * ThinProvisioningImplementation.md §2.2 for the rationale.
+ *
+ * VERSION is kept at 1 since TPV is pre-GA and no previous layout ever
+ * shipped — the packed layout is the only on-disk format the code has
+ * ever written. The version field is retained so a future format change
+ * can bump it and gate compatibility.
  */
-#define CDV_ONDISK_VERSION              2
+#define CDV_ONDISK_VERSION              1
 
 struct cdv_alloc_ondisk_header {
 	uint32_t magic;                                  /* CDV_ONDISK_MAGIC */

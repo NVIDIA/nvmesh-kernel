@@ -99,15 +99,14 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	/* Split-mode (TPV_MetadataCDV.md): if metaCdvUUID is non-empty the
 	 * management layer is asking us to attach the TPV's L1/L2 tree on a
 	 * second CDV. The metadata CDV must already be attached to this
-	 * client (enforced at the management layer by attaching it before
-	 * the TPV AttachVolumes MCS arrives).
+	 * client before the TPV AttachVolumes MCS arrives.
 	 *
 	 * Metadata geometry (meta_tpv_extent_size_kb, meta_cdv_extent_size_mib)
-	 * is not carried in the binary codec. A future minor MCS extension will
-	 * piggyback them on the JSON AttachVolumes sidecar; until then we use
-	 * conservative defaults matching the data side — callers that need
-	 * different geometry should supply it via the sidecar and update this
-	 * block to read from it. */
+	 * is carried on the binary codec via dedicated fields that management
+	 * populates when the TPV is in split mode. Both may legitimately
+	 * differ from the data-side extent sizes — that's the whole point of
+	 * split mode (small mirror-backed meta CDV paired with a larger EC
+	 * data CDV, for instance). */
 	if (conf->metaCdvUUID[0]) {
 		meta_cdv = (struct nvmeibc_volume *)nvmeibc_volume_get_by_uuid(
 			p, conf->metaCdvUUID, UNKNOWN_ILLEGAL);
@@ -123,10 +122,16 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 			    conf->name);
 			return -EINVAL;
 		}
-		/* Default to same geometry as the data side. When the MCS
-		 * sidecar for meta geometry lands, parse it here instead. */
-		meta_tpv_extent_size_kb = tpv_extent_size_kb;
-		meta_cdv_extent_size_mib = cdv_extent_size_mib;
+		meta_tpv_extent_size_kb  = (u32)conf->metaTpvExtentSizeKb;
+		meta_cdv_extent_size_mib = (u32)conf->metaCdvExtentSizeMib;
+		if (!meta_tpv_extent_size_kb || !meta_cdv_extent_size_mib) {
+			_NE(tpv_meta_geometry_missing,
+			    "TPV @STR: metaCdvUUID set but metaCdvExtentSizeMib=@UINT metaTpvExtentSizeKb=@UINT — management didn't populate split-mode geometry",
+			    conf->name,
+			    (unsigned int)conf->metaCdvExtentSizeMib,
+			    (unsigned int)conf->metaTpvExtentSizeKb);
+			return -EINVAL;
+		}
 	}
 
 	tpv = nvmeibc_tpv_attach(cdv, conf->name, conf->uuid,

@@ -1447,10 +1447,25 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 
 	if (tpv->allocator.free_tpv_extent_count == 0) {
 		_NI(tpv_pool_empty_after_load,
-		    "TPV: @STR: pool empty after load; scheduling CDV alloc",
+		    "TPV: @STR: data pool empty after load; scheduling CDV alloc",
 		    tpv->tpv_name);
 		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
 			schedule_work(&tpv->cdv_alloc_work);
+	}
+
+	/*
+	 * Split mode: the metadata allocator has its own free pool that
+	 * flush_state's L2-slot allocator draws from. If it's empty at
+	 * load time the first flush would stall until a CDV_ALLOCATOR_UPDATE
+	 * topology push kicks the meta side. Prefetch symmetrically.
+	 */
+	if (tpv->meta_allocator &&
+	    tpv->meta_allocator->free_tpv_extent_count == 0) {
+		_NI(tpv_meta_pool_empty_after_load,
+		    "TPV: @STR: meta pool empty after load; scheduling meta CDV alloc",
+		    tpv->tpv_name);
+		if (!atomic_xchg(&tpv->meta_cdv_alloc_pending, 1))
+			schedule_work(&tpv->meta_cdv_alloc_work);
 	}
 }
 EXPORT_SYMBOL(nvmeibc_tpv_load_state_work_fn);

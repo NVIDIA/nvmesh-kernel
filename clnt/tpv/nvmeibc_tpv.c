@@ -952,9 +952,9 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 
 	INIT_LIST_HEAD(&tpv->list_node);
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
-	/* meta_cdv_alloc_work runs the same handler; it distinguishes which
-	 * allocator (data vs. meta) to service via container_of on the work
-	 * struct. See nvmeibc_tpv_cdv_alloc_work_fn in nvmeibc_tpv_allocator.c. */
+	/* Two distinct work functions (data vs. meta) so container_of in each
+	 * handler unambiguously resolves to the correct embedded work_struct.
+	 * See nvmeibc_tpv_{cdv,meta_cdv}_alloc_work_fn in nvmeibc_tpv_allocator.c. */
 	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_meta_cdv_alloc_work_fn);
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
 	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
