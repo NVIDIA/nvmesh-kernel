@@ -618,7 +618,7 @@ static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 
 	/* A3. Re-initialise work structs with new module's function pointers. */
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
-	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
+	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_meta_cdv_alloc_work_fn);
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
 	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
 	INIT_DELAYED_WORK(&tpv->timeout_work, nvmeibc_tpv_timeout_work_fn);
@@ -955,7 +955,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	/* meta_cdv_alloc_work runs the same handler; it distinguishes which
 	 * allocator (data vs. meta) to service via container_of on the work
 	 * struct. See nvmeibc_tpv_cdv_alloc_work_fn in nvmeibc_tpv_allocator.c. */
-	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
+	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_meta_cdv_alloc_work_fn);
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
 	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
 	INIT_DELAYED_WORK(&tpv->timeout_work, nvmeibc_tpv_timeout_work_fn);

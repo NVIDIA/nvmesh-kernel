@@ -884,20 +884,26 @@ out_clear_pending:
 		nvmeibc_tpv_retry_pending_bios(tpv);
 }
 
+/*
+ * Two distinct work entry points: the side is encoded in the function
+ * pointer, not in runtime inspection of the work_struct address. Using a
+ * single function for both work embeds would produce a tautological
+ * container_of comparison (work always equals &tpv->cdv_alloc_work
+ * relative to the container_of-derived tpv) — only the function pointer
+ * distinguishes the two embedded work_structs reliably.
+ */
 void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 {
-	struct nvmeibc_tpv *tpv_data = container_of(work, struct nvmeibc_tpv, cdv_alloc_work);
-	struct nvmeibc_tpv *tpv_meta = container_of(work, struct nvmeibc_tpv, meta_cdv_alloc_work);
+	struct nvmeibc_tpv *tpv = container_of(work, struct nvmeibc_tpv, cdv_alloc_work);
 
-	/*
-	 * Exactly one of (work == &tpv->cdv_alloc_work) or
-	 * (work == &tpv->meta_cdv_alloc_work) is true. Identify the side by
-	 * comparing the offset: if work == &tpv_data->cdv_alloc_work then the
-	 * data-side container_of is valid. Otherwise treat as meta-side.
-	 */
-	if (work == &tpv_data->cdv_alloc_work)
-		nvmeibc_tpv_cdv_alloc_work_run(tpv_data, /*is_meta_side=*/false);
-	else
-		nvmeibc_tpv_cdv_alloc_work_run(tpv_meta, /*is_meta_side=*/true);
+	nvmeibc_tpv_cdv_alloc_work_run(tpv, /*is_meta_side=*/false);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_cdv_alloc_work_fn);
+
+void nvmeibc_tpv_meta_cdv_alloc_work_fn(struct work_struct *work)
+{
+	struct nvmeibc_tpv *tpv = container_of(work, struct nvmeibc_tpv, meta_cdv_alloc_work);
+
+	nvmeibc_tpv_cdv_alloc_work_run(tpv, /*is_meta_side=*/true);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_meta_cdv_alloc_work_fn);

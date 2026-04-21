@@ -595,8 +595,14 @@ int  nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx);
 /* Free all nvmeibc_tpv_free_slot entries on a list. Called at detach. */
 void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);
 
-/* Background work handler: return empty CDV_extents, then request new ones. */
+/*
+ * Background work handlers: return empty CDV_extents, then request new ones.
+ * Two separate entry points so container_of unambiguously resolves to the
+ * correct struct embed — single-CDV TPVs only use _fn; split-mode TPVs use
+ * _fn for the data side and _meta_fn for the metadata side.
+ */
 void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work);
+void nvmeibc_tpv_meta_cdv_alloc_work_fn(struct work_struct *work);
 
 /* ── Persistence API (implemented in nvmeibc_tpv_persist.c) ───────────── */
 

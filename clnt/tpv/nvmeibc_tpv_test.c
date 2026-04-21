@@ -336,7 +336,7 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	tpv->meta_allocator    = NULL;
 	tpv->meta_allocator_toma_id[0] = '\0';
 	tpv->meta_allocator_generation = 0;
-	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
+	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_meta_cdv_alloc_work_fn);
 	atomic_set(&tpv->meta_cdv_alloc_pending, 0);
 
 	INIT_WORK(&tpv->persist_work, nvmeibc_tpv_persist_work_fn);

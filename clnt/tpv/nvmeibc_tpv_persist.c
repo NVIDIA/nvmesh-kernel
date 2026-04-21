@@ -902,6 +902,45 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		return 0;
 	}
 
+	/* ── 2b. Split mode: also fetch the data-CDV extent list up front ──
+	 *
+	 * The L1/L2 walk installs leaves pointing at data-CDV offsets into the
+	 * data-side allocator's extent_map. Decoding those offsets requires
+	 * the DATA allocator's geometry (cdv_extent_size_mib, allocator_size_gib),
+	 * and the ownership sanity check needs the DATA-CDV TOMA list. Fetch
+	 * both here so the leaf walk below has what it needs.
+	 *
+	 * Single-CDV mode: the meta side IS the data side, so this step is a
+	 * no-op (toma_indices already covers both L1/L2 and data).
+	 */
+	if (nvmeibc_tpv_is_split(tpv)) {
+		char data_toma[NVMEIB_HOST_NAME_LEN];
+
+		rv = load_state_snapshot_toma_id(tpv, /*is_meta_side=*/false,
+						  data_toma);
+		if (rv == -EAGAIN) {
+			_NW(tpv_load_data_toma_unknown,
+			    "TPV: @STR: data-side TOMA not yet known; leaf extent-ownership check will be skipped",
+			    tpv->tpv_name);
+		} else if (rv == 0) {
+			rv = nvmeibc_ib_admin_cdv_list_extents(
+				nvmeibc_tpv_data_cdv(tpv), data_toma,
+				tpv->tpv_uuid,
+				&data_toma_indices, &data_toma_count);
+			if (rv == -ENOTSUPP) {
+				/* test stub — fresh data side */
+				data_toma_indices = NULL;
+				data_toma_count   = 0;
+			} else if (rv) {
+				_NE(tpv_load_data_list_fail,
+				    "TPV: @STR: data-side CDV_LIST_EXTENTS failed rv=@INT",
+				    tpv->tpv_name, rv);
+				kvfree(toma_indices);
+				return rv;
+			}
+		}
+	}
+
 	/* ── 3. Find L1 extent (scan TOMA list for magic in slot 0) ───── */
 	{
 		/*
@@ -1082,27 +1121,50 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			goto out_free;
 		}
 
-		/* Walk L2 entries (per-virtual-extent leaves). */
+		/* Walk L2 entries (per-virtual-extent leaves).
+		 *
+		 * L2 leaves point at byte offsets on the DATA CDV. Decoding
+		 * them with the meta-side allocator (different E / A) would
+		 * yield a wrong extent index and a wrong slot. Use the data-
+		 * side allocator for the decode; single-CDV mode's data_alloc
+		 * == alloc so this is a no-op there. Likewise the TOMA-
+		 * ownership check must use the data-side TOMA list
+		 * (data_toma_indices) in split mode; fall back to toma_indices
+		 * in single-CDV mode where the two are identical.
+		 */
 		for (j = 0; j < N_L2; j++) {
 			u64 data_phys = l2[j].cdv_offset;
 			u64 data_idx, slot_in;
 			u64 V;
 			struct nvmeibc_tpv_extent_entry *ee;
 			struct persist_load_extent *le;
+			const u64 *own_list;
+			u64        own_count;
 
 			if (data_phys == TPV_TREE_NULL)
 				continue;
 
-			persist_decode_phys(alloc, data_phys, &data_idx, &slot_in);
+			persist_decode_phys(data_alloc, data_phys, &data_idx, &slot_in);
+
+			if (nvmeibc_tpv_is_split(tpv)) {
+				own_list  = data_toma_indices;
+				own_count = data_toma_count;
+			} else {
+				own_list  = toma_indices;
+				own_count = toma_count;
+			}
 
 			/* Sanity: L2 leaf must reference an extent that
-			 * TOMA says belongs to us. */
-			if (tp_verify_l1_l2_extent_ownership) {
+			 * TOMA says belongs to us. Skip the check when the
+			 * data-side TOMA list is unavailable (split mode,
+			 * data TOMA identity not yet known — already warned
+			 * at the §2b fetch site). */
+			if (tp_verify_l1_l2_extent_ownership && own_list) {
 				u64 k;
 				bool owned = false;
 
-				for (k = 0; k < toma_count; k++) {
-					if (toma_indices[k] == data_idx) {
+				for (k = 0; k < own_count; k++) {
+					if (own_list[k] == data_idx) {
 						owned = true;
 						break;
 					}
@@ -1253,50 +1315,28 @@ store_toma_list:
 	alloc->toma_extent_count = toma_count;
 
 	/*
-	 * Split-mode: populate the data-side allocator's cdv_extent_list and
-	 * free_tpv_extents from a separate CDV_LIST_EXTENTS query against the
-	 * data CDV. Data-leaf slots already installed in data_alloc->extent_map
-	 * are excluded from the free pool.
+	 * Split-mode: the data-side TOMA list was already fetched in §2b so
+	 * the L1/L2 walk could use it for leaf-ownership checks. Use it here
+	 * to populate the data-side allocator's cdv_extent_list and free
+	 * pool. Data-leaf slots already installed in data_alloc->extent_map
+	 * are excluded from the free pool by load_state_populate_data_side.
 	 */
-	if (nvmeibc_tpv_is_split(tpv)) {
-		char   data_toma[NVMEIB_HOST_NAME_LEN];
-		int    rv2;
-
-		rv2 = load_state_snapshot_toma_id(tpv, /*is_meta_side=*/false,
-						   data_toma);
+	if (nvmeibc_tpv_is_split(tpv) && data_toma_count > 0) {
+		int rv2 = load_state_populate_data_side(tpv,
+				data_toma_indices, data_toma_count);
 		if (rv2) {
-			_NW(tpv_load_data_side_toma_unknown,
-			    "TPV: @STR: no data-side TOMA ID yet; data-side pool will be populated when cdv_alloc_work lands",
-			    tpv->tpv_name);
-		} else {
-			rv2 = nvmeibc_ib_admin_cdv_list_extents(
-				nvmeibc_tpv_data_cdv(tpv), data_toma,
-				tpv->tpv_uuid,
-				&data_toma_indices, &data_toma_count);
-			if (rv2 == -ENOTSUPP) {
-				/* test stub — fresh data side */
-				_NI(tpv_load_data_side_stub,
-				    "TPV: @STR: data-side CDV_LIST_EXTENTS not available; fresh data side",
-				    tpv->tpv_name);
-			} else if (rv2) {
-				_NE(tpv_load_data_side_list_fail,
-				    "TPV: @STR: data-side CDV_LIST_EXTENTS failed rv=@INT",
-				    tpv->tpv_name, rv2);
-			} else if (data_toma_count > 0) {
-				rv2 = load_state_populate_data_side(tpv,
-					data_toma_indices, data_toma_count);
-				if (rv2) {
-					_NE(tpv_load_data_side_populate_fail,
-					    "TPV: @STR: data-side populate failed rv=@INT",
-					    tpv->tpv_name, rv2);
-					kvfree(data_toma_indices);
-					return rv2;
-				}
-				data_alloc->toma_extent_list  = data_toma_indices;
-				data_alloc->toma_extent_count = data_toma_count;
-				data_toma_indices = NULL;
-			}
+			_NE(tpv_load_data_side_populate_fail,
+			    "TPV: @STR: data-side populate failed rv=@INT",
+			    tpv->tpv_name, rv2);
+			kvfree(data_toma_indices);
+			return rv2;
 		}
+		data_alloc->toma_extent_list  = data_toma_indices;
+		data_alloc->toma_extent_count = data_toma_count;
+		data_toma_indices = NULL;
+	} else {
+		/* No data-side TOMA list (single-CDV, no extents, or TOMA not
+		 * yet known). Free any allocation; recovery will retry later. */
 		kvfree(data_toma_indices);
 	}
 	return 0;
