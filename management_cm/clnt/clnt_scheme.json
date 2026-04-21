@@ -217,6 +217,7 @@
                 "snapshotVolumeUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
                 "sourceID" : "__codec WithDefaultCodec(PodCodec('32s'), '')",
                 "sourceUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "metaCdvUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
                 "enableLocalReadOptimization" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
                 "chunks" : {
                         "__type" : "array",

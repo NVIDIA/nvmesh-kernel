@@ -134,34 +134,73 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 
 /* ── allocator fill ─────────────────────────────────────────────────────── */
 
-static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
+static ssize_t tpv_proc_allocator_dump_side(const struct nvmeibc_tpv *tpv,
+					     const struct nvmeibc_tpv_allocator *alloc,
+					     const char *label,
+					     bool show_l1_fields,
+					     bool show_pending_atomic,
+					     char *buf, size_t len, size_t count)
 {
-	struct nvmeibc_tpv           *tpv   = arg;
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
 	u64    cdv_extents, free_slots, pending;
-	ssize_t count = 0;
 
 #define BUF_ADD(...) count += scnprintf(buf + count, len - count, __VA_ARGS__)
 
-	spin_lock(&alloc->lock);
+	spin_lock((spinlock_t *)&alloc->lock);
 	cdv_extents = alloc->cdv_extents_count;
 	free_slots  = alloc->free_tpv_extent_count;
 	pending     = 0;
 	{
-		struct nvmeibc_cdv_extent_ref *ref;
+		const struct nvmeibc_cdv_extent_ref *ref;
 		list_for_each_entry(ref, &alloc->pending_return_list, node)
 			pending++;
 	}
-	spin_unlock(&alloc->lock);
+	spin_unlock((spinlock_t *)&alloc->lock);
 
-	BUF_ADD("state_loaded:            %s\n",  READ_ONCE(tpv->state_loaded) ? "yes" : "no");
-	BUF_ADD("cdv_extents_count:       %llu\n", cdv_extents);
-	BUF_ADD("free_tpv_extent_count:   %llu\n", free_slots);
-	BUF_ADD("low_watermark:           %llu\n", alloc->low_watermark);
-	BUF_ADD("pending_return_count:    %llu\n", pending);
-	BUF_ADD("cdv_alloc_pending:       %d\n",   atomic_read(&tpv->cdv_alloc_pending));
-	BUF_ADD("l1_extent_index:         %llu\n", alloc->l1_extent_index);
-	BUF_ADD("n_l2_tables_used:        %llu\n", alloc->n_l2_tables_used);
+	BUF_ADD("[%s] cdv_extents_count:     %llu\n", label, cdv_extents);
+	BUF_ADD("[%s] free_tpv_extent_count: %llu\n", label, free_slots);
+	BUF_ADD("[%s] low_watermark:         %llu\n", label, alloc->low_watermark);
+	BUF_ADD("[%s] pending_return_count:  %llu\n", label, pending);
+	if (show_pending_atomic)
+		BUF_ADD("[%s] cdv_alloc_pending:     %d\n",
+			label, atomic_read((atomic_t *)&tpv->cdv_alloc_pending));
+	else
+		BUF_ADD("[%s] meta_cdv_alloc_pending:%d\n",
+			label, atomic_read((atomic_t *)&tpv->meta_cdv_alloc_pending));
+	if (show_l1_fields) {
+		BUF_ADD("[%s] l1_extent_index:       %llu\n", label, alloc->l1_extent_index);
+		BUF_ADD("[%s] n_l2_tables_used:      %llu\n", label, alloc->n_l2_tables_used);
+	}
+
+#undef BUF_ADD
+	return count;
+}
+
+static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
+{
+	struct nvmeibc_tpv *tpv = arg;
+	ssize_t count = 0;
+
+#define BUF_ADD(...) count += scnprintf(buf + count, len - count, __VA_ARGS__)
+
+	BUF_ADD("state_loaded:            %s\n",
+		READ_ONCE(tpv->state_loaded) ? "yes" : "no");
+	BUF_ADD("split_mode:              %s\n",
+		nvmeibc_tpv_is_split(tpv) ? "yes" : "no");
+
+	/*
+	 * Data side always present; L1 fields live on whichever side owns the
+	 * tree — data in single-CDV mode, meta in split mode.
+	 */
+	count = tpv_proc_allocator_dump_side(tpv, &tpv->allocator, "data",
+					      !nvmeibc_tpv_is_split(tpv),
+					      /*pending_atomic=*/true,
+					      buf, len, count);
+	if (nvmeibc_tpv_is_split(tpv) && tpv->meta_allocator) {
+		count = tpv_proc_allocator_dump_side(tpv, tpv->meta_allocator, "meta",
+						      /*show_l1_fields=*/true,
+						      /*pending_atomic=*/false,
+						      buf, len, count);
+	}
 
 #undef BUF_ADD
 	return count;

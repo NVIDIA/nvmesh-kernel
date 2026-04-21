@@ -246,7 +246,10 @@ static inline void persist_decode_phys(const struct nvmeibc_tpv_allocator *a,
 static int persist_get_or_alloc_l2_ctx(struct nvmeibc_tpv *tpv, u64 l1_idx,
 				       struct tpv_l2_ctx **ctx_out)
 {
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	/* L1/L2 tree bookkeeping lives on the metadata-side allocator in
+	 * split mode; nvmeibc_tpv_meta_alloc() returns the data allocator
+	 * in single-CDV mode so this helper keeps working unchanged. */
+	struct nvmeibc_tpv_allocator *alloc = nvmeibc_tpv_meta_alloc(tpv);
 	struct tpv_l2_ctx *ctx;
 	u64 n_pages = persist_n_pages(alloc);
 	u64 phys;
@@ -301,7 +304,7 @@ static int persist_get_or_alloc_l2_ctx(struct nvmeibc_tpv *tpv, u64 l1_idx,
  */
 void nvmeibc_tpv_mark_l2_leaf_dirty(struct nvmeibc_tpv *tpv, u64 virt_idx)
 {
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_allocator *alloc = nvmeibc_tpv_meta_alloc(tpv);
 	u64 N_L2   = persist_n_l2(alloc);
 	u64 l1_idx = virt_idx / N_L2;
 	u64 l2_idx = virt_idx % N_L2;
@@ -323,7 +326,7 @@ EXPORT_SYMBOL(nvmeibc_tpv_mark_l2_leaf_dirty);
  */
 void nvmeibc_tpv_mark_l1_full_dirty(struct nvmeibc_tpv *tpv)
 {
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_allocator *alloc = nvmeibc_tpv_meta_alloc(tpv);
 	u64 n_pages = persist_n_pages(alloc);
 
 	if (!alloc->l1_dirty_pages)
@@ -345,7 +348,8 @@ static int flush_state_write_l2_ctx(struct nvmeibc_tpv *tpv,
 				    u64 n_pages,
 				    struct tpv_tree_entry *l1_entries)
 {
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	/* L1 dirty-page bitmap lives on the metadata-side allocator. */
+	struct nvmeibc_tpv_allocator *alloc = nvmeibc_tpv_meta_alloc(tpv);
 	int rv;
 
 	if (tpv_is_detaching(tpv))
@@ -371,7 +375,16 @@ static int flush_state_write_l2_ctx(struct nvmeibc_tpv *tpv,
 
 int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 {
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	/*
+	 * The L1/L2 tree lives on the metadata side. Geometry constants (T,
+	 * N_L1, N_L2, n_pages) come from the metadata allocator because the
+	 * metadata CDV may use a different cdv_extent_size_mib /
+	 * tpv_extent_size_kb than the data CDV. In single-CDV mode both
+	 * allocators are the same. extent_map iteration (data leaves) still
+	 * happens against the data-side allocator — see below.
+	 */
+	struct nvmeibc_tpv_allocator *alloc      = nvmeibc_tpv_meta_alloc(tpv);
+	struct nvmeibc_tpv_allocator *data_alloc = nvmeibc_tpv_data_alloc(tpv);
 	u64  T       = persist_slot_bytes(alloc);
 	u64  N_L1    = persist_n_l1(alloc);
 	u64  N_L2    = persist_n_l2(alloc);
@@ -445,8 +458,9 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	 * Group entries by L1_idx.  When L1_idx changes, flush the previous
 	 * L2 table to CDV and start a fresh one.
 	 */
+	/* Iterate the data-side extent map: leaves point at data CDV offsets. */
 	rcu_read_lock();
-	xa_for_each(&alloc->extent_map, idx, entry) {
+	xa_for_each(&data_alloc->extent_map, idx, entry) {
 		u64 V       = idx;
 		u64 l1_idx  = V / N_L2;
 		u64 l2_idx  = V % N_L2;
@@ -564,7 +578,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		unsigned long xi;
 
 		rcu_read_lock();
-		xa_for_each(&alloc->extent_map, xi, e)
+		xa_for_each(&data_alloc->extent_map, xi, e)
 			WRITE_ONCE(e->persisted, true);
 		(void)xi;
 		rcu_read_unlock();
@@ -651,46 +665,42 @@ static void persist_free_le_list(struct list_head *le_list)
  * Returns 0 on success, negative errno on hard error.
  * Called at attach time (single-threaded, no concurrent IO).
  */
-int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
+/*
+ * load_state_snapshot_toma_id — pull the TOMA identity for a given allocator
+ * side into @toma_id_out (NVMEIB_HOST_NAME_LEN bytes). If the TPV's cached
+ * copy is empty, re-reads the CDV's cache and primes the TPV if possible.
+ *
+ * Returns 0 on success, -EAGAIN if no TOMA identity is available yet (caller
+ * should retry via load_state_work_fn).
+ */
+static int load_state_snapshot_toma_id(struct nvmeibc_tpv *tpv,
+					bool is_meta_side,
+					char *toma_id_out)
 {
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
-	u64  T       = persist_slot_bytes(alloc);
-	u64  N_L1    = persist_n_l1(alloc);
-	u64  N_L2    = persist_n_l2(alloc);
-	u64  n_slots = persist_slots_per_extent(alloc);
-	char toma_id[NVMEIB_HOST_NAME_LEN];
-	u64 *toma_indices = NULL;
-	u64  toma_count   = 0;
-	void *l1_buf      = NULL;
-	struct tpv_l1_header  *hdr;
-	struct tpv_tree_entry *l1_entries;
-	struct tpv_tree_entry *l2 = NULL;
-	u64  l1_ei   = 0;	/* CDV_extent holding the L1 table */
-	u64  loaded  = 0;
-	u64  i;
-	int  rv;
+	struct nvmeibc_volume *cdv;
+	spinlock_t *id_lock;
+	const char *id_src;
+	u64        *gen_src;
 	unsigned long flags;
-	LIST_HEAD(le_list);
 
-	if (tpv_is_detaching(tpv))
-		return -ECANCELED;
+	if (is_meta_side) {
+		cdv     = tpv->meta_cdv_vol;
+		id_lock = &tpv->meta_allocator_id_lock;
+		id_src  = tpv->meta_allocator_toma_id;
+		gen_src = &tpv->meta_allocator_generation;
+	} else {
+		cdv     = tpv->cdv_vol;
+		id_lock = &tpv->allocator_id_lock;
+		id_src  = tpv->allocator_toma_id;
+		gen_src = &tpv->allocator_generation;
+	}
 
-	/* ── 1. Snapshot TOMA identity ──────────────────────────────────
-	 *
-	 * The TPV's allocator_toma_id is seeded once from cdv->cdv_allocator_toma_id
-	 * at attach/adopt time (see nvmeibc_tpv_attach:764-770 and
-	 * nvmeibc_tpv_adopt:493-503).  A CDV_ALLOCATOR_UPDATE push that lands
-	 * while the TPV is not yet in nvmeibc_tpv_active_list populates the CDV
-	 * cache but does not reach the TPV.  Close that race here by re-reading
-	 * the CDV cache whenever the local snapshot is empty.
-	 */
-	spin_lock_irqsave(&tpv->allocator_id_lock, flags);
-	strncpy(toma_id, tpv->allocator_toma_id, sizeof(toma_id) - 1);
-	toma_id[sizeof(toma_id) - 1] = '\0';
-	spin_unlock_irqrestore(&tpv->allocator_id_lock, flags);
+	spin_lock_irqsave(id_lock, flags);
+	strncpy(toma_id_out, id_src, NVMEIB_HOST_NAME_LEN - 1);
+	toma_id_out[NVMEIB_HOST_NAME_LEN - 1] = '\0';
+	spin_unlock_irqrestore(id_lock, flags);
 
-	if (toma_id[0] == '\0' && tpv->cdv_vol) {
-		struct nvmeibc_volume *cdv = tpv->cdv_vol;
+	if (toma_id_out[0] == '\0' && cdv) {
 		unsigned long vflags;
 		char   cdv_toma[NVMEIB_HOST_NAME_LEN] = {0};
 		u64    cdv_gen = 0;
@@ -702,30 +712,169 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		spin_unlock_irqrestore(&cdv->spinlock, vflags);
 
 		if (cdv_toma[0]) {
-			nvmeibc_tpv_update_allocator_id(tpv, cdv_toma, cdv_gen);
-			strncpy(toma_id, cdv_toma, sizeof(toma_id) - 1);
-			toma_id[sizeof(toma_id) - 1] = '\0';
+			if (is_meta_side) {
+				unsigned long iflags;
+
+				spin_lock_irqsave(id_lock, iflags);
+				strncpy(tpv->meta_allocator_toma_id, cdv_toma,
+					sizeof(tpv->meta_allocator_toma_id) - 1);
+				tpv->meta_allocator_toma_id[sizeof(tpv->meta_allocator_toma_id) - 1] = '\0';
+				*gen_src = cdv_gen;
+				spin_unlock_irqrestore(id_lock, iflags);
+			} else {
+				nvmeibc_tpv_update_allocator_id(tpv, cdv_toma, cdv_gen);
+			}
+			strncpy(toma_id_out, cdv_toma, NVMEIB_HOST_NAME_LEN - 1);
+			toma_id_out[NVMEIB_HOST_NAME_LEN - 1] = '\0';
 			_NI(tpv_load_toma_from_cdv,
-			    "TPV: @STR: picked up allocator toma=@STR gen=@LLU from CDV cache",
-			    tpv->tpv_name, cdv_toma, cdv_gen);
+			    "TPV: @STR: picked up allocator toma=@STR gen=@LLU from CDV cache (meta=@INT)",
+			    tpv->tpv_name, cdv_toma, cdv_gen, (int)is_meta_side);
 		}
 	}
 
-	if (toma_id[0] == '\0') {
-		/*
-		 * Allocator TOMA not yet known on TPV or CDV — can't query
-		 * CDV_LIST_EXTENTS.  Return -EAGAIN so load_state_work_fn
-		 * retries; the CDV cache is updated on each CDV_ALLOCATOR_UPDATE
-		 * push and will be re-read next iteration.
-		 */
+	if (toma_id_out[0] == '\0') {
 		_NW(tpv_load_no_toma,
-		    "TPV: @STR: no allocator TOMA ID; deferring load_state",
-		    tpv->tpv_name);
+		    "TPV: @STR: no allocator TOMA ID yet (meta=@INT); deferring load_state",
+		    tpv->tpv_name, (int)is_meta_side);
 		return -EAGAIN;
 	}
+	return 0;
+}
 
-	/* ── 2. CDV_LIST_EXTENTS ──────────────────────────────────────── */
-	rv = nvmeibc_ib_admin_cdv_list_extents(tpv->cdv_vol, toma_id,
+/*
+ * load_state_populate_data_side_from_toma_list — split-mode helper.
+ *
+ * In split mode the data CDV never hosts L1/L2 — every extent TOMA reports
+ * as owned by this TPV is a pure data extent. Walk the list, match each
+ * extent against the xarray leaves already installed (so already-used slots
+ * are excluded from the free pool), and splice the remaining slots into the
+ * data-side free pool.
+ *
+ * Runs AFTER the L1/L2 walk in the meta side has populated data_alloc's
+ * extent_map. Called only when nvmeibc_tpv_is_split(tpv).
+ */
+static int load_state_populate_data_side(struct nvmeibc_tpv *tpv,
+					  const u64 *data_indices,
+					  u64 data_count)
+{
+	struct nvmeibc_tpv_allocator *data_alloc = nvmeibc_tpv_data_alloc(tpv);
+	u64  n_slots = persist_slots_per_extent(data_alloc);
+	u64  i;
+	LIST_HEAD(le_list);
+	int  rv = 0;
+
+	for (i = 0; i < data_count; i++) {
+		if (!persist_find_or_create_le(&le_list, data_indices[i], n_slots)) {
+			rv = -ENOMEM;
+			goto out;
+		}
+	}
+
+	/*
+	 * Mark slots that are already referenced by the xarray (data leaves
+	 * installed from the L2 walk) so they don't end up on the free list.
+	 */
+	{
+		struct nvmeibc_tpv_extent_entry *ee;
+		unsigned long xi;
+
+		rcu_read_lock();
+		xa_for_each(&data_alloc->extent_map, xi, ee) {
+			u64 data_idx, slot_in;
+			struct persist_load_extent *le;
+
+			persist_decode_phys(data_alloc, ee->phys_offset,
+					     &data_idx, &slot_in);
+			le = persist_find_or_create_le(&le_list, data_idx, n_slots);
+			if (le)
+				set_bit(slot_in, le->used_bm);
+			(void)xi;
+		}
+		rcu_read_unlock();
+	}
+
+	{
+		struct persist_load_extent *le;
+
+		list_for_each_entry(le, &le_list, node) {
+			struct nvmeibc_cdv_extent_ref *ref;
+			u64 s;
+			u64 data_cnt = bitmap_weight(le->used_bm, le->n_slots);
+
+			ref = kzalloc(sizeof(*ref), GFP_NOIO);
+			if (!ref) { rv = -ENOMEM; goto out; }
+			ref->extent_index    = le->extent_index;
+			ref->allocated_count = data_cnt;
+			ref->l2_slots        = 0;		/* no L2 on data side */
+			ref->is_l1_extent    = false;	/* no L1 on data side */
+			INIT_LIST_HEAD(&ref->node);
+			list_add_tail(&ref->node, &data_alloc->cdv_extent_list);
+			data_alloc->cdv_extents_count++;
+
+			for (s = 0; s < le->n_slots; s++) {
+				struct nvmeibc_tpv_free_slot *fs;
+
+				if (test_bit(s, le->used_bm))
+					continue;
+				fs = kzalloc(sizeof(*fs), GFP_NOIO);
+				if (!fs) { rv = -ENOMEM; goto out; }
+				fs->phys_offset      = persist_phys_of(data_alloc,
+							le->extent_index, s);
+				fs->cdv_extent_index = le->extent_index;
+				INIT_LIST_HEAD(&fs->node);
+				list_add_tail(&fs->node, &data_alloc->free_tpv_extents);
+				data_alloc->free_tpv_extent_count++;
+			}
+		}
+	}
+
+out:
+	persist_free_le_list(&le_list);
+	return rv;
+}
+
+int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
+{
+	/*
+	 * In split mode the L1/L2 tree lives on the metadata CDV, so the
+	 * tree walk, CDV_LIST_EXTENTS for the L1 scan, and L1/L2 bookkeeping
+	 * all use the metadata-side allocator and CDV. Data leaves (pointers
+	 * into the data CDV) are stored on the data-side allocator's xarray.
+	 * In single-CDV mode nvmeibc_tpv_meta_* return the data side, so the
+	 * code below degrades to the pre-split behavior automatically.
+	 */
+	struct nvmeibc_tpv_allocator *alloc      = nvmeibc_tpv_meta_alloc(tpv);
+	struct nvmeibc_tpv_allocator *data_alloc = nvmeibc_tpv_data_alloc(tpv);
+	struct nvmeibc_volume        *meta_cdv   = nvmeibc_tpv_meta_cdv(tpv);
+	u64  T       = persist_slot_bytes(alloc);
+	u64  N_L1    = persist_n_l1(alloc);
+	u64  N_L2    = persist_n_l2(alloc);
+	u64  n_slots = persist_slots_per_extent(alloc);
+	char toma_id[NVMEIB_HOST_NAME_LEN];
+	u64 *toma_indices = NULL;
+	u64  toma_count   = 0;
+	u64 *data_toma_indices = NULL;	/* split-mode data-side list */
+	u64  data_toma_count   = 0;
+	void *l1_buf      = NULL;
+	struct tpv_l1_header  *hdr;
+	struct tpv_tree_entry *l1_entries;
+	struct tpv_tree_entry *l2 = NULL;
+	u64  l1_ei   = 0;	/* CDV_extent holding the L1 table */
+	u64  loaded  = 0;
+	u64  i;
+	int  rv;
+	LIST_HEAD(le_list);
+
+	if (tpv_is_detaching(tpv))
+		return -ECANCELED;
+
+	/* ── 1. Snapshot TOMA identity for the tree-owning side ──────── */
+	rv = load_state_snapshot_toma_id(tpv, nvmeibc_tpv_is_split(tpv), toma_id);
+	if (rv)
+		return rv;
+
+	/* ── 2. CDV_LIST_EXTENTS on the tree-owning CDV ─────────────── */
+	rv = nvmeibc_ib_admin_cdv_list_extents(meta_cdv, toma_id,
 					       tpv->tpv_uuid,
 					       &toma_indices, &toma_count);
 	if (rv == -ENOTSUPP) {
@@ -977,7 +1126,9 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			ee->cdv_extent_index = data_idx;
 			ee->persisted        = true;
 
-			rv = xa_err(xa_store(&alloc->extent_map, V,
+			/* Leaves point at data-CDV offsets and live on the
+			 * data-side allocator's extent_map. */
+			rv = xa_err(xa_store(&data_alloc->extent_map, V,
 					     ee, GFP_NOIO));
 			if (rv) {
 				kfree(ee);
@@ -985,15 +1136,28 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			}
 			loaded++;
 
-			/* Track per-CDV_extent slot usage. */
-			le = persist_find_or_create_le(&le_list,
-						      data_idx,
-						      n_slots);
-			if (!le) {
-				rv = -ENOMEM;
-				goto out_free;
+			/*
+			 * Track per-CDV_extent slot usage for the tree-owning
+			 * side's le_list. In single-CDV mode that side owns
+			 * both L1/L2 and data, so data-leaf slots need marking
+			 * here. In split mode data leaves live on a different
+			 * CDV — their extent tracking is handled by
+			 * load_state_populate_data_side() below and they must
+			 * not enter meta's le_list (extent-index collisions
+			 * between the two CDVs would poison it).
+			 */
+			if (!nvmeibc_tpv_is_split(tpv)) {
+				le = persist_find_or_create_le(&le_list,
+							      data_idx,
+							      n_slots);
+				if (!le) {
+					rv = -ENOMEM;
+					goto out_free;
+				}
+				set_bit(slot_in, le->used_bm);
+			} else {
+				(void)le;
 			}
-			set_bit(slot_in, le->used_bm);
 		}
 	}
 
@@ -1087,6 +1251,54 @@ store_toma_list:
 	/* ── 7. Store TOMA list for recovery ──────────────────────────── */
 	alloc->toma_extent_list  = toma_indices;
 	alloc->toma_extent_count = toma_count;
+
+	/*
+	 * Split-mode: populate the data-side allocator's cdv_extent_list and
+	 * free_tpv_extents from a separate CDV_LIST_EXTENTS query against the
+	 * data CDV. Data-leaf slots already installed in data_alloc->extent_map
+	 * are excluded from the free pool.
+	 */
+	if (nvmeibc_tpv_is_split(tpv)) {
+		char   data_toma[NVMEIB_HOST_NAME_LEN];
+		int    rv2;
+
+		rv2 = load_state_snapshot_toma_id(tpv, /*is_meta_side=*/false,
+						   data_toma);
+		if (rv2) {
+			_NW(tpv_load_data_side_toma_unknown,
+			    "TPV: @STR: no data-side TOMA ID yet; data-side pool will be populated when cdv_alloc_work lands",
+			    tpv->tpv_name);
+		} else {
+			rv2 = nvmeibc_ib_admin_cdv_list_extents(
+				nvmeibc_tpv_data_cdv(tpv), data_toma,
+				tpv->tpv_uuid,
+				&data_toma_indices, &data_toma_count);
+			if (rv2 == -ENOTSUPP) {
+				/* test stub — fresh data side */
+				_NI(tpv_load_data_side_stub,
+				    "TPV: @STR: data-side CDV_LIST_EXTENTS not available; fresh data side",
+				    tpv->tpv_name);
+			} else if (rv2) {
+				_NE(tpv_load_data_side_list_fail,
+				    "TPV: @STR: data-side CDV_LIST_EXTENTS failed rv=@INT",
+				    tpv->tpv_name, rv2);
+			} else if (data_toma_count > 0) {
+				rv2 = load_state_populate_data_side(tpv,
+					data_toma_indices, data_toma_count);
+				if (rv2) {
+					_NE(tpv_load_data_side_populate_fail,
+					    "TPV: @STR: data-side populate failed rv=@INT",
+					    tpv->tpv_name, rv2);
+					kvfree(data_toma_indices);
+					return rv2;
+				}
+				data_alloc->toma_extent_list  = data_toma_indices;
+				data_alloc->toma_extent_count = data_toma_count;
+				data_toma_indices = NULL;
+			}
+		}
+		kvfree(data_toma_indices);
+	}
 	return 0;
 
 out_free:
@@ -1094,6 +1306,7 @@ out_free:
 	vfree(l2);
 	vfree(l1_buf);
 	kvfree(toma_indices);
+	kvfree(data_toma_indices);
 	return rv;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_load_state);

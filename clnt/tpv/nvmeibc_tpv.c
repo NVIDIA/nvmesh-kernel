@@ -168,10 +168,14 @@ void nvmeibc_tpv_detach_all_for_inst(const struct nvmeibc_cinst_params_main *cin
 again:
 	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
 	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
-		if (tpv->cdv_vol && tpv->cdv_vol->p == cinst) {
+		bool data_hit = tpv->cdv_vol && tpv->cdv_vol->p == cinst;
+		bool meta_hit = tpv->meta_cdv_vol && tpv->meta_cdv_vol->p == cinst;
+
+		if (data_hit || meta_hit) {
 			spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
-			_NI(tpv_shutdown_detach, "TPV: @STR detaching as part of instance shutdown",
-			    tpv->tpv_name);
+			_NI(tpv_shutdown_detach,
+			    "TPV: @STR detaching as part of instance shutdown (side=@STR)",
+			    tpv->tpv_name, data_hit ? "data" : "meta");
 			nvmeibc_tpv_detach(tpv);
 			goto again;
 		}
@@ -219,12 +223,18 @@ static void nvmeibc_tpv_cdv_preempted_work_fn(struct work_struct *work)
 again:
 	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
 	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
-		if (tpv->cdv_vol &&
-		    strncmp(tpv->cdv_vol->hdr.uuid, ctx->cdv_uuid, NVMEIBC_BD_UUID_LEN) == 0) {
+		bool data_hit = tpv->cdv_vol &&
+			strncmp(tpv->cdv_vol->hdr.uuid, ctx->cdv_uuid,
+				NVMEIBC_BD_UUID_LEN) == 0;
+		bool meta_hit = tpv->meta_cdv_vol &&
+			strncmp(tpv->meta_cdv_vol->hdr.uuid, ctx->cdv_uuid,
+				NVMEIBC_BD_UUID_LEN) == 0;
+
+		if (data_hit || meta_hit) {
 			spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
 			_NW(tpv_cdv_preempted,
-			    "TPV: @STR tearing down due to parent CDV preempt",
-			    tpv->tpv_name);
+			    "TPV: @STR tearing down due to parent CDV preempt (side=@STR)",
+			    tpv->tpv_name, data_hit ? "data" : "meta");
 			nvmeibc_tpv_detach(tpv);
 			goto again;
 		}
@@ -579,7 +589,8 @@ static void nvmeibc_tpv_blkdev_unregister(struct nvmeibc_tpv *tpv)
 static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 					      struct nvmeibc_volume *cdv,
 					      const char *tpv_uuid,
-					      bool sync_flush)
+					      bool sync_flush,
+					      struct nvmeibc_volume *meta_cdv)
 {
 	unsigned long flags;
 	(void)sync_flush;
@@ -592,11 +603,22 @@ static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 		return NULL;
 	}
 
-	/* A2. Reconnect to the (now-adopted) CDV volume object. */
+	/* A2. Reconnect to the (now-adopted) CDV volume object(s). */
 	tpv->cdv_vol = cdv;
+	if (tpv->meta_cdv_vol || meta_cdv) {
+		/* Split-mode orphan: restore meta_cdv_vol from the post-NDU
+		 * volume list. meta_cdv may be NULL if the caller did not
+		 * locate the metadata CDV in the newly-attached volumes; in
+		 * that case the TPV's existing meta_cdv_vol is a dangling
+		 * pointer — we clear it and the next tree write will fail
+		 * cleanly with -ENODEV until the caller re-drives adopt with
+		 * the metadata CDV pointer. */
+		tpv->meta_cdv_vol = meta_cdv;
+	}
 
 	/* A3. Re-initialise work structs with new module's function pointers. */
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
+	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
 	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
 	INIT_DELAYED_WORK(&tpv->timeout_work, nvmeibc_tpv_timeout_work_fn);
@@ -693,14 +715,19 @@ void nvmeibc_tpv_abandon_all_for_inst(const struct nvmeibc_cinst_params_main *ci
 again:
 	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
 	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
-		if (tpv->cdv_vol && tpv->cdv_vol->p == cinst) {
+		bool data_hit = tpv->cdv_vol && tpv->cdv_vol->p == cinst;
+		bool meta_hit = tpv->meta_cdv_vol && tpv->meta_cdv_vol->p == cinst;
+
+		if (data_hit || meta_hit) {
 			spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
 
-			_NI(tpv_ndu_abandon, "TPV: @STR abandoning for NDU",
-			    tpv->tpv_name);
+			_NI(tpv_ndu_abandon,
+			    "TPV: @STR abandoning for NDU (side=@STR)",
+			    tpv->tpv_name, data_hit ? "data" : "meta");
 
 			/* Step 1: Cancel background CDV_extent requests. */
 			cancel_work_sync(&tpv->cdv_alloc_work);
+			cancel_work_sync(&tpv->meta_cdv_alloc_work);
 
 			/* Step 2: Cancel persist work before flush. */
 			cancel_work_sync(&tpv->persist_work);
@@ -775,7 +802,10 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					u32 tpv_extent_size_kb,
 					u32 cdv_extent_size_mib,
 					u64 allocator_size_gib,
-					bool sync_flush)
+					bool sync_flush,
+					struct nvmeibc_volume *meta_cdv,
+					u32 meta_tpv_extent_size_kb,
+					u32 meta_cdv_extent_size_mib)
 {
 	struct nvmeibc_tpv *tpv;
 	int rv;
@@ -783,6 +813,14 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	if (WARN_ON(!cdv || !tpv_uuid || !tpv_name || !virtual_size_bytes ||
 		    !tpv_extent_size_kb))
 		return NULL;
+
+	/* Split-mode validation. */
+	if (meta_cdv) {
+		if (WARN_ON(meta_cdv == cdv ||
+			    !meta_tpv_extent_size_kb ||
+			    !meta_cdv_extent_size_mib))
+			return NULL;
+	}
 
 	/* ── 0a. Idempotency: return existing TPV if already attached ────
 	 *
@@ -827,7 +865,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 			    "TPV: @STR found NDU orphan atom; adopting",
 			    tpv_name);
 			return nvmeibc_tpv_adopt(orphan_tpv, cdv, tpv_uuid,
-						 sync_flush);
+						 sync_flush, meta_cdv);
 		}
 	}
 
@@ -852,6 +890,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	}
 
 	tpv->cdv_vol     = cdv;
+	tpv->meta_cdv_vol = meta_cdv;	/* NULL for single-CDV mode */
 	tpv->virtual_size = virtual_size_bytes;
 	strncpy(tpv->tpv_uuid, tpv_uuid, sizeof(tpv->tpv_uuid) - 1);
 	strncpy(tpv->tpv_name, tpv_name, sizeof(tpv->tpv_name) - 1);
@@ -868,6 +907,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	 * the work function will defer until the next CDV_ALLOCATOR_UPDATE.
 	 */
 	spin_lock_init(&tpv->allocator_id_lock);
+	spin_lock_init(&tpv->meta_allocator_id_lock);
 	{
 		unsigned long vflags;
 
@@ -878,6 +918,16 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		tpv->allocator_generation = cdv->cdv_allocator_generation;
 		spin_unlock_irqrestore(&cdv->spinlock, vflags);
 	}
+	if (meta_cdv) {
+		unsigned long vflags;
+
+		spin_lock_irqsave(&meta_cdv->spinlock, vflags);
+		strncpy(tpv->meta_allocator_toma_id, meta_cdv->cdv_allocator_toma_id,
+			sizeof(tpv->meta_allocator_toma_id) - 1);
+		tpv->meta_allocator_toma_id[sizeof(tpv->meta_allocator_toma_id) - 1] = '\0';
+		tpv->meta_allocator_generation = meta_cdv->cdv_allocator_generation;
+		spin_unlock_irqrestore(&meta_cdv->spinlock, vflags);
+	}
 	if (tpv->allocator_toma_id[0])
 		_NI(tpv_allocator_seeded,
 		    "TPV @STR: seeded allocator from CDV cache: toma=@STR gen=@LLU",
@@ -886,17 +936,32 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		_ND(tpv_allocator_no_cache,
 		    "TPV @STR: CDV allocator not yet known; will wait for CDV_ALLOCATOR_UPDATE push",
 		    tpv_name);
+	if (meta_cdv) {
+		if (tpv->meta_allocator_toma_id[0])
+			_NI(tpv_meta_allocator_seeded,
+			    "TPV @STR: seeded meta allocator from metaCDV cache: toma=@STR gen=@LLU",
+			    tpv_name, tpv->meta_allocator_toma_id, tpv->meta_allocator_generation);
+		else
+			_ND(tpv_meta_allocator_no_cache,
+			    "TPV @STR: metaCDV allocator not yet known; will wait for CDV_ALLOCATOR_UPDATE push",
+			    tpv_name);
+	}
 
 	spin_lock_init(&tpv->persist_lock);
 	tpv->dirty = false;
 
 	INIT_LIST_HEAD(&tpv->list_node);
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
+	/* meta_cdv_alloc_work runs the same handler; it distinguishes which
+	 * allocator (data vs. meta) to service via container_of on the work
+	 * struct. See nvmeibc_tpv_cdv_alloc_work_fn in nvmeibc_tpv_allocator.c. */
+	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
 	INIT_WORK(&tpv->persist_work,   nvmeibc_tpv_persist_work_fn);
 	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
 	INIT_DELAYED_WORK(&tpv->timeout_work, nvmeibc_tpv_timeout_work_fn);
 	tpv->state_loaded = false;
 	atomic_set(&tpv->cdv_alloc_pending, 0);
+	atomic_set(&tpv->meta_cdv_alloc_pending, 0);
 	atomic_set(&tpv->io_inflight, 0);
 
 	/*
@@ -913,10 +978,42 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	spin_lock_init(&tpv->pending_bio_lock);
 	tpv->sync_flush = sync_flush;
 
-	/* ── 3a. Initialise allocator ───────────────────────────────────── */
+	/* ── 3a. Initialise allocator(s) ─────────────────────────────────
+	 *
+	 * Data-side allocator always initialised.
+	 *
+	 * Split-mode: allocate a second allocator for the metadata CDV. It
+	 * manages L2-table slots on the metadata CDV (and will hold the L1
+	 * extent). The L1 bookkeeping fields (l1_extent_index,
+	 * n_l2_tables_used, l1_to_l2_ctx, l1_dirty_pages) live on whichever
+	 * allocator owns the L1 extent — nvmeibc_tpv_meta_alloc() returns
+	 * that allocator and is used throughout the persist/recovery paths.
+	 *
+	 * virtual_extents_total on the meta allocator is the number of L2
+	 * slots the metadata CDV can host, not the TPV's virtual extent
+	 * count. We pass the TPV's virtual size so the struct's book-keeping
+	 * of the TPV's logical range stays consistent, but the meta allocator
+	 * uses it only for the xarray key range (no xarray entries are
+	 * stored there — the xarray holding virt_idx -> extent_entry is on
+	 * the data-side allocator).
+	 */
 	nvmeibc_tpv_allocator_init(&tpv->allocator, tpv_extent_size_kb,
 				   virtual_size_bytes, cdv_extent_size_mib,
 				   allocator_size_gib);
+
+	if (meta_cdv) {
+		tpv->meta_allocator = kzalloc(sizeof(*tpv->meta_allocator), GFP_KERNEL);
+		if (!tpv->meta_allocator) {
+			_NE(tpv_attach_meta_alloc_kzalloc_fail,
+			    "TPV @STR: kzalloc meta_allocator failed", tpv_name);
+			goto err_free_alloc;
+		}
+		nvmeibc_tpv_allocator_init(tpv->meta_allocator,
+					   meta_tpv_extent_size_kb,
+					   virtual_size_bytes,
+					   meta_cdv_extent_size_mib,
+					   /* allocator_size_gib */ 0);
+	}
 
 	/* ── 3a-check. Verify 2-level L1/L2 tree can address all virtual extents. */
 	{
@@ -965,14 +1062,23 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	nvmeibc_tpv_proc_register(tpv);
 
 	_NI(tpv_attached,
-	    "TPV: @STR (uuid=@STR) attached vsize=@LLU MB tpv_ext=@UINT KB cdv_ext=@UINT MB alloc=@LLU GB wmark=@LLU sync_flush=@INT",
+	    "TPV: @STR (uuid=@STR) attached vsize=@LLU MB tpv_ext=@UINT KB cdv_ext=@UINT MB alloc=@LLU GB wmark=@LLU sync_flush=@INT split=@INT",
 	    tpv_name, tpv_uuid,
 	    virtual_size_bytes >> 20,
 	    tpv_extent_size_kb,
 	    cdv_extent_size_mib,
 	    allocator_size_gib,
 	    tpv->allocator.low_watermark,
-	    (int)tpv->sync_flush);
+	    (int)tpv->sync_flush,
+	    (int)(meta_cdv != NULL));
+
+	if (meta_cdv) {
+		_NI(tpv_meta_attached,
+		    "TPV @STR: split-mode meta CDV @STR meta_tpv_ext=@UINT KB meta_cdv_ext=@UINT MB",
+		    tpv_name, meta_cdv->hdr.uuid,
+		    meta_tpv_extent_size_kb,
+		    meta_cdv_extent_size_mib);
+	}
 
 	return tpv;
 
@@ -981,6 +1087,11 @@ err_free_alloc:
 	cancel_delayed_work_sync(&tpv->timeout_work);
 	/* Unregister the block device if blkdev_register already succeeded. */
 	nvmeibc_tpv_blkdev_unregister(tpv);
+	if (tpv->meta_allocator) {
+		nvmeibc_tpv_allocator_free(tpv->meta_allocator);
+		kfree(tpv->meta_allocator);
+		tpv->meta_allocator = NULL;
+	}
 	nvmeibc_tpv_allocator_free(&tpv->allocator);
 	kfree(tpv);
 	return NULL;
@@ -1011,6 +1122,7 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	/* ── 1. Remove from active list and cancel pending work ────────── */
 	cancel_delayed_work_sync(&tpv->load_state_work);
 	cancel_work_sync(&tpv->cdv_alloc_work);
+	cancel_work_sync(&tpv->meta_cdv_alloc_work);
 	cancel_work_sync(&tpv->persist_work);
 	cancel_delayed_work_sync(&tpv->timeout_work);
 
@@ -1053,6 +1165,11 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 
 	/* ── 4. Deregister proc entries and free allocator state ────────── */
 	nvmeibc_tpv_proc_deregister(tpv);
+	if (tpv->meta_allocator) {
+		nvmeibc_tpv_allocator_free(tpv->meta_allocator);
+		kfree(tpv->meta_allocator);
+		tpv->meta_allocator = NULL;
+	}
 	nvmeibc_tpv_allocator_free(&tpv->allocator);
 
 	_NI(tpv_detached, "TPV: @STR (uuid=@STR) detached", tpv->tpv_name, tpv->tpv_uuid);
@@ -1146,28 +1263,43 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 
 	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
 	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
-		if (!tpv->cdv_vol)
-			continue;
-		if (strncmp(tpv->cdv_vol->hdr.uuid, cdv_uuid,
-			    NVMEIBC_BD_UUID_LEN) != 0)
+		bool data_match = tpv->cdv_vol &&
+			strncmp(tpv->cdv_vol->hdr.uuid, cdv_uuid,
+				NVMEIBC_BD_UUID_LEN) == 0;
+		bool meta_match = tpv->meta_cdv_vol &&
+			strncmp(tpv->meta_cdv_vol->hdr.uuid, cdv_uuid,
+				NVMEIBC_BD_UUID_LEN) == 0;
+
+		if (!data_match && !meta_match)
 			continue;
 
 		_NI(tpv_allocator_cdv_update,
-		    "TPV @STR: CDV allocator update cdv=@STR toma=@STR gen=@LLU",
-		    tpv->tpv_name, cdv_uuid, toma_id, generation);
+		    "TPV @STR: CDV allocator update cdv=@STR toma=@STR gen=@LLU side=@STR",
+		    tpv->tpv_name, cdv_uuid, toma_id, generation,
+		    data_match ? "data" : "meta");
 
-		nvmeibc_tpv_update_allocator_id(tpv, toma_id, generation);
+		if (data_match) {
+			nvmeibc_tpv_update_allocator_id(tpv, toma_id, generation);
+			if (!READ_ONCE(tpv->state_loaded))
+				schedule_delayed_work(&tpv->load_state_work, 0);
+			else if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+				schedule_work(&tpv->cdv_alloc_work);
+		} else {
+			/* Meta side: write into tpv->meta_allocator_toma_id. */
+			unsigned long iflags;
 
-		/*
-		 * Re-arm load_state_work if the allocator state hasn't been
-		 * loaded yet — load_state retries may have stalled waiting
-		 * for the TOMA identity.  Otherwise re-arm cdv_alloc_work
-		 * in case it deferred due to an empty allocator_toma_id.
-		 */
-		if (!READ_ONCE(tpv->state_loaded))
-			schedule_delayed_work(&tpv->load_state_work, 0);
-		else if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
-			schedule_work(&tpv->cdv_alloc_work);
+			spin_lock_irqsave(&tpv->meta_allocator_id_lock, iflags);
+			strncpy(tpv->meta_allocator_toma_id, toma_id,
+				sizeof(tpv->meta_allocator_toma_id) - 1);
+			tpv->meta_allocator_toma_id[sizeof(tpv->meta_allocator_toma_id) - 1] = '\0';
+			tpv->meta_allocator_generation = generation;
+			spin_unlock_irqrestore(&tpv->meta_allocator_id_lock, iflags);
+
+			if (!READ_ONCE(tpv->state_loaded))
+				schedule_delayed_work(&tpv->load_state_work, 0);
+			else if (!atomic_xchg(&tpv->meta_cdv_alloc_pending, 1))
+				schedule_work(&tpv->meta_cdv_alloc_work);
+		}
 		n_updated++;
 	}
 	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);

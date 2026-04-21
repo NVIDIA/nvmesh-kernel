@@ -329,6 +329,16 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 
+	/* Split-mode fields default to single-CDV (null / zero) — callers
+	 * wanting split-mode initialize them via tpv_ktest_upgrade_to_split(). */
+	spin_lock_init(&tpv->meta_allocator_id_lock);
+	tpv->meta_cdv_vol      = NULL;
+	tpv->meta_allocator    = NULL;
+	tpv->meta_allocator_toma_id[0] = '\0';
+	tpv->meta_allocator_generation = 0;
+	INIT_WORK(&tpv->meta_cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
+	atomic_set(&tpv->meta_cdv_alloc_pending, 0);
+
 	INIT_WORK(&tpv->persist_work, nvmeibc_tpv_persist_work_fn);
 	spin_lock_init(&tpv->persist_lock);
 	tpv->dirty = false;
@@ -498,7 +508,86 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 	kvfree(alloc->toma_extent_list);
 	alloc->toma_extent_list = NULL;
 
+	/* Split-mode tests may have attached a meta_allocator. */
+	if (tpv->meta_allocator) {
+		struct nvmeibc_tpv_allocator *m = tpv->meta_allocator;
+
+		xa_destroy(&m->extent_map);
+		{
+			struct nvmeibc_cdv_extent_ref *mref, *mtmp;
+
+			list_for_each_entry_safe(mref, mtmp, &m->cdv_extent_list, node) {
+				list_del(&mref->node);
+				kfree(mref);
+			}
+			list_for_each_entry_safe(mref, mtmp, &m->pending_return_list, node) {
+				list_del(&mref->node);
+				kfree(mref);
+			}
+		}
+		nvmeibc_tpv_free_slots_list(&m->free_tpv_extents);
+		{
+			struct tpv_l2_ctx *ctx;
+			unsigned long      li;
+
+			xa_for_each(&m->l1_to_l2_ctx, li, ctx) {
+				if (ctx) {
+					bitmap_free(ctx->dirty_pages);
+					kfree(ctx);
+				}
+			}
+			xa_destroy(&m->l1_to_l2_ctx);
+		}
+		bitmap_free(m->l1_dirty_pages);
+		kvfree(m->toma_extent_list);
+		kfree(m);
+		tpv->meta_allocator = NULL;
+	}
+
 	kfree(tpv);
+}
+
+/*
+ * tpv_ktest_upgrade_to_split — convert a fresh kzalloc'd TPV into split-mode
+ * by allocating a meta_allocator instance with the given geometry. Callers
+ * that exercise split-mode paths use this right after tpv_ktest_create().
+ * Returns 0 on success, -ENOMEM on failure.
+ */
+static int tpv_ktest_upgrade_to_split(struct nvmeibc_tpv *tpv,
+				       u32 meta_tpv_extent_size_kb,
+				       u32 meta_cdv_extent_size_mib)
+{
+	struct nvmeibc_tpv_allocator *m;
+	u64 T, n_pages;
+
+	m = kzalloc(sizeof(*m), GFP_KERNEL);
+	if (!m)
+		return -ENOMEM;
+
+	xa_init(&m->extent_map);
+	spin_lock_init(&m->lock);
+	m->tpv_extent_size_kb    = meta_tpv_extent_size_kb;
+	m->cdv_extent_size_mib   = meta_cdv_extent_size_mib;
+	m->allocator_size_gib    = 0;
+	m->virtual_extents_total = tpv->virtual_size /
+				   ((u64)meta_tpv_extent_size_kb << 10);
+	INIT_LIST_HEAD(&m->cdv_extent_list);
+	INIT_LIST_HEAD(&m->free_tpv_extents);
+	INIT_LIST_HEAD(&m->pending_return_list);
+	xa_init(&m->l1_to_l2_ctx);
+	T       = (u64)meta_tpv_extent_size_kb << 10;
+	n_pages = (T + 4095ULL) / 4096ULL;
+	m->l1_dirty_pages = bitmap_zalloc(n_pages, GFP_KERNEL);
+
+	tpv->meta_allocator = m;
+	/*
+	 * Non-NULL meta_cdv_vol triggers nvmeibc_tpv_is_split() → true. We
+	 * use tpv->atom as a sentinel pointer value (never dereferenced in
+	 * the split-mode code paths exercised by these tests) since our
+	 * CDV sync I/O is fully stubbed by nvmeibc_tpv_cdv_test_*_fn.
+	 */
+	tpv->meta_cdv_vol = (struct nvmeibc_volume *)&tpv->atom;
+	return 0;
 }
 
 /* ── Self-test functions ─────────────────────────────────────────────────── */
@@ -991,13 +1080,93 @@ cleanup:
 	g_tc.recovery_count   = 0;
 }
 
+/*
+ * tpv_ktest_split_mode — structural smoke test for split-mode TPV helpers.
+ *
+ * Verifies:
+ *   • nvmeibc_tpv_is_split() toggles correctly based on meta_cdv_vol.
+ *   • nvmeibc_tpv_meta_alloc() / nvmeibc_tpv_data_alloc() return distinct
+ *     allocator pointers once upgraded.
+ *   • Single-CDV mode (default) returns the same pointer from both.
+ *   • The two allocators can carry different tpv_extent_size_kb geometries.
+ *
+ * Does not exercise the full alloc/free IO flow because that would require
+ * parallel stub CDV buffers for both sides. Full IO-level split-mode tests
+ * land separately once the test harness learns how to stand up two CDVs.
+ */
+static void tpv_ktest_split_mode(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv *tpv;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) {
+		KTO_FAIL(kto, "split_mode", "kzalloc failed");
+		return;
+	}
+
+	if (nvmeibc_tpv_is_split(tpv)) {
+		KTO_FAIL(kto, "split_mode", "is_split() true before upgrade");
+		goto done;
+	}
+	if (nvmeibc_tpv_meta_alloc(tpv) != &tpv->allocator) {
+		KTO_FAIL(kto, "split_mode", "meta_alloc != data_alloc in single mode");
+		goto done;
+	}
+	if (nvmeibc_tpv_data_alloc(tpv) != &tpv->allocator) {
+		KTO_FAIL(kto, "split_mode", "data_alloc mismatch in single mode");
+		goto done;
+	}
+
+	/* Upgrade: meta side uses a different tpv_extent_size_kb so the two
+	 * allocators are distinguishable by geometry. */
+	rc = tpv_ktest_upgrade_to_split(tpv, TPV_KTEST_TPV_EXT_KB * 2,
+					 TPV_KTEST_CDV_EXT_MB);
+	if (rc != 0) {
+		KTO_FAIL(kto, "split_mode", "upgrade_to_split rc=%d", rc);
+		goto done;
+	}
+
+	if (!nvmeibc_tpv_is_split(tpv)) {
+		KTO_FAIL(kto, "split_mode", "is_split() false after upgrade");
+		goto done;
+	}
+	if (nvmeibc_tpv_meta_alloc(tpv) != tpv->meta_allocator) {
+		KTO_FAIL(kto, "split_mode", "meta_alloc != tpv->meta_allocator");
+		goto done;
+	}
+	if (nvmeibc_tpv_data_alloc(tpv) != &tpv->allocator) {
+		KTO_FAIL(kto, "split_mode", "data_alloc != &tpv->allocator");
+		goto done;
+	}
+	if (nvmeibc_tpv_meta_alloc(tpv) == nvmeibc_tpv_data_alloc(tpv)) {
+		KTO_FAIL(kto, "split_mode",
+			 "meta_alloc and data_alloc alias in split mode");
+		goto done;
+	}
+	if (nvmeibc_tpv_meta_alloc(tpv)->tpv_extent_size_kb ==
+	    nvmeibc_tpv_data_alloc(tpv)->tpv_extent_size_kb) {
+		KTO_FAIL(kto, "split_mode",
+			 "expected distinct geometry: data T=%u meta T=%u",
+			 nvmeibc_tpv_data_alloc(tpv)->tpv_extent_size_kb,
+			 nvmeibc_tpv_meta_alloc(tpv)->tpv_extent_size_kb);
+		goto done;
+	}
+
+	KTO_PASS(kto, "split_mode");
+done:
+	tpv_ktest_destroy(tpv);
+}
+
 /* ── Proc fill function ─────────────────────────────────────────────────── */
 
 /*
  * nvmeibc_tpv_run_selftests — proc fill function for "selftest".
  *
- * Reading /proc/nvmeibc/tpv/<name>/selftest runs all five kernel self-tests
- * and writes a summary to the proc read buffer.
+ * Reading /proc/nvmeibc/tpv/<name>/selftest runs all kernel self-tests
+ * (six as of TPV_MetadataCDV.md: alloc/free, persist, pool exhaustion,
+ * double free, recovery, split-mode smoke) and writes a summary to the
+ * proc read buffer.
  *
  * arg is the nvmeibc_tpv * registered at proc creation time (unused here;
  * tests construct their own TPV instances for full isolation).
@@ -1051,8 +1220,9 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg __maybe_unused, char *buf, size_t le
 	tpv_ktest_pool_exhaustion(&kto);
 	tpv_ktest_double_free(&kto);
 	tpv_ktest_recovery(&kto);
+	tpv_ktest_split_mode(&kto);
 
-#define TPV_KTEST_N_TESTS	5
+#define TPV_KTEST_N_TESTS	6
 	KTO_ADD(&kto, "\n");
 	if (kto.failures == 0)
 		KTO_ADD(&kto, "all %d tests passed\n", TPV_KTEST_N_TESTS);

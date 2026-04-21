@@ -150,14 +150,22 @@ static bool tpv_recovery_is_known(const struct nvmeibc_tpv_allocator *alloc,
  *
  * Must be called from single-threaded context (attach / recovery path).
  */
-static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index)
+static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
+				      bool is_meta_side)
 {
-	struct nvmeibc_tpv_allocator  *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_allocator  *alloc = is_meta_side ? tpv->meta_allocator
+							    : &tpv->allocator;
 	struct nvmeibc_cdv_extent_ref *ref;
 	struct nvmeibc_tpv_free_slot  *fs;
 	u64   n_slots = recov_slots_per_extent(alloc);
 	u64   s, first_s = 0;
 	bool  promote_to_l1 = false;
+	/*
+	 * The L1 extent lives on the side that owns the tree. In single-CDV
+	 * mode that's the data allocator; in split mode it's the metadata
+	 * allocator. Only that side may promote an orphan to the L1 host.
+	 */
+	bool  this_side_hosts_l1 = !nvmeibc_tpv_is_split(tpv) || is_meta_side;
 	LIST_HEAD(batch);
 
 	ref = kzalloc(sizeof(*ref), GFP_NOIO);
@@ -171,7 +179,7 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index)
 	 * Mirrors the tpv_on_cdv_alloc_ok bootstrap path: reserve slot 0 for
 	 * the forthcoming L1 write and keep the rest as free slots.
 	 */
-	if (alloc->l1_extent_index == 0) {
+	if (this_side_hosts_l1 && alloc->l1_extent_index == 0) {
 		alloc->l1_extent_index = extent_index;
 		promote_to_l1          = true;
 		first_s                = 1;	/* skip slot 0 in free-pool splice */
@@ -226,9 +234,17 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index)
  * Returns 0 always.  Individual adoption failures are logged but do not
  * abort recovery of the remaining extents, and do not fail the attach.
  */
-int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
+/*
+ * tpv_recovery_one_side — run orphan reconciliation for a single CDV side.
+ *
+ * Returns 0 always; adoption failures are logged but non-fatal.
+ */
+static int tpv_recovery_one_side(struct nvmeibc_tpv *tpv, bool is_meta_side)
 {
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_allocator *alloc;
+	struct nvmeibc_volume        *cdv_vol;
+	spinlock_t                   *id_lock;
+	const char                   *id_src;
 	char   toma_id[NVMEIB_HOST_NAME_LEN];
 	u64   *toma_indices = NULL;
 	u64    toma_count   = 0;
@@ -237,84 +253,75 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 	u64    i;
 	int    rv;
 
-	/* ── 1. Snapshot the allocator TOMA identity ────────────────────────── */
-	spin_lock_irqsave(&tpv->allocator_id_lock, flags);
-	strncpy(toma_id, tpv->allocator_toma_id, sizeof(toma_id) - 1);
+	if (is_meta_side) {
+		alloc   = tpv->meta_allocator;
+		cdv_vol = tpv->meta_cdv_vol;
+		id_lock = &tpv->meta_allocator_id_lock;
+		id_src  = tpv->meta_allocator_toma_id;
+	} else {
+		alloc   = &tpv->allocator;
+		cdv_vol = tpv->cdv_vol;
+		id_lock = &tpv->allocator_id_lock;
+		id_src  = tpv->allocator_toma_id;
+	}
+
+	if (!alloc || !cdv_vol)
+		return 0;
+
+	/* ── 1. Snapshot the allocator TOMA identity ─────────── */
+	spin_lock_irqsave(id_lock, flags);
+	strncpy(toma_id, id_src, sizeof(toma_id) - 1);
 	toma_id[sizeof(toma_id) - 1] = '\0';
-	spin_unlock_irqrestore(&tpv->allocator_id_lock, flags);
+	spin_unlock_irqrestore(id_lock, flags);
 
 	if (toma_id[0] == '\0') {
-		/*
-		 * CDV topology has not yet pushed the allocator identity.
-		 * The normal below-watermark CDV_extent request will eventually
-		 * replenish the free pool.  Orphaned extents, if any, are left
-		 * for NVCK to reclaim.
-		 */
 		_NW(tpv_recovery_no_toma,
-		    "TPV: @STR: no allocator TOMA ID at recovery time; orphan check skipped",
-		    tpv->tpv_name);
+		    "TPV: @STR: no allocator TOMA ID at recovery time (meta=@INT); orphan check skipped",
+		    tpv->tpv_name, (int)is_meta_side);
 		return 0;
 	}
 
-	/* ── 2. Get TOMA extent list (prefer cached from load_state) ───────── */
+	/* ── 2. Get TOMA extent list (prefer cached from load_state) ── */
 	if (alloc->toma_extent_list && alloc->toma_extent_count > 0) {
 		toma_indices = alloc->toma_extent_list;
 		toma_count   = alloc->toma_extent_count;
-		/* Transfer ownership: recovery will vfree. */
 		alloc->toma_extent_list  = NULL;
 		alloc->toma_extent_count = 0;
 	} else {
-		rv = nvmeibc_ib_admin_cdv_list_extents(tpv->cdv_vol, toma_id,
+		rv = nvmeibc_ib_admin_cdv_list_extents(cdv_vol, toma_id,
 						       tpv->tpv_uuid,
 						       &toma_indices,
 						       &toma_count);
 		if (rv) {
 			_NE(tpv_recovery_list_fail,
-			    "TPV: @STR: CDV_LIST_EXTENTS to @STR failed rv=@INT; orphan check skipped",
-			    tpv->tpv_name, toma_id, rv);
+			    "TPV: @STR: CDV_LIST_EXTENTS to @STR failed rv=@INT (meta=@INT); orphan check skipped",
+			    tpv->tpv_name, toma_id, rv, (int)is_meta_side);
 			return 0;
 		}
 	}
 
 	_NT(tpv_recovery_list_ok,
-	    "TPV: @STR: TOMA reports @LLU data CDV_extents; tree has @LLU",
-	    tpv->tpv_name, toma_count, alloc->cdv_extents_count);
+	    "TPV: @STR: TOMA reports @LLU CDV_extents (meta=@INT); tree has @LLU",
+	    tpv->tpv_name, toma_count, (int)is_meta_side, alloc->cdv_extents_count);
 
-	/* ── 3. Cross-reference and adopt orphans ─────────────────────────────
-	 *
-	 * Dynamic L2 placement: the L1 extent is a normal entry in
-	 * cdv_extent_list after load_state (is_l1_extent is set on its ref
-	 * but it is otherwise indistinguishable).  No special skip needed:
-	 * tpv_recovery_is_known() handles it.
-	 */
+	/* ── 3. Cross-reference and adopt orphans ─────────────── */
 	for (i = 0; i < toma_count; i++) {
 		u64 eidx = toma_indices[i];
 		bool known;
 
 		known = tpv_recovery_is_known(alloc, eidx);
-
-		_NT(tpv_recovery_check_ext,
-		    "TPV: @STR: recovery TOMA extent[@LLU] known=@INT",
-		    tpv->tpv_name, eidx, (int)known);
-
 		if (known)
 			continue;
 
-		/*
-		 * Orphan: TOMA allocated this CDV_extent to us but there are
-		 * no leaves for it in the L1/L2 tree.  Adopt it so its
-		 * physical slots enter the free pool.
-		 */
 		_NI(tpv_recovery_orphan_found,
-		    "TPV: @STR: CDV_extent[@LLU] orphaned; adopting",
-		    tpv->tpv_name, eidx);
+		    "TPV: @STR: CDV_extent[@LLU] orphaned (meta=@INT); adopting",
+		    tpv->tpv_name, eidx, (int)is_meta_side);
 
-		rv = tpv_recovery_adopt_orphan(tpv, eidx);
+		rv = tpv_recovery_adopt_orphan(tpv, eidx, is_meta_side);
 		if (rv) {
 			_NE(tpv_recovery_adopt_fail,
-			    "TPV: @STR: failed to adopt CDV_extent[@LLU] rv=@INT; slots unavailable until NVCK",
-			    tpv->tpv_name, eidx, rv);
-			/* Non-fatal: try remaining extents. */
+			    "TPV: @STR: failed to adopt CDV_extent[@LLU] (meta=@INT) rv=@INT",
+			    tpv->tpv_name, eidx, (int)is_meta_side, rv);
 			continue;
 		}
 		n_orphans++;
@@ -322,16 +329,27 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 
 	kvfree(toma_indices);
 
-	/* ── 4. Summary ─────────────────────────────────────────────────────── */
 	if (n_orphans > 0)
 		_NI(tpv_recovery_done,
-		    "TPV: @STR: adopted @LLU orphaned CDV_extents; free pool now @LLU slots",
-		    tpv->tpv_name, n_orphans, alloc->free_tpv_extent_count);
+		    "TPV: @STR: adopted @LLU orphaned CDV_extents (meta=@INT); free pool now @LLU slots",
+		    tpv->tpv_name, n_orphans, (int)is_meta_side, alloc->free_tpv_extent_count);
 	else
 		_ND(tpv_recovery_clean,
-		    "TPV: @STR: no orphans (TOMA: @LLU tree: @LLU CDV_extents)",
-		    tpv->tpv_name, toma_count, alloc->cdv_extents_count);
+		    "TPV: @STR: no orphans (meta=@INT)", tpv->tpv_name, (int)is_meta_side);
 
+	return 0;
+}
+
+int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
+{
+	/*
+	 * Recover data side (always). In split mode, also recover the
+	 * metadata side — its extents host L1/L2 only but orphans still
+	 * need adopting so the tree-write pool is replenished.
+	 */
+	(void)tpv_recovery_one_side(tpv, /*is_meta_side=*/false);
+	if (nvmeibc_tpv_is_split(tpv))
+		(void)tpv_recovery_one_side(tpv, /*is_meta_side=*/true);
 	return 0;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_recovery);

@@ -114,7 +114,14 @@ static void tpv_cdv_bio_end(struct bio *bio, int error_arg)
 static int tpv_cdv_sync_io(struct nvmeibc_tpv *tpv, u64 cdv_off,
 			    void *buf, u64 len, bool is_write)
 {
-	struct nvmeibc_os_api  *os   = nvmeibc_block_get_os_api(tpv->cdv_vol->block_dev);
+	/*
+	 * Synchronous I/O on the TPV is exclusively for the L1/L2 tree
+	 * (persist.c). In split mode that tree lives on the metadata CDV;
+	 * nvmeibc_tpv_meta_cdv() returns tpv->cdv_vol in single-CDV mode so
+	 * the existing path is unchanged. See TPV_MetadataCDV.md §6.3.
+	 */
+	struct nvmeibc_volume  *cdv_vol = nvmeibc_tpv_meta_cdv(tpv);
+	struct nvmeibc_os_api  *os   = nvmeibc_block_get_os_api(cdv_vol->block_dev);
 	struct gendisk         *disk = os->atom.disk;
 	u8                     *ptr  = (u8 *)buf;
 	u64                     remaining = len;

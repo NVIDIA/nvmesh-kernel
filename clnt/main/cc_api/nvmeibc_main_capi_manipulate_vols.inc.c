@@ -25,26 +25,36 @@
  * required parameters in fields that are otherwise unused for TPV volumes:
  *
  *   conf->blocks        - virtual size in 4 KiB management blocks
- *   conf->mdvUUID       - parent CDV UUID (for lookup in the volumes list)
+ *   conf->mdvUUID       - parent (data) CDV UUID — lookup in volumes list
  *   conf->stripeSize    - TPV extent size in KiB  (tpv_extent_size_kb)
  *   conf->dataBlocks    - CDV extent size in MiB  (cdv_extent_size_mib)
  *   conf->parityBlocks  - allocator area size in GiB within the CDV
  *                         (allocator_size_gib; 0 under satellite design —
  *                         allocator metadata lives on the <cdv>-mgmt volume)
+ *   conf->metaCdvUUID   - optional metadata CDV UUID (split-mode,
+ *                         TPV_MetadataCDV.md). Empty for single-CDV TPVs.
+ *                         In split mode the metadata CDV must already be
+ *                         attached before this call; metadata geometry
+ *                         (meta TPV-extent size, meta CDV-extent size) is
+ *                         carried via the JSON AttachVolumes sidecar
+ *                         metaCdvConf rather than the binary codec.
  *
- * The CDV must already be attached as a regular (hidden) volume before this
- * function is called.
+ * The CDV(s) must already be attached as a regular (hidden) volume before
+ * this function is called.
  */
 static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 		       const struct nvmeib_mgmt_to_client_volume_configuration *msg)
 {
 	const struct nvmeibc_volume_conf *conf = &msg->volumes[0];
 	struct nvmeibc_volume *cdv;
+	struct nvmeibc_volume *meta_cdv = NULL;
 	struct nvmeibc_tpv *tpv;
 	u64 virtual_size_bytes;
 	u32 tpv_extent_size_kb;
 	u32 cdv_extent_size_mib;
 	u64 allocator_size_gib;
+	u32 meta_tpv_extent_size_kb = 0;
+	u32 meta_cdv_extent_size_mib = 0;
 	bool sync_flush;
 
 	/* Locate the parent CDV by the UUID encoded in conf->mdvUUID. */
@@ -86,10 +96,46 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 		return -EINVAL;
 	}
 
+	/* Split-mode (TPV_MetadataCDV.md): if metaCdvUUID is non-empty the
+	 * management layer is asking us to attach the TPV's L1/L2 tree on a
+	 * second CDV. The metadata CDV must already be attached to this
+	 * client (enforced at the management layer by attaching it before
+	 * the TPV AttachVolumes MCS arrives).
+	 *
+	 * Metadata geometry (meta_tpv_extent_size_kb, meta_cdv_extent_size_mib)
+	 * is not carried in the binary codec. A future minor MCS extension will
+	 * piggyback them on the JSON AttachVolumes sidecar; until then we use
+	 * conservative defaults matching the data side — callers that need
+	 * different geometry should supply it via the sidecar and update this
+	 * block to read from it. */
+	if (conf->metaCdvUUID[0]) {
+		meta_cdv = (struct nvmeibc_volume *)nvmeibc_volume_get_by_uuid(
+			p, conf->metaCdvUUID, UNKNOWN_ILLEGAL);
+		if (!meta_cdv) {
+			_NI(tpv_meta_cdv_not_found_yet,
+			    "TPV @STR: metadata CDV @STR not found (not yet attached?)",
+			    conf->name, conf->metaCdvUUID);
+			return -ENODEV;
+		}
+		if (meta_cdv == cdv) {
+			_NE(tpv_meta_cdv_same_as_data,
+			    "TPV @STR: metadata CDV must differ from data CDV",
+			    conf->name);
+			return -EINVAL;
+		}
+		/* Default to same geometry as the data side. When the MCS
+		 * sidecar for meta geometry lands, parse it here instead. */
+		meta_tpv_extent_size_kb = tpv_extent_size_kb;
+		meta_cdv_extent_size_mib = cdv_extent_size_mib;
+	}
+
 	tpv = nvmeibc_tpv_attach(cdv, conf->name, conf->uuid,
 				 virtual_size_bytes, tpv_extent_size_kb,
 				 cdv_extent_size_mib, allocator_size_gib,
-				 sync_flush);
+				 sync_flush,
+				 meta_cdv,
+				 meta_tpv_extent_size_kb,
+				 meta_cdv_extent_size_mib);
 	if (!tpv) {
 		_NE(tpv_setup_attach_failed,
 		    "TPV @STR: nvmeibc_tpv_attach() failed", conf->name);

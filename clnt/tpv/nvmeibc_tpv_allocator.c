@@ -530,15 +530,27 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
  *
  * Returns 0 on success.
  */
-static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
+static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_index,
+					 bool is_meta_side)
 {
-	struct nvmeibc_tpv_allocator  *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_allocator  *alloc = is_meta_side ? tpv->meta_allocator
+							    : &tpv->allocator;
 	struct nvmeibc_cdv_extent_ref *ref;
 	struct nvmeibc_tpv_free_slot  *fs;
 	LIST_HEAD(batch);
 	u64 n_slots;
 	u64 s;
 	int rv;
+	/*
+	 * Split-mode (TPV_MetadataCDV.md §6.1): in split mode the metadata
+	 * allocator hosts the L1 extent and L2 tables — never data. The data
+	 * allocator hosts only user-data slots, no L1/L2. So:
+	 *   - Single-CDV mode: this allocator IS the L1 host → honour the
+	 *     "first extent becomes L1 extent" rule.
+	 *   - Split mode, meta side: this allocator IS the L1 host.
+	 *   - Split mode, data side: this allocator NEVER becomes the L1 host.
+	 */
+	bool this_side_hosts_l1 = !nvmeibc_tpv_is_split(tpv) || is_meta_side;
 
 	_NT(tpv_cdv_alloc_ok_enter,
 	    "TPV: @STR: tpv_on_cdv_alloc_ok extent_index=@LLU cdv_extents_count=@LLU free_slots=@LLU",
@@ -580,7 +592,7 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
 	 * so there is nothing to record.  flush_state will write the initial
 	 * L1 on the first persist cycle.
 	 */
-	if (alloc->l1_extent_index == 0) {
+	if (this_side_hosts_l1 && alloc->l1_extent_index == 0) {
 		u64 first_free_slot = 1;	/* slot 0 reserved for L1 */
 
 		alloc->l1_extent_index  = extent_index;
@@ -697,6 +709,12 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
  *
  * Background work item (process context, may sleep).
  *
+ * Services one side (data CDV or — in split mode — metadata CDV) of the TPV.
+ * The side is identified by comparing the work pointer against the two
+ * embedded work structs. Split-mode TPVs have two parallel work items with
+ * independent allocators, TOMA identities, and free pools; single-CDV TPVs
+ * use only the data-side work item.
+ *
  * Phase 1: Drain pending_return_list — return empty CDV_extents to TOMA via
  *   NVMEIBC_MA_CDV_FREE_EXTENT.
  *
@@ -712,11 +730,16 @@ static int tpv_on_cdv_alloc_ok(struct nvmeibc_tpv *tpv, u64 extent_index)
  *               on allocation remain queued until a topology push signals
  *               available capacity.
  */
-void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
+static void nvmeibc_tpv_cdv_alloc_work_run(struct nvmeibc_tpv *tpv,
+					    bool is_meta_side)
 {
-	struct nvmeibc_tpv           *tpv = container_of(work, struct nvmeibc_tpv,
-							 cdv_alloc_work);
-	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_allocator *alloc;
+	struct nvmeibc_volume        *cdv_vol;
+	spinlock_t                   *id_lock;
+	const char                   *id_src;
+	u64                          *gen_src;
+	atomic_t                     *pending;
+	struct work_struct           *self_work;
 	struct nvmeibc_cdv_alloc_req  req;
 	struct nvmeibc_cdv_alloc_resp resp;
 	char     toma_id[NVMEIB_HOST_NAME_LEN];
@@ -726,89 +749,89 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 	int      rv;
 	bool     retry_pending = false;
 
+	if (is_meta_side) {
+		alloc    = tpv->meta_allocator;
+		cdv_vol  = tpv->meta_cdv_vol;
+		id_lock  = &tpv->meta_allocator_id_lock;
+		id_src   = tpv->meta_allocator_toma_id;
+		gen_src  = &tpv->meta_allocator_generation;
+		pending  = &tpv->meta_cdv_alloc_pending;
+		self_work = &tpv->meta_cdv_alloc_work;
+	} else {
+		alloc    = &tpv->allocator;
+		cdv_vol  = tpv->cdv_vol;
+		id_lock  = &tpv->allocator_id_lock;
+		id_src   = tpv->allocator_toma_id;
+		gen_src  = &tpv->allocator_generation;
+		pending  = &tpv->cdv_alloc_pending;
+		self_work = &tpv->cdv_alloc_work;
+	}
+
 	_NI(tpv_alloc_work_enter,
-	    "TPV @STR: cdv_alloc_work: free=@LLU wm=@LLU cdv_extents=@LLU",
-	    tpv->tpv_name, alloc->free_tpv_extent_count,
+	    "TPV @STR: cdv_alloc_work[meta=@INT]: free=@LLU wm=@LLU cdv_extents=@LLU",
+	    tpv->tpv_name, (int)is_meta_side, alloc->free_tpv_extent_count,
 	    alloc->low_watermark, alloc->cdv_extents_count);
 
 	if (atomic_read(&tpv->state) == TPV_DETACHING)
 		goto out_clear_pending;
 
-	/*
-	 * Allocator state not yet loaded from CDV — do not request new
-	 * CDV_extents until load_state_work_fn populates the extent map.
-	 * load_state_work_fn will re-schedule us after load completes.
-	 */
 	if (!READ_ONCE(tpv->state_loaded))
 		goto out_clear_pending;
 
-	/* Snapshot (toma_id, generation) atomically. */
-	spin_lock_irqsave(&tpv->allocator_id_lock, flags);
-	strncpy(toma_id, tpv->allocator_toma_id, sizeof(toma_id) - 1);
+	spin_lock_irqsave(id_lock, flags);
+	strncpy(toma_id, id_src, sizeof(toma_id) - 1);
 	toma_id[sizeof(toma_id) - 1] = '\0';
-	client_gen = tpv->allocator_generation;
-	spin_unlock_irqrestore(&tpv->allocator_id_lock, flags);
+	client_gen = *gen_src;
+	spin_unlock_irqrestore(id_lock, flags);
 
 	if (toma_id[0] == '\0') {
-		/*
-		 * Allocator TOMA identity not yet known (topology push has not
-		 * arrived).  Clear pending so alloc_extent() can re-arm later.
-		 */
-		_NW(tpv_no_toma_id, "TPV: @STR: no allocator TOMA ID yet; deferring CDV work",
-		    tpv->tpv_name);
+		_NW(tpv_no_toma_id, "TPV: @STR: no allocator TOMA ID yet (meta=@INT); deferring CDV work",
+		    tpv->tpv_name, (int)is_meta_side);
 		goto out_clear_pending;
 	}
 
-	/* ── Phase 1: Return any empty CDV_extents ── */
 	if (!list_empty(&alloc->pending_return_list))
 		tpv_drain_pending_returns(tpv, toma_id);
 
-	/* ── Phase 2: Request a new CDV_extent if still below watermark ── */
 	if (alloc->free_tpv_extent_count >= alloc->low_watermark)
 		goto out_clear_pending;
 
 	memset(&req, 0, sizeof(req));
 	strncpy(req.tpv_uuid, tpv->tpv_uuid, sizeof(req.tpv_uuid) - 1);
-	strncpy(req.cdv_uuid, tpv->cdv_vol->hdr.uuid, sizeof(req.cdv_uuid) - 1);
+	strncpy(req.cdv_uuid, cdv_vol->hdr.uuid, sizeof(req.cdv_uuid) - 1);
 	req.req_id            = (u64)atomic64_inc_return(&nvmeibc_tpv_req_id_counter);
 	req.client_generation = client_gen;
 
-	/*
-	 * Provide CDV capacity so TOMA can determine when the CDV is full.
-	 * Post-satellite-migration the allocator metadata lives on the
-	 * <cdv>-mgmt satellite volume, so the full CDV is available as data.
-	 */
 	if (alloc->cdv_extent_size_mib > 0) {
-		u64 cdv_bytes   = (u64)nvmeibc_volume_get_size(tpv->cdv_vol)
+		u64 cdv_bytes   = (u64)nvmeibc_volume_get_size(cdv_vol)
 				  << NVMEIBC_SECTOR_SHIFT;
 		req.total_data_extents = cdv_bytes / ((u64)alloc->cdv_extent_size_mib << 20);
 	}
 
-	_NT(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT to @STR gen=@LLU req_id=@LLU total_extents=@LLU free=@LLU wm=@LLU cdv_extents=@LLU",
-	    tpv->tpv_name, toma_id, client_gen, req.req_id, req.total_data_extents,
+	_NT(tpv_cdv_alloc_req, "TPV: @STR: CDV_ALLOC_EXTENT[meta=@INT] to @STR gen=@LLU req_id=@LLU total_extents=@LLU free=@LLU wm=@LLU cdv_extents=@LLU",
+	    tpv->tpv_name, (int)is_meta_side, toma_id, client_gen, req.req_id, req.total_data_extents,
 	    alloc->free_tpv_extent_count, alloc->low_watermark, alloc->cdv_extents_count);
 
 	memset(&resp, 0, sizeof(resp));
 	t_start = ktime_get();
-	rv = nvmeibc_ib_admin_cdv_alloc_extent(tpv->cdv_vol, toma_id, &req,
-					       &resp);
+	rv = nvmeibc_ib_admin_cdv_alloc_extent(cdv_vol, toma_id, &req, &resp);
 	if (rv) {
 		atomic64_inc(&alloc->stat_cdv_alloc_err);
-		_NE(tpv_cdv_alloc_send_fail, "TPV: @STR: CDV_ALLOC_EXTENT send error rv=@INT",
-		    tpv->tpv_name, rv);
+		_NE(tpv_cdv_alloc_send_fail, "TPV: @STR: CDV_ALLOC_EXTENT[meta=@INT] send error rv=@INT",
+		    tpv->tpv_name, (int)is_meta_side, rv);
 		goto out_clear_pending;
 	}
 
-	_NT(tpv_cdv_alloc_resp, "TPV: @STR: CDV_ALLOC_EXTENT resp status=@UINT extent_index=@LLU resp_gen=@LLU",
-	    tpv->tpv_name, resp.status, resp.extent_index, resp.allocator_generation);
+	_NT(tpv_cdv_alloc_resp, "TPV: @STR: CDV_ALLOC_EXTENT[meta=@INT] resp status=@UINT extent_index=@LLU resp_gen=@LLU",
+	    tpv->tpv_name, (int)is_meta_side, resp.status, resp.extent_index, resp.allocator_generation);
 
 	switch ((enum nvmeibc_cdv_alloc_status)resp.status) {
 	case NVMEIBC_CDV_ALLOC_OK:
-		rv = tpv_on_cdv_alloc_ok(tpv, resp.extent_index);
+		rv = tpv_on_cdv_alloc_ok_for_side(tpv, resp.extent_index, is_meta_side);
 		if (rv)
 			_NE(tpv_cdv_alloc_ok_fail,
-			    "TPV: @STR: tpv_on_cdv_alloc_ok(@LLU) failed rv=@INT",
-			    tpv->tpv_name, resp.extent_index, rv);
+			    "TPV: @STR: tpv_on_cdv_alloc_ok[meta=@INT](@LLU) failed rv=@INT",
+			    tpv->tpv_name, (int)is_meta_side, resp.extent_index, rv);
 		else {
 			atomic64_add(ktime_to_ns(ktime_sub(ktime_get(), t_start)),
 				     &alloc->stat_cdv_alloc_ns);
@@ -818,51 +841,63 @@ void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
 		break;
 
 	case NVMEIBC_CDV_ALLOC_CDV_FULL:
-		/*
-		 * CDV is at capacity.  TOMA sends CDVCapacityWarning to
-		 * management.  IOs needing allocation remain queued.
-		 */
 		atomic64_inc(&alloc->stat_cdv_alloc_full);
-		_NW(tpv_cdv_full, "TPV: @STR: CDV full; IOs blocked until CDV is extended",
-		    tpv->tpv_name);
+		_NW(tpv_cdv_full, "TPV: @STR: CDV full[meta=@INT]; IOs blocked until CDV is extended",
+		    tpv->tpv_name, (int)is_meta_side);
 		break;
 
 	case NVMEIBC_CDV_ALLOC_WRONG_GEN:
-		/*
-		 * Stale generation: the allocator's generation changed (RAFT
-		 * re-election or rollover).  Update our cached generation so
-		 * the next request uses the correct value.  toma_id is kept
-		 * unchanged — if the RAFT leader moved to a different TOMA node
-		 * a management topology push will supply the new hostname via
-		 * nvmeibc_tpv_update_allocator_id().
-		 */
 		atomic64_inc(&alloc->stat_cdv_alloc_wgen);
 		_NI(tpv_cdv_wrong_gen,
-		    "TPV: @STR: WRONG_GEN ours=@LLU TOMA=@LLU; updating generation and re-arming",
-		    tpv->tpv_name, client_gen, resp.allocator_generation);
-		nvmeibc_tpv_update_allocator_id(tpv, toma_id, resp.allocator_generation);
-		/* Re-arm so the corrected generation is used on the next attempt. */
-		if (atomic_cmpxchg(&tpv->cdv_alloc_pending, 0, 1) == 0)
-			schedule_work(&tpv->cdv_alloc_work);
+		    "TPV: @STR: WRONG_GEN[meta=@INT] ours=@LLU TOMA=@LLU; updating generation and re-arming",
+		    tpv->tpv_name, (int)is_meta_side, client_gen, resp.allocator_generation);
+		if (is_meta_side) {
+			unsigned long iflags;
+
+			spin_lock_irqsave(id_lock, iflags);
+			*gen_src = resp.allocator_generation;
+			spin_unlock_irqrestore(id_lock, iflags);
+		} else {
+			nvmeibc_tpv_update_allocator_id(tpv, toma_id, resp.allocator_generation);
+		}
+		if (atomic_cmpxchg(pending, 0, 1) == 0)
+			schedule_work(self_work);
 		break;
 
 	default:
 		_NE(tpv_cdv_alloc_bad_status,
-		    "TPV: @STR: CDV_ALLOC_EXTENT unexpected status=@UINT",
-		    tpv->tpv_name, resp.status);
+		    "TPV: @STR: CDV_ALLOC_EXTENT unexpected status=@UINT (meta=@INT)",
+		    tpv->tpv_name, resp.status, (int)is_meta_side);
 		break;
 	}
 
 out_clear_pending:
-	atomic_set(&tpv->cdv_alloc_pending, 0);
+	atomic_set(pending, 0);
 
 	/*
-	 * Retry pending bios AFTER clearing cdv_alloc_pending.  This way, if
-	 * the pool refill was partial and some retried bios still hit -EAGAIN,
-	 * nvmeibc_tpv_alloc_extent() can successfully re-arm cdv_alloc_pending
-	 * (seeing 0, not 1) and re-schedule this work for another CDV_extent.
+	 * Retry pending bios AFTER clearing *_pending. Only the data side has
+	 * parked bios waiting on data-extent allocation; metadata-side pool
+	 * refills do not directly unblock IO (they unblock the persist path,
+	 * which reschedules itself).
 	 */
-	if (retry_pending)
+	if (retry_pending && !is_meta_side)
 		nvmeibc_tpv_retry_pending_bios(tpv);
+}
+
+void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)
+{
+	struct nvmeibc_tpv *tpv_data = container_of(work, struct nvmeibc_tpv, cdv_alloc_work);
+	struct nvmeibc_tpv *tpv_meta = container_of(work, struct nvmeibc_tpv, meta_cdv_alloc_work);
+
+	/*
+	 * Exactly one of (work == &tpv->cdv_alloc_work) or
+	 * (work == &tpv->meta_cdv_alloc_work) is true. Identify the side by
+	 * comparing the offset: if work == &tpv_data->cdv_alloc_work then the
+	 * data-side container_of is valid. Otherwise treat as meta-side.
+	 */
+	if (work == &tpv_data->cdv_alloc_work)
+		nvmeibc_tpv_cdv_alloc_work_run(tpv_data, /*is_meta_side=*/false);
+	else
+		nvmeibc_tpv_cdv_alloc_work_run(tpv_meta, /*is_meta_side=*/true);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_cdv_alloc_work_fn);

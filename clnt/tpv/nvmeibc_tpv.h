@@ -206,8 +206,22 @@ enum nvmeibc_tpv_state {
 
 struct nvmeibc_tpv {
 	struct nvmeiba_atom_os_api    atom;		/* MUST be first for container_of */
-	struct nvmeibc_volume        *cdv_vol;		/* parent CDV volume pointer */
-	struct nvmeibc_tpv_allocator  allocator;
+	struct nvmeibc_volume        *cdv_vol;		/* data CDV volume pointer */
+	struct nvmeibc_tpv_allocator  allocator;	/* data-side allocator */
+
+	/*
+	 * Split-mode fields (TPV_MetadataCDV.md). NULL/absent in single-CDV
+	 * mode; when meta_cdv_vol != NULL the TPV's L1/L2 tree lives on a
+	 * second CDV and all metadata reads/writes are routed to
+	 * meta_allocator / meta_cdv_vol instead of allocator / cdv_vol.
+	 *
+	 * The data-side allocator (tpv->allocator) continues to serve data
+	 * extents on the data CDV and never holds L1/L2 slots in split mode.
+	 * In single-CDV mode the data-side allocator serves both data slots
+	 * and L1/L2 slots exactly as before; meta_* fields are unused.
+	 */
+	struct nvmeibc_volume        *meta_cdv_vol;
+	struct nvmeibc_tpv_allocator *meta_allocator;	/* kzalloc'd when split-mode */
 
 	char                          tpv_uuid[NVMEIBC_BD_UUID_LEN];
 	char                          tpv_name[NVMEIBC_BD_NAME_LEN];	/* human-readable name */
@@ -217,14 +231,25 @@ struct nvmeibc_tpv {
 	/*
 	 * CDV.allocator identity — learned from CDV topology at attach time,
 	 * updated via topology push when allocator TOMA changes.
+	 * Data-side identity. Split mode maintains a parallel identity for
+	 * the metadata CDV's allocator in meta_allocator_toma_id below.
 	 */
 	char                          allocator_toma_id[NVMEIB_HOST_NAME_LEN];
 	u64                           allocator_generation;
 	spinlock_t                    allocator_id_lock;
 
+	/* Metadata-side allocator identity (split-mode only). */
+	char                          meta_allocator_toma_id[NVMEIB_HOST_NAME_LEN];
+	u64                           meta_allocator_generation;
+	spinlock_t                    meta_allocator_id_lock;
+
 	/* Background CDV_extent allocation from TOMA via ADMIN channel. */
 	struct work_struct            cdv_alloc_work;
 	atomic_t                      cdv_alloc_pending;
+
+	/* Metadata-side allocation work (split-mode only). */
+	struct work_struct            meta_cdv_alloc_work;
+	atomic_t                      meta_cdv_alloc_pending;
 
 	/*
 	 * Bios blocked waiting for free TPV_extent slots.
@@ -315,6 +340,44 @@ struct nvmeibc_tpv {
 #define tpv_disk(tpv)   ((tpv)->atom.disk)
 #define tpv_queue(tpv)  ((tpv)->atom.queue)
 
+/* ── Split-mode helpers ────────────────────────────────────────────────── */
+
+/*
+ * A split-mode TPV stores its L1/L2 tree on a second CDV. These helpers
+ * return the allocator / CDV that owns the tree. In single-CDV mode both
+ * return the data-side allocator / CDV so existing call sites Just Work.
+ *
+ * nvmeibc_tpv_is_split() — true iff split-mode.
+ * nvmeibc_tpv_meta_alloc() — allocator that hosts the L1 extent + L2 tables.
+ * nvmeibc_tpv_meta_cdv()   — CDV volume where tree reads/writes go.
+ * nvmeibc_tpv_data_alloc() — allocator that hosts user-data slots.
+ * nvmeibc_tpv_data_cdv()   — CDV volume where data reads/writes go.
+ */
+static inline bool nvmeibc_tpv_is_split(const struct nvmeibc_tpv *tpv)
+{
+	return tpv->meta_cdv_vol != NULL;
+}
+
+static inline struct nvmeibc_tpv_allocator *nvmeibc_tpv_meta_alloc(struct nvmeibc_tpv *tpv)
+{
+	return tpv->meta_allocator ? tpv->meta_allocator : &tpv->allocator;
+}
+
+static inline struct nvmeibc_volume *nvmeibc_tpv_meta_cdv(struct nvmeibc_tpv *tpv)
+{
+	return tpv->meta_cdv_vol ? tpv->meta_cdv_vol : tpv->cdv_vol;
+}
+
+static inline struct nvmeibc_tpv_allocator *nvmeibc_tpv_data_alloc(struct nvmeibc_tpv *tpv)
+{
+	return &tpv->allocator;
+}
+
+static inline struct nvmeibc_volume *nvmeibc_tpv_data_cdv(struct nvmeibc_tpv *tpv)
+{
+	return tpv->cdv_vol;
+}
+
 /* ── L1/L2 tree on-disk entry format ────────────────────────────────────── */
 
 /*
@@ -392,6 +455,10 @@ void nvmeibc_tpv_forward_l1_flush_bios(struct nvmeibc_tpv *tpv);
  * Returns the new nvmeibc_tpv on success, NULL on error.
  * cdv_extent_size_mib and allocator_size_gib are properties of the parent CDV,
  * received from management in the AttachVolumes MCS cdvConf payload.
+ *
+ * Split mode (TPV_MetadataCDV.md): pass meta_cdv != NULL along with
+ * meta_tpv_extent_size_kb and meta_cdv_extent_size_mib to host the TPV's
+ * L1/L2 tree on a second CDV. Pass meta_cdv == NULL for single-CDV mode.
  */
 struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					const char *tpv_name,
@@ -400,7 +467,10 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					u32 tpv_extent_size_kb,
 					u32 cdv_extent_size_mib,
 					u64 allocator_size_gib,
-					bool sync_flush);
+					bool sync_flush,
+					struct nvmeibc_volume *meta_cdv,
+					u32 meta_tpv_extent_size_kb,
+					u32 meta_cdv_extent_size_mib);
 
 /*
  * Detach a TPV. MUST be idempotent (callable more than once per TPV without
