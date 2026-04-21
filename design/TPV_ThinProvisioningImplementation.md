@@ -17,7 +17,7 @@ Authoritative merged document. Supersedes ThinProvisioningImplementation1.md and
 | Term | Meaning |
 |------|---------|
 | **CDV** | Carrier Direct Volume — thick-provisioned shared volume holding capacity for TPVs |
-| **CDV\_extent** | Allocation unit carved from CDV; size is configurable per-CDV (`cdvExtentSizeMib`), power-of-2, between 64 MB and 64 GB |
+| **CDV\_extent** | Allocation unit carved from CDV; size is configurable per-CDV (`cdvExtentSizeMib`), power-of-2, between 16 MiB and 64 GiB. (Floor lowered from 64 MiB to 16 MiB to support compact metadata-role CDVs — see `TPV_MetadataCDV.md`.) |
 | **TPV** | Thin-Provisioned Volume — virtual volume riding on a CDV, exclusively attached to one client |
 | **TPV\_extent** | Fine-grained allocation unit within the TPV; size is configurable per-TPV (`tpvExtentSizeKB`), power-of-2, between 64 KB and 64 MB |
 | **CDV.allocator** | Central allocator running on a TOMA node; manages CDV\_extent allocation |
@@ -100,7 +100,7 @@ volumeClass: {
 // CDV-specific fields (present when volumeClass === 'CDV')
 cdvConfig: {
     maxTPVs:          { type: Number, default: 512 },   // mutable cap on hosted TPVs; default 512
-    cdvExtentSizeMib:  { type: Number, required: true }, // power-of-2, 64–65536 MB
+    cdvExtentSizeMib:  { type: Number, required: true }, // power-of-2, 16–65536 MiB
     allocatorSizeGib:  { type: Number, default: 1 },     // allocator area size in GB; integer >= 1
 },
 
@@ -258,7 +258,7 @@ if (volumeData.volumeClass === consts.volumeClass.CDV) {
     const { cdvExtentSizeMib, allocatorSizeGib, maxTPVs } = volumeData.cdvConfig || {};
 
     if (!consts.cdvExtentSizeMibValues.includes(cdvExtentSizeMib))
-        throw new Error('cdvExtentSizeMib must be a power-of-2 between 64 and 65536 MB');
+        throw new Error('cdvExtentSizeMib must be a power-of-2 between 16 and 65536 MiB');
     if (!Number.isInteger(allocatorSizeGib) || allocatorSizeGib < 1)
         throw new Error('allocatorSizeGib must be a positive integer (minimum 1)');
 
@@ -2147,8 +2147,8 @@ File: `public/javascripts/components/pages/volumes/createEditModal/CreateEditVol
 #### Dropdown constants (add near top of file)
 
 ```js
-// Power-of-2 values from 64 MB to 64 GB for CDV extent size
-const CDV_EXTENT_SIZE_OPTIONS = [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536].map(mb => ({
+// Power-of-2 values from 16 MiB to 64 GiB for CDV extent size
+const CDV_EXTENT_SIZE_OPTIONS = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536].map(mb => ({
     value: mb,
     label: mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`,
 }));
@@ -4181,7 +4181,7 @@ Add after `EncryptionObj` (~line 70):
 
 ```python
 class CDVConfig(SdkObject):
-    cdvExtentSizeMib : int    # power-of-2: 64–65536 MB
+    cdvExtentSizeMib : int    # power-of-2: 16–65536 MiB
     allocatorSizeGib : int    # default 1
     maxTPVs         : int    # default 512
 
