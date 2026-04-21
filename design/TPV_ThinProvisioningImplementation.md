@@ -4,6 +4,12 @@ Based on: *2026-03 Minimal Extensible Thin Provisioned Volumes.md*
 
 Authoritative merged document. Supersedes ThinProvisioningImplementation1.md and ThinProvisioningImplementation2.md.
 
+**Companion feature docs:**
+- [`TPV_MetadataCDV.md`](TPV_MetadataCDV.md) — optional split-mode TPV placing the L1/L2 tree on a second CDV. Adds `tpvConfig.metaCdvId` / `metaCdvUUID` / `metaTpvExtentSizeKB` / `metaVirtualSizeGB` alongside the existing data-side fields. Single-CDV TPVs are unaffected.
+- [`TPV_EncryptionPlan.md`](TPV_EncryptionPlan.md) — per-TPV LUKS.
+- [`TPV_PerClientCDVPreemption.md`](TPV_PerClientCDVPreemption.md) — per-client CDV preemption (admission_floor).
+- [`TPV_SatelliteVolumeForCDVAlloc.md`](TPV_SatelliteVolumeForCDVAlloc.md) — `<cdv>-mgmt` satellite allocator volume (covered in Part 1.5 below).
+
 ---
 
 ## Terminology
