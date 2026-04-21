@@ -474,9 +474,9 @@ This is a real server-side admission check — not sender-trusted — keyed on a
 
 #### 1.5.4.3 Lifecycle — atomic create / delete, CDV-only extend
 
-- **Create.** `POST /volumes/save` for a CDV allocates `capacity + 1 GiB` of raw disk capacity and writes **both** documents (`<CDV>` and `<CDV>-mgmt`) in a single Mongo operation. If either write fails the operation is rolled back before any Kafka traffic is emitted. No state is published to TOMA/clients until both volumes are durable.
+- **Create.** `POST /volumes/save` for a CDV allocates `capacity + allocatorSizeGib` GiB of raw disk capacity and writes **both** documents (`<CDV>` and `<CDV>-mgmt`) in a single Mongo operation. If either write fails the operation is rolled back before any Kafka traffic is emitted. No state is published to TOMA/clients until both volumes are durable.
 - **Delete.** Deleting a CDV deletes both volumes in one operation. Users cannot delete the satellite independently; the satellite has no delete affordance in UI or REST (see §1.5.4.5).
-- **Extend.** Volume-extend on a CDV extends **only** the CDV. The satellite size is fixed at creation (1 GiB covers ~44.7M extents — sufficient for any realistic CDV). This keeps the Mongo update path single-document.
+- **Extend.** Volume-extend on a CDV extends **only** the CDV. The satellite size is fixed at creation (to the admin-supplied `cdvConfig.allocatorSizeGib`, default 1 GiB). Each GiB of satellite supports ~262 143 extent records (4 KiB/record atomic block), so at the default 1 GiB the CDV is capped at ~262k extents × its extent size; admins provisioning a very large CDV with a small extent raise allocatorSizeGib at create time. Keeping the satellite size fixed after create preserves the Mongo update path single-document.
 - **Resize-down / encryption / other mutations** on the CDV do not touch the satellite.
 
 This "allocate raw + write two docs + single rollback" discipline keeps the Mongo transactional surface the same as today's single-volume create path — which is important because NVMesh Mongo writes are not multi-document atomic.

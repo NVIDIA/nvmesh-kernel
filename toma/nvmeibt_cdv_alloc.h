@@ -87,8 +87,11 @@ struct nvmeibt_cdv_extent_entry {
  *   ...
  *
  * Each block is 4 KiB (PAGE_SIZE), matching the NVMe physical block size
- * for atomic single-block writes.  With a 1 GiB allocator region this
- * supports (1 GiB / 4 KiB) - 1 = 262,143 extent slots.
+ * for atomic single-block writes.  With an allocator region of
+ * `allocatorSizeGib` GiB this supports `allocatorSizeGib * (1 GiB / 4 KiB) - 1`
+ * extent slots — e.g. the default 1 GiB gives 262,143 slots; admins
+ * raise allocatorSizeGib at CDV create time for very large CDVs at small
+ * extent sizes.
  */
 
 #define CDV_ONDISK_BLOCK_SIZE   4096U

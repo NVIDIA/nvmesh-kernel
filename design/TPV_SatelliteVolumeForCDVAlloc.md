@@ -1,8 +1,10 @@
 # Satellite Volume for CDV Allocator — Implementation Plan
 
+> **Shipped status (retrospective, 2026-04).** Several plan bullets below diverged from what actually shipped. Where the plan says "Retire `cdvConfig.allocatorSizeGib`" / "fixed at 1 GiB", the implementation kept the field as a user-configurable CDV parameter (minimum 1 GiB, default 1 GiB). The max-extents ceiling therefore scales with the admin-chosen `allocatorSizeGib` rather than being pinned. All other elements (CDV_MGMT volumeClass, single raw allocation sliced into two volumes, preempt-based fencing) shipped as written. Treat this document as historical design with the `allocatorSizeGib` override noted inline.
+
 ## Overview
 
-Every CDV gains a dedicated 1 GiB satellite volume named `<CDV>-mgmt` whose sole purpose is to hold the allocator header and `cdv_extent_md[]` array that previously lived in the CDV's leading `[0, A)` region. The satellite is held `EXCLUSIVE_READ_WRITE` by the current allocator TOMA; re-election is a plain preempt on the satellite, reusing NVMesh's existing reservation-version fencing to reject writes from a replaced-but-still-alive allocator.
+Every CDV gains a dedicated satellite volume named `<CDV>-mgmt` whose sole purpose is to hold the allocator header and `cdv_extent_md[]` array that previously lived in the CDV's leading `[0, A)` region. The satellite size is `cdvConfig.allocatorSizeGib` GiB (user-configurable, defaults to 1). The satellite is held `EXCLUSIVE_READ_WRITE` by the current allocator TOMA; re-election is a plain preempt on the satellite, reusing NVMesh's existing reservation-version fencing to reject writes from a replaced-but-still-alive allocator.
 
 Rationale, correctness argument, and comparison against the range-fenced alternative (Option A) are in `ThinProvisioningImplementation.md` Part 1.5. This document is the **implementation plan**.
 
@@ -20,7 +22,7 @@ The plan is organized in four phases. Phases 1 and 2 ship together; Phase 3 foll
 - **New `volumeClass: 'CDV_MGMT'`** added to `consts.volumeClass`. Satellites are their own class — makes filter queries straightforward and removes any name-parsing-based typing.
 - **Fields on CDV_MGMT document:** `parentCDVId`, `parentCDVUUID`. No `cdvConfig`, no `tpvCount`, no user-facing mutability.
 - **CDV name length limit = 16 characters.** Enforced in the existing name validator. Add `assertNotReservedCDVSuffix` that rejects user-facing create/rename of any volume whose name ends in `-mgmt`.
-- **Retire `cdvConfig.allocatorSizeGib`** from the create path. The satellite size is fixed at 1 GiB. The field remains readable on pre-migration records but is ignored on new creates.
+- ~~**Retire `cdvConfig.allocatorSizeGib`** from the create path. The satellite size is fixed at 1 GiB. The field remains readable on pre-migration records but is ignored on new creates.~~ **As shipped:** `cdvConfig.allocatorSizeGib` was retained as a user-configurable CDV create parameter (minimum 1 GiB, default 1 GiB). The satellite's size is set to that value at CDV create time and is fixed per-CDV thereafter. Max extents ≈ `allocatorSizeGib × 262 143` (one 4 KiB record per extent); admins provisioning very large CDVs at small extent sizes raise this value at create time.
 
 ### 1.2 Create path — single raw allocation, sliced into N volumes
 
