@@ -110,8 +110,11 @@ ifeq ($(OFED_WE_R), yes)
     $(info Using OFED_SRC_DIR=$(OFED_SRC_DIR))
     ifeq ($(OFA_KERNEL),)
         # Check for all possible ofa_kernel dirs
-        OFA_KERNEL_DIR := $(wildcard /usr/src/ofa_kernel/$(KERN_ARCH)/$(KERN_VER))
+        OFA_KERNEL_DIR := $(wildcard /usr/src/ofa_kernel-dkms/$(KERN_ARCH)/$(KERN_VER))
+        OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel/$(KERN_ARCH)/$(KERN_VER))
+        OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel-dkms/$(KERN_VER))
         OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel/$(KERN_VER))
+        OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel-dkms/default)
         OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel/default)
         OFA_KERNEL = $(firstword $(OFA_KERNEL_DIR))
     endif
