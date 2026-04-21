@@ -272,22 +272,51 @@ void nvmeibc_tpv_handle_cdv_preempted(const struct nvmeibc_volume *cdv)
 /* -- Allocator helpers --------------------------------------------------- */
 
 /*
- * Low-watermark: keep at least 50 MB worth of TPV_extents pre-allocated.
+ * Low-watermark:
+ *   Data side: keep at least 50 MB worth of TPV_extents pre-allocated so
+ *              write bursts do not block on CDV_ALLOC round-trips.
+ *   Meta side: only L1 + L2-table slots ever get allocated, and the upper
+ *              bound is known at init time (1 L1 + ceil(V / N_L2) L2s).
+ *              A fixed 50 MB watermark over-provisions badly with small
+ *              meta extent sizes (e.g. 4 CDV extents for a TPV that will
+ *              use ~17 slots total). Size the meta watermark to the actual
+ *              worst-case footprint instead.
  * When free_tpv_extent_count drops below this, cdv_alloc_work fires.
  */
 #define TPV_LOW_WATERMARK_MB		50ULL
 #define TPV_LOW_WATERMARK_KB		(TPV_LOW_WATERMARK_MB * 1024ULL)
 
-static u64 nvmeibc_tpv_calc_watermark(u32 tpv_extent_size_kb)
+static u64 nvmeibc_tpv_calc_watermark(u32 tpv_extent_size_kb,
+				       u64 virtual_size_bytes,
+				       bool is_meta_side,
+				       u32 data_tpv_extent_size_kb)
 {
-	return TPV_LOW_WATERMARK_KB / tpv_extent_size_kb;
+	if (!is_meta_side)
+		return TPV_LOW_WATERMARK_KB / tpv_extent_size_kb;
+
+	{
+		/*
+		 * Meta watermark = worst-case L1+L2 footprint.
+		 * virtual_extents count is governed by the DATA side's T, not
+		 * the meta side's. L2 fanout is governed by the META side's T.
+		 */
+		u64 T_data       = (u64)data_tpv_extent_size_kb << 10;
+		u64 T_meta       = (u64)tpv_extent_size_kb << 10;
+		u64 v_extents    = T_data ? virtual_size_bytes / T_data : 0;
+		u64 n_l2_fanout  = T_meta / sizeof(struct tpv_tree_entry);
+		u64 n_l2_max     = n_l2_fanout ? DIV_ROUND_UP(v_extents, n_l2_fanout) : 0;
+
+		return n_l2_max + 1;
+	}
 }
 
 static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 				       u32 tpv_extent_size_kb,
 				       u64 virtual_size_bytes,
 				       u32 cdv_extent_size_mib,
-				       u64 allocator_size_gib)
+				       u64 allocator_size_gib,
+				       bool is_meta_side,
+				       u32 data_tpv_extent_size_kb)
 {
 	xa_init(&alloc->extent_map);
 	spin_lock_init(&alloc->lock);
@@ -307,7 +336,11 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 
 	INIT_LIST_HEAD(&alloc->pending_return_list);
 
-	alloc->low_watermark           = nvmeibc_tpv_calc_watermark(tpv_extent_size_kb);
+	alloc->low_watermark           = nvmeibc_tpv_calc_watermark(
+						tpv_extent_size_kb,
+						virtual_size_bytes,
+						is_meta_side,
+						data_tpv_extent_size_kb);
 
 	/* Per-TPV L1/L2 tree tracking - populated by load_state or tpv_on_cdv_alloc_ok. */
 	alloc->l1_extent_index         = 0;
@@ -999,7 +1032,9 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	 */
 	nvmeibc_tpv_allocator_init(&tpv->allocator, tpv_extent_size_kb,
 				   virtual_size_bytes, cdv_extent_size_mib,
-				   allocator_size_gib);
+				   allocator_size_gib,
+				   /* is_meta_side */ false,
+				   tpv_extent_size_kb);
 
 	if (meta_cdv) {
 		tpv->meta_allocator = kzalloc(sizeof(*tpv->meta_allocator), GFP_KERNEL);
@@ -1012,7 +1047,9 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					   meta_tpv_extent_size_kb,
 					   virtual_size_bytes,
 					   meta_cdv_extent_size_mib,
-					   /* allocator_size_gib */ 0);
+					   /* allocator_size_gib */ 0,
+					   /* is_meta_side */ true,
+					   tpv_extent_size_kb);
 	}
 
 	/* -- 3a-check. Verify 2-level L1/L2 tree can address all virtual extents. */
