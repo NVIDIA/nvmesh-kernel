@@ -94,9 +94,21 @@ struct nvmeibt_cdv_extent_entry {
  * extent sizes.
  */
 
-#define CDV_ONDISK_BLOCK_SIZE   4096U
-#define CDV_ONDISK_MAGIC        0x43444D31U     /* 'CDM1' */
-#define CDV_ONDISK_VERSION      1
+#define CDV_ONDISK_BLOCK_SIZE           4096U
+#define CDV_ONDISK_RECORD_SIZE          128U
+#define CDV_ONDISK_RECORDS_PER_BLOCK    (CDV_ONDISK_BLOCK_SIZE / CDV_ONDISK_RECORD_SIZE)  /* 32 */
+#define CDV_ONDISK_MAGIC                0x43444D31U     /* 'CDM1' */
+/*
+ * VERSION 1 (historical): one 4 KiB block per extent record. Predated the
+ * satellite-volume refactor; at that point the allocator area lived on the
+ * raw CDV block device and the 4 KiB block was the smallest atomic unit.
+ * VERSION 2 (current): packed 128-byte records, 32 per 4 KiB block.
+ * Atomicity is provided by NVMesh's whole-bio write guarantee on the
+ * satellite volume; concurrent record updates on the same block are
+ * serialised by nvmeibt_cdv_alloc.handler_lock. See
+ * ThinProvisioningImplementation.md §2.2 for the rationale.
+ */
+#define CDV_ONDISK_VERSION              2
 
 struct cdv_alloc_ondisk_header {
 	uint32_t magic;                                  /* CDV_ONDISK_MAGIC */
@@ -123,8 +135,44 @@ struct cdv_alloc_ondisk_record {
 	 */
 	uint32_t zeroing_allocator_size_gib;
 	uint32_t zeroing_cdv_extent_size_mib;
-	uint8_t  reserved2[CDV_ONDISK_BLOCK_SIZE - 1 - 7 - 64 - 4 - 4 - 4];
+	/* 44 bytes headroom for future fields (timestamps, TPV name hash, etc.)
+	 * within the 128-byte record. */
+	uint8_t  reserved2[CDV_ONDISK_RECORD_SIZE - 1 - 7 - 64 - 4 - 4 - 4];
 } __attribute__((__packed__));
+
+/* Compile-time sanity — record must fit exactly in CDV_ONDISK_RECORD_SIZE
+ * bytes for the `extent_index → byte offset` arithmetic to hold. */
+#ifdef __KERNEL__
+_Static_assert(sizeof(struct cdv_alloc_ondisk_record) == CDV_ONDISK_RECORD_SIZE,
+	       "cdv_alloc_ondisk_record must be exactly CDV_ONDISK_RECORD_SIZE bytes");
+#endif
+
+/*
+ * Physical offset of the 4 KiB block containing extent_index's record.
+ *
+ * extent_index is 1-based: block 0 of the satellite is the header, the first
+ * 32 extent records (indices 1..32) share block 1, the next 32 (33..64) share
+ * block 2, etc.
+ */
+static inline uint64_t cdv_ondisk_block_offset(uint64_t extent_index)
+{
+	uint64_t block_index = 1ULL + ((extent_index - 1ULL) / CDV_ONDISK_RECORDS_PER_BLOCK);
+
+	return block_index * CDV_ONDISK_BLOCK_SIZE;
+}
+
+/* Byte offset of the record itself, within the satellite. */
+static inline uint64_t cdv_ondisk_record_offset(uint64_t extent_index)
+{
+	return cdv_ondisk_block_offset(extent_index) +
+	       ((extent_index - 1ULL) % CDV_ONDISK_RECORDS_PER_BLOCK) * CDV_ONDISK_RECORD_SIZE;
+}
+
+/* Index within the block of the record for extent_index (0..31). */
+static inline uint32_t cdv_ondisk_record_slot(uint64_t extent_index)
+{
+	return (uint32_t)((extent_index - 1ULL) % CDV_ONDISK_RECORDS_PER_BLOCK);
+}
 
 /* ── Per-CDV allocator ──────────────────────────────────────────────────────
  *

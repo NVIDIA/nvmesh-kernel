@@ -224,20 +224,16 @@ static int cdv_worker_open_cdv_fd_for_zeroing(struct nvmeibt_cdv_alloc *alloc)
 }
 
 /*
- * cdv_ondisk_record_offset — byte offset within the satellite volume for
- * extent_index's record.
+ * Layout helpers for extent records on the satellite live in the header
+ * (cdv_ondisk_block_offset / cdv_ondisk_record_offset / cdv_ondisk_record_slot).
  *
- * Extent indices are 1-based (index 0 is unused; the satellite header lives
- * at offset 0):
- *   Offset 0:                            Header (4 KiB)
- *   Offset 1 * CDV_ONDISK_BLOCK_SIZE:    Record for extent 1
- *   Offset 2 * CDV_ONDISK_BLOCK_SIZE:    Record for extent 2
- *   ...
+ * VERSION 2 of the on-disk format packs 32 × 128-byte records per 4 KiB
+ * block. All record mutations here read the 4 KiB block containing the
+ * target record, modify the target slot in place, and write the block
+ * back. Concurrency on a shared block is serialised by
+ * alloc->handler_lock (held across every record-update call path), so
+ * no additional block-level lock is needed.
  */
-static inline uint64_t cdv_ondisk_record_offset(uint64_t extent_index)
-{
-	return (uint64_t)CDV_ONDISK_BLOCK_SIZE * extent_index;
-}
 
 /* Note: the old synchronous cdv_ondisk_write_record() and cdv_ondisk_write_header()
  * have been replaced by cdv_async_write_record() and cdv_async_write_header()
@@ -300,9 +296,10 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 	struct cdv_ondisk_scan_wq_entry *e =
 		container_of(wq_entry, struct cdv_ondisk_scan_wq_entry, wq_entry);
 	struct cdv_alloc_ondisk_header *hdr = NULL;
-	struct cdv_alloc_ondisk_record *rec = NULL;
+	void *block_buf = NULL;	/* holds one 4 KiB block (32 packed records) */
 	struct cdv_scan_result_entry *results = NULL;
 	uint64_t i, total, n_results = 0, results_cap = 0;
+	uint64_t cur_block_off = (uint64_t)-1;	/* cached block offset; none loaded */
 	int fd;
 
 	e->rv = -EIO;
@@ -330,9 +327,9 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 
 	hdr = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_async_scan_hdr_alloc,
 					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
-	rec = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_async_scan_rec_alloc,
-					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
-	if (!hdr || !rec) {
+	block_buf = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_async_scan_rec_alloc,
+					        PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
+	if (!hdr || !block_buf) {
 		e->rv = -ENOMEM;
 		goto done;
 	}
@@ -368,6 +365,21 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 		}
 	}
 
+	/*
+	 * Version gate. VERSION 1 (one record per 4 KiB block) predates the
+	 * packed-record layout. TPV is pre-GA; any VERSION 1 satellite is a
+	 * stale dev/test artifact. Treat as fresh so the operator can
+	 * re-create the CDV instead of silently reinterpreting the old layout.
+	 */
+	if (hdr->version != CDV_ONDISK_VERSION) {
+		N_Wf(cdv_async_scan_bad_ver,
+		     "CDV-alloc: async scan cdv=@STR unsupported version=@UINT (expected @UINT); treating as fresh — recreate the CDV",
+		     e->cdv_uuid, hdr->version, (uint32_t)CDV_ONDISK_VERSION);
+		e->is_fresh = true;
+		e->rv = 0;
+		goto done;
+	}
+
 	total = hdr->total_data_extents;
 	e->total_data_extents = total;
 	e->allocator_generation = hdr->allocator_generation;
@@ -385,18 +397,33 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 		goto done;
 	}
 
+	/*
+	 * VERSION 2: read one 4 KiB block per 32 extents. Cache the most
+	 * recent block offset so consecutive indices in the same block
+	 * reuse the buffer — typical for sequentially-allocated CDVs this
+	 * cuts satellite read volume by 32× vs. the VERSION 1 per-extent
+	 * loop.
+	 */
 	for (i = 1; i <= total; i++) {
-		uint64_t off = cdv_ondisk_record_offset(i);
+		uint64_t off = cdv_ondisk_block_offset(i);
+		uint32_t slot = cdv_ondisk_record_slot(i);
+		struct cdv_alloc_ondisk_record *rec;
 		uint32_t expected_crc;
 
-		if (NNVMEIBT_PREAD(cdv_async_scan_rec_rd, fd, rec, CDV_ONDISK_BLOCK_SIZE,
-				   off, 1) < 0) {
-			N_Wf(cdv_async_scan_rec_err,
-			     "CDV-alloc: async scan cdv=@STR read failed at idx=@LLU; aborting, will retry",
-			     e->cdv_uuid, i);
-			e->rv = -EIO;
-			goto done;
+		if (off != cur_block_off) {
+			if (NNVMEIBT_PREAD(cdv_async_scan_rec_rd, fd, block_buf,
+					   CDV_ONDISK_BLOCK_SIZE, off, 1) < 0) {
+				N_Wf(cdv_async_scan_rec_err,
+				     "CDV-alloc: async scan cdv=@STR block read failed at idx=@LLU off=@LLU; aborting, will retry",
+				     e->cdv_uuid, i, off);
+				e->rv = -EIO;
+				goto done;
+			}
+			cur_block_off = off;
 		}
+
+		rec = (struct cdv_alloc_ondisk_record *)
+			((char *)block_buf + slot * CDV_ONDISK_RECORD_SIZE);
 
 		if (!(rec->flags & CDV_ONDISK_RECORD_FLAG_ALLOCATED))
 			continue;
@@ -437,8 +464,6 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 			results[n_results].zeroing_cdv_extent_size_mib = rec->zeroing_cdv_extent_size_mib;
 		}
 		n_results++;
-
-		memset(rec, 0, CDV_ONDISK_BLOCK_SIZE);
 	}
 
 	e->results = results;
@@ -453,7 +478,7 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 done:
 	if (results) NNVMEIBT_BM_FREE(cdv_async_scan_results_free, results);
 	if (hdr) NNVMEIBT_BM_FREE(cdv_async_scan_hdr_free, hdr);
-	if (rec) NNVMEIBT_BM_FREE(cdv_async_scan_rec_free, rec);
+	if (block_buf) NNVMEIBT_BM_FREE(cdv_async_scan_rec_free, block_buf);
 	/* fd is cached in alloc->cdv_fd — do NOT close here. */
 
 	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ,
@@ -819,6 +844,120 @@ static void cdv_write_free(struct nvmeibt_wq_entry *wq_entry)
 	NNVMEIBT_BM_FREE(cdv_write_wqe_free, e);
 }
 
+/* ── Async CDV read-modify-write for single records (VERSION 2 packed layout)
+ *
+ * Version 2 packs 32 × 128-byte records into each 4 KiB satellite block.
+ * A record update can no longer be a single pwrite — we must read the block
+ * containing the target slot, overwrite exactly 128 bytes in-place, and
+ * write the block back. The per-CDV io_wq is single-threaded (see §2.2 of
+ * ThinProvisioningImplementation.md), so RMW entries targeting the same
+ * block are dispatched in the order they were enqueued on the main thread
+ * under handler_lock, and executed sequentially by the worker. No
+ * additional block-level lock is required.
+ */
+struct cdv_rmw_wq_entry {
+	struct nvmeibt_wq_entry   wq_entry;
+	struct nvmeibt_cdv_alloc *alloc;
+	uint64_t                  extent_index;	/* 1-based */
+	struct cdv_alloc_ondisk_record new_rec;	/* contents to overwrite slot with */
+	int                       rv;
+};
+
+static void cdv_rmw_execute(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_rmw_wq_entry *e =
+		container_of(wq_entry, struct cdv_rmw_wq_entry, wq_entry);
+	void    *block;
+	uint64_t block_off = cdv_ondisk_block_offset(e->extent_index);
+	uint32_t slot      = cdv_ondisk_record_slot(e->extent_index);
+	int      fd;
+
+	e->rv = 0;
+
+	fd = cdv_worker_open_fd(e->alloc);
+	if (fd < 0) {
+		e->rv = -ENODEV;
+		goto out;
+	}
+
+	block = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_rmw_block_alloc,
+					    PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
+	if (!block) {
+		e->rv = -ENOMEM;
+		goto out;
+	}
+
+	if (NNVMEIBT_PREAD(cdv_rmw_rd, fd, block, CDV_ONDISK_BLOCK_SIZE,
+			   block_off, 0ULL) < 0) {
+		e->rv = -EIO;
+		goto out_free;
+	}
+
+	memcpy((char *)block + slot * CDV_ONDISK_RECORD_SIZE,
+	       &e->new_rec, CDV_ONDISK_RECORD_SIZE);
+
+	if (NNVMEIBT_PWRITE(cdv_rmw_wr, fd, block, CDV_ONDISK_BLOCK_SIZE,
+			    block_off, 0ULL) < 0)
+		e->rv = -EIO;
+
+out_free:
+	NNVMEIBT_BM_FREE(cdv_rmw_block_free, block);
+out:
+	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, &e->wq_entry);
+}
+
+static void cdv_rmw_finalize(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_rmw_wq_entry *e =
+		container_of(wq_entry, struct cdv_rmw_wq_entry, wq_entry);
+
+	if (wq_entry->is_canceled || e->rv < 0)
+		N_Wf(cdv_rmw_fin_err,
+		     "CDV-alloc: RMW extent_index=@LLU rv=@INT canceled=@INT",
+		     e->extent_index, e->rv, wq_entry->is_canceled);
+}
+
+static void cdv_rmw_free(struct nvmeibt_wq_entry *wq_entry)
+{
+	struct cdv_rmw_wq_entry *e =
+		container_of(wq_entry, struct cdv_rmw_wq_entry, wq_entry);
+
+	NNVMEIBT_BM_FREE(cdv_rmw_wqe_free, e);
+}
+
+/*
+ * cdv_dispatch_rmw_record — enqueue an RMW on the per-extent record.
+ *
+ * Caller passes the *new* record contents; the worker reads the block,
+ * overwrites exactly that 128-byte slot, and writes the block back.
+ * Serialised by the main-thread handler_lock and the single-threaded io_wq.
+ */
+static void cdv_dispatch_rmw_record(struct nvmeibt_cdv_alloc *alloc,
+				     uint64_t extent_index,
+				     const struct cdv_alloc_ondisk_record *new_rec)
+{
+	struct cdv_rmw_wq_entry *e;
+
+	if (!alloc->io_wq)
+		return;
+
+	e = NNVMEIBT_BM_CALLOC(cdv_rmw_wqe_alloc, sizeof(*e));
+	if (!e)
+		return;
+
+	e->wq_entry.type     = "CDV_RMW_RECORD";
+	e->wq_entry.execute  = cdv_rmw_execute;
+	e->wq_entry.finalize = cdv_rmw_finalize;
+	e->wq_entry.abort    = nvmeibt_toma_wakeup_wq_abort_func;
+	e->wq_entry.free     = cdv_rmw_free;
+
+	e->alloc        = alloc;
+	e->extent_index = extent_index;
+	e->new_rec      = *new_rec;
+
+	nvmeibt_wq_addw(alloc->io_wq, &e->wq_entry);
+}
+
 /*
  * cdv_dispatch_write — enqueue a single 4 KiB write to the per-CDV I/O WQ.
  *
@@ -827,6 +966,8 @@ static void cdv_write_free(struct nvmeibt_wq_entry *wq_entry)
  * @offset:  CDV byte offset to write at
  *
  * The caller must NOT free @buf after calling this; it is freed by the WQ.
+ * Used only for the satellite header (offset 0); per-extent record writes
+ * go through cdv_dispatch_rmw_record so the RMW is correct under packing.
  */
 static void cdv_dispatch_write(struct nvmeibt_cdv_alloc *alloc,
 			       void *buf, uint64_t offset)
@@ -868,22 +1009,18 @@ static void cdv_async_write_record(struct nvmeibt_cdv_alloc *alloc,
 				   uint64_t extent_index,
 				   const char *tpv_uuid)
 {
-	struct cdv_alloc_ondisk_record *rec;
+	struct cdv_alloc_ondisk_record rec;
 
-	rec = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_async_wr_rec_alloc,
-					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
-	if (!rec)
-		return;
-
+	memset(&rec, 0, sizeof(rec));
 	if (tpv_uuid) {
-		rec->flags = CDV_ONDISK_RECORD_FLAG_ALLOCATED;
-		strncpy(rec->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
-		rec->tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+		rec.flags = CDV_ONDISK_RECORD_FLAG_ALLOCATED;
+		strncpy(rec.tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+		rec.tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
 	}
-	rec->crc32 = crc32_seedless(rec,
+	rec.crc32 = crc32_seedless(&rec,
 		offsetof(struct cdv_alloc_ondisk_record, crc32));
 
-	cdv_dispatch_write(alloc, rec, cdv_ondisk_record_offset(extent_index));
+	cdv_dispatch_rmw_record(alloc, extent_index, &rec);
 }
 
 /*
@@ -942,23 +1079,19 @@ static void cdv_async_write_record_needs_zeroing(struct nvmeibt_cdv_alloc *alloc
 						  uint32_t allocator_size_gib,
 						  uint32_t cdv_extent_size_mib)
 {
-	struct cdv_alloc_ondisk_record *rec;
+	struct cdv_alloc_ondisk_record rec;
 
-	rec = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_async_wr_nz_rec_alloc,
-					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
-	if (!rec)
-		return;
-
-	rec->flags = CDV_ONDISK_RECORD_FLAG_ALLOCATED | CDV_ONDISK_RECORD_FLAG_NEEDS_ZEROING;
-	strncpy(rec->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
-	rec->tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
-	rec->crc32 = crc32_seedless(rec,
+	memset(&rec, 0, sizeof(rec));
+	rec.flags = CDV_ONDISK_RECORD_FLAG_ALLOCATED | CDV_ONDISK_RECORD_FLAG_NEEDS_ZEROING;
+	strncpy(rec.tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	rec.tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	rec.crc32 = crc32_seedless(&rec,
 		offsetof(struct cdv_alloc_ondisk_record, crc32));
 	/* Geometry fields are after crc32, not CRC-covered. */
-	rec->zeroing_allocator_size_gib  = allocator_size_gib;
-	rec->zeroing_cdv_extent_size_mib = cdv_extent_size_mib;
+	rec.zeroing_allocator_size_gib  = allocator_size_gib;
+	rec.zeroing_cdv_extent_size_mib = cdv_extent_size_mib;
 
-	cdv_dispatch_write(alloc, rec, cdv_ondisk_record_offset(extent_index));
+	cdv_dispatch_rmw_record(alloc, extent_index, &rec);
 }
 
 /* ── Background CDV data-extent zero (work-queue based) ────────────────────
@@ -1189,10 +1322,14 @@ struct cdv_alloc_persist_wq_entry {
 	struct nvmeibt_wq_entry          wq_entry;
 	struct nvmeibt_cdv_alloc        *alloc;
 
-	/* Buffers prepared by main thread, written by worker. */
-	void    *record_buf;
-	uint64_t record_offset;
-	void    *header_buf;
+	/*
+	 * Record contents prepared by main thread; worker does RMW on the
+	 * 4 KiB block containing extent_index's slot (§2.2 VERSION 2).
+	 */
+	struct cdv_alloc_ondisk_record   new_rec;
+	uint64_t                         extent_index;
+	/* Header buffer is still a full 4 KiB block (header occupies block 0). */
+	void                            *header_buf;
 
 	/* Response to send from finalize after write completes. */
 	struct nvmeibt_registrant_ctx    reg_ctx;	/* copy — msg may be freed */
@@ -1205,7 +1342,10 @@ static void cdv_alloc_persist_execute(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct cdv_alloc_persist_wq_entry *e =
 		container_of(wq_entry, struct cdv_alloc_persist_wq_entry, wq_entry);
-	int fd;
+	void    *block = NULL;
+	uint64_t block_off = cdv_ondisk_block_offset(e->extent_index);
+	uint32_t slot      = cdv_ondisk_record_slot(e->extent_index);
+	int      fd;
 
 	e->write_rv = 0;
 	fd = cdv_worker_open_fd(e->alloc);
@@ -1214,9 +1354,25 @@ static void cdv_alloc_persist_execute(struct nvmeibt_wq_entry *wq_entry)
 		goto done;
 	}
 
-	/* Write the allocation record — this is the critical write. */
-	if (NNVMEIBT_PWRITE(cdv_alloc_persist_rec_wr, fd, e->record_buf,
-			    CDV_ONDISK_BLOCK_SIZE, e->record_offset, 0ULL) < 0) {
+	/*
+	 * Write the allocation record — this is the critical write.
+	 * VERSION 2 packed layout: RMW the 4 KiB block containing the slot.
+	 */
+	block = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_alloc_persist_rmw_block,
+					    PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
+	if (!block) {
+		e->write_rv = -ENOMEM;
+		goto done;
+	}
+	if (NNVMEIBT_PREAD(cdv_alloc_persist_rec_rd, fd, block,
+			   CDV_ONDISK_BLOCK_SIZE, block_off, 0ULL) < 0) {
+		e->write_rv = -EIO;
+		goto done;
+	}
+	memcpy((char *)block + slot * CDV_ONDISK_RECORD_SIZE,
+	       &e->new_rec, CDV_ONDISK_RECORD_SIZE);
+	if (NNVMEIBT_PWRITE(cdv_alloc_persist_rec_wr, fd, block,
+			    CDV_ONDISK_BLOCK_SIZE, block_off, 0ULL) < 0) {
 		e->write_rv = -EIO;
 		goto done;
 	}
@@ -1230,6 +1386,8 @@ static void cdv_alloc_persist_execute(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 done:
+	if (block)
+		NNVMEIBT_BM_FREE(cdv_alloc_persist_rmw_block_free, block);
 	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, &e->wq_entry);
 }
 
@@ -1256,8 +1414,6 @@ static void cdv_alloc_persist_free(struct nvmeibt_wq_entry *wq_entry)
 	struct cdv_alloc_persist_wq_entry *e =
 		container_of(wq_entry, struct cdv_alloc_persist_wq_entry, wq_entry);
 
-	if (e->record_buf)
-		NNVMEIBT_BM_FREE(cdv_alloc_persist_rec_free, e->record_buf);
 	if (e->header_buf)
 		NNVMEIBT_BM_FREE(cdv_alloc_persist_hdr_free, e->header_buf);
 	NNVMEIBT_BM_FREE(cdv_alloc_persist_wqe_free, e);
@@ -1278,7 +1434,6 @@ static int cdv_dispatch_alloc_persist(struct nvmeibt_cdv_alloc *alloc,
 				      const struct nvmeibt_cdv_alloc_resp *resp)
 {
 	struct cdv_alloc_persist_wq_entry *e;
-	struct cdv_alloc_ondisk_record *rec;
 	struct cdv_alloc_ondisk_header *hdr;
 
 	if (!alloc->io_wq)
@@ -1288,17 +1443,12 @@ static int cdv_dispatch_alloc_persist(struct nvmeibt_cdv_alloc *alloc,
 	if (!e)
 		return -ENOMEM;
 
-	/* Prepare the record buffer. */
-	rec = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_alloc_persist_rec_buf,
-					  PAGE_SIZE, CDV_ONDISK_BLOCK_SIZE);
-	if (!rec) {
-		NNVMEIBT_BM_FREE(cdv_alloc_persist_wqe_oom, e);
-		return -ENOMEM;
-	}
-	rec->flags = CDV_ONDISK_RECORD_FLAG_ALLOCATED;
-	strncpy(rec->tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
-	rec->tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
-	rec->crc32 = crc32_seedless(rec,
+	/* Prepare the 128-byte record payload; worker does RMW on the block. */
+	memset(&e->new_rec, 0, sizeof(e->new_rec));
+	e->new_rec.flags = CDV_ONDISK_RECORD_FLAG_ALLOCATED;
+	strncpy(e->new_rec.tpv_uuid, tpv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+	e->new_rec.tpv_uuid[NVMEIBT_CDV_UUID_STRLEN - 1] = '\0';
+	e->new_rec.crc32 = crc32_seedless(&e->new_rec,
 		offsetof(struct cdv_alloc_ondisk_record, crc32));
 
 	/* Prepare the header buffer. */
@@ -1323,8 +1473,7 @@ static int cdv_dispatch_alloc_persist(struct nvmeibt_cdv_alloc *alloc,
 	e->wq_entry.free     = cdv_alloc_persist_free;
 
 	e->alloc         = alloc;
-	e->record_buf    = rec;
-	e->record_offset = cdv_ondisk_record_offset(extent_index);
+	e->extent_index  = extent_index;
 	e->header_buf    = hdr;
 	e->reg_ctx       = *reg_ctx;	/* struct copy */
 	e->resp          = *resp;	/* struct copy */

@@ -476,7 +476,7 @@ This is a real server-side admission check — not sender-trusted — keyed on a
 
 - **Create.** `POST /volumes/save` for a CDV allocates `capacity + allocatorSizeGib` GiB of raw disk capacity and writes **both** documents (`<CDV>` and `<CDV>-mgmt`) in a single Mongo operation. If either write fails the operation is rolled back before any Kafka traffic is emitted. No state is published to TOMA/clients until both volumes are durable.
 - **Delete.** Deleting a CDV deletes both volumes in one operation. Users cannot delete the satellite independently; the satellite has no delete affordance in UI or REST (see §1.5.4.5).
-- **Extend.** Volume-extend on a CDV extends **only** the CDV. The satellite size is fixed at creation (to the admin-supplied `cdvConfig.allocatorSizeGib`, default 1 GiB). Each GiB of satellite supports ~262 143 extent records (4 KiB/record atomic block), so at the default 1 GiB the CDV is capped at ~262k extents × its extent size; admins provisioning a very large CDV with a small extent raise allocatorSizeGib at create time. Keeping the satellite size fixed after create preserves the Mongo update path single-document.
+- **Extend.** Volume-extend on a CDV extends **only** the CDV. The satellite size is fixed at creation (to the admin-supplied `cdvConfig.allocatorSizeGib`, default 1 GiB). Each GiB of satellite supports ~8.4M extent records under VERSION 2 (32 × 128-byte records per 4 KiB block — see §2.2). At the default 1 GiB the CDV can carry up to ~8.4M × its extent size; admins provisioning a very large CDV with a small extent raise allocatorSizeGib at create time. Keeping the satellite size fixed after create preserves the Mongo update path single-document.
 - **Resize-down / encryption / other mutations** on the CDV do not touch the satellite.
 
 This "allocate raw + write two docs + single rollback" discipline keeps the Mongo transactional surface the same as today's single-volume create path — which is important because NVMesh Mongo writes are not multi-document atomic.
@@ -540,44 +540,55 @@ The CDV.allocator is a role held by exactly one TOMA at any time. It owns all CD
 
 ### 2.2 On-Disk Format (Allocator Area)
 
-The allocator area occupies the first `allocatorSizeGib` GiB of the CDV (bytes `0` to `A`). Data CDV\_extents follow immediately after. Two independent size parameters:
+The allocator area is a separate NVMesh volume — the `<CDV>-mgmt` satellite (§1.5) — sized at `cdvConfig.allocatorSizeGib` GiB. Data CDV\_extents live on the CDV volume itself, starting at offset `0`. Two independent size parameters:
 
-- $A = \texttt{allocatorSizeGib} \times 1\,\text{GiB}$ — allocator area size (configurable CDV property, default 1 GiB)
+- $A = \texttt{allocatorSizeGib} \times 1\,\text{GiB}$ — satellite volume size (configurable CDV property, default 1 GiB, min 1 GiB)
 - $E = \texttt{cdvExtentSizeMib} \times 1\,\text{MiB}$ — CDV\_extent size (configurable CDV property)
 
-The allocator region is organised as an array of 4 KiB blocks — the smallest atomic unit the CDV block stack guarantees. The first block is the header; each subsequent block is one record describing one CDV\_extent. This wastes space relative to a packed 24-byte layout, but each header/record write is atomic on its own, which eliminates torn-write concerns during allocate/free and during allocator migration between TOMAs (§2.6).
+**Record packing (VERSION 2).** The allocator region is organised as an array of 4 KiB blocks. The first block is the header; each subsequent block carries **32 packed 128-byte records** describing 32 CDV\_extents. The satellite is an NVMesh volume, so NVMesh's whole-write atomicity guarantee applies to every bio TOMA issues — we do not require one record per atomic unit. All record mutations go through the per-CDV `nvmeibt_cdv_alloc.handler_lock` (`toma/nvmeibt_cdv_alloc.h`), which serialises read-modify-write on shared blocks.
 
 ```
 [0 .. 4 KiB)                CDV.allocator header (cdv_alloc_ondisk_header, 4 KiB block)
-[4 KiB .. A)                cdv_alloc_ondisk_record[N] — one 4 KiB block per data CDV_extent
-[A   .. A+E)   CDV_extent[0]  — reserved; never available for TPV data
-[A+E .. A+2E)  CDV_extent[1]  — first allocatable data extent
+[4 KiB .. A)                cdv_alloc_ondisk_record[N] — 32 × 128-byte records per 4 KiB block
+data CDV (separate volume):
+[0 .. E)       CDV_extent[0]  — first allocatable data extent
+[E .. 2E)      CDV_extent[1]
 ...
 ```
 
-```mermaid
-graph LR
-    H["[0, 4 KiB)\nHeader (4 KiB block)\nmagic, version,\nallocator_toma_id,\nallocator_generation"]
-    R["[4 KiB, A)\nPer-extent records\ncdv_alloc_ondisk_record\n(4 KiB per slot)"]
-    D0["CDV_extent[0]\n[A, A+E)\nreserved\n(never TPV data)"]
-    D1["CDV_extent[1]\n[A+E, A+2E)\nFirst allocatable"]
-    D2["..."]
-    DN["CDV_extent[N-1]\nLast allocatable"]
-    H --> R --> D0 --> D1 --> D2 --> DN
-```
+*Figure 1: CDV + satellite layout. The satellite is a full NVMesh volume of size A; data extents live on the separate CDV volume starting at offset 0.*
 
-*Figure 1: CDV physical layout. The allocator area (A bytes) is a 4 KiB header plus a flat array of 4 KiB per-extent records. All allocatable data extents start at CDV\_extent[1].*
+With a 1 GiB allocator region and 128-byte records this supports $(1\,\text{GiB} - 4\,\text{KiB}) / 128 = 8{,}388{,}576$ extent slots. Larger allocator regions scale this linearly.
 
-With a 1 GiB allocator region and 4 KiB blocks this supports $(1\,\text{GiB} / 4\,\text{KiB}) - 1 = 262{,}143$ extent slots. Larger allocator regions scale this linearly.
+#### Version history
+
+- **VERSION 1** (historical; pre-GA): one record per 4 KiB block. Density 1/32× the current format. Predated the satellite refactor; at the time the allocator area lived on the raw CDV block device and the 4 KiB block was the smallest atomic unit. Reformat required to load — TPV is pre-GA, no migration path shipped.
+- **VERSION 2** (current): packed 128-byte records, 32 per block. RMW on every record write, serialised by `handler_lock`. See the design note in §2.2.1 below.
+
+#### 2.2.1 Why pack records — and why 128 bytes
+
+The per-record payload in VERSION 1 was 84 bytes of useful data padded to 4 KiB — 2% utilisation. Packing brings two wins and one cost:
+
+- **Satellite headroom.** A 1 GiB default satellite now addresses ~8.4M extents instead of 262 k. Admins running very large CDVs at small extent sizes no longer need to raise `allocatorSizeGib`.
+- **Better scan/I-O locality.** Sequential allocations land in the same block. A small LRU of in-flight satellite blocks in TOMA amortises the RMW cost.
+- **Cost: RMW per update.** A single-record write becomes `read(4 KiB) → mutate one record → write(4 KiB)` under the per-CDV lock. Satellite I/O is off the data hot path and the extra 4 KiB read caches well, so the cost is negligible in practice.
+
+128 bytes was chosen for natural power-of-2 alignment and 44 bytes of headroom above the 84-byte payload — room for future per-extent fields (timestamps, per-TPV name hash, additional flags) without another version bump.
+
+#### 2.2.2 Deferred: sub-1-GiB satellite (Option B)
+
+With packed records, a 32 MiB satellite would suffice for typical metadata-CDV workloads (262k extents × 128 B ≈ 32 MiB + header). We do not ship that here because management enforces a **hard 1 GiB volume-size floor** (`MIN_VOLUME_CAPACITY = 1` in `nvmesh-management/utils.js`; volume `capacity` is an integer-GiB field). Allowing sub-1-GiB volumes — even just for the `CDV_MGMT` volume class — touches schema validation, capacity-unit accounting, and UI display paths across the whole volume subsystem, and has implications beyond thin provisioning. **Deferred** until sub-1-GiB allocation is considered independently. Until then the 1 GiB satellite is harmless over-provision: TOMA's steady-state RAM footprint is driven by `n_allocated` (one `nvmeibt_cdv_extent_entry` per allocated extent), not by satellite size, and the startup scan reads the satellite once and retains only the in-RAM entries.
 
 #### Header
 
 ```c
 /* toma/nvmeibt_cdv_alloc.h */
-#define CDV_ONDISK_BLOCK_SIZE  4096U
-#define CDV_ONDISK_MAGIC       0x43444D31U   /* 'CDM1' */
-#define CDV_ONDISK_VERSION     1
-#define NVMEIBT_CDV_UUID_STRLEN 64           /* hostname / UUID string length */
+#define CDV_ONDISK_BLOCK_SIZE       4096U
+#define CDV_ONDISK_RECORD_SIZE      128U
+#define CDV_ONDISK_RECORDS_PER_BLOCK (CDV_ONDISK_BLOCK_SIZE / CDV_ONDISK_RECORD_SIZE)  /* 32 */
+#define CDV_ONDISK_MAGIC            0x43444D31U   /* 'CDM1' */
+#define CDV_ONDISK_VERSION          2             /* packed 128-B records */
+#define NVMEIBT_CDV_UUID_STRLEN     64            /* hostname / UUID string length */
 
 struct cdv_alloc_ondisk_header {
     uint32_t magic;                                 /* CDV_ONDISK_MAGIC */
@@ -609,9 +620,22 @@ struct cdv_alloc_ondisk_record {
      */
     uint32_t zeroing_allocator_size_gib;
     uint32_t zeroing_cdv_extent_size_mib;
-    uint8_t  reserved2[CDV_ONDISK_BLOCK_SIZE - 1 - 7 - 64 - 4 - 4 - 4];
+    uint8_t  reserved2[CDV_ONDISK_RECORD_SIZE - 1 - 7 - 64 - 4 - 4 - 4];  /* 44 bytes headroom */
 } __attribute__((packed));
+_Static_assert(sizeof(struct cdv_alloc_ondisk_record) == CDV_ONDISK_RECORD_SIZE,
+               "cdv_alloc_ondisk_record must be exactly CDV_ONDISK_RECORD_SIZE bytes");
 ```
+
+**Physical offset of record for `extent_index`** (0-based; block 0 of the satellite holds the header):
+
+```c
+block_index  = 1 + extent_index / CDV_ONDISK_RECORDS_PER_BLOCK;
+record_in_blk = extent_index % CDV_ONDISK_RECORDS_PER_BLOCK;
+byte_offset  = block_index * CDV_ONDISK_BLOCK_SIZE
+             + record_in_blk * CDV_ONDISK_RECORD_SIZE;
+```
+
+Writes are read-modify-write: load the block (4 KiB bio), mutate `records[record_in_blk]` in place, write the block back. A tiny block-LRU in `struct nvmeibt_cdv_alloc` (e.g. 4–8 blocks) amortises sequential-allocation bursts so most RMW cycles reuse a cached read.
 
 Record `i` at byte offset `4 KiB × (i + 1)` describes CDV\_extent `i`. Records are read in bulk at attach time (`cdv_ondisk_scan_async`) to rebuild the in-memory allocator state. There is **no CDV-wide L1/L2 tree or `cdv_extent_type` enum** in the on-disk format — the previous design iteration with `CDV_EXTENT_{L1,L2,L2A,L3,DATA}` enum values and a flat 24-byte record has been superseded. Per-TPV mapping trees (§3.4) are stored inside the TPV's own data CDV\_extents, not in the allocator region.
 
@@ -3308,7 +3332,7 @@ TOMA's in-memory `nvmeibt_cdv_alloc` struct provides:
 - `total_data_extents` — total CDV data capacity in extents
 - `extents` xdlist — per-extent entries with `tpv_uuid`, from which per-TPV CDV extent counts are derived
 
-The `maxAddressableExtents` is computed from the allocator area geometry: one 4 KiB header block + one 4 KiB record per extent slot = `(allocatorSizeGib × 1 GiB / 4 KiB) − 1`.
+The `maxAddressableExtents` is computed from the allocator area geometry: one 4 KiB header block + 32 × 128-byte records per subsequent 4 KiB block (§2.2 VERSION 2) = `((allocatorSizeGib × 1 GiB − 4 KiB) / 128)`. At the default `allocatorSizeGib = 1` this is ~8 388 576.
 
 #### New Kafka message: `TOMAToManagement_TP.cdvAllocatorStats`
 
@@ -3320,7 +3344,7 @@ Published by TOMA after every `CDV_ALLOC_EXTENT` and `CDV_FREE_EXTENT` operation
     "cdvUUID": "<uuid>",
     "allocatedExtents": 42,
     "totalDataExtents": 100,
-    "maxAddressableExtents": 262143,
+    "maxAddressableExtents": 8388576,
     "perTPV": [
         { "tpvUUID": "<uuid-1>", "cdvExtents": 12 },
         { "tpvUUID": "<uuid-2>", "cdvExtents": 30 }
@@ -3499,11 +3523,11 @@ Note: `runtimeStats.cdvExtents` on the TPV document is written by the CDV stats 
 
 ### 10.6 "Max Additional Extents" Computation
 
-**Max addressable extents** is the upper limit on how many CDV data extents the allocator area can track, regardless of current CDV physical capacity. It is determined by the on-disk allocator format (one 4 KiB record per extent, plus a 4 KiB header):
+**Max addressable extents** is the upper limit on how many CDV data extents the allocator area can track, regardless of current CDV physical capacity. It is determined by the on-disk allocator format (§2.2 VERSION 2: 32 × 128-byte records per 4 KiB block, plus a 4 KiB header):
 
-$$\text{maxAddressable} = \frac{\text{allocatorSizeGib} \times 1\,\text{GiB}}{4\,\text{KiB}} - 1$$
+$$\text{maxAddressable} = \frac{\text{allocatorSizeGib} \times 1\,\text{GiB} - 4\,\text{KiB}}{128}$$
 
-For the default `allocatorSizeGib = 1`: 262,143 extent slots.
+For the default `allocatorSizeGib = 1`: 8,388,576 extent slots.
 
 **Total data extents** is how many CDV data extents actually exist given current CDV capacity:
 
