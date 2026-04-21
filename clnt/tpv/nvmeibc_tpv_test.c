@@ -111,6 +111,16 @@ static struct nvmeibc_tpv_ktest_ctx {
 	void    *cdv_buf;
 	u64      cdv_len;
 
+	/*
+	 * Split-mode meta CDV backing store (optional). When non-NULL,
+	 * ktest_cdv_sync_read/write routes I/O from split-mode TPVs to this
+	 * buffer instead of cdv_buf — mirroring the production
+	 * tpv_cdv_sync_io → nvmeibc_tpv_meta_cdv() routing. Left NULL for
+	 * single-CDV tests.
+	 */
+	void    *meta_cdv_buf;
+	u64      meta_cdv_len;
+
 	/* TOMA simulation: extent index counter for cdv_alloc_extent */
 	u64      next_extent_idx;	/* next data extent to hand out (start: 1) */
 	u64      max_extents;		/* maximum data extents available */
@@ -123,6 +133,16 @@ static struct nvmeibc_tpv_ktest_ctx {
 	/* TOMA simulation: extent list for recovery (vmalloc'd array) */
 	u64     *recovery_extents;	/* extent indices to return from cdv_list_extents */
 	u64      recovery_count;	/* number of entries in recovery_extents */
+
+	/*
+	 * Split-mode recovery: distinct extent lists per side. When the IB
+	 * admin cdv_list_extents stub receives a cdv UUID equal to the
+	 * meta-side sentinel, it returns meta_recovery_extents; otherwise
+	 * (data side, or any single-CDV test) it falls through to
+	 * recovery_extents.
+	 */
+	u64     *meta_recovery_extents;
+	u64      meta_recovery_count;
 } g_tc;
 
 static DEFINE_MUTEX(g_tc_lock);	/* serialises concurrent selftest invocations */
@@ -143,25 +163,51 @@ extern int (*nvmeibc_tpv_cdv_test_sync_write_fn)(struct nvmeibc_tpv *tpv,
 						   u64 cdv_offset,
 						   const void *buf, u64 len);
 
-static int ktest_cdv_sync_read(struct nvmeibc_tpv *tpv __maybe_unused,
-			       u64 cdv_offset, void *buf, u64 len)
+/*
+ * Pick the right backing buffer for sync I/O. Mirrors the production
+ * tpv_cdv_sync_io routing via nvmeibc_tpv_meta_cdv(): split-mode TPVs target
+ * the meta CDV buffer when one has been provisioned for the test; fall back
+ * to the data buffer otherwise (single-CDV tests or split-mode tests that
+ * happen to target a data offset via a path not yet encountered).
+ */
+static void ktest_cdv_pick_buf(struct nvmeibc_tpv *tpv, void **out_buf, u64 *out_len)
 {
-	if (!g_tc.cdv_buf)
+	if (nvmeibc_tpv_is_split(tpv) && g_tc.meta_cdv_buf) {
+		*out_buf = g_tc.meta_cdv_buf;
+		*out_len = g_tc.meta_cdv_len;
+	} else {
+		*out_buf = g_tc.cdv_buf;
+		*out_len = g_tc.cdv_len;
+	}
+}
+
+static int ktest_cdv_sync_read(struct nvmeibc_tpv *tpv, u64 cdv_offset,
+				void *buf, u64 len)
+{
+	void *cdv_buf;
+	u64   cdv_len;
+
+	ktest_cdv_pick_buf(tpv, &cdv_buf, &cdv_len);
+	if (!cdv_buf)
 		return -ENOTSUPP;
-	if (cdv_offset + len > g_tc.cdv_len)
+	if (cdv_offset + len > cdv_len)
 		return -ERANGE;
-	memcpy(buf, (char *)g_tc.cdv_buf + cdv_offset, len);
+	memcpy(buf, (char *)cdv_buf + cdv_offset, len);
 	return 0;
 }
 
-static int ktest_cdv_sync_write(struct nvmeibc_tpv *tpv __maybe_unused,
-				u64 cdv_offset, const void *buf, u64 len)
+static int ktest_cdv_sync_write(struct nvmeibc_tpv *tpv, u64 cdv_offset,
+				const void *buf, u64 len)
 {
-	if (!g_tc.cdv_buf)
+	void *cdv_buf;
+	u64   cdv_len;
+
+	ktest_cdv_pick_buf(tpv, &cdv_buf, &cdv_len);
+	if (!cdv_buf)
 		return -ENOTSUPP;
-	if (cdv_offset + len > g_tc.cdv_len)
+	if (cdv_offset + len > cdv_len)
 		return -ERANGE;
-	memcpy((char *)g_tc.cdv_buf + cdv_offset, buf, len);
+	memcpy((char *)cdv_buf + cdv_offset, buf, len);
 	return 0;
 }
 
@@ -220,28 +266,52 @@ extern int (*nvmeibc_tpv_test_cdv_list_fn)(
 	struct nvmeibc_volume *cdv, const char *toma_id,
 	const char *tpv_uuid, u64 **out_indices, u64 *out_count);
 
+/*
+ * ktest_cdv_is_meta_side — does this cdv pointer point at a split-mode
+ * meta_cdv sentinel? Split-mode tests use tpv->atom as a stable sentinel
+ * (see tpv_ktest_upgrade_to_split). We recognise any pointer that isn't
+ * the data-side cdv_vol of an active test TPV as "not the meta side",
+ * but since self-tests only run against a single TPV at a time the
+ * check can be conservative: if a recovery list was staged specifically
+ * for the meta side AND cdv is non-NULL-and-not-sentinel for the data
+ * side, route to meta.
+ *
+ * Simpler heuristic: if g_tc.meta_recovery_extents is set AND cdv != NULL,
+ * the caller distinguishes sides by cdv pointer inequality. Tests that
+ * want distinct lists per side populate both; the stub picks via pointer
+ * identity recorded by the test (see tpv_ktest_split_recovery).
+ */
+static void *ktest_meta_cdv_sentinel;	/* test-owned; set by split-mode tests */
+
 static int ktest_cdv_list_extents(
-	struct nvmeibc_volume *cdv __maybe_unused,
+	struct nvmeibc_volume *cdv,
 	const char            *toma_id __maybe_unused,
 	const char            *tpv_uuid,
 	u64                  **out_indices,
 	u64                   *out_count)
 {
-	u64 *copy;
+	u64  *src       = g_tc.recovery_extents;
+	u64   src_count = g_tc.recovery_count;
+	u64  *copy;
+
+	if (ktest_meta_cdv_sentinel && cdv == (struct nvmeibc_volume *)ktest_meta_cdv_sentinel) {
+		src       = g_tc.meta_recovery_extents;
+		src_count = g_tc.meta_recovery_count;
+	}
 
 	*out_indices = NULL;
 	*out_count   = 0;
 
-	if (!g_tc.recovery_extents || g_tc.recovery_count == 0)
+	if (!src || src_count == 0)
 		return 0;
 
-	copy = vmalloc(g_tc.recovery_count * sizeof(u64));
+	copy = vmalloc(src_count * sizeof(u64));
 	if (!copy)
 		return -ENOMEM;
 
-	memcpy(copy, g_tc.recovery_extents, g_tc.recovery_count * sizeof(u64));
+	memcpy(copy, src, src_count * sizeof(u64));
 	*out_indices = copy;
-	*out_count   = g_tc.recovery_count;
+	*out_count   = src_count;
 	return 0;
 }
 
@@ -1158,6 +1228,380 @@ done:
 	tpv_ktest_destroy(tpv);
 }
 
+/*
+ * tpv_ktest_seed_meta_pool — seed the meta allocator with one L1 extent
+ * plus n_data_extents data extents. Mirrors tpv_ktest_seed_pool but
+ * targets tpv->meta_allocator. In split mode "data_extents" here mean
+ * slots on the meta CDV that the persist path can use for L2 tables.
+ * The first extent (index 1) is marked is_l1_extent, slot 0 pinned.
+ */
+static int tpv_ktest_seed_meta_pool(struct nvmeibc_tpv *tpv, u64 n_l2_extents)
+{
+	struct nvmeibc_tpv_allocator *alloc = tpv->meta_allocator;
+	u64 E = (u64)alloc->cdv_extent_size_mib << 20;
+	u64 T = (u64)alloc->tpv_extent_size_kb << 10;
+	u64 A = (u64)alloc->allocator_size_gib << 30;	/* 0 in tests */
+	u64 ei, s;
+	u64 n_slots = E / T;
+
+	/* L1 extent: slot 0 pinned. */
+	{
+		struct nvmeibc_cdv_extent_ref *ref;
+
+		ref = kzalloc(sizeof(*ref), GFP_KERNEL);
+		if (!ref) return -ENOMEM;
+		ref->extent_index    = TPV_KTEST_L1_EXT_IDX;
+		ref->is_l1_extent    = true;
+		INIT_LIST_HEAD(&ref->node);
+		list_add_tail(&ref->node, &alloc->cdv_extent_list);
+		alloc->cdv_extents_count++;
+		alloc->l1_extent_index  = TPV_KTEST_L1_EXT_IDX;
+		alloc->n_l2_tables_used = 0;
+		nvmeibc_tpv_mark_l1_full_dirty(tpv);
+
+		for (s = 1; s < n_slots; s++) {
+			struct nvmeibc_tpv_free_slot *fs;
+
+			fs = kzalloc(sizeof(*fs), GFP_KERNEL);
+			if (!fs) return -ENOMEM;
+			fs->phys_offset      = A + (TPV_KTEST_L1_EXT_IDX - 1) * E + s * T;
+			fs->cdv_extent_index = TPV_KTEST_L1_EXT_IDX;
+			INIT_LIST_HEAD(&fs->node);
+			list_add_tail(&fs->node, &alloc->free_tpv_extents);
+			alloc->free_tpv_extent_count++;
+		}
+	}
+
+	for (ei = TPV_KTEST_L1_EXT_IDX + 1;
+	     ei <= TPV_KTEST_L1_EXT_IDX + n_l2_extents; ei++) {
+		struct nvmeibc_cdv_extent_ref *ref;
+
+		ref = kzalloc(sizeof(*ref), GFP_KERNEL);
+		if (!ref) return -ENOMEM;
+		ref->extent_index    = ei;
+		INIT_LIST_HEAD(&ref->node);
+		list_add_tail(&ref->node, &alloc->cdv_extent_list);
+		alloc->cdv_extents_count++;
+
+		for (s = 0; s < n_slots; s++) {
+			struct nvmeibc_tpv_free_slot *fs;
+
+			fs = kzalloc(sizeof(*fs), GFP_KERNEL);
+			if (!fs) return -ENOMEM;
+			fs->phys_offset      = A + (ei - 1) * E + s * T;
+			fs->cdv_extent_index = ei;
+			INIT_LIST_HEAD(&fs->node);
+			list_add_tail(&fs->node, &alloc->free_tpv_extents);
+			alloc->free_tpv_extent_count++;
+		}
+	}
+	return 0;
+}
+
+/*
+ * tpv_ktest_split_alloc_free — verify that alloc / free on the data side
+ * of a split-mode TPV do not touch the metadata allocator's pool or
+ * extent list. This is the MVP split invariant: the two pools are
+ * independent; data-path allocation stays on the data allocator.
+ */
+static void tpv_ktest_split_alloc_free(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv *tpv;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	u64 meta_free_before;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) { KTO_FAIL(kto, "split_alloc_free", "kzalloc failed"); return; }
+
+	rc = tpv_ktest_upgrade_to_split(tpv, TPV_KTEST_TPV_EXT_KB, TPV_KTEST_CDV_EXT_MB);
+	if (rc != 0) { KTO_FAIL(kto, "split_alloc_free", "upgrade rc=%d", rc); goto done; }
+
+	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
+		KTO_FAIL(kto, "split_alloc_free", "seed_pool failed");
+		goto done;
+	}
+	if (tpv_ktest_seed_meta_pool(tpv, 0) < 0) {
+		KTO_FAIL(kto, "split_alloc_free", "seed_meta_pool failed");
+		goto done;
+	}
+	meta_free_before = tpv->meta_allocator->free_tpv_extent_count;
+
+	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	if (rc != 0 || !entry) {
+		KTO_FAIL(kto, "split_alloc_free", "alloc rc=%d", rc);
+		goto done;
+	}
+	if (tpv->meta_allocator->free_tpv_extent_count != meta_free_before) {
+		KTO_FAIL(kto, "split_alloc_free",
+			 "data alloc perturbed meta free pool %llu → %llu",
+			 meta_free_before, tpv->meta_allocator->free_tpv_extent_count);
+		goto done;
+	}
+	rc = nvmeibc_tpv_free_extent(tpv, 0);
+	if (rc != 0) {
+		KTO_FAIL(kto, "split_alloc_free", "free rc=%d", rc);
+		goto done;
+	}
+	if (tpv->meta_allocator->free_tpv_extent_count != meta_free_before) {
+		KTO_FAIL(kto, "split_alloc_free",
+			 "data free perturbed meta free pool %llu → %llu",
+			 meta_free_before, tpv->meta_allocator->free_tpv_extent_count);
+		goto done;
+	}
+
+	KTO_PASS(kto, "split_alloc_free");
+done:
+	tpv_ktest_destroy(tpv);
+}
+
+/*
+ * tpv_ktest_split_persist — verify that flush_state writes the TPV's L1
+ * table to the meta CDV buffer, not the data CDV buffer. Uses a separate
+ * backing buffer for the meta side; the ktest_cdv_sync_* stubs route to
+ * it via nvmeibc_tpv_is_split(tpv).
+ */
+static void tpv_ktest_split_persist(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv *tpv;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	struct tpv_l1_header hdr;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) { KTO_FAIL(kto, "split_persist", "kzalloc failed"); return; }
+
+	rc = tpv_ktest_upgrade_to_split(tpv, TPV_KTEST_TPV_EXT_KB, TPV_KTEST_CDV_EXT_MB);
+	if (rc != 0) { KTO_FAIL(kto, "split_persist", "upgrade rc=%d", rc); goto done; }
+
+	/* Provision the meta CDV buffer for the sync-IO stub. */
+	g_tc.meta_cdv_buf = vzalloc(TPV_KTEST_CDV_BUF_SZ);
+	if (!g_tc.meta_cdv_buf) {
+		KTO_FAIL(kto, "split_persist", "meta_cdv_buf vzalloc failed");
+		goto done;
+	}
+	g_tc.meta_cdv_len = TPV_KTEST_CDV_BUF_SZ;
+
+	if (tpv_ktest_seed_pool(tpv, 1) < 0 || tpv_ktest_seed_meta_pool(tpv, 1) < 0) {
+		KTO_FAIL(kto, "split_persist", "seed failed");
+		goto cleanup_buf;
+	}
+
+	/* Install a leaf so flush_state has something to persist. */
+	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	if (rc != 0) {
+		KTO_FAIL(kto, "split_persist", "alloc rc=%d", rc);
+		goto cleanup_buf;
+	}
+
+	/* Flush. In split mode this must land on meta_cdv_buf. */
+	rc = nvmeibc_tpv_flush_state(tpv);
+	if (rc != 0) {
+		KTO_FAIL(kto, "split_persist", "flush_state rc=%d", rc);
+		goto cleanup_buf;
+	}
+
+	/* Read back the L1 header from what the stub considers the
+	 * appropriate buffer (meta in split mode). Verify magic. */
+	rc = nvmeibc_tpv_cdv_sync_read(tpv, 0, &hdr, sizeof(hdr));
+	if (rc != 0) {
+		KTO_FAIL(kto, "split_persist", "read_back rc=%d", rc);
+		goto cleanup_buf;
+	}
+	if (hdr.magic != TPV_L1_MAGIC) {
+		KTO_FAIL(kto, "split_persist",
+			 "expected magic=%llx on meta buf, got %llx",
+			 (u64)TPV_L1_MAGIC, (u64)hdr.magic);
+		goto cleanup_buf;
+	}
+
+	/* Data buffer must NOT contain an L1 header (that would mean the
+	 * flush went to the wrong side). Check offset 0 on the data side. */
+	{
+		struct tpv_l1_header data_probe;
+
+		memcpy(&data_probe, (char *)g_tc.cdv_buf, sizeof(data_probe));
+		if (data_probe.magic == TPV_L1_MAGIC) {
+			KTO_FAIL(kto, "split_persist",
+				 "L1 magic found on data buffer — flush went to wrong side");
+			goto cleanup_buf;
+		}
+	}
+
+	KTO_PASS(kto, "split_persist");
+cleanup_buf:
+	vfree(g_tc.meta_cdv_buf);
+	g_tc.meta_cdv_buf = NULL;
+	g_tc.meta_cdv_len = 0;
+done:
+	tpv_ktest_destroy(tpv);
+}
+
+/*
+ * tpv_ktest_split_pool_exhaustion — exhaust the data pool on a split-mode
+ * TPV and verify the meta pool is unaffected. Complements the single-CDV
+ * pool_exhaustion test by asserting pool independence.
+ */
+static void tpv_ktest_split_pool_exhaustion(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv *tpv;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	u64 meta_free;
+	u64 v;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) { KTO_FAIL(kto, "split_pool_exhaustion", "kzalloc failed"); return; }
+
+	rc = tpv_ktest_upgrade_to_split(tpv, TPV_KTEST_TPV_EXT_KB, TPV_KTEST_CDV_EXT_MB);
+	if (rc != 0) { KTO_FAIL(kto, "split_pool_exhaustion", "upgrade rc=%d", rc); goto done; }
+
+	/* Data side gets only the L1 extent's (N_SLOTS-1) data slots. No
+	 * data extents beyond that → small fixed pool we can exhaust. */
+	if (tpv_ktest_seed_pool(tpv, 0) < 0 || tpv_ktest_seed_meta_pool(tpv, 0) < 0) {
+		KTO_FAIL(kto, "split_pool_exhaustion", "seed failed");
+		goto done;
+	}
+	meta_free = tpv->meta_allocator->free_tpv_extent_count;
+
+	/* Drain the data pool. */
+	for (v = 0; v < (TPV_KTEST_N_SLOTS - 1); v++) {
+		rc = nvmeibc_tpv_alloc_extent(tpv, v, &entry);
+		if (rc != 0) {
+			KTO_FAIL(kto, "split_pool_exhaustion",
+				 "unexpected rc=%d at v=%llu", rc, v);
+			goto done;
+		}
+	}
+	/* Next allocation must -EAGAIN on data side. */
+	rc = nvmeibc_tpv_alloc_extent(tpv, TPV_KTEST_N_SLOTS, &entry);
+	if (rc != -EAGAIN) {
+		KTO_FAIL(kto, "split_pool_exhaustion",
+			 "expected -EAGAIN on exhausted data pool, got %d", rc);
+		goto done;
+	}
+	/* Meta pool must not have been consumed by data-side exhaustion. */
+	if (tpv->meta_allocator->free_tpv_extent_count != meta_free) {
+		KTO_FAIL(kto, "split_pool_exhaustion",
+			 "meta pool perturbed by data exhaustion: %llu → %llu",
+			 meta_free, tpv->meta_allocator->free_tpv_extent_count);
+		goto done;
+	}
+
+	KTO_PASS(kto, "split_pool_exhaustion");
+done:
+	tpv_ktest_destroy(tpv);
+}
+
+/*
+ * tpv_ktest_split_double_free — verify free-extent error paths work
+ * normally when invoked on a split-mode TPV. Exercises the data side; the
+ * metadata side allocator isn't touched since no L2 slot has been claimed.
+ */
+static void tpv_ktest_split_double_free(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv *tpv;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) { KTO_FAIL(kto, "split_double_free", "kzalloc failed"); return; }
+
+	rc = tpv_ktest_upgrade_to_split(tpv, TPV_KTEST_TPV_EXT_KB, TPV_KTEST_CDV_EXT_MB);
+	if (rc != 0) { KTO_FAIL(kto, "split_double_free", "upgrade rc=%d", rc); goto done; }
+
+	if (tpv_ktest_seed_pool(tpv, 1) < 0 || tpv_ktest_seed_meta_pool(tpv, 0) < 0) {
+		KTO_FAIL(kto, "split_double_free", "seed failed");
+		goto done;
+	}
+
+	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	if (rc != 0) { KTO_FAIL(kto, "split_double_free", "alloc rc=%d", rc); goto done; }
+	rc = nvmeibc_tpv_free_extent(tpv, 0);
+	if (rc != 0) { KTO_FAIL(kto, "split_double_free", "first free rc=%d", rc); goto done; }
+	rc = nvmeibc_tpv_free_extent(tpv, 0);
+	if (rc != -ENOENT) {
+		KTO_FAIL(kto, "split_double_free",
+			 "expected -ENOENT on second free, got %d", rc);
+		goto done;
+	}
+
+	KTO_PASS(kto, "split_double_free");
+done:
+	tpv_ktest_destroy(tpv);
+}
+
+/*
+ * tpv_ktest_split_recovery — stage distinct TOMA extent lists for the data
+ * and metadata CDVs, run nvmeibc_tpv_recovery, and verify that both sides
+ * observed orphan adoption. Uses ktest_meta_cdv_sentinel so the stub's
+ * cdv_list_extents can route per CDV pointer.
+ */
+static void tpv_ktest_split_recovery(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv *tpv;
+	u64 data_orphans[] = { 9 };
+	u64 meta_orphans[] = { 9 };
+	u64 data_extents_before, meta_extents_before;
+	u64 data_extents_after, meta_extents_after;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) { KTO_FAIL(kto, "split_recovery", "kzalloc failed"); return; }
+
+	rc = tpv_ktest_upgrade_to_split(tpv, TPV_KTEST_TPV_EXT_KB, TPV_KTEST_CDV_EXT_MB);
+	if (rc != 0) { KTO_FAIL(kto, "split_recovery", "upgrade rc=%d", rc); goto done; }
+
+	/* Route list-extents calls for the meta-side pointer to the meta list. */
+	ktest_meta_cdv_sentinel = tpv->meta_cdv_vol;
+	g_tc.recovery_extents       = data_orphans;
+	g_tc.recovery_count         = ARRAY_SIZE(data_orphans);
+	g_tc.meta_recovery_extents  = meta_orphans;
+	g_tc.meta_recovery_count    = ARRAY_SIZE(meta_orphans);
+
+	/*
+	 * Seed a TOMA id on both sides so recovery_one_side proceeds past
+	 * the "no allocator TOMA ID" guard. Value is arbitrary; the stub
+	 * doesn't verify it.
+	 */
+	strncpy(tpv->allocator_toma_id, "ktest-data-toma",
+		sizeof(tpv->allocator_toma_id) - 1);
+	strncpy(tpv->meta_allocator_toma_id, "ktest-meta-toma",
+		sizeof(tpv->meta_allocator_toma_id) - 1);
+
+	data_extents_before = tpv->allocator.cdv_extents_count;
+	meta_extents_before = tpv->meta_allocator->cdv_extents_count;
+
+	rc = nvmeibc_tpv_recovery(tpv);
+	if (rc != 0) { KTO_FAIL(kto, "split_recovery", "recovery rc=%d", rc); goto cleanup; }
+
+	data_extents_after = tpv->allocator.cdv_extents_count;
+	meta_extents_after = tpv->meta_allocator->cdv_extents_count;
+
+	if (data_extents_after != data_extents_before + ARRAY_SIZE(data_orphans)) {
+		KTO_FAIL(kto, "split_recovery",
+			 "data side: expected +%zu extents, got %llu → %llu",
+			 ARRAY_SIZE(data_orphans), data_extents_before, data_extents_after);
+		goto cleanup;
+	}
+	if (meta_extents_after != meta_extents_before + ARRAY_SIZE(meta_orphans)) {
+		KTO_FAIL(kto, "split_recovery",
+			 "meta side: expected +%zu extents, got %llu → %llu",
+			 ARRAY_SIZE(meta_orphans), meta_extents_before, meta_extents_after);
+		goto cleanup;
+	}
+
+	KTO_PASS(kto, "split_recovery");
+cleanup:
+	ktest_meta_cdv_sentinel     = NULL;
+	g_tc.recovery_extents       = NULL;
+	g_tc.recovery_count         = 0;
+	g_tc.meta_recovery_extents  = NULL;
+	g_tc.meta_recovery_count    = 0;
+done:
+	tpv_ktest_destroy(tpv);
+}
+
 /* ── Proc fill function ─────────────────────────────────────────────────── */
 
 /*
@@ -1221,8 +1665,13 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg __maybe_unused, char *buf, size_t le
 	tpv_ktest_double_free(&kto);
 	tpv_ktest_recovery(&kto);
 	tpv_ktest_split_mode(&kto);
+	tpv_ktest_split_alloc_free(&kto);
+	tpv_ktest_split_persist(&kto);
+	tpv_ktest_split_pool_exhaustion(&kto);
+	tpv_ktest_split_double_free(&kto);
+	tpv_ktest_split_recovery(&kto);
 
-#define TPV_KTEST_N_TESTS	6
+#define TPV_KTEST_N_TESTS	11
 	KTO_ADD(&kto, "\n");
 	if (kto.failures == 0)
 		KTO_ADD(&kto, "all %d tests passed\n", TPV_KTEST_N_TESTS);
