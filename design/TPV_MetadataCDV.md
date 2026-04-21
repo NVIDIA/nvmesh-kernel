@@ -33,24 +33,27 @@ Everything the main design specifies at and below the CDV level — satellite al
 
 The CDV schema gains nothing. A CDV does not know how many TPVs use it for data vs. metadata; `tpvCount` counts every TPV that references it in either role. The one knob admins may want to tune differently for metadata CDVs is `cdvConfig.cdvExtentSizeMib` — smaller extents (e.g. 64 MiB) waste less capacity when the metadata footprint is well below one extent. No schema work needed for that; the existing 64 MiB–64 GiB power-of-2 range already covers it.
 
-### 3.2 TPV `tpvConfig` — three fields become six
+### 3.2 TPV `tpvConfig` — three fields become seven
+
+The existing three data-side fields keep their legacy names (`cdvId`, `cdvUUID`, `tpvExtentSizeKB`) and are treated as the **data** side by convention. Split mode adds four new fields alongside them. Keeping the existing names avoids a wide rename ripple across mgmt / kernel / CSI / CLI / UI for no semantic gain; the code is unambiguous because only a data CDV is ever referenced without the `meta` prefix.
 
 ```js
 tpvConfig: {
-    // --- Data side (existing three, renamed for clarity) ---
-    dataCdvId:             { type: String, required: true },
-    dataCdvUUID:           { type: String, required: true },
-    dataTpvExtentSizeKB:   { type: Number, required: true },   // power-of-2, 64–65536 KB
+    // --- Data side (legacy names; treated as "data" by convention) ---
+    cdvId:                 { type: String, required: true },
+    cdvUUID:               { type: String, required: true },
+    tpvExtentSizeKB:       { type: Number, required: true },   // power-of-2, 64–65536 KB
 
-    // --- Metadata side (new three; absent in single-CDV mode) ---
+    // --- Metadata side (new; absent in single-CDV mode) ---
     metaCdvId:             { type: String, default: null },
     metaCdvUUID:           { type: String, default: null },
     metaTpvExtentSizeKB:   { type: Number, default: null },    // power-of-2, 64–65536 KB
 
     // --- Virtual geometry ---
-    virtualSizeGB:         { type: Number, required: true },
+    // Note: virtual size is carried on top-level `capacity` (GiB) — not inside
+    // tpvConfig — matching the regular-volume convention. metaVirtualSizeGB
+    // below is the server-owned metadata-side reservation.
     metaVirtualSizeGB:     { type: Number, default: null },    // split mode only; auto-computed
-    maxVirtualSizeGB:      { type: Number, default: 1000 },
 
     // --- Attachment state (unchanged) ---
     exclusiveClient:       { type: String, default: null },
@@ -58,13 +61,11 @@ tpvConfig: {
 }
 ```
 
-`metaCdvId === null` is the single-CDV mode discriminator. When null, the TPV behaves exactly as the base design: L1 in slot 0 of its first data CDV extent, L2 tables inline with data slots.
-
-**Legacy-name note.** The existing fields `cdvId`, `cdvUUID`, `tpvExtentSizeKB` are renamed to the `data…` variants. Because TPV is not yet GA (§3.4.2), dev volumes are reformatted; no Mongo migration.
+`metaCdvId === null` is the single-CDV mode discriminator. When null, the TPV behaves exactly as the base design: L1 in slot 0 of its first CDV extent, L2 tables inline with data slots on the same CDV.
 
 **Pairing rules (MVP — one-way only).**
-- `(dataCdvId, metaCdvId)` is fixed at create time and immutable.
-- `dataCdvId === metaCdvId` is rejected — if the admin wants both on one CDV, they pick single-CDV mode.
+- `(cdvId, metaCdvId)` is fixed at create time and immutable.
+- `cdvId === metaCdvId` is rejected — if the admin wants both on one CDV, they pick single-CDV mode.
 - Cannot add a metaCdv to an existing single-CDV TPV. Cannot remove the metaCdv from a split TPV.
 - Either CDV may be shared across many TPVs (bounded by that CDV's own `maxTPVs`). `tpvCount` on a shared metadata CDV counts TPVs that use it for metadata.
 
@@ -73,17 +74,19 @@ tpvConfig: {
 Formula (in `modules/volume.js`, applied on create and on every `extendTPV`):
 
 ```
-raw_L2_bytes   = ceil(virtualSizeGB × 2^20 / dataTpvExtentSizeKB) × 8
+raw_L2_bytes   = ceil(capacity × 2^20 / tpvExtentSizeKB) × 8
 raw_L1_bytes   = ceil(raw_L2_bytes / metaTpvExtentSizeKB / 2^10) × 8  +  sizeof(tpv_l1_header)
 raw_total_B    = raw_L1_bytes + raw_L2_bytes
 safety_B       = ceil(raw_total_B × 1.10)                        // 10% fragmentation/headroom
 metaVirtualSizeGB = max(1, ceil(safety_B / 2^30))                // 1 GiB allocation granularity
 ```
 
+`capacity` here is the top-level TPV virtual size in GiB (the schema carries virtual size as the top-level `capacity` field on the volume document, matching the regular-volume convention — not inside `tpvConfig`).
+
 `1 GiB` is the NVMesh volume allocation quantum (`MIN_VOLUME_CAPACITY = 1` in `nvmesh-management/utils.js`; all volume capacities are integer GiB). Rounding up to that matches how every other volume in the system is sized.
 
 **Examples.**
-| `virtualSizeGB` | `dataTpvExtentSizeKB` | raw L2 | +10% + round → `metaVirtualSizeGB` |
+| `capacity` (GiB) | `tpvExtentSizeKB` | raw L2 | +10% + round → `metaVirtualSizeGB` |
 |---:|---:|---:|---:|
 | 128 | 64 | 16 MiB | 1 GiB |
 | 1 024 | 64 | 128 MiB | 1 GiB |
@@ -91,11 +94,10 @@ metaVirtualSizeGB = max(1, ceil(safety_B / 2^30))                // 1 GiB alloca
 | 102 400 | 64 | 12.8 GiB | 15 GiB |
 | 1 024 | 1 024 | 8 MiB | 1 GiB |
 
-**Expand path.** `extendTPV({tpvId, newSizeGB})` recomputes `metaVirtualSizeGB` from the new `virtualSizeGB`. If the result exceeds the current `metaVirtualSizeGB`:
+**Expand path.** `extendTPV({tpvId, newSizeGB})` recomputes `metaVirtualSizeGB` from the new `capacity`. If the result exceeds the current `metaVirtualSizeGB`:
 
-1. Extend the metadata TPV first by calling the same underlying extend logic on the meta side. If that fails (e.g. metadata CDV exhausted), the TPV extend aborts with no change. Metadata-before-data ordering guarantees we never grow the virtual address space beyond what the tree can describe.
-2. Then extend the data side (existing logic).
-3. Update `tpvConfig.virtualSizeGB` + `metaVirtualSizeGB`, then send one `UpdateVolume` MCS to the client carrying both new sizes.
+1. Verify the metadata CDV has room for the new `metaVirtualSizeGB`. If not, the TPV extend aborts with no change. Metadata-before-data ordering guarantees we never grow the virtual address space beyond what the tree can describe.
+2. Update `capacity` + `tpvConfig.metaVirtualSizeGB` atomically on the TPV doc; send one `UpdateVolume` MCS to the client carrying the new virtual size. On the client, `nvmeibc_tpv_grow()` also updates `meta_allocator->virtual_extents_total` to keep /proc and tree-capacity checks honest.
 
 Capacity on the metadata CDV is checked the same way as the data CDV — `createTPV` / `extendTPV` both compare against the CDV's free capacity and `maxTPVs`.
 
@@ -111,9 +113,9 @@ All flows are straight extensions of §1.4. The delta is that every operation th
 
 - **Single-CDV mode** (`metaCdvId` absent): exactly as today.
 - **Split mode**:
-  1. Validate both CDVs exist, are online, each has `tpvCount < maxTPVs`, and `dataCdvId !== metaCdvId`.
-  2. Validate `dataTpvExtentSizeKB ≤ dataCdv.cdvExtentSizeMib × 1024` and `metaTpvExtentSizeKB ≤ metaCdv.cdvExtentSizeMib × 1024`.
-  3. Compute `metaVirtualSizeGB` per §3.3; check `virtualSizeGB ≤ dataCdv.capacity` and `metaVirtualSizeGB ≤ metaCdv.capacity`.
+  1. Validate both CDVs exist, are online, each has `tpvCount < maxTPVs`, and `cdvId !== metaCdvId`.
+  2. Validate `tpvExtentSizeKB ≤ dataCdv.cdvExtentSizeMib × 1024` and `metaTpvExtentSizeKB ≤ metaCdv.cdvExtentSizeMib × 1024`.
+  3. Compute `metaVirtualSizeGB` per §3.3; check `capacity ≤ dataCdv.capacity` and `metaVirtualSizeGB ≤ metaCdv.capacity`.
   4. Insert TPV record. Atomically `$inc` `tpvCount` on both CDVs.
   5. No Kafka traffic for CDV changes — the TPV is not yet attached.
 
@@ -144,7 +146,7 @@ The "CDV cleanup on involuntary detach" invariant (§1.4) applies to both CDVs: 
 
 Per-CDV preemption is an **eviction of a client from a CDV**. For a split-mode TPV, the TPV is unusable without either CDV. Therefore:
 
-- **Evicting a client from the data CDV** tears down every TPV whose `dataCdvId` points at that CDV on that client (existing rule, unchanged).
+- **Evicting a client from the data CDV** tears down every TPV whose `cdvId` points at that CDV on that client (existing rule, unchanged).
 - **Evicting a client from the metadata CDV** tears down every TPV whose `metaCdvId` points at that CDV on that client (new rule).
 - The management-side "evict TPV X from client A" helper (force-detach) translates into **two** `preemptClientFromCDV` fan-outs, one per CDV. Order: metadata CDV first, then data CDV. The metadata-first order prevents the window in which the client briefly has its data CDV torn down but still holds the metadata CDV and could issue a stray tree write.
 
@@ -173,7 +175,7 @@ Today the TPV `AttachVolumes` payload inlines one `cdvConf`. For split mode, add
 
 The main design repurposes `mdvUUID` to carry the (single) parent CDV UUID without adding to the kernel ABI. Split mode needs a **second** CDV UUID.
 
-**Decision: add a new CM field, `metaCdvUUID`.** Cleaner than stacking more repurposed fields on top of the existing TPV overloading, and it documents intent on the wire. Ships with a matching kernel version gate — older kernels refuse to attach a split-mode TPV.
+**Decision: add a new CM field, `metaCdvUUID`.** Cleaner than stacking more repurposed fields on top of the existing TPV overloading, and it documents intent on the wire. The codec uses a default-empty codec entry, so kernels built without split-mode awareness decode the field as `""` and run in single-CDV mode — TPV is pre-GA, no deployed old-kernel population exists to gate against, and single→split conversion of an existing TPV is explicitly disallowed (§11), so no formal version gate is shipped.
 
 Other split-mode geometry (`metaTpvExtentSizeKB`, `metaVirtualSizeGB`) piggybacks on the inline `metaCdvConf` blob — no CM-level change needed since it is a JSON sidecar already.
 
@@ -248,14 +250,14 @@ Add one split-mode case per existing test (alloc/free, persist, exhaustion, doub
 |---|---|
 | `cdvName` / `cdvNameRegex` | Data CDV selection (existing). |
 | `metaCdvName` / `metaCdvNameRegex` | Metadata CDV selection (new). Absent → single-CDV mode. |
-| `dataTpvExtentSizeKB` | (renamed from `tpvExtentSizeKB`; old name accepted for back-compat in the driver). |
-| `metaTpvExtentSizeKB` | Metadata extent size; optional, default from driver config. |
+| `tpvExtentSizeKB` | Data-side TPV extent size (existing). |
+| `metaTpvExtentSizeKB` | Metadata extent size; optional, defaults to the data-side value when split mode is engaged. |
 
 Pool selection runs the §14.3 algorithm **twice**, independently — once per regex. Both must return at least one eligible CDV; if either pool is empty, the driver returns `ResourceExhausted` and the PVC stays pending.
 
 Topology: both CDVs must be in a zone that satisfies `accessibility_requirements`. If they are in different zones, the intersection is used; empty intersection → `ResourceExhausted`.
 
-The CSI driver does **not** compute `metaVirtualSizeGB`. It passes `virtualSizeGB`, `dataTpvExtentSizeKB`, `metaTpvExtentSizeKB`, `dataCdvId`, `metaCdvId` to `POST /volumes/save`; management auto-computes the metadata size.
+The CSI driver does **not** compute `metaVirtualSizeGB`. It passes the top-level `capacity` plus `tpvExtentSizeKB`, `metaTpvExtentSizeKB`, `cdvId`, `metaCdvId` to `POST /volumes/save`; management auto-computes the metadata size.
 
 `ControllerExpandVolume` is unchanged on the wire — it still posts `newSizeGB` to `/volumes/tpv/extend`. Management handles the metadata-side extend.
 
@@ -267,11 +269,11 @@ The CSI driver does **not** compute `metaVirtualSizeGB`. It passes `virtualSizeG
 
 The NVMesh-CLI is rest-driven through `rest.yaml` (see CLAUDE.md). Split-mode TPVs need:
 
-- **`rest.yaml` — `TPV` entity `ops.create.params`** extended with `metaCdvId`, `metaTpvExtentSizeKB` (the existing `tpvConfig` sub-object recursion picks up the new fields automatically once `TPVConfig` declares them). `virtualSizeGB` is still the sole user-facing size input.
+- **`rest.yaml` — `TPV` entity `ops.create.params`** extended with `metaCdvId`, `metaTpvExtentSizeKB` (the existing `tpvConfig` sub-object recursion picks up the new fields automatically once `TPVConfig` declares them). The top-level `capacity` is still the sole user-facing size input.
 - **`TPVConfig` SdkObject** (`xlro/core/entities/`) gains the three new fields, matching the Mongo schema camelCase exactly (`metaCdvId`, `metaTpvExtentSizeKB`, `metaVirtualSizeGB`) — the last is server-populated and read-only on display.
 - **`TPV` entity `display`** gains `metaCdvName` (via a `$lookup` alongside the existing `cdvName` lookup for data) and the two extent sizes.
 - **Golden files** `current.api` and `current.display` regenerated to reflect the new flags and display columns.
-- **`rest_custom.py`** — no new `TPVGroup` override needed; the auto-generated `create` form handles the new optional params cleanly. If both `--tpv-config-meta-cdv-id` and `--tpv-config-data-cdv-id` are omitted, the CLI errors with the standard missing-required-param message for `dataCdvId`.
+- **`rest_custom.py`** — no new `TPVGroup` override needed; the auto-generated `create` form handles the new optional params cleanly. Omitting both `--tpv-config-cdv-id` and all split params keeps the existing single-CDV semantics.
 - **`CDV` entity** unchanged — the CLI does not need to know a CDV's intended role.
 
 Example invocation:
@@ -279,8 +281,8 @@ Example invocation:
 ```
 nvmesh tpv create myTPV \
   --capacity 1TiB \
-  --tpv-config-data-cdv-id data-pool-01 \
-  --tpv-config-data-tpv-extent-size-k-b 64 \
+  --tpv-config-cdv-id data-pool-01 \
+  --tpv-config-tpv-extent-size-k-b 64 \
   --tpv-config-meta-cdv-id meta-pool-01 \
   --tpv-config-meta-tpv-extent-size-k-b 64
 ```
@@ -349,14 +351,13 @@ High-level ordering; each bullet is a self-contained commit or small series.
 - Rename `tpvConfig.{cdvId,cdvUUID,tpvExtentSizeKB}` to the `data…` variants; update all readers.
 - Add `tpvConfig.{metaCdvId,metaCdvUUID,metaTpvExtentSizeKB,metaVirtualSizeGB}`.
 - Add auto-sizing helper + extend-time recompute in `modules/volume.js`.
-- Reject `dataCdvId === metaCdvId`; enforce immutability of the split choice.
+- Reject `cdvId === metaCdvId`; enforce immutability of the split choice.
 - Unit tests for auto-sizing formula, capacity checks, pairing rules.
 
 **Phase 2 — MCS / Kafka wire**
 
-- New CM field `metaCdvUUID` in `VolumeMessage.js:preparePayload`.
+- New CM field `metaCdvUUID` in `VolumeMessage.js:preparePayload` (default-empty codec; kernels without split-mode awareness run single-CDV — see §5.2).
 - Rename `cdvConf` to `dataCdvConf`; add sibling `metaCdvConf` in `AttachVolumes.js`.
-- Kernel version gate: old kernels reject split-mode attaches.
 
 **Phase 3 — attach / detach / delete orchestration**
 
@@ -380,7 +381,7 @@ High-level ordering; each bullet is a self-contained commit or small series.
 
 - StorageClass params: `metaCdvName`, `metaCdvNameRegex`, `metaTpvExtentSizeKB`.
 - Pool selection run twice; zone intersection enforced.
-- Rename `tpvExtentSizeKB` → `dataTpvExtentSizeKB` (accept old name for one release).
+- (No rename of existing `tpvExtentSizeKB` — it already means "data-side TPV extent size.")
 
 **Phase 7 — CLI**
 
