@@ -1216,6 +1216,48 @@ void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes)
 	tpv->allocator.virtual_extents_total  = new_total_extents;
 	spin_unlock(&tpv->allocator.lock);
 
+	/*
+	 * Split mode: keep meta_allocator->virtual_extents_total in sync with
+	 * the grown virtual size. The field is not consulted on the IO hot
+	 * path (L2 tables are demand-allocated from the meta free pool), but
+	 * /proc and future tree-capacity checks read it, so mismatched values
+	 * would mislead. Use the meta-side tpv_extent_size_kb — it may differ
+	 * from the data side.
+	 */
+	if (tpv->meta_allocator) {
+		u64 meta_total = new_virtual_size_bytes /
+				 ((u64)tpv->meta_allocator->tpv_extent_size_kb << 10);
+
+		spin_lock(&tpv->meta_allocator->lock);
+		tpv->meta_allocator->virtual_extents_total = meta_total;
+		spin_unlock(&tpv->meta_allocator->lock);
+
+		_NI(tpv_meta_grown,
+		    "TPV: @STR meta allocator virtual_extents_total=@LLU",
+		    tpv->tpv_name, meta_total);
+	}
+
+	/*
+	 * Verify the 2-level tree can still address the grown virtual size.
+	 * Management refuses extends that would overflow the tree, so this
+	 * should never fire; log loudly if it does to flag the protocol bug.
+	 * Uses the tree-owning allocator's geometry (meta in split mode).
+	 */
+	{
+		struct nvmeibc_tpv_allocator *tree = nvmeibc_tpv_meta_alloc(tpv);
+		u64 T      = (u64)tree->tpv_extent_size_kb << 10;
+		u64 n_l1   = (T - sizeof(struct tpv_l1_header)) /
+			     sizeof(struct tpv_tree_entry);
+		u64 n_l2   = T / sizeof(struct tpv_tree_entry);
+		u64 n_sl   = ((u64)tree->cdv_extent_size_mib << 20) / T;
+		u64 max_ve = n_l1 * n_l2 * n_sl;
+
+		if (new_total_extents > max_ve)
+			_NE(tpv_grow_tree_overflow,
+			    "TPV: @STR grow to @LLU virt extents exceeds 2-level tree cap @LLU — writes beyond cap will fail",
+			    tpv->tpv_name, new_total_extents, max_ve);
+	}
+
 	if (tpv_disk(tpv))
 		set_capacity(tpv_disk(tpv),
 			     new_virtual_size_bytes >> KERNEL_SECTOR_SHIFT);
