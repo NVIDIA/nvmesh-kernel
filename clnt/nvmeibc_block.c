@@ -1056,7 +1056,7 @@ bool nvmeibc_block_update_status(struct nvmeibc_block_device* dev, char reason)
 		spin_unlock_irqrestore(&dev->dp.resub.lock, flags);
 		nvmeibc_io_resubmitter_wakeup(&dev->dp.resub);
 		/*
-		 * Per-client CDV preempt cleanup barrier (TPV_PerClientCDVPreemption.md §2.10).
+		 * Per-client CDV preempt cleanup barrier (TPV_PerClientCDVPreemption.md S.2.10).
 		 * If this device is a CDV that was just preempted, tear down every TPV that
 		 * references it so no stale CDV offsets remain in the TPV extent_map. The
 		 * helper is a no-op when dev->volume is not a CDV (no matching TPV

@@ -4,14 +4,14 @@
 */
 
 /*
- * nvmeibc_tpv_ib_admin.c — Real IB admin channel for CDV extent operations.
+ * nvmeibc_tpv_ib_admin.c - Real IB admin channel for CDV extent operations.
  *
  * Implements the three CDV admin functions declared as externs in
  * nvmeibc_tpv_allocator.c and nvmeibc_tpv_recovery.c:
  *
- *   nvmeibc_ib_admin_cdv_alloc_extent()  — request one CDV_extent from TOMA
- *   nvmeibc_ib_admin_cdv_free_extent()   — return one CDV_extent to TOMA
- *   nvmeibc_ib_admin_cdv_list_extents()  — list CDV_extents owned by a TPV
+ *   nvmeibc_ib_admin_cdv_alloc_extent()  - request one CDV_extent from TOMA
+ *   nvmeibc_ib_admin_cdv_free_extent()   - return one CDV_extent to TOMA
+ *   nvmeibc_ib_admin_cdv_list_extents()  - list CDV_extents owned by a TPV
  *
  * Send path:
  *   Finds the CDV disk segment whose TOMA hostname matches the elected
@@ -39,7 +39,7 @@
 #include "block/nvmeibc_topology.h"
 #include "nvmeibc_icore_ops.h"
 
-/* ── Forward declarations (prototypes required by -Wmissing-prototypes) ── */
+/* -- Forward declarations (prototypes required by -Wmissing-prototypes) -- */
 
 int nvmeibc_ib_admin_cdv_alloc_extent(
 	struct nvmeibc_volume *cdv, const char *toma_id,
@@ -56,7 +56,7 @@ int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 				       u64 **out_indices,
 				       u64 *out_count);
 
-/* ── Test hook pointers ──────────────────────────────────────────────────── */
+/* -- Test hook pointers ---------------------------------------------------- */
 
 int (*nvmeibc_tpv_test_cdv_alloc_fn)(
 	struct nvmeibc_volume *cdv, const char *toma_id,
@@ -74,7 +74,7 @@ int (*nvmeibc_tpv_test_cdv_list_fn)(
 	const char *tpv_uuid, u64 **out_indices, u64 *out_count);
 EXPORT_SYMBOL(nvmeibc_tpv_test_cdv_list_fn);
 
-/* ── Pending-request tracking ──────────────────────────────────────────── */
+/* -- Pending-request tracking -------------------------------------------- */
 
 #define CDV_ADMIN_TIMEOUT_SECS 30
 
@@ -95,14 +95,14 @@ static DEFINE_SPINLOCK(cdv_pending_lock);
 static LIST_HEAD(cdv_pending_list);
 static atomic64_t nvmeibc_tpv_req_id_counter = ATOMIC64_INIT(0);
 
-/* ── Segment lookup ──────────────────────────────────────────────────────
+/* -- Segment lookup ------------------------------------------------------
  *
  * Find the CDV volume's active disk segment for the elected allocator TOMA.
  * CDV is JBOD: single chunk, single RAID-1, one or two segments.
  *
  * When toma_id is non-empty, prefer a segment whose disk hostname matches.
  * This ensures CDV_ALLOC_EXTENT/FREE/LIST go to the elected allocator TOMA
- * rather than whichever segment happens to be first — on a RAID-1 CDV the
+ * rather than whichever segment happens to be first - on a RAID-1 CDV the
  * two segments live on different TOMA nodes, and routing to the wrong one
  * causes the not-allocator Path 4 WRONG_GEN loop.
  *
@@ -152,7 +152,7 @@ static struct nvmeibc_disk_segment *cdv_find_segment_for_toma(
 	return fallback;
 }
 
-/* ── TOMA send with CDV payload ──────────────────────────────────────────
+/* -- TOMA send with CDV payload ------------------------------------------
  *
  * Builds a nvmeibt_client_msg with msg_type and the CDV request struct
  * as thick.data[], then sends via icore_ops->toma_send().
@@ -213,7 +213,7 @@ static int cdv_toma_send(struct nvmeibc_disk_segment *seg,
 	return rv;
 }
 
-/* ── Response dispatch (called from nvmeibc_topology.c) ──────────────── */
+/* -- Response dispatch (called from nvmeibc_topology.c) ---------------- */
 
 void nvmeibc_cdv_dispatch_alloc_response(const struct nvmeibc_cdv_alloc_resp *resp)
 {
@@ -230,7 +230,7 @@ void nvmeibc_cdv_dispatch_alloc_response(const struct nvmeibc_cdv_alloc_resp *re
 			 * complete() must be called inside the lock.  If we
 			 * unlock first, a concurrent timeout in the waiter can
 			 * run list_del() and return (freeing the stack frame)
-			 * before complete() touches pending->done — UAF.
+			 * before complete() touches pending->done - UAF.
 			 */
 			complete(&pending->done);
 			spin_unlock_irqrestore(&cdv_pending_lock, flags);
@@ -265,7 +265,7 @@ void nvmeibc_cdv_dispatch_list_response(const struct nvmeibc_cdv_list_resp *resp
 				else
 					pending->list_count = 0;
 			}
-			/* complete() inside the lock — same reason as in
+			/* complete() inside the lock - same reason as in
 			 * nvmeibc_cdv_dispatch_alloc_response(). */
 			complete(&pending->done);
 			spin_unlock_irqrestore(&cdv_pending_lock, flags);
@@ -280,7 +280,7 @@ void nvmeibc_cdv_dispatch_list_response(const struct nvmeibc_cdv_list_resp *resp
 }
 EXPORT_SYMBOL(nvmeibc_cdv_dispatch_list_response);
 
-/* ── CDV_ALLOC_EXTENT ──────────────────────────────────────────────────── */
+/* -- CDV_ALLOC_EXTENT ---------------------------------------------------- */
 
 int nvmeibc_ib_admin_cdv_alloc_extent(
 	struct nvmeibc_volume                *cdv,
@@ -334,7 +334,7 @@ int nvmeibc_ib_admin_cdv_alloc_extent(
 	 * The success path must also call list_del: the pending entry lives
 	 * on our stack, and leaving it in the list after we return causes
 	 * dispatch_alloc_response to walk stale memory the next time a
-	 * response arrives — UAF and spinlock corruption.
+	 * response arrives - UAF and spinlock corruption.
 	 *
 	 * complete() is called inside cdv_pending_lock in the dispatch
 	 * functions, so by the time wait_for_completion_timeout() returns
@@ -368,7 +368,7 @@ out_remove:
 }
 EXPORT_SYMBOL(nvmeibc_ib_admin_cdv_alloc_extent);
 
-/* ── CDV_FREE_EXTENT (fire-and-forget) ─────────────────────────────────── */
+/* -- CDV_FREE_EXTENT (fire-and-forget) ----------------------------------- */
 
 int nvmeibc_ib_admin_cdv_free_extent(
 	struct nvmeibc_volume                *cdv,
@@ -400,7 +400,7 @@ int nvmeibc_ib_admin_cdv_free_extent(
 }
 EXPORT_SYMBOL(nvmeibc_ib_admin_cdv_free_extent);
 
-/* ── CDV_LIST_EXTENTS ──────────────────────────────────────────────────── */
+/* -- CDV_LIST_EXTENTS ---------------------------------------------------- */
 
 /*
  * Matches the existing recovery caller signature:
@@ -455,7 +455,7 @@ int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 	remaining = wait_for_completion_timeout(
 		&pending.done, CDV_ADMIN_TIMEOUT_SECS * HZ);
 
-	/* Always remove from list before returning — see alloc_extent for the
+	/* Always remove from list before returning - see alloc_extent for the
 	 * full explanation of why the success path also needs list_del. */
 	spin_lock_irqsave(&cdv_pending_lock, flags);
 	list_del(&pending.node);

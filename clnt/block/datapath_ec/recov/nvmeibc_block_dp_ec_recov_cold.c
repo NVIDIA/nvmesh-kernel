@@ -39,11 +39,11 @@ NVMEIBC_MEMMGR_METRIC(dp_recovery_cold, "component=raid.io_ctrl.cold");
 *    illegal value (-1) for each journal entry
 * 4. On apply topology event, each TOMA starts a Cold Recovery Analysis
 *    Client (CRAC) per pRAID and assigns it the blockset ranges for which this
-*    TOMA is the owner. We may relax the ‘per RAID’ and allow a client to be
+*    TOMA is the owner. We may relax the 'per RAID' and allow a client to be
 *    responsible for several pRAIDs
 * 5. Each CRAC asks Server Jr Components for journal metadata areas for the
 *    drives comprising the pRAID from all servers relevant for this pRAID and
-*    reads all of them to the client’s RAM
+*    reads all of them to the client's RAM
 * 6. Each CRAC builds a list of viable transaction candidates according to
 *    TxID, TxBM and J2D but only for J2Ds falling into the blockset ranges
 *    assigned to this client and skips all other entries.
@@ -53,15 +53,15 @@ NVMEIBC_MEMMGR_METRIC(dp_recovery_cold, "component=raid.io_ctrl.cold");
 * 7. When a journal chunk is processed, each entry with J2D pointing to the
 *    region under responsibility of this CRAC falls into 2 categories
 *    a. Belongs to a viable candidate for blockset B so the corresponding J2D
-*       Map on the server side should be changed: (-1) → B
-*    b. Can be discarded and the J2D Map entry is zeroed: (-1) → 0
+*       Map on the server side should be changed: (-1) -> B
+*    b. Can be discarded and the J2D Map entry is zeroed: (-1) -> 0
 *    c. These updates can be done in batches to save RDMA Write operations
 * 8. Upon finishing this operation CRAC writes to 3 server RAMs
 *    (owner & 2 backups):
 *    a. A map:
-*       Lock Index →
-*       {(Slice Index, TxBM, TxID, {JCI, Offset | ∀d in TxBM}) | ∀candidates}
-*    b. Lock Entry: all zeros (including TxID) but ‘Stale’ bit is set for
+*       Lock Index ->
+*       {(Slice Index, TxBM, TxID, {JCI, Offset | forall d in TxBM}) | forall candidates}
+*    b. Lock Entry: all zeros (including TxID) but 'Stale' bit is set for
 *       any blockset for which it has at least one viable candidate
 * 9. CRAC reports to all Server Jr Components about the completion of its work.
 *    This report causes the servers to walk through J2D Map and check if there
@@ -70,11 +70,11 @@ NVMEIBC_MEMMGR_METRIC(dp_recovery_cold, "component=raid.io_ctrl.cold");
 *    to the pool.
 * 10.In the end CRAC reports about completion to TOMA
 * 11.TOMA then goes through all the Lock Entries it owns and if the entry does
-*    not have ‘Stale’ bit set TOMA sets its TxID to 1
+*    not have 'Stale' bit set TOMA sets its TxID to 1
 * 12.In parallel with CRAC operation (or at any point in run-time) TOMA passes
 *    to the local Server Jr Component the list of unallocated ranges on the
 *    local drives so the Jr Component can walk through journal metadata and
-*    clean all J2D Map entries (change (-1) → 0, as if a client-recoverer
+*    clean all J2D Map entries (change (-1) -> 0, as if a client-recoverer
 *    released them) which somehow point to unallocated ranges. This operation
 *    combined with the CRAC updates of J2D Map should free the journal very
 *    quickly leaving only the information required for second phase of cold
@@ -84,8 +84,8 @@ NVMEIBC_MEMMGR_METRIC(dp_recovery_cold, "component=raid.io_ctrl.cold");
 * -------------------------------
 * The actions described below can be performed by a special recovery client
 * started by TOMA or by any client that stumbles upon an entry with TxID = 0
-* and ‘Stale’ bit set.
-* 1. Lock it with the Recoverer LockID and ‘use-journal’ bit is reset
+* and 'Stale' bit set.
+* 1. Lock it with the Recoverer LockID and 'use-journal' bit is reset
 * 2. Ask the owner TOMA for the list of candidates for this blockset
 *    a. If we want for TOMA to be abstracted from the internals of the
 *       candidate map - it can provide the address and the information will
@@ -95,24 +95,24 @@ NVMEIBC_MEMMGR_METRIC(dp_recovery_cold, "component=raid.io_ctrl.cold");
 *       in TxBM
 *    b. Look for data block with
 *       i. JCI field points to the chunk the candidate was found in
-*       ii.TxID matches the candidate’s TxID
+*       ii.TxID matches the candidate's TxID
 *    c. If no such data block found - discard the candidate
-* 4. If no candidates remain - release the lock with ‘Stale’ bit reset and
+* 4. If no candidates remain - release the lock with 'Stale' bit reset and
 *    TxID = 1
 * 5.Among the remaining candidates choose the one with the highest TxID
-*    a. We can’t get a TxID from before wrap-around since on wrap-around the
-*       TxIDs in the data blocks’ metadata are zeroed and therefore we can’t
+*    a. We can't get a TxID from before wrap-around since on wrap-around the
+*       TxIDs in the data blocks' metadata are zeroed and therefore we can't
 *       have a match above
-*    b. We can’t have same TxIDs in different candidates at this point since
+*    b. We can't have same TxIDs in different candidates at this point since
 *       the data metadata will point to a specific chunk via JCI field so only
 *       one will remain
-*    c. We can’t have same TxID in different candidates in the same journal
+*    c. We can't have same TxID in different candidates in the same journal
 *       chunk for the same reasons we already mentioned in hot recovery
 *    6. Roll it forward and remember its TxID
-* 7. Release the lock with ‘Stale’ bit reset and with TxID set according to
+* 7. Release the lock with 'Stale' bit reset and with TxID set according to
 *    the rolled forward TxID
 * 8. Update J2D Maps on all servers that the entries used by candidates are
-*    now free (change (-1) → 0)
+*    now free (change (-1) -> 0)
 *    a. There is no concern here to release journal entries after releasing
 *        the lock since the journal chunks are under server responsibility
 *        anyway
@@ -403,7 +403,7 @@ static int __calc_candidates_for_clnt_jris(struct jrecovery *jrecov, struct tx_c
 
 	NFIN;
 
-	/* Guaranteed: ∀i | (SEG(i)=RW && (tx->jris[i] is dirty)) -> (tx->jris[i] != -1) */
+	/* Guaranteed: forall i | (SEG(i)=RW && (tx->jris[i] is dirty)) -> (tx->jris[i] != -1) */
 	for_each_set_bit(i, &jrecov->bmp, jrecov->n_segs) { // Find Tx on seg i, and subset of segs [i+1...last_seg]
 		if (tx->client->jris[i] == -1)  // non dirty range can't be first block of a candidate's txbm
 			continue;
@@ -497,11 +497,11 @@ static int __calc_candidates_for_clnt_jris(struct jrecovery *jrecov, struct tx_c
 				}
 			}
 
-			/* Guaranteed: ∀i | tx.jris[i]==-1 -> tx.jents[i]==-1 */
+			/* Guaranteed: forall i | tx.jris[i]==-1 -> tx.jents[i]==-1 */
 			if (jrecov->recovery->type == NVMEIBT_RECOVERY_TYPE_EC_JOUR_GC)			// On jgc there is no point to check if journal committed since we only analyze 1 seg
 				err = __add_jour_candidate_to_blockset(jrecov, tx, i);
 			else if (__is_journal_committed(r1, tx->jent_mds, jrecov->bmp)) {		// Cold recovery
-				/* Guaranteed: ∀i | rw_txbm[i]==1 -> tx->jents[i]!=-1 */
+				/* Guaranteed: forall i | rw_txbm[i]==1 -> tx->jents[i]!=-1 */
 				const int pivot_seg = get_pivot_si(r1, tx->jent_mds);
 				err = __add_jour_candidate_to_blockset(jrecov, tx, pivot_seg);
 			}

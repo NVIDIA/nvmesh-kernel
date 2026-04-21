@@ -194,7 +194,7 @@ struct nvmeibc_block_device* block_api_os_get_base_bdev(const struct nvmeibc_os_
 int block_api_os_verify_bio_geometry(const struct bio *bio);
 
 /*
- * block_api_os_get_bdev — return the struct block_device * associated with an
+ * block_api_os_get_bdev - return the struct block_device * associated with an
  * attached nvmeibc_os_api.  The returned pointer is valid for as long as the
  * volume is attached (unsafe_self_ref is cleared at detach).
  *

@@ -81,10 +81,10 @@ struct nvmeibc_volume {
 	struct list_head link;						// Link List of volumes
 	struct nvmeibc_volume_info info;		// a volume configuration info
 	/*
-	 * CDV allocator identity — valid only for volumes with volume_class CDV.
+	 * CDV allocator identity - valid only for volumes with volume_class CDV.
 	 * Populated when a CDV_ALLOCATOR_UPDATE topology message arrives.
 	 * Read by nvmeibc_tpv_attach() to seed newly-created TPVs with the
-	 * already-known allocator, avoiding the attach→allocator-update race.
+	 * already-known allocator, avoiding the attach->allocator-update race.
 	 * Protected by spinlock above.
 	 */
 	char cdv_allocator_toma_id[NVMEIB_HOST_NAME_LEN];

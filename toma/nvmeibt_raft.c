@@ -674,6 +674,7 @@ static void persist_and_wire_buf_copy_data_to_section(struct nvmeibt_wire_type_l
 	*upd_data_ptr += upd_len;
 	*old_data_ptr += old_len;
 	*dst_data_ptr += nvmeibt_tlv_get_len(dst_wire_ctx);
+
 }
 
 // returns a newly allocated struct where the new-upd takes presidence (whenever it carries a value)

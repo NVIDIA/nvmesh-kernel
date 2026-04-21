@@ -942,7 +942,7 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 		if ((k_err == RD_KAFKA_RESP_ERR_NO_ERROR) && (pl->elems[0].offset >= 0L)) {	// May return RD_KAFKA_OFFSET_INVALID if queue just created and was never read from
 			calc_offset = pl->elems[0].offset;
 			if ((k_err_watermark == RD_KAFKA_RESP_ERR_NO_ERROR) && ((calc_offset < low_wm) || (calc_offset > high_wm)))
-				N_Wf(minwusk, "@STR Kafka error. commited offset @LD is NOT in watermarks [@LD..@LD]", name, calc_offset, low_wm, high_wm);		// This is a valid, When kafka client connets, broker will respond “offset out of range, and "auto.offset.reset" will take the earliest message
+				N_Wf(minwusk, “@STR Kafka error. commited offset @LD is NOT in watermarks [@LD..@LD]”, name, calc_offset, low_wm, high_wm);		// This is a valid, When kafka client connets, broker will respond “offset out of range, and “auto.offset.reset” will take the earliest message
 		} else {
 			calc_offset = RD_KAFKA_OFFSET_BEGINNING;	// Now default is use beginning as fallback
 			k_err = __consumer_assign_partition_and_offset(k, calc_offset);
@@ -1158,15 +1158,15 @@ struct generic_CMD_params_ctx {
 	int								metadataSize;
 	struct nvmeibt_urn_uuid			dbUUID;
 	/*
-	 * preemptClientFromCDV fields (TPV_PerClientCDVPreemption.md §2.10).
+	 * preemptClientFromCDV fields (TPV_PerClientCDVPreemption.md S.2.10).
 	 * Kept OUTSIDE the sibling union so parsing cannot race with
 	 * cdv_free_all.cdv_uuid at the same offset. The CDV UUID itself still
 	 * lives in cdv_free_all.cdv_uuid (shared key "cdvUUID"); these fields
 	 * carry the preempt-specific payload.
 	 *
-	 * preempt_client_id is the client's hostname — matched against the
+	 * preempt_client_id is the client's hostname - matched against the
 	 * registrant_node_id.str field on nvmeibt_registrant_ctx during the
-	 * termination walk. It is NOT a uint64 handle — TOMA's
+	 * termination walk. It is NOT a uint64 handle - TOMA's
 	 * client_messaging_handle is opaque to management.
 	 */
 	char							preempt_client_id[NVMEIBT_CDV_HOSTNAME_LEN];
@@ -1211,7 +1211,7 @@ struct generic_CMD_params_ctx {
 			uint32_t						cdv_extent_size_mib;
 		} cdv_free_all;
 		/*
-		 * attachSatelliteResponse — management's reply to TOMA's
+		 * attachSatelliteResponse - management's reply to TOMA's
 		 * attachSatelliteRequest after the elected allocator has asked for the
 		 * satellite to be attached EXCLUSIVE_READ_WRITE (with preempt) to it.
 		 * See nvmesh-kernel/design/SatelliteVolumeForCDVAlloc.md Phase 2/3.
@@ -1365,7 +1365,7 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			} else if (!strcmp(payload_kv->key, "cdvExtentSizeMib")) {
 				CMD_params->cdv_free_all.cdv_extent_size_mib = (uint32_t)payload_kv->value->num;
 			} else if (!strcmp(payload_kv->key, "satelliteUUID")) {
-				/* attachSatelliteResponse — overlaps cdv_free_all.tpv_uuid in the union;
+				/* attachSatelliteResponse - overlaps cdv_free_all.tpv_uuid in the union;
 				 * safe because the two message types are dispatched separately.        */
 				nvmeibt_strlcpy(CMD_params->attach_sat_resp.satellite_uuid, payload_kv->value->str, sizeof(CMD_params->attach_sat_resp.satellite_uuid));
 			} else if (!strcmp(payload_kv->key, "status")) {

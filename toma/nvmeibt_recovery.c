@@ -1274,7 +1274,7 @@ void nvmeibt_attach_vol_for_encryption(struct nvmeibt_block_device *vol, char *s
  * the namebased path (nvmeibt_start_encrypt_for_tpv_by_name). When origin_vol
  * is NULL (namebased), the name and UUID come from ep->tpv_vol_name /
  * ep->tpv_urn_uuid.  When origin_vol is non-NULL, use it directly.
- * Either way, do NOT free the vol or the origin_vol — management owns its
+ * Either way, do NOT free the vol or the origin_vol - management owns its
  * lifecycle and will detach after receiving the Kafka response.
  */
 static void tpv_encrypt_after_exec_cb(struct run_exec_on_blkdev_ctx *exec_ctx)
@@ -1363,7 +1363,7 @@ bool nvmeibt_start_encrypt_for_tpv_by_name(const char *vol_name, const union nvm
 	}
 
 	exec_ctx = &encrypt_params->exec_ctx;
-	exec_ctx->blkdev = NULL; /* no server-side vol — callback uses tpv_vol_name/tpv_urn_uuid */
+	exec_ctx->blkdev = NULL; /* no server-side vol - callback uses tpv_vol_name/tpv_urn_uuid */
 	if (old_passphrase[0] && new_passphrase[0]) {
 		snprintf(exec_ctx->executable_str, sizeof(exec_ctx->executable_str),
 				 "cryptsetup %s --key-file=%.256s /dev/nvmesh-tpv/%s %.256s",
@@ -1586,11 +1586,11 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		encrypt_params = blkdev->encrypt_params;
 		snprintf(blkdev_path, sizeof(blkdev_path), "/dev/nvmesh/%s", nvmeibt_blkdev_name(blkdev));
 	} else {
-		/* TPV namebased encryption (design/TPV_EncryptionPlan.md §Phase 3):
+		/* TPV namebased encryption (design/TPV_EncryptionPlan.md S.Phase 3):
 		 * no server-side blkdev.  Derive encrypt_params from the embedded
 		 * exec_ctx via container_of, and wait for /dev/nvmesh-tpv/<name>
 		 * (where management attached the TPV to this TOMA node's client
-		 * kernel).  The passphrase-file and spawn logic below is unchanged —
+		 * kernel).  The passphrase-file and spawn logic below is unchanged -
 		 * it operates on encrypt_params only. */
 		encrypt_params = container_of(entry->run_exec_on_blkdev_ctx, struct nvmeibt_encrypt_params, exec_ctx);
 		snprintf(blkdev_path, sizeof(blkdev_path), "/dev/nvmesh-tpv/%s", encrypt_params->tpv_vol_name);

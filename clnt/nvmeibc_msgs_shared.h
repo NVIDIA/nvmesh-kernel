@@ -319,17 +319,17 @@ enum nvmeibc_config_ops {
 	NVMEIBC_MA_GET_JRANGE		= 0x10,
 
 	/*
-	 * CDV_extent allocation / deallocation — sent by a client TPV.allocator
-	 * to the CDV.allocator TOMA via the per-disk ADMIN channel (§2.8).
+	 * CDV_extent allocation / deallocation - sent by a client TPV.allocator
+	 * to the CDV.allocator TOMA via the per-disk ADMIN channel (S.2.8).
 	 */
 	NVMEIBC_MA_CDV_ALLOC_EXTENT	= 0x20,
 	NVMEIBC_MA_CDV_FREE_EXTENT	= 0x21,
 	NVMEIBC_MA_CDV_LIST_EXTENTS	= 0x22,	/* recovery: list all extents owned by a TPV */
 };
 
-/* ── CDV_extent allocation protocol (§2.8) ──────────────────────────────────
+/* -- CDV_extent allocation protocol (S.2.8) ----------------------------------
  *
- * Client TPV.allocator → CDV.allocator TOMA via ADMIN channel.
+ * Client TPV.allocator -> CDV.allocator TOMA via ADMIN channel.
  *
  * These are application-level C structs passed between the TPV allocator and
  * the IB admin channel layer.  The IB admin channel layer is responsible for
@@ -371,7 +371,7 @@ struct nvmeibc_cdv_free_req {
 	u64  extent_index;			/* data CDV_extent index to return to the pool */
 };
 
-/* NVMEIBC_MA_CDV_LIST_EXTENTS request — sent by the recovery path */
+/* NVMEIBC_MA_CDV_LIST_EXTENTS request - sent by the recovery path */
 struct nvmeibc_cdv_list_req {
 	char tpv_uuid[NVMEIBC_BD_UUID_LEN];	/* whose extents to list */
 	char cdv_uuid[NVMEIBC_BD_UUID_LEN];	/* which CDV to query */
@@ -379,9 +379,9 @@ struct nvmeibc_cdv_list_req {
 };
 
 /*
- * NVMEIBC_MA_CDV_LIST_EXTENTS response — variable-length.
+ * NVMEIBC_MA_CDV_LIST_EXTENTS response - variable-length.
  *
- * Followed immediately by n_extents × u64 extent indices.
+ * Followed immediately by n_extents x u64 extent indices.
  * The response is dispatched by nvmeibc_cdv_dispatch_list_response()
  * in nvmeibc_tpv_ib_admin.c, which matches the response to the pending
  * request by req_id.
@@ -393,7 +393,7 @@ struct nvmeibc_cdv_list_resp {
 };
 
 /*
- * CDV_ALLOCATOR_UPDATE — TOMA → client push.
+ * CDV_ALLOCATOR_UPDATE - TOMA -> client push.
  *
  * Received from TOMA when the CDV allocator identity is elected or changes.
  * The client matches cdv_uuid to find all TPVs backed by this CDV and updates
@@ -409,7 +409,7 @@ struct nvmeibc_cdv_allocator_update {
 	u64  allocator_generation;
 };
 
-/* ── end CDV_extent allocation protocol ──────────────────────────────────── */
+/* -- end CDV_extent allocation protocol ------------------------------------ */
 
 enum {
 	NVMEIBC_CFG_SHARE_MAX_CONST = 32,

@@ -356,7 +356,7 @@ static inline void bitmap_zero(unsigned long *dst, unsigned int nbits) {
 }
 
 /*
- * bitmap_zalloc / bitmap_free — allocate and free a zero-initialised bitmap.
+ * bitmap_zalloc / bitmap_free - allocate and free a zero-initialised bitmap.
  */
 static inline unsigned long *bitmap_zalloc(unsigned int nbits, gfp_t flags)
 {

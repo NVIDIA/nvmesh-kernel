@@ -40,7 +40,7 @@ static void nvmeibc_arm_save_regs(struct user_fpsimd_state *save_buf)
 {
 	uint64_t tmp;
 	__asm__ volatile(
-		/* save Q0–Q31 in 16-byte lanes, pairs at 32-byte strides */
+		/* save Q0-Q31 in 16-byte lanes, pairs at 32-byte strides */
 		"stp   q0,  q1,  [%[s], #16 * 0]   \n"
 		"stp   q2,  q3,  [%[s], #16 * 2]   \n"
 		"stp   q4,  q5,  [%[s], #16 * 4]   \n"
@@ -62,10 +62,10 @@ static void nvmeibc_arm_save_regs(struct user_fpsimd_state *save_buf)
 		"str   %w[t], [%[s], #16 * 2]   \n"
 		"mrs   %x[t], fpcr               \n"
 		"str   %w[t], [%[s], #16 * 2 + 4]\n"
-		: [s] "+r" (save_buf)      /* %0 = save_buf pointer, updated by the final “!” */
+		: [s] "+r" (save_buf)      /* %0 = save_buf pointer, updated by the final "!" */
 		, [t] "=&r" (tmp)          /* %1 = temp register for FPSR/FPCR */
 		:                          /* no read-only inputs */
-		: "memory"                 /* clobber memory so the compiler won’t reorder */
+		: "memory"                 /* clobber memory so the compiler won't reorder */
 	);
 }
 
@@ -74,7 +74,7 @@ static void nvmeibc_arm_rstr_regs(struct user_fpsimd_state *save_buf)
 	uint32_t tmp;
 	uint32_t save_fpcr;
 	__asm__ volatile(
-		/* Q-registers 0–31 */
+		/* Q-registers 0-31 */
 		"ldp   q0,  q1,  [%[s], #16*0]   \n"
 		"ldp   q2,  q3,  [%[s], #16*2]   \n"
 		"ldp   q4,  q5,  [%[s], #16*4]   \n"

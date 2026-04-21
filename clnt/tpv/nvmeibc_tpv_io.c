@@ -4,29 +4,29 @@
 */
 
 /*
- * nvmeibc_tpv_io.c — TPV IO dispatch: zero-read, write-allocate, DISCARD.
+ * nvmeibc_tpv_io.c - TPV IO dispatch: zero-read, write-allocate, DISCARD.
  *
  * Entry points:
- *   nvmeibc_tpv_make_request()     — block-layer make_request/submit_bio hook.
- *   nvmeibc_tpv_retry_pending_bios() — drains write-blocked bios after pool
+ *   nvmeibc_tpv_make_request()     - block-layer make_request/submit_bio hook.
+ *   nvmeibc_tpv_retry_pending_bios() - drains write-blocked bios after pool
  *                                      replenishment (called from work context).
  *
  * IO dispatch per operation:
  *
  *   READ/WRITE bios are split to single-extent granularity at the top of
  *   tpv_handle_one_bio.  On modern kernels (>= 5.9) with fops->submit_bio,
- *   the generic block layer does NOT enforce chunk_sectors — the driver must
+ *   the generic block layer does NOT enforce chunk_sectors - the driver must
  *   split bios itself.  DISCARD bios may span multiple extents and are
  *   handled by the DISCARD loop inside tpv_handle_one_bio.
  *
- *   READ  + unmapped → zero-fill pages and complete immediately.
- *   WRITE + unmapped → nvmeibc_tpv_alloc_extent():
- *                        0       → slot acquired; fall through to mapped path.
- *                       -EAGAIN  → park bio on pending_bios; CDV_extent
+ *   READ  + unmapped -> zero-fill pages and complete immediately.
+ *   WRITE + unmapped -> nvmeibc_tpv_alloc_extent():
+ *                        0       -> slot acquired; fall through to mapped path.
+ *                       -EAGAIN  -> park bio on pending_bios; CDV_extent
  *                                  pre-fetch is already scheduled.
- *                       other   → fail bio with the error code.
- *   READ/WRITE + mapped → forward to CDV at physical offset.
- *   DISCARD → free all extents covered by the bio; complete immediately.
+ *                       other   -> fail bio with the error code.
+ *   READ/WRITE + mapped -> forward to CDV at physical offset.
+ *   DISCARD -> free all extents covered by the bio; complete immediately.
  */
 
 #include "common/kr_incs.h"
@@ -34,7 +34,7 @@
 #include "clnt/nvmeibc_block.h"			/* KERNEL_SECTOR_SHIFT */
 #include "common/nvmeib_common_os_block_api.h"	/* REQ_RET, REQ_RET_ZERO */
 
-/* ── Bio-split bioset for extent-boundary splitting ─────────────────────── */
+/* -- Bio-split bioset for extent-boundary splitting ----------------------- */
 
 static struct bio_set tpv_split_bio_set;
 
@@ -51,13 +51,13 @@ void nvmeibc_tpv_io_exit(void)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_io_exit);
 
-/* ── Forward declarations ────────────────────────────────────────────────── */
+/* -- Forward declarations -------------------------------------------------- */
 
 /* Satisfy -Werror=missing-prototypes: REQ_RET is defined in the include above. */
 REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio);
 
 /*
- * nvmeibc_tpv_cdv_submit_bio — forward a mapped bio to the CDV IB transport.
+ * nvmeibc_tpv_cdv_submit_bio - forward a mapped bio to the CDV IB transport.
  *
  * cdv_phys_offset is the CDV byte offset of the first byte of the bio.
  * Takes ownership of bio; bio is completed via bio_endio() when CDV IO done.
@@ -68,10 +68,10 @@ extern void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 					struct bio *bio,
 					u64 cdv_phys_offset);
 
-/* ── Sector accessor (kernel-version-aware) ─────────────────────────────── */
+/* -- Sector accessor (kernel-version-aware) ------------------------------- */
 
 /*
- * KS_BVEC_ITER — bio uses bi_iter.bi_sector (new kernels); else bi_sector.
+ * KS_BVEC_ITER - bio uses bi_iter.bi_sector (new kernels); else bi_sector.
  * The same flag is used by nvmeibc_block_dp_submit_bio_part.h for __GET_BI_SECTOR.
  */
 static inline u64 tpv_bio_start_bytes(const struct bio *bio)
@@ -83,7 +83,7 @@ static inline u64 tpv_bio_start_bytes(const struct bio *bio)
 #endif
 }
 
-/* ── DISCARD detection (kernel-version-aware) ───────────────────────────── */
+/* -- DISCARD detection (kernel-version-aware) ----------------------------- */
 
 /*
  * Matches the pattern in nvmeibc_block_api_os.c (lines 1745-1751) for
@@ -100,20 +100,20 @@ static inline bool tpv_bio_is_discard(const struct bio *bio)
 #endif
 }
 
-/* ── tpv_handle_one_bio — dispatch one extent-aligned bio ──────────────── */
+/* -- tpv_handle_one_bio - dispatch one extent-aligned bio ---------------- */
 
 /*
  * Pre-conditions:
- *   • READ/WRITE bios are fully contained within a single TPV_extent
+ *   - READ/WRITE bios are fully contained within a single TPV_extent
  *     (enforced by blk_queue_chunk_sectors in the registration path).
- *   • DISCARD bios may span multiple extents (chunk_sectors does not
+ *   - DISCARD bios may span multiple extents (chunk_sectors does not
  *     constrain DISCARDs; the kernel uses max_discard_sectors instead).
- *   • tpv->state == TPV_ATTACHED (checked by caller).
+ *   - tpv->state == TPV_ATTACHED (checked by caller).
  *
- * Returns  0        — bio dispatched or completed.
- * Returns -EAGAIN   — bio has been added to pending_bios; caller must not
+ * Returns  0        - bio dispatched or completed.
+ * Returns -EAGAIN   - bio has been added to pending_bios; caller must not
  *                     touch bio after this return.
- * Returns other <0  — bio has been completed with the error code.
+ * Returns other <0  - bio has been completed with the error code.
  */
 static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 {
@@ -128,7 +128,7 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 	int  rv;
 
 	/*
-	 * ── Extent-boundary split ────────────────────────────────────────
+	 * -- Extent-boundary split ----------------------------------------
 	 *
 	 * On modern kernels (>= 5.9) the generic block layer does not
 	 * enforce chunk_sectors for devices that provide fops->submit_bio,
@@ -138,7 +138,7 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 	 * function for the next chunk), and fall through to single-extent
 	 * handling for the head.
 	 *
-	 * DISCARDs are excluded — they have their own multi-extent loop.
+	 * DISCARDs are excluded - they have their own multi-extent loop.
 	 */
 	if (!tpv_bio_is_discard(bio)) {
 		u64 extent_sectors = (u64)alloc->tpv_extent_size_kb << 1;
@@ -174,7 +174,7 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		}
 	}
 
-	/* ── DISCARD — may span multiple extents ──────────────────────────── */
+	/* -- DISCARD - may span multiple extents ---------------------------- */
 	if (tpv_bio_is_discard(bio)) {
 		u64 discard_bytes = (u64)bio_sectors(bio) << KERNEL_SECTOR_SHIFT;
 		u64 end_byte      = virt_offset + discard_bytes;
@@ -200,14 +200,14 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 	if (!entry) {
 		rcu_read_unlock();
 
-		/* ── READ on unmapped extent → zero-fill and complete ────── */
+		/* -- READ on unmapped extent -> zero-fill and complete ------ */
 		if (!is_write) {
 			zero_fill_bio(bio);
 			bio_endio(bio, 0);
 			return 0;
 		}
 
-		/* ── WRITE on unmapped extent → allocate physical slot ────── */
+		/* -- WRITE on unmapped extent -> allocate physical slot ------ */
 		rv = nvmeibc_tpv_alloc_extent(tpv, virt_idx, &entry);
 		if (rv == -EAGAIN) {
 			/*
@@ -237,12 +237,12 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		}
 
 		/*
-		 * Freshly allocated entry — not yet visible to concurrent
+		 * Freshly allocated entry - not yet visible to concurrent
 		 * erasers, so direct access is safe without RCU.
 		 *
 		 * sync_flush mode: park the bio until persist_work has
 		 * flushed the new L1 entry to the tree extent.  persist_work
-		 * was already scheduled by alloc_extent (dirty → true).
+		 * was already scheduled by alloc_extent (dirty -> true).
 		 * The parked bio is re-dispatched by
 		 * nvmeibc_tpv_forward_l1_flush_bios() after flush succeeds;
 		 * at that point the extent_map lookup finds the mapping and
@@ -262,7 +262,7 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		return 0;
 	}
 
-	/* ── Mapped READ or WRITE — snapshot offset under RCU ─────────────── */
+	/* -- Mapped READ or WRITE - snapshot offset under RCU --------------- */
 	phys_off = entry->phys_offset + intra_offset;
 
 	/*
@@ -287,7 +287,7 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 	return 0;
 }
 
-/* ── nvmeibc_tpv_make_request — block-layer IO entry point ─────────────── */
+/* -- nvmeibc_tpv_make_request - block-layer IO entry point --------------- */
 
 /*
  * Called by the block layer for every bio targeting the TPV gendisk.
@@ -347,11 +347,11 @@ REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_make_request);
 
-/* ── nvmeibc_tpv_retry_pending_bios — drain write-blocked bios ─────────── */
+/* -- nvmeibc_tpv_retry_pending_bios - drain write-blocked bios ----------- */
 
 /*
  * Called from nvmeibc_tpv_cdv_alloc_work_fn() after tpv_on_cdv_alloc_ok()
- * succeeds — new TPV_extent slots are now in free_tpv_extents.
+ * succeeds - new TPV_extent slots are now in free_tpv_extents.
  *
  * Atomically swaps out the pending_bios list and re-dispatches each bio
  * through tpv_handle_one_bio().  Bios that return -EAGAIN again (rare: pool
@@ -374,7 +374,7 @@ void nvmeibc_tpv_retry_pending_bios(struct nvmeibc_tpv *tpv)
 	spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
 
 	/*
-	 * Cancel the timeout sweep — bios are being processed now.
+	 * Cancel the timeout sweep - bios are being processed now.
 	 * If tpv_handle_one_bio re-parks any of them (partial pool refill),
 	 * the parking code re-schedules timeout_work.
 	 */
@@ -385,11 +385,11 @@ void nvmeibc_tpv_retry_pending_bios(struct nvmeibc_tpv *tpv)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_retry_pending_bios);
 
-/* ── nvmeibc_tpv_forward_l1_flush_bios ─────────────────────────────────── */
+/* -- nvmeibc_tpv_forward_l1_flush_bios ----------------------------------- */
 
 /*
  * Drain bios parked on pending_l1_flush_bios after a successful L1 flush.
- * Each bio already has its virtual extent mapped in the xarray — the
+ * Each bio already has its virtual extent mapped in the xarray - the
  * re-dispatch through tpv_handle_one_bio() hits the "mapped" path and
  * forwards the bio to the CDV at the physical offset recorded earlier.
  *
@@ -415,17 +415,17 @@ void nvmeibc_tpv_forward_l1_flush_bios(struct nvmeibc_tpv *tpv)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_forward_l1_flush_bios);
 
-/* ── nvmeibc_tpv_timeout_work_fn — fail parked bios after timeout ─────── */
+/* -- nvmeibc_tpv_timeout_work_fn - fail parked bios after timeout ------- */
 
 /*
  * Fires after max_retry_jiffies from the moment the first bio was parked.
  * Fails all bios on pending_bios and pending_l1_flush_bios with -EIO.
  *
  * The timeout value depends on TPV state:
- *   - Attaching (state_loaded == false): 30 s  — CDV tree didn't load in time.
- *   - Attached (normal):        virtually infinite — CDV extent pool exhaustion
+ *   - Attaching (state_loaded == false): 30 s  - CDV tree didn't load in time.
+ *   - Attached (normal):        virtually infinite - CDV extent pool exhaustion
  *                                is transient; pool refill cancels this work.
- *   - Detaching:                10 ms — fast drain for graceful shutdown.
+ *   - Detaching:                10 ms - fast drain for graceful shutdown.
  */
 void nvmeibc_tpv_timeout_work_fn(struct work_struct *work)
 {

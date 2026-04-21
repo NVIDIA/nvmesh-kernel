@@ -146,7 +146,7 @@ void nvmeibt_flush_all_and_terminate(void) {
 }
 
 void nvmeibt_toggle_logging(void) {
-	/* If logging is on switch it off and viсe versa */
+	/* If logging is on switch it off and vice versa */
 	/* The tracer_nvmeibt_debug_level can be 0 or a configured value */
 	is_logging_on = !is_logging_on;
 	tracer_nvmeibt_debug_level = is_logging_on ? (int)tracer_nvmeibt_requested_debug_level : 0;

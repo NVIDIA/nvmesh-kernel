@@ -7,7 +7,7 @@
 #define NVMEIBC_TPV_TEST_H
 
 /*
- * nvmeibc_tpv_test.h — TPV kernel self-test declarations.
+ * nvmeibc_tpv_test.h - TPV kernel self-test declarations.
  *
  * This header is included by nvmeibc_tpv_proc.c to register the selftest
  * proc entry.  The actual test implementations live in nvmeibc_tpv_test.c.
@@ -27,7 +27,7 @@
 #ifdef __KERNEL__
 
 /*
- * nvmeibc_tpv_run_selftests — proc fill function for the "selftest" entry.
+ * nvmeibc_tpv_run_selftests - proc fill function for the "selftest" entry.
  *
  * Signature matches proc_fill_t: (void *arg, char *buf, size_t len).
  * arg is the struct nvmeibc_tpv * passed at registration.

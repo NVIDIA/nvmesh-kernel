@@ -219,7 +219,7 @@ enum NVMEIBT_CLIENT_TR_REASON { // [1..0xFF], TR - measn Toma to client, RT - me
 	NVMEIBT_CLIENT_TR_REASON_UPDATING_RM_VERSION		= 0x5 | NVMEIBT_CLIENT_TR_REASON_PREFIX_MAINTANANCE,
 	NVMEIBT_CLIENT_TR_REASON_UNREGISTER_IN_PROGRESS		= 0x2 | NVMEIBT_CLIENT_TR_REASON_PREFIX_MAINTANANCE,
 	/*
-	 * Per-client CDV preempt admission-floor rejection (TPV_PerClientCDVPreemption.md §2.10).
+	 * Per-client CDV preempt admission-floor rejection (TPV_PerClientCDVPreemption.md S.2.10).
 	 * Sent when a REGISTER on a CDV segment carries reservation_mode_version
 	 * below the CDV's current admission_floor. Treated by the client like
 	 * NCBD_PREEMPTED: tear down TPVs whose cdv_vol is this CDV, reliance on
@@ -324,13 +324,13 @@ enum NVMEIBT_CLIENT_MSG_TYPES {
 	NVMEIBT_CLIENT_MSG_TR_TOMA_NOT_READY = 0x81 | NVMEIBT_PROTOCOL_SIGNATURE_REGISTER_TR,
 	NVMEIBT_CLIENT_MSG_TR_INVALID_DISK_SEGMENT_ID = 0x82 | NVMEIBT_PROTOCOL_SIGNATURE_REGISTER_TR,
 
-	// CDV extent allocation (client TPV.allocator ↔ TOMA CDV.allocator)
+	// CDV extent allocation (client TPV.allocator <-> TOMA CDV.allocator)
 	NVMEIBT_CLIENT_MSG_RT_CDV_ALLOC_EXTENT       = 0xA0 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
 	NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP   = 0xA1 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
 	NVMEIBT_CLIENT_MSG_RT_CDV_FREE_EXTENT        = 0xA2 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
 	NVMEIBT_CLIENT_MSG_RT_CDV_LIST_EXTENTS       = 0xA3 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
 	NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP   = 0xA4 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
-	// CDV allocator identity push (TOMA → client; sent on election / change)
+	// CDV allocator identity push (TOMA -> client; sent on election / change)
 	NVMEIBT_CLIENT_MSG_TR_CDV_ALLOCATOR_UPDATE   = 0xA5 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
 
 	//Client recovery/rebuild messages

@@ -22,7 +22,7 @@
 #endif
 
 /*
- * ATOM handover fops pointer — stored at module init by nvmeibc_os_api_layer_init()
+ * ATOM handover fops pointer - stored at module init by nvmeibc_os_api_layer_init()
  * and used by TPV NDU adoption to populate tpv_live_fops with nvmeiba's .owner,
  * .open, .release handlers.
  */
@@ -284,7 +284,7 @@ _critical_error:
 }
 
 /*
- * block_api_os_get_bdev — extract the underlying struct block_device *
+ * block_api_os_get_bdev - extract the underlying struct block_device *
  * from an nvmeibc_os_api's unsafe_self_ref.
  *
  * WARNING: this returns NULL during normal I/O.  unsafe_self_ref.bdev_during_detach

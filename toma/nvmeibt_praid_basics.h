@@ -49,7 +49,7 @@ struct nvmeibt_praid_topo_ctx {
 	int										praid_version_minor;	// Increased upon every praid change
 	enum PRAID_REGISTRANTS_SYNC_CMD			registrants_sync_cmd;
 	int										leader_did_all_segs_sync_registrants;	// Used only ib the leader's context
-	/* CDV-allocator identity — meaningful only for a CDV's first pRAID
+	/* CDV-allocator identity - meaningful only for a CDV's first pRAID
 	 * (stripe_idx==0 && blkdev->from_config.is_cdv). Zero on every other pRAID.
 	 * Written by the RAFT leader in cdv_alloc_elect(); delivered to every TOMA
 	 * via AppendEntries; applied in update_applied_topology() which triggers

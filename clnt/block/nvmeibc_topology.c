@@ -1634,7 +1634,7 @@ static void __do_on_toma_not_ready(struct nvmeibc_subscription_ctx* tr, struct n
 		/*
 		 * Per-client CDV preempt: TOMA rejected our REGISTER because our
 		 * reservation_mode_version is below the CDV's current admission
-		 * floor (TPV_PerClientCDVPreemption.md §2.10). Management has
+		 * floor (TPV_PerClientCDVPreemption.md S.2.10). Management has
 		 * evicted this client from the CDV. Treat like NCBD_PREEMPTED:
 		 * transition the CDV device to preempted, which triggers the
 		 * cleanup barrier in nvmeibc_block.c (nvmeibc_tpv_handle_cdv_preempted)
@@ -2769,7 +2769,7 @@ static void __block_toma_msg_handler(void *unused_cinst, u64 handle, u8 *buf, in
 		 * Cache allocator identity on the CDV volume before updating TPVs.
 		 * nvmeibc_tpv_attach() reads cdv->cdv_allocator_toma_id to seed
 		 * newly-created TPVs, closing the attach-time race where the push
-		 * arrives during CDV segment registration — before the TPV is in
+		 * arrives during CDV segment registration - before the TPV is in
 		 * nvmeibc_tpv_active_list.
 		 */
 		{

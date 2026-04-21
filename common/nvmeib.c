@@ -4088,7 +4088,7 @@ void nvmeib_intr_shaper_destroy(struct nvmeib_intr_shaper *shaper)
 }
 EXPORT_SYMBOL(nvmeib_intr_shaper_destroy);
 
-/* EWMA α=1/16 (i.e. shift right by 4) */
+/* EWMA a=1/16 (i.e. shift right by 4) */
 #define NVMEIB_INTR_SHAPER_EWMA_ALPHA_SHIFT 4
 
 static void nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
@@ -4130,21 +4130,21 @@ static void nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
 	pcpu->busy_since_last_ns = 0;
 
 	if (!busy) {
-		/* No work → decay a bit towards 0 */
+		/* No work -> decay a bit towards 0 */
 		if (pcpu->ewma_load_pct_x1000)
-			pcpu->ewma_load_pct_x1000 -= pcpu->ewma_load_pct_x1000 >> NVMEIB_INTR_SHAPER_EWMA_ALPHA_SHIFT; /* α=1/16 */
+			pcpu->ewma_load_pct_x1000 -= pcpu->ewma_load_pct_x1000 >> NVMEIB_INTR_SHAPER_EWMA_ALPHA_SHIFT; /* a=1/16 */
 		goto check_thresh;
 	}
 
 	/*
-	 * instantaneous_load (% * 1000) ≈ busy/dt * 100 * 1000
+	 * instantaneous_load (% * 1000) ~ busy/dt * 100 * 1000
 	 * => inst_x1000 = busy * 100000 / dt
 	 */
 	inst_load_pct_x1000 = div64_u64(busy * 100000ULL, dt);
 	if (inst_load_pct_x1000 > 100000)
 		inst_load_pct_x1000 = 100000; /* clamp at 100% */
 
-	/* EWMA: ewma += α * (inst - ewma), α = 1/16 via shift */
+	/* EWMA: ewma += a * (inst - ewma), a = 1/16 via shift */
 	ewma = pcpu->ewma_load_pct_x1000;
 	diff = (s32)inst_load_pct_x1000 - (s32)ewma;
 	ewma += diff >> NVMEIB_INTR_SHAPER_EWMA_ALPHA_SHIFT;

@@ -2602,11 +2602,11 @@ out:
 }
 
 /*
- * CDV admission-floor check (TPV_PerClientCDVPreemption.md §2.10).
+ * CDV admission-floor check (TPV_PerClientCDVPreemption.md S.2.10).
  *
  * Runs at REGISTER time. If the segment's parent volume is a CDV, rejects
  * the REGISTER when the caller's reservation_mode_version is below the CDV's
- * current admission_floor — that's the signal that management has evicted
+ * current admission_floor - that's the signal that management has evicted
  * this client from the CDV since its last attach. On rejection, sends
  * TOMA_NOT_READY with reason BELOW_CDV_FLOOR; the client maps the reject
  * to NCBD_PREEMPTED (clnt/block/nvmeibc_topology.c) and tears down its TPVs
@@ -2614,14 +2614,14 @@ out:
  * barrier the preempt design depends on.
  *
  * Returns TRUE if admissible, FALSE if rejected (and the response has
- * already been sent). NULL cdv_alloc means non-CDV segment → no gate.
+ * already been sent). NULL cdv_alloc means non-CDV segment -> no gate.
  */
 static BOOL check_cdv_admission_floor(struct nvmeibt_registrant_ctx *incoming_reg_ctx)
 {
 	struct nvmeibt_seg_active *seg_active = incoming_reg_ctx->seg_active;
 	struct nvmeibt_cdv_alloc  *cdv;
 
-	/* Lookup returns NULL for non-CDV segments — no gate applies. */
+	/* Lookup returns NULL for non-CDV segments - no gate applies. */
 	cdv = nvmeibt_seg_active_get_cdv_alloc(seg_active);
 	if (!cdv)
 		return 1;	/* admissible (BOOL true) */
@@ -2644,7 +2644,7 @@ static BOOL check_cdv_admission_floor(struct nvmeibt_registrant_ctx *incoming_re
 	 * concurrent preemptClientFromCDV handler cannot observe an intermediate
 	 * state where we passed the floor check but haven't yet inserted into
 	 * active_registrants. This would require threading the locked cdv_alloc
-	 * pointer through is_valid_register_req → register_on_disk_segment →
+	 * pointer through is_valid_register_req -> register_on_disk_segment ->
 	 * hash insert, which is a larger refactor.
 	 *
 	 * The current release-and-rely-on-idempotency shape is correct because:
@@ -2655,7 +2655,7 @@ static BOOL check_cdv_admission_floor(struct nvmeibt_registrant_ctx *incoming_re
 	 *   - The preempt completes when all TOMAs ACK; the ACK only fires
 	 *     AFTER the terminate loop, so management doesn't clear EVICTING
 	 *     until the stale reg_ctx is gone.
-	 * See §2.10.4 "Eventual consistency across TOMAs" for the full argument.
+	 * See S.2.10.4 "Eventual consistency across TOMAs" for the full argument.
 	 */
 	pthread_mutex_unlock(&cdv->handler_lock);
 	return 1;	/* admissible (BOOL true) */
@@ -2671,7 +2671,7 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 
 	NFIN;
 
-	/* Per-client CDV admission floor check — runs BEFORE other validations.
+	/* Per-client CDV admission floor check - runs BEFORE other validations.
 	 * A stale-version REGISTER from an evicted client is rejected here
 	 * regardless of seg/praid state. */
 	if (!check_cdv_admission_floor(incoming_reg_ctx))

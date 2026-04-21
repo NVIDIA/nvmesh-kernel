@@ -1404,7 +1404,7 @@ static void update_applied_topology(void)
 		committed_praid_topo = &praid_follower->committed_praid_lot.topo_ctx;
 		is_praid_config_ver_changed = (praid_follower->applied_praid_lot.from_config.version != praid_follower->committed_praid_lot.from_config.version);
 		/* Snapshot the previously-applied topo_ctx before the duplicate_content
-		 * overwrites it — the CDV allocator hook needs the old (toma_id, gen)
+		 * overwrites it - the CDV allocator hook needs the old (toma_id, gen)
 		 * to detect a role transition. */
 		prev_applied_topo_ctx = praid_follower->applied_praid_lot.topo_ctx;
 		// The duplication must be performed before processing the praid because some segs can be already deleted !
@@ -1743,8 +1743,8 @@ void nvmeibt_topology_calc_topology(void)
 		/*
 		 * CDV allocator election: for the first pRAID of a CDV, stage the
 		 * elected (allocator_toma_id, allocator_generation) into the pRAID's
-		 * calculated_praid_lot.topo_ctx.  The normal leader → AppendEntries
-		 * → follower-apply pipeline carries the update to every TOMA;
+		 * calculated_praid_lot.topo_ctx.  The normal leader -> AppendEntries
+		 * -> follower-apply pipeline carries the update to every TOMA;
 		 * nvmeibt_cdv_alloc_on_topo_applied() fires the local role
 		 * transition on each TOMA.  On new election (elect returns 1), we
 		 * also bump topo_idx_updated + praid_version_minor so the existing
@@ -1790,7 +1790,7 @@ void nvmeibt_topology_calc_topology(void)
 						continue;
 					node = disk->its_node_config;
 					/* Require the segment owner to be a currently-alive RAFT
-					 * member — a dead owner must not be picked. */
+					 * member - a dead owner must not be picked. */
 					member = nvmeibt_raft_get_member_by_id(nvmeibt_node_UUID(node));
 					if (!member || !member->is_alive_for_topo)
 						continue;

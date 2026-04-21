@@ -67,7 +67,7 @@ bool llist_add_batch(struct llist_node *new_first,
 {
 	struct llist_node *first = __atomic_load_n((struct llist_node * volatile *)&head->first, __ATOMIC_RELAXED);
 	int succ = __ATOMIC_RELEASE;   // publish initialized node
-	int fail = __ATOMIC_RELAXED;   // on CAS failure we’ll retry anyway
+	int fail = __ATOMIC_RELAXED;   // on CAS failure we'll retry anyway
 
 	do {
 		new_last->next = first;

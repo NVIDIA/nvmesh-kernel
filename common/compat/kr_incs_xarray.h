@@ -7,7 +7,7 @@
 #define KERNEL_XARRAY_SIM_H
 
 /*
- * kr_incs_xarray.h — minimal xarray simulation for userspace unit tests.
+ * kr_incs_xarray.h - minimal xarray simulation for userspace unit tests.
  *
  * Implements the subset of the kernel xarray API used by the TPV allocator:
  *   xa_init / xa_destroy / xa_store / xa_erase / xa_load / xa_for_each / xa_err
@@ -46,7 +46,7 @@ static inline void xa_init(struct xarray *xa)
 	xa_init_flags(xa, 0);
 }
 
-/* xa_destroy — free all xa_node structs; caller is responsible for values */
+/* xa_destroy - free all xa_node structs; caller is responsible for values */
 static inline void xa_destroy(struct xarray *xa)
 {
 	struct xa_node *n, *tmp;
@@ -57,7 +57,7 @@ static inline void xa_destroy(struct xarray *xa)
 	}
 }
 
-/* xa_load — look up the value for @index; NULL if not present */
+/* xa_load - look up the value for @index; NULL if not present */
 static inline void *xa_load(struct xarray *xa, unsigned long index)
 {
 	struct xa_node *n;
@@ -70,7 +70,7 @@ static inline void *xa_load(struct xarray *xa, unsigned long index)
 }
 
 /*
- * xa_store — store @entry at @index.
+ * xa_store - store @entry at @index.
  *
  * Returns: NULL if no prior mapping existed (new key).
  *          the old value if there was a prior mapping.
@@ -107,7 +107,7 @@ static inline void *xa_store(struct xarray *xa, unsigned long index,
 }
 
 /*
- * xa_erase — remove the mapping for @index and return the value.
+ * xa_erase - remove the mapping for @index and return the value.
  * Returns NULL if @index was not mapped.
  */
 static inline void *xa_erase(struct xarray *xa, unsigned long index)
@@ -126,7 +126,7 @@ static inline void *xa_erase(struct xarray *xa, unsigned long index)
 }
 
 /*
- * xa_err — extract an errno from an xa_store return value.
+ * xa_err - extract an errno from an xa_store return value.
  * Returns 0 on success, negative errno on failure.
  */
 static inline int xa_err(void *entry)
@@ -135,7 +135,7 @@ static inline int xa_err(void *entry)
 }
 
 /*
- * xa_for_each — iterate over all entries in an xarray.
+ * xa_for_each - iterate over all entries in an xarray.
  *
  * Usage (caller declares @index and @entry before the loop):
  *
