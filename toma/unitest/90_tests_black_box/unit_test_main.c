@@ -268,7 +268,6 @@ static void scenario_evict_rebuild_r1(void) {
 			.uuid = pr->segs[2].uuid, .dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
 		});
 	}
-	mgmt_sim_send_leader_keep_alive();
 
 	// PHASE 6 -- Rebuild complete; verify. {Surviving seg: OWNER_RECOVERER(OWNER_RECOVERER_DONE) -> OWNER_IDLE, Replacement: UNDER_RECOVERY_R -> OWNER_IDLE, Praid: SWITCH_TOPO_U -> STABLE
 	WAIT_UNTIL(evict_rebuild_complete(pr->segs[seg_idx_to].uuid));
@@ -360,7 +359,7 @@ static void scenario_create_remove_r1(void) {
 	scenario_attach_good_path_io_on_volume(0);
 	scenario_attach_good_path_io_on_volume(1);
 
-	if (0) scenario_evict_rebuild_r1();
+	scenario_evict_rebuild_r1();
 
 	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
 	peer_toma_simu_ignore_append_entries_by_node(2);
