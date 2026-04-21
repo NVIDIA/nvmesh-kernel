@@ -1426,7 +1426,7 @@ static void tpv_ktest_split_persist(struct tpv_ktest_output *kto)
 		memcpy(&data_probe, (char *)g_tc.cdv_buf, sizeof(data_probe));
 		if (data_probe.magic == TPV_L1_MAGIC) {
 			KTO_FAIL(kto, "split_persist",
-				 "L1 magic found on data buffer — flush went to wrong side");
+				 "L1 magic found on data buffer; flush went to wrong side");
 			goto cleanup_buf;
 		}
 	}
