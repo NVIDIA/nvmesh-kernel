@@ -373,7 +373,7 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 	 */
 	if (hdr->version != CDV_ONDISK_VERSION) {
 		N_Wf(cdv_async_scan_bad_ver,
-		     "CDV-alloc: async scan cdv=@STR unsupported version=@UINT (expected @UINT); treating as fresh — recreate the CDV",
+		     "CDV-alloc: async scan cdv=@STR unsupported version=@UINT (expected @UINT); treating as fresh: recreate the CDV",
 		     e->cdv_uuid, hdr->version, (uint32_t)CDV_ONDISK_VERSION);
 		e->is_fresh = true;
 		e->rv = 0;
@@ -946,7 +946,7 @@ static void cdv_rmw_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 		if (rv)
 			N_Ef(cdv_rmw_rollback_fail,
-			     "CDV-alloc: rollback re-insert failed cdv=@STR idx=@LLU tpv=@STR rv=@INT — on-disk still ALLOCATED, in-memory free",
+			     "CDV-alloc: rollback re-insert failed cdv=@STR idx=@LLU tpv=@STR rv=@INT: on-disk still ALLOCATED, in-memory free",
 			     e->rollback_reinsert_cdv_uuid, e->extent_index,
 			     e->rollback_reinsert_tpv_uuid, rv);
 	}

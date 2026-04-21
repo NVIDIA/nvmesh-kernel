@@ -1254,7 +1254,7 @@ void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes)
 
 		if (new_total_extents > max_ve)
 			_NE(tpv_grow_tree_overflow,
-			    "TPV: @STR grow to @LLU virt extents exceeds 2-level tree cap @LLU — writes beyond cap will fail",
+			    "TPV: @STR grow to @LLU virt extents exceeds 2-level tree cap @LLU; writes beyond cap will fail",
 			    tpv->tpv_name, new_total_extents, max_ve);
 	}
 

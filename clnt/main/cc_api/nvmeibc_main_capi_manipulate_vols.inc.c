@@ -126,7 +126,7 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 		meta_cdv_extent_size_mib = (u32)conf->metaCdvExtentSizeMib;
 		if (!meta_tpv_extent_size_kb || !meta_cdv_extent_size_mib) {
 			_NE(tpv_meta_geometry_missing,
-			    "TPV @STR: metaCdvUUID set but metaCdvExtentSizeMib=@UINT metaTpvExtentSizeKb=@UINT — management didn't populate split-mode geometry",
+			    "TPV @STR: metaCdvUUID set but metaCdvExtentSizeMib=@UINT metaTpvExtentSizeKb=@UINT; management didn't populate split-mode geometry",
 			    conf->name,
 			    (unsigned int)conf->metaCdvExtentSizeMib,
 			    (unsigned int)conf->metaTpvExtentSizeKb);

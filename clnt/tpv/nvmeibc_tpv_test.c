@@ -1402,8 +1402,11 @@ static void tpv_ktest_split_persist(struct tpv_ktest_output *kto)
 	}
 
 	/* Read back the L1 header from what the stub considers the
-	 * appropriate buffer (meta in split mode). Verify magic. */
-	rc = nvmeibc_tpv_cdv_sync_read(tpv, 0, &hdr, sizeof(hdr));
+	 * appropriate buffer (meta in split mode). Use the local stub
+	 * directly — nvmeibc_tpv_cdv_sync_read is not declared in a
+	 * header visible from this file; the stub is the same function
+	 * that production code would have called through the hook. */
+	rc = ktest_cdv_sync_read(tpv, 0, &hdr, sizeof(hdr));
 	if (rc != 0) {
 		KTO_FAIL(kto, "split_persist", "read_back rc=%d", rc);
 		goto cleanup_buf;
