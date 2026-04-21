@@ -680,19 +680,16 @@ static int load_state_snapshot_toma_id(struct nvmeibc_tpv *tpv,
 	struct nvmeibc_volume *cdv;
 	spinlock_t *id_lock;
 	const char *id_src;
-	u64        *gen_src;
 	unsigned long flags;
 
 	if (is_meta_side) {
 		cdv     = tpv->meta_cdv_vol;
 		id_lock = &tpv->meta_allocator_id_lock;
 		id_src  = tpv->meta_allocator_toma_id;
-		gen_src = &tpv->meta_allocator_generation;
 	} else {
 		cdv     = tpv->cdv_vol;
 		id_lock = &tpv->allocator_id_lock;
 		id_src  = tpv->allocator_toma_id;
-		gen_src = &tpv->allocator_generation;
 	}
 
 	spin_lock_irqsave(id_lock, flags);
@@ -712,18 +709,10 @@ static int load_state_snapshot_toma_id(struct nvmeibc_tpv *tpv,
 		spin_unlock_irqrestore(&cdv->spinlock, vflags);
 
 		if (cdv_toma[0]) {
-			if (is_meta_side) {
-				unsigned long iflags;
-
-				spin_lock_irqsave(id_lock, iflags);
-				strncpy(tpv->meta_allocator_toma_id, cdv_toma,
-					sizeof(tpv->meta_allocator_toma_id) - 1);
-				tpv->meta_allocator_toma_id[sizeof(tpv->meta_allocator_toma_id) - 1] = '\0';
-				*gen_src = cdv_gen;
-				spin_unlock_irqrestore(id_lock, iflags);
-			} else {
+			if (is_meta_side)
+				nvmeibc_tpv_update_meta_allocator_id(tpv, cdv_toma, cdv_gen);
+			else
 				nvmeibc_tpv_update_allocator_id(tpv, cdv_toma, cdv_gen);
-			}
 			strncpy(toma_id_out, cdv_toma, NVMEIB_HOST_NAME_LEN - 1);
 			toma_id_out[NVMEIB_HOST_NAME_LEN - 1] = '\0';
 			_NI(tpv_load_toma_from_cdv,

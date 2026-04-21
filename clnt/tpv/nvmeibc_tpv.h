@@ -519,10 +519,15 @@ void nvmeibc_tpv_abandon_all_for_inst(const struct nvmeibc_cinst_params_main *ci
  * Update the CDV.allocator TOMA identity after a topology push.
  * Callers must fence in-flight CDV_ALLOC_EXTENT requests with the old
  * generation before accepting responses from the new allocator.
+ * _update_allocator_id updates the data-side identity; _update_meta_allocator_id
+ * updates the metadata-side identity (split-mode only).
  */
 void nvmeibc_tpv_update_allocator_id(struct nvmeibc_tpv *tpv,
 				     const char *toma_id,
 				     u64 generation);
+void nvmeibc_tpv_update_meta_allocator_id(struct nvmeibc_tpv *tpv,
+					   const char *toma_id,
+					   u64 generation);
 
 /*
  * nvmeibc_tpv_update_allocator_for_cdv — update allocator identity for all

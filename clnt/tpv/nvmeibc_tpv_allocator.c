@@ -851,15 +851,14 @@ static void nvmeibc_tpv_cdv_alloc_work_run(struct nvmeibc_tpv *tpv,
 		_NI(tpv_cdv_wrong_gen,
 		    "TPV: @STR: WRONG_GEN[meta=@INT] ours=@LLU TOMA=@LLU; updating generation and re-arming",
 		    tpv->tpv_name, (int)is_meta_side, client_gen, resp.allocator_generation);
-		if (is_meta_side) {
-			unsigned long iflags;
-
-			spin_lock_irqsave(id_lock, iflags);
-			*gen_src = resp.allocator_generation;
-			spin_unlock_irqrestore(id_lock, iflags);
-		} else {
+		/* toma_id is unchanged — the RAFT leader may move to a different
+		 * TOMA via a management topology push, but WRONG_GEN only bumps
+		 * the generation. Use the side-appropriate helper to update the
+		 * cached generation under the right lock. */
+		if (is_meta_side)
+			nvmeibc_tpv_update_meta_allocator_id(tpv, toma_id, resp.allocator_generation);
+		else
 			nvmeibc_tpv_update_allocator_id(tpv, toma_id, resp.allocator_generation);
-		}
 		if (atomic_cmpxchg(pending, 0, 1) == 0)
 			schedule_work(self_work);
 		break;

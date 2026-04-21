@@ -1290,6 +1290,27 @@ void nvmeibc_tpv_update_allocator_id(struct nvmeibc_tpv *tpv,
 EXPORT_SYMBOL(nvmeibc_tpv_update_allocator_id);
 
 /*
+ * nvmeibc_tpv_update_meta_allocator_id — mirror of nvmeibc_tpv_update_allocator_id
+ * for the metadata-side allocator identity (split-mode TPVs). Keeps the two
+ * sides symmetric and gives callers a single named entry point per side
+ * instead of open-coding the lock acquisition.
+ */
+void nvmeibc_tpv_update_meta_allocator_id(struct nvmeibc_tpv *tpv,
+					   const char *toma_id,
+					   u64 generation)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&tpv->meta_allocator_id_lock, flags);
+	strncpy(tpv->meta_allocator_toma_id, toma_id,
+		sizeof(tpv->meta_allocator_toma_id) - 1);
+	tpv->meta_allocator_toma_id[sizeof(tpv->meta_allocator_toma_id) - 1] = '\0';
+	tpv->meta_allocator_generation = generation;
+	spin_unlock_irqrestore(&tpv->meta_allocator_id_lock, flags);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_update_meta_allocator_id);
+
+/*
  * nvmeibc_tpv_update_allocator_for_cdv — update allocator for all TPVs on a CDV.
  *
  * Iterates the active TPV list, finds all TPVs whose parent CDV UUID matches,
@@ -1327,15 +1348,7 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 			else if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
 				schedule_work(&tpv->cdv_alloc_work);
 		} else {
-			/* Meta side: write into tpv->meta_allocator_toma_id. */
-			unsigned long iflags;
-
-			spin_lock_irqsave(&tpv->meta_allocator_id_lock, iflags);
-			strncpy(tpv->meta_allocator_toma_id, toma_id,
-				sizeof(tpv->meta_allocator_toma_id) - 1);
-			tpv->meta_allocator_toma_id[sizeof(tpv->meta_allocator_toma_id) - 1] = '\0';
-			tpv->meta_allocator_generation = generation;
-			spin_unlock_irqrestore(&tpv->meta_allocator_id_lock, iflags);
+			nvmeibc_tpv_update_meta_allocator_id(tpv, toma_id, generation);
 
 			if (!READ_ONCE(tpv->state_loaded))
 				schedule_delayed_work(&tpv->load_state_work, 0);
