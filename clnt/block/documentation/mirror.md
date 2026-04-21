@@ -640,7 +640,54 @@ The abandon decision uses the same logic as writes: if some trim commands
 succeeded and others were not issued, the lock is abandoned (becomes stale)
 to ensure recovery handles the inconsistency.
 
-### 7.5 Trim Consistency Limitations
+### 7.5 NVMe Deallocation Read Behavior (Spec Background)
+
+The vendor-dependent post-trim behavior that causes the consistency gaps
+described in section 7.6 originates directly from the NVMe specification.
+Two pieces of the Identify Namespace Data Structure (
+[NVM Express NVM Command Set Specification, Revision 1.1, August 2024](https://nvmexpress.org/wp-content/uploads/NVM-Express-NVM-Command-Set-Specification-Revision-1.1-2024.08.05-Ratified.pdf)
+) are relevant.
+
+**Logical block includes metadata.** Per section 1.4.2.6, a logical block's
+size is computed as `logical block data size + metadata bytes`. Every NVMe
+operation that talks about a "logical block", including deallocation, acts
+on this combined unit. For a mirror volume formatted with 4096+8 metadata,
+the 8 metadata bytes are part of the logical block and are deallocated
+along with the data.
+
+**Deallocation Read Behavior (DRB).** Figure 114 defines a per-namespace
+`DLFEAT` field at byte 33 of the Identify Namespace Data Structure. Bits 2:0
+of DLFEAT carry DRB, which reports what a read from a deallocated logical
+block returns:
+
+| DRB value    | Meaning                                                                        |
+| ------------ | ------------------------------------------------------------------------------ |
+| 000b         | Behavior not reported — post-deallocate read value is undefined                |
+| 001b         | All bytes (data and metadata, excluding protection information) cleared to 00h |
+| 010b         | All bytes (data and metadata, excluding protection information) set to FFh     |
+| 011b to 111b | Reserved                                                                       |
+
+Two consequences follow for a NVMesh mirror volume:
+
+1. **Metadata returns the deallocated pattern too.** Because metadata is
+   part of the logical block, the 8 metadata bytes on a 4096+8 disk follow
+   the same DRB pattern as the data payload. For EDIC-enabled mirror
+   volumes this means the CRC bits stored in block MD (see section 3.2) are
+   no longer meaningful on a trimmed range — they read back as all-zero or
+   all-FFh, not as a CRC over the data. Any post-trim EDIC verification on a
+   deallocated block would therefore be comparing arbitrary, firmware-chosen
+   bytes against the recomputed CRC.
+
+2. **Replicas with different DRB values look different.** NVMesh does not
+   require the underlying NVMe disks backing a mirror's legs to share the
+   same DRB. A 2-way mirror built from one DRB=001b disk and one DRB=010b
+   disk will legitimately return different bytes for the same trimmed LBA
+   on the two legs, even when both disks followed the spec exactly. This is
+   the concrete mechanism behind the "replicas silently inconsistent for
+   trimmed blocks" statement in section 7.6 — the divergence is not a bug
+   in NVMesh or in either disk, it is what the spec allows.
+
+### 7.6 Trim Consistency Limitations
 
 NVMesh reports `discard_zeroes_data = 0` to the kernel, meaning reads after
 trim return **indeterminate data**. The content depends on each physical
