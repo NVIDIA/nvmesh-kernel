@@ -4,36 +4,36 @@
 */
 
 /*
- * nvmeibc_tpv_allocator.c — TPV.allocator: xarray extent map, CDV_extent
+ * nvmeibc_tpv_allocator.c - TPV.allocator: xarray extent map, CDV_extent
  * alloc/free, and low-watermark CDV_extent pre-fetch from TOMA.
  *
  * Responsibilities:
- *   • nvmeibc_tpv_alloc_extent()      — pop one free physical TPV_extent slot,
+ *   - nvmeibc_tpv_alloc_extent()      - pop one free physical TPV_extent slot,
  *     install it in the xarray, trigger CDV_extent pre-fetch if below watermark.
- *   • nvmeibc_tpv_free_extent()       — erase from xarray, return slot to free
+ *   - nvmeibc_tpv_free_extent()       - erase from xarray, return slot to free
  *     list; when a CDV_extent becomes empty move it to pending_return_list and
  *     schedule cdv_alloc_work (which drains the return list before allocating).
- *   • nvmeibc_tpv_cdv_alloc_work_fn() — background work: return any pending
+ *   - nvmeibc_tpv_cdv_alloc_work_fn() - background work: return any pending
  *     empty CDV_extents via NVMEIBC_MA_CDV_FREE_EXTENT, then (if still below
  *     watermark) send NVMEIBC_MA_CDV_ALLOC_EXTENT to the TOMA allocator.
- *   • nvmeibc_tpv_free_slots_list()   — called by nvmeibc_tpv.c at detach to
+ *   - nvmeibc_tpv_free_slots_list()   - called by nvmeibc_tpv.c at detach to
  *     free all free_tpv_extents list entries.
  *
  * Locking order:
- *   allocator_id_lock  (irqsave)   — read toma_id / generation snapshot
- *   allocator.lock     (spin)      — protect extent_map, cdv_extent_list,
+ *   allocator_id_lock  (irqsave)   - read toma_id / generation snapshot
+ *   allocator.lock     (spin)      - protect extent_map, cdv_extent_list,
  *                                    free_tpv_extents, pending_return_list
- *   persist_lock       (spin)      — set dirty, schedule persist_work;
+ *   persist_lock       (spin)      - set dirty, schedule persist_work;
  *                                    always taken AFTER releasing allocator.lock
  *
  * CDV geometry (from nvmeibc_tpv_allocator fields):
- *   A = allocator_size_gib × 1 GiB — byte offset of first data CDV_extent
- *   E = cdv_extent_size_mib × 1 MiB — size of one data CDV_extent
- *   T = tpv_extent_size_kb × 1 KiB — size of one TPV_extent (= one slot)
- *   n_slots = E / T                  — TPV_extents per CDV_extent
+ *   A = allocator_size_gib x 1 GiB - byte offset of first data CDV_extent
+ *   E = cdv_extent_size_mib x 1 MiB - size of one data CDV_extent
+ *   T = tpv_extent_size_kb x 1 KiB - size of one TPV_extent (= one slot)
+ *   n_slots = E / T                  - TPV_extents per CDV_extent
  *
- * Data CDV_extent[i] occupies CDV bytes [A + i×E, A + (i+1)×E).
- * Slot s within CDV_extent[i] starts at CDV byte A + i×E + s×T.
+ * Data CDV_extent[i] occupies CDV bytes [A + ixE, A + (i+1)xE).
+ * Slot s within CDV_extent[i] starts at CDV byte A + ixE + sxT.
  */
 
 #include "common/kr_incs.h"		/* kernel headers, u64, spinlock, kzalloc, etc. */
@@ -43,7 +43,7 @@
 
 /* struct nvmeibc_tpv_free_slot is now in nvmeibc_tpv.h (shared with persist) */
 
-/* ── Geometry helpers ───────────────────────────────────────────────────── */
+/* -- Geometry helpers ----------------------------------------------------- */
 
 static inline u64 tpv_alloc_area_bytes(const struct nvmeibc_tpv_allocator *a)
 {
@@ -78,11 +78,11 @@ static inline u64 tpv_slot_phys_offset(const struct nvmeibc_tpv_allocator *a,
 	       slot * tpv_extent_bytes(a);
 }
 
-/* ── Forward declarations ───────────────────────────────────────────────────
+/* -- Forward declarations ---------------------------------------------------
  *
  * nvmeibc_ib_admin_cdv_alloc_extent() and nvmeibc_ib_admin_cdv_free_extent()
  * are implemented in nvmeibc_ib_admin_channel.c as part of the IB admin
- * channel additions for thin provisioning (§2.8).  They may block; both are
+ * channel additions for thin provisioning (S.2.8).  They may block; both are
  * called only from process context (work_struct handlers).
  */
 extern int nvmeibc_ib_admin_cdv_alloc_extent(
@@ -97,7 +97,7 @@ extern int nvmeibc_ib_admin_cdv_free_extent(
 	const struct nvmeibc_cdv_free_req    *req);
 
 /*
- * nvmeibc_tpv_install_data_extent() — install a newly allocated data
+ * nvmeibc_tpv_install_data_extent() - install a newly allocated data
  * CDV_extent into the L2/L3 mapping tree (tree extent) and flush the
  * modified pages to the CDV.  Called before slots are added to the free list
  * to maintain crash-consistency: if the client crashes after the tree write,
@@ -115,7 +115,7 @@ extern int nvmeibc_ib_admin_cdv_free_extent(
  */
 static atomic64_t nvmeibc_tpv_req_id_counter = ATOMIC64_INIT(0);
 
-/* ── nvmeibc_tpv_free_slots_list ────────────────────────────────────────────
+/* -- nvmeibc_tpv_free_slots_list --------------------------------------------
  *
  * Walk and free all nvmeibc_tpv_free_slot entries on a list.  Called from
  * nvmeibc_tpv.c:nvmeibc_tpv_allocator_free() at detach time after all IO
@@ -132,16 +132,16 @@ void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_free_slots_list);
 
-/* ── nvmeibc_tpv_alloc_extent ───────────────────────────────────────────────
+/* -- nvmeibc_tpv_alloc_extent -----------------------------------------------
  *
  * Pop one physical TPV_extent slot from free_tpv_extents, install an
  * extent_entry in the xarray at virt_idx, and return it to the caller.
  *
- * Returns  0         — *out is valid; caller maps the bio to entry->phys_offset.
- * Returns -EAGAIN    — free pool empty; cdv_alloc_work has been scheduled;
+ * Returns  0         - *out is valid; caller maps the bio to entry->phys_offset.
+ * Returns -EAGAIN    - free pool empty; cdv_alloc_work has been scheduled;
  *                      caller must queue the bio and retry when the work fn
  *                      replenishes free_tpv_extents.
- * Returns -ENOMEM    — kzalloc failed under GFP_ATOMIC; caller fails the bio.
+ * Returns -ENOMEM    - kzalloc failed under GFP_ATOMIC; caller fails the bio.
  *
  * Called from IO context (nvmeibc_tpv_make_request); must not sleep.
  * Uses GFP_ATOMIC for all allocations.
@@ -162,7 +162,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	 * Double-check: another bio for the same virt_idx may have raced
 	 * past the caller's unlocked xa_load()==NULL and already allocated
 	 * a slot.  This happens under iodepth>1 with overlapping random
-	 * writes — two bios target the same unmapped extent concurrently.
+	 * writes - two bios target the same unmapped extent concurrently.
 	 *
 	 * Without this check, xa_store below silently overwrites the first
 	 * entry, leaking its physical slot and causing the first bio's data
@@ -180,7 +180,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	}
 
 	if (list_empty(&alloc->free_tpv_extents)) {
-		/* Pool empty — arm CDV_extent pre-fetch if not already pending. */
+		/* Pool empty - arm CDV_extent pre-fetch if not already pending. */
 		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
 			schedule_work(&tpv->cdv_alloc_work);
 		spin_unlock(&alloc->lock);
@@ -225,7 +225,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	/*
 	 * xa_store before kfree(slot) so that on failure we can restore state.
 	 * xa_store with GFP_ATOMIC may fail under memory pressure; treat as
-	 * transient — the IO path will retry.
+	 * transient - the IO path will retry.
 	 */
 	rv = xa_err(xa_store(&alloc->extent_map, virt_idx, entry, GFP_ATOMIC));
 	if (rv) {
@@ -257,9 +257,9 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 		schedule_work(&tpv->cdv_alloc_work);
 
 	/*
-	 * Partial-page flush hook (§3.4.3): mark the 4 KB page of the owning
+	 * Partial-page flush hook (S.3.4.3): mark the 4 KB page of the owning
 	 * L2 table that holds this leaf as dirty.  No-op when the L2 ctx
-	 * does not exist yet (first-ever leaf under this L1 idx — flush_state
+	 * does not exist yet (first-ever leaf under this L1 idx - flush_state
 	 * will create the ctx with all pages dirty).
 	 */
 	nvmeibc_tpv_mark_l2_leaf_dirty(tpv, virt_idx);
@@ -278,7 +278,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 }
 EXPORT_SYMBOL(nvmeibc_tpv_alloc_extent);
 
-/* ── nvmeibc_tpv_alloc_l2_slot ─────────────────────────────────────────────
+/* -- nvmeibc_tpv_alloc_l2_slot ---------------------------------------------
  *
  * Reserve one slot from the free pool for use as an L2 table.  Used by
  * flush_state when a new L1 index becomes non-null.  The slot is removed
@@ -297,7 +297,7 @@ int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out)
 	 * L2 tables live on the side that hosts the tree. In split mode
 	 * that's the metadata CDV; in single-CDV mode nvmeibc_tpv_meta_alloc
 	 * returns the data allocator so this degrades to the pre-split path.
-	 * On -EAGAIN we re-arm the allocator whose free pool was empty —
+	 * On -EAGAIN we re-arm the allocator whose free pool was empty -
 	 * data-side cdv_alloc_work in single mode, meta-side in split mode.
 	 */
 	struct nvmeibc_tpv_allocator  *alloc = nvmeibc_tpv_meta_alloc(tpv);
@@ -340,7 +340,7 @@ int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_alloc_l2_slot);
 
-/* ── nvmeibc_tpv_free_extent ────────────────────────────────────────────────
+/* -- nvmeibc_tpv_free_extent ------------------------------------------------
  *
  * Erase the mapping for virt_idx from the xarray and return the physical slot
  * to free_tpv_extents.  If the owning CDV_extent has no more allocated
@@ -454,7 +454,7 @@ out_unlock:
 	spin_unlock(&alloc->lock);
 
 	/*
-	 * Partial-page flush hook (§3.4.3): the L2 leaf for this virt_idx
+	 * Partial-page flush hook (S.3.4.3): the L2 leaf for this virt_idx
 	 * must be zeroed on disk, so mark its page dirty.  No-op when the
 	 * L2 ctx doesn't exist yet (nothing to flush).
 	 */
@@ -477,7 +477,7 @@ out_unlock:
 }
 EXPORT_SYMBOL(nvmeibc_tpv_free_extent);
 
-/* ── tpv_drain_pending_returns ──────────────────────────────────────────────
+/* -- tpv_drain_pending_returns ----------------------------------------------
  *
  * Called from nvmeibc_tpv_cdv_alloc_work_fn() (process context, may sleep).
  * Drains pending_return_list: for each empty CDV_extent, sends
@@ -530,7 +530,7 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
 	}
 }
 
-/* ── tpv_on_cdv_alloc_ok ────────────────────────────────────────────────────
+/* -- tpv_on_cdv_alloc_ok ----------------------------------------------------
  *
  * Called from nvmeibc_tpv_cdv_alloc_work_fn() after a successful
  * NVMEIBC_MA_CDV_ALLOC_EXTENT response.
@@ -555,10 +555,10 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 	u64 s;
 	int rv;
 	/*
-	 * Split-mode (TPV_MetadataCDV.md §6.1): in split mode the metadata
-	 * allocator hosts the L1 extent and L2 tables — never data. The data
+	 * Split-mode (TPV_MetadataCDV.md S.6.1): in split mode the metadata
+	 * allocator hosts the L1 extent and L2 tables - never data. The data
 	 * allocator hosts only user-data slots, no L1/L2. So:
-	 *   - Single-CDV mode: this allocator IS the L1 host → honour the
+	 *   - Single-CDV mode: this allocator IS the L1 host -> honour the
 	 *     "first extent becomes L1 extent" rule.
 	 *   - Split mode, meta side: this allocator IS the L1 host.
 	 *   - Split mode, data side: this allocator NEVER becomes the L1 host.
@@ -575,7 +575,7 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 	 * where TOMA's persisted state lost track of some extents, TOMA may
 	 * re-allocate an index that the client already holds from load_state.
 	 * Adding duplicate slots would cause two virtual extents to map to
-	 * the same physical location — silent data corruption.
+	 * the same physical location - silent data corruption.
 	 */
 	spin_lock(&alloc->lock);
 	{
@@ -683,7 +683,7 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 	 * This avoids a large contiguous allocation that would fail at extreme
 	 * n_slots (e.g. 1M when CDV extent = 64 GB, TPV extent = 64 KB).
 	 *
-	 * GFP_NOIO: we are a storage driver — GFP_KERNEL can trigger writeback
+	 * GFP_NOIO: we are a storage driver - GFP_KERNEL can trigger writeback
 	 * that re-enters this driver, causing deadlock.
 	 */
 	for (s = 0; s < n_slots; s++) {
@@ -718,28 +718,28 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 	return 0;
 }
 
-/* ── nvmeibc_tpv_cdv_alloc_work_fn ─────────────────────────────────────────
+/* -- nvmeibc_tpv_cdv_alloc_work_fn -----------------------------------------
  *
  * Background work item (process context, may sleep).
  *
- * Services one side (data CDV or — in split mode — metadata CDV) of the TPV.
+ * Services one side (data CDV or - in split mode - metadata CDV) of the TPV.
  * The side is identified by comparing the work pointer against the two
  * embedded work structs. Split-mode TPVs have two parallel work items with
  * independent allocators, TOMA identities, and free pools; single-CDV TPVs
  * use only the data-side work item.
  *
- * Phase 1: Drain pending_return_list — return empty CDV_extents to TOMA via
+ * Phase 1: Drain pending_return_list - return empty CDV_extents to TOMA via
  *   NVMEIBC_MA_CDV_FREE_EXTENT.
  *
  * Phase 2: If free_tpv_extent_count is still below low_watermark, send
  *   NVMEIBC_MA_CDV_ALLOC_EXTENT to request one new CDV_extent from TOMA.
  *
  * Error cases:
- *   WRONG_GEN — our allocator_generation is stale; a new allocator was
+ *   WRONG_GEN - our allocator_generation is stale; a new allocator was
  *               elected.  The updated topology push will call
  *               nvmeibc_tpv_update_allocator_id(); the next alloc_extent()
  *               shortfall will re-arm this work.
- *   CDV_FULL  — TOMA will send CDVCapacityWarning to management; IOs blocked
+ *   CDV_FULL  - TOMA will send CDVCapacityWarning to management; IOs blocked
  *               on allocation remain queued until a topology push signals
  *               available capacity.
  */
@@ -864,7 +864,7 @@ static void nvmeibc_tpv_cdv_alloc_work_run(struct nvmeibc_tpv *tpv,
 		_NI(tpv_cdv_wrong_gen,
 		    "TPV: @STR: WRONG_GEN[meta=@INT] ours=@LLU TOMA=@LLU; updating generation and re-arming",
 		    tpv->tpv_name, (int)is_meta_side, client_gen, resp.allocator_generation);
-		/* toma_id is unchanged — the RAFT leader may move to a different
+		/* toma_id is unchanged - the RAFT leader may move to a different
 		 * TOMA via a management topology push, but WRONG_GEN only bumps
 		 * the generation. Use the side-appropriate helper to update the
 		 * cached generation under the right lock. */
@@ -901,7 +901,7 @@ out_clear_pending:
  * pointer, not in runtime inspection of the work_struct address. Using a
  * single function for both work embeds would produce a tautological
  * container_of comparison (work always equals &tpv->cdv_alloc_work
- * relative to the container_of-derived tpv) — only the function pointer
+ * relative to the container_of-derived tpv) - only the function pointer
  * distinguishes the two embedded work_structs reliably.
  */
 void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work)

@@ -4,14 +4,14 @@
 */
 
 /*
- * nvmeibc_tpv_cdv.c — CDV block-layer integration for TPV.
+ * nvmeibc_tpv_cdv.c - CDV block-layer integration for TPV.
  *
  * Implements the three CDV transport functions declared as externs in the
  * TPV core files:
  *
- *   nvmeibc_tpv_cdv_sync_read()   — synchronous read from CDV (persist.c)
- *   nvmeibc_tpv_cdv_sync_write()  — synchronous write to CDV  (persist.c)
- *   nvmeibc_tpv_cdv_submit_bio()  — async bio forwarding to CDV (io.c)
+ *   nvmeibc_tpv_cdv_sync_read()   - synchronous read from CDV (persist.c)
+ *   nvmeibc_tpv_cdv_sync_write()  - synchronous write to CDV  (persist.c)
+ *   nvmeibc_tpv_cdv_submit_bio()  - async bio forwarding to CDV (io.c)
  *
  * Sync I/O path (flush_state / load_state):
  *   Allocates a fresh bio per page of the L1 buffer, sets the CDV as the
@@ -36,7 +36,7 @@
 #include "clnt/block/nvmeibc_block_api_os.h"	/* block_api_os_get_bdev, CALL_SUBMIT_BIO_FN */
 #include "common/nvmeib_common_os_block_api.h"	/* KS_BIO_HAS_BI_GENDISK_PTR, bio_gendisk */
 
-/* ── Forward declarations ────────────────────────────────────────────────── */
+/* -- Forward declarations -------------------------------------------------- */
 
 int  nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 				u64 cdv_offset, void *buf, u64 len);
@@ -45,7 +45,7 @@ int  nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 				 struct bio *bio, u64 cdv_phys_offset);
 
-/* ── Test hook pointers ──────────────────────────────────────────────────── */
+/* -- Test hook pointers ---------------------------------------------------- */
 
 /*
  * Set to non-NULL by nvmeibc_tpv_test.c before kernel self-tests run;
@@ -58,7 +58,7 @@ int (*nvmeibc_tpv_cdv_test_sync_write_fn)(struct nvmeibc_tpv *tpv,
 					   u64 cdv_offset, const void *buf,
 					   u64 len);
 
-/* ── Synchronous bio completion helper ──────────────────────────────────── */
+/* -- Synchronous bio completion helper ------------------------------------ */
 
 struct tpv_cdv_bio_sync {
 	struct completion done;
@@ -84,14 +84,14 @@ static void tpv_cdv_bio_end(struct bio *bio, int error_arg)
 #endif
 
 /*
- * disk_part0_bdev — return the whole-disk struct block_device * from a gendisk.
+ * disk_part0_bdev - return the whole-disk struct block_device * from a gendisk.
  *
  * The shape of gendisk.part0 changed across kernel versions:
- *   5.11–~6.8 : struct block_device part0  (embedded value) → &disk->part0
- *   ≥ ~6.9    : struct block_device *part0 (pointer field)  →  disk->part0
+ *   5.11-~6.8 : struct block_device part0  (embedded value) -> &disk->part0
+ *   >= ~6.9    : struct block_device *part0 (pointer field)  ->  disk->part0
  *
  * __builtin_choose_expr + __builtin_types_compatible_p selects the right form
- * purely from the actual type at compile time — no compat-script macro needed.
+ * purely from the actual type at compile time - no compat-script macro needed.
  * The non-taken branch is parsed but never evaluated; both are syntactically
  * valid expressions so the compiler does not warn about the discarded form.
  */
@@ -102,7 +102,7 @@ static void tpv_cdv_bio_end(struct bio *bio, int error_arg)
 		(disk)->part0,							\
 		&(disk)->part0)
 
-/* ── tpv_cdv_sync_io — page-by-page synchronous CDV block I/O ───────────── */
+/* -- tpv_cdv_sync_io - page-by-page synchronous CDV block I/O ------------- */
 
 /*
  * Issue synchronous block I/O to the CDV.  The buffer (L1 tree) is
@@ -118,7 +118,7 @@ static int tpv_cdv_sync_io(struct nvmeibc_tpv *tpv, u64 cdv_off,
 	 * Synchronous I/O on the TPV is exclusively for the L1/L2 tree
 	 * (persist.c). In split mode that tree lives on the metadata CDV;
 	 * nvmeibc_tpv_meta_cdv() returns tpv->cdv_vol in single-CDV mode so
-	 * the existing path is unchanged. See TPV_MetadataCDV.md §6.3.
+	 * the existing path is unchanged. See TPV_MetadataCDV.md S.6.3.
 	 */
 	struct nvmeibc_volume  *cdv_vol = nvmeibc_tpv_meta_cdv(tpv);
 	struct nvmeibc_os_api  *os   = nvmeibc_block_get_os_api(cdv_vol->block_dev);
@@ -128,18 +128,18 @@ static int tpv_cdv_sync_io(struct nvmeibc_tpv *tpv, u64 cdv_off,
 	u64                     off       = cdv_off;
 
 	/*
-	 * We must NOT use block_api_os_get_bdev() here — that helper reads
+	 * We must NOT use block_api_os_get_bdev() here - that helper reads
 	 * os->unsafe_self_ref.bdev_during_detach, which is NULL during normal
 	 * operation (it is only populated by block_api_os_get(), a detach-path
 	 * routine that cannot be called mid-I/O due to its "get() twice" guard).
 	 *
 	 * On kernels that address bios via bi_disk (KS_BIO_HAS_BI_GENDISK_PTR,
-	 * 4.14–5.12), we set bi_disk/bi_partno directly — no bdev needed.
+	 * 4.14-5.12), we set bi_disk/bi_partno directly - no bdev needed.
 	 *
 	 * On bi_bdev kernels (>= 5.12), disk_part0_bdev() returns the
 	 * whole-disk struct block_device * from the gendisk, handling both the
-	 * embedded-struct layout (5.11–~6.8) and the pointer-field layout
-	 * (≥ ~6.9) transparently.
+	 * embedded-struct layout (5.11-~6.8) and the pointer-field layout
+	 * (>= ~6.9) transparently.
 	 */
 #if !KS_BIO_HAS_BI_GENDISK_PTR
 	struct block_device *bdev = disk_part0_bdev(disk);
@@ -206,10 +206,10 @@ static int tpv_cdv_sync_io(struct nvmeibc_tpv *tpv, u64 cdv_off,
 	return 0;
 }
 
-/* ── Public CDV transport functions ─────────────────────────────────────── */
+/* -- Public CDV transport functions --------------------------------------- */
 
 /*
- * nvmeibc_tpv_cdv_sync_read — synchronous read of @len bytes from the CDV
+ * nvmeibc_tpv_cdv_sync_read - synchronous read of @len bytes from the CDV
  * starting at byte offset @cdv_offset.
  *
  * Returns 0 on success, negative errno on failure.
@@ -230,7 +230,7 @@ int nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_read);
 
 /*
- * nvmeibc_tpv_cdv_sync_write — synchronous write of @len bytes to the CDV
+ * nvmeibc_tpv_cdv_sync_write - synchronous write of @len bytes to the CDV
  * starting at byte offset @cdv_offset.
  *
  * Returns 0 on success, negative errno on failure.
@@ -250,7 +250,7 @@ int nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_write);
 
 /*
- * nvmeibc_tpv_cdv_submit_bio — forward a user bio to the CDV at the given
+ * nvmeibc_tpv_cdv_submit_bio - forward a user bio to the CDV at the given
  * physical byte offset.
  *
  * Re-targets the bio at the CDV block device (updating bi_sector and
@@ -262,13 +262,13 @@ EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_write);
  * CDV's make_request directly is critical: the TPV's chunk_sectors (= TPV
  * extent size) may be larger than the CDV's internal alignment, and a bio
  * that exceeds the CDV's alignment can be split incorrectly inside the
- * CDV datapath — the split portions get independent address translations
+ * CDV datapath - the split portions get independent address translations
  * and can land at wrong disk offsets.
  *
  * After this call the bio is owned by the CDV transport; the caller must
  * not access it again.
  *
- * cdv_phys_offset is already the absolute CDV byte offset (A + i×E + s×T).
+ * cdv_phys_offset is already the absolute CDV byte offset (A + ixE + sxT).
  */
 void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 				 struct bio *bio,
@@ -300,11 +300,11 @@ void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 	 * block_api_os_get_os(bio) resolves to the CDV's nvmeibc_os_api,
 	 * directing I/O to the CDV's RDMA transport.
 	 *
-	 * For KS_BIO_HAS_BI_GENDISK_PTR (4.14–5.12): set bi_disk/bi_partno.
+	 * For KS_BIO_HAS_BI_GENDISK_PTR (4.14-5.12): set bi_disk/bi_partno.
 	 * For bi_bdev kernels (>= 5.12): disk_part0_bdev() returns the
 	 * whole-disk bdev from the gendisk, handling both the embedded-struct
-	 * layout (5.11–~6.8) and the pointer-field layout (>= ~6.9).
-	 * We must NOT use block_api_os_get_bdev() — it reads unsafe_self_ref
+	 * layout (5.11-~6.8) and the pointer-field layout (>= ~6.9).
+	 * We must NOT use block_api_os_get_bdev() - it reads unsafe_self_ref
 	 * which is NULL except during the detach sequence.
 	 */
 #if KS_BIO_HAS_BI_GENDISK_PTR

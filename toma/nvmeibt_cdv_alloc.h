@@ -4,7 +4,7 @@
 */
 
 /*
- * nvmeibt_cdv_alloc.h — CDV extent allocator: in-memory state + on-CDV persistence.
+ * nvmeibt_cdv_alloc.h - CDV extent allocator: in-memory state + on-CDV persistence.
  *
  * TOMA maintains, for each CDV (Carrier Direct Volume), a table of which data
  * CDV_extents have been allocated to which TPV (Thin-Provisioned Volume).
@@ -26,7 +26,7 @@
  * CDV allocator identity (allocator_toma_id, allocator_generation) is elected
  * by the RAFT leader via nvmeibt_cdv_alloc_elect() and carried in the
  * RAFT-replicated pRAID topology record.  Delivery to every TOMA happens via
- * the standard AppendEntries → follower-apply pipeline; the role transition
+ * the standard AppendEntries -> follower-apply pipeline; the role transition
  * (promote / demote) runs in nvmeibt_cdv_alloc_on_topo_applied(), which fires
  * Stage A of the satellite-attach handshake on the newly-elected allocator
  * and tears down local state on the demoted one.  Clients learn the new
@@ -47,10 +47,10 @@
 #include "nvmeibt_common.h"
 #include "nvmeibt_ds.h"
 
-/* ── UUID string length (matches NVMEIBC_BD_UUID_LEN on the client side) ── */
+/* -- UUID string length (matches NVMEIBC_BD_UUID_LEN on the client side) -- */
 #define NVMEIBT_CDV_UUID_STRLEN  64
 
-/* ── In-memory per-extent node ──────────────────────────────────────────────
+/* -- In-memory per-extent node ----------------------------------------------
  *
  * Lives on nvmeibt_cdv_alloc.extents.  One node per allocated CDV_extent.
  * The 'link' field is the XDLIST embedded link; must match the field name
@@ -75,12 +75,12 @@ struct nvmeibt_cdv_extent_entry {
 #define NVMEIBT_CDV_WARN_PCT       90   /* fire warning at >= 90% used */
 #define NVMEIBT_CDV_WARN_CLEAR_PCT 85   /* clear flag when usage drops below 85% */
 
-/* ── On-satellite metadata format ────────────────────────────────────────────
+/* -- On-satellite metadata format --------------------------------------------
  *
  * Extent allocation records live on the <CDV>-mgmt satellite volume. The
  * satellite's first 4 KiB block holds the header; each subsequent 4 KiB
  * block holds 32 packed 128-byte records (extent_index is 1-based, so
- * block 1 holds records 1..32, block 2 holds 33..64, and so on —
+ * block 1 holds records 1..32, block 2 holds 33..64, and so on -
  * see cdv_ondisk_block_offset / cdv_ondisk_record_slot below).
  *
  * Atomicity of each record mutation comes from NVMesh's whole-bio write
@@ -88,7 +88,7 @@ struct nvmeibt_cdv_extent_entry {
  * serialises read-modify-write on any shared 4 KiB block.
  *
  * With an allocator region of `allocatorSizeGib` GiB this supports
- * `(allocatorSizeGib * 1 GiB - 4 KiB) / 128` extent slots — e.g. the
+ * `(allocatorSizeGib * 1 GiB - 4 KiB) / 128` extent slots - e.g. the
  * default 1 GiB gives ~8,388,576 slots; admins raise allocatorSizeGib at
  * CDV create time for very large CDVs at small extent sizes.
  */
@@ -98,14 +98,14 @@ struct nvmeibt_cdv_extent_entry {
 #define CDV_ONDISK_RECORDS_PER_BLOCK    (CDV_ONDISK_BLOCK_SIZE / CDV_ONDISK_RECORD_SIZE)  /* 32 */
 #define CDV_ONDISK_MAGIC                0x43444D31U     /* 'CDM1' */
 /*
- * The on-disk format packs 32 × 128-byte records per 4 KiB satellite block.
+ * The on-disk format packs 32 x 128-byte records per 4 KiB satellite block.
  * Atomicity is provided by NVMesh's whole-bio write guarantee on the
  * satellite volume; concurrent record updates on the same block are
  * serialised by nvmeibt_cdv_alloc.handler_lock. See
- * ThinProvisioningImplementation.md §2.2 for the rationale.
+ * ThinProvisioningImplementation.md S.2.2 for the rationale.
  *
  * VERSION is kept at 1 since TPV is pre-GA and no previous layout ever
- * shipped — the packed layout is the only on-disk format the code has
+ * shipped - the packed layout is the only on-disk format the code has
  * ever written. The version field is retained so a future format change
  * can bump it and gate compatibility.
  */
@@ -130,7 +130,7 @@ struct cdv_alloc_ondisk_record {
 	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];     /* 64 bytes; zeroed if free */
 	uint32_t crc32;
 	/*
-	 * Zeroing geometry — not CRC-covered; valid only when NEEDS_ZEROING is set.
+	 * Zeroing geometry - not CRC-covered; valid only when NEEDS_ZEROING is set.
 	 * Stored here so the zeroing worker can recover geometry on restart without
 	 * requiring a separate management query.
 	 */
@@ -141,8 +141,8 @@ struct cdv_alloc_ondisk_record {
 	uint8_t  reserved2[CDV_ONDISK_RECORD_SIZE - 1 - 7 - 64 - 4 - 4 - 4];
 } __attribute__((__packed__));
 
-/* Compile-time sanity — record must fit exactly in CDV_ONDISK_RECORD_SIZE
- * bytes for the `extent_index → byte offset` arithmetic to hold. */
+/* Compile-time sanity - record must fit exactly in CDV_ONDISK_RECORD_SIZE
+ * bytes for the `extent_index -> byte offset` arithmetic to hold. */
 #ifdef __KERNEL__
 _Static_assert(sizeof(struct cdv_alloc_ondisk_record) == CDV_ONDISK_RECORD_SIZE,
 	       "cdv_alloc_ondisk_record must be exactly CDV_ONDISK_RECORD_SIZE bytes");
@@ -175,30 +175,30 @@ static inline uint32_t cdv_ondisk_record_slot(uint64_t extent_index)
 	return (uint32_t)((extent_index - 1ULL) % CDV_ONDISK_RECORDS_PER_BLOCK);
 }
 
-/* ── Per-CDV allocator ──────────────────────────────────────────────────────
+/* -- Per-CDV allocator ------------------------------------------------------
  *
  * One instance per CDV that has had at least one extent allocated.
  * Stored in the global hash table (cdv_alloc_hash, an XHASHTABLE) keyed by
  * xhash_str_to_32_bits(cdv_uuid).  The hash_link field is the embedded link
  * node for the XHASHTABLE; cdv_uuid is used for exact-match within a bucket.
  */
-/* Maximum hostname length — must match NVMEIB_HOST_NAME_LEN (64) on the client side. */
+/* Maximum hostname length - must match NVMEIB_HOST_NAME_LEN (64) on the client side. */
 #define NVMEIBT_CDV_HOSTNAME_LEN  64
 
 /*
  * Allocator state machine on the elected TOMA.  See SatelliteVolumeForCDVAlloc.md
- * §3.2 for the full election handoff protocol.
+ * S.3.2 for the full election handoff protocol.
  *
  *   NOT_ALLOCATOR
- *      │ RAFT-leader picks this TOMA as allocator (handle_notify())
- *      ▼
+ *      | RAFT-leader picks this TOMA as allocator (handle_notify())
+ *      v
  *   AWAITING_SATELLITE_ATTACH
- *      │ Stage A: AttachSatelliteRequest enqueued to management
- *      │ Stage B: AttachSatelliteResponse(OK) received, satellite opened, scan run
- *      ▼
+ *      | Stage A: AttachSatelliteRequest enqueued to management
+ *      | Stage B: AttachSatelliteResponse(OK) received, satellite opened, scan run
+ *      v
  *   ACTIVE
- *      │ Reservation preempt observed on the satellite (next allocator elected)
- *      ▼
+ *      | Reservation preempt observed on the satellite (next allocator elected)
+ *      v
  *   NOT_ALLOCATOR
  *
  * In NOT_ALLOCATOR and AWAITING_SATELLITE_ATTACH states, ALLOC requests are
@@ -216,7 +216,7 @@ struct nvmeibt_cdv_alloc {
 	uint64_t n_allocated;
 	uint64_t total_data_extents;	/* CDV capacity in data extents; populated from first ALLOC */
 	/*
-	 * Allocator identity — the TOMA node responsible for this CDV's extent
+	 * Allocator identity - the TOMA node responsible for this CDV's extent
 	 * allocation.  Elected by the RAFT leader and committed to all TOMAs.
 	 * allocator_toma_id is empty ("") until the first election.
 	 */
@@ -228,7 +228,7 @@ struct nvmeibt_cdv_alloc {
 	bool     scan_fresh_seen_once;	/* true after first scan returned "fresh" (no magic);
 					 * forces one retry to guard against satellite-not-yet-online
 					 * during simultaneous client+TOMA restart */
-	uint32_t scan_retry_delay_ms;	/* 0 on first attempt; 100 → 1000 backoff on failure
+	uint32_t scan_retry_delay_ms;	/* 0 on first attempt; 100 -> 1000 backoff on failure
 					 * while this TOMA is the elected allocator and
 					 * ondisk_loaded is still false */
 	/*
@@ -246,7 +246,7 @@ struct nvmeibt_cdv_alloc {
 	uint64_t satellite_attach_request_id; /* idempotency key for the in-flight request */
 	uint64_t satellite_reservation_version; /* from AttachSatelliteResponse, for fencing */
 	/*
-	 * CDV geometry — cached on first free_all_for_tpv call and on scan.
+	 * CDV geometry - cached on first free_all_for_tpv call and on scan.
 	 * Needed by the background zero worker to compute per-extent byte offsets
 	 * when re-dispatching zeroing after a TOMA restart.
 	 */
@@ -255,7 +255,7 @@ struct nvmeibt_cdv_alloc {
 	uint64_t n_pending_zeroing;	/* extents with needs_zeroing=true (not yet re-usable) */
 	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread.
 					 * Currently still used by cdv_zero_execute (data-extent
-					 * zeroing on free) — that path requires the CDV itself to
+					 * zeroing on free) - that path requires the CDV itself to
 					 * be attached to this TOMA, which is no longer the
 					 * default after the satellite-volume migration.
 					 * If cdv_extent_zero_on_free is enabled, the operator
@@ -267,21 +267,21 @@ struct nvmeibt_cdv_alloc {
 	struct xdlist hash_link;	/* embedded link for cdv_alloc_hash (XHASHTABLE) */
 
 	/*
-	 * Per-client CDV preempt (TPV_PerClientCDVPreemption.md §2.10):
+	 * Per-client CDV preempt (TPV_PerClientCDVPreemption.md S.2.10):
 	 *
-	 *   admission_floor — monotonic u64. New REGISTERs on CDV segments with
+	 *   admission_floor - monotonic u64. New REGISTERs on CDV segments with
 	 *     reservation_mode_version < admission_floor are rejected with
 	 *     NVMEIBT_CLIENT_TR_REASON_BELOW_CDV_FLOOR. Raised by the
 	 *     preempt_client_from_cdv Kafka handler under handler_lock, and
 	 *     seeded by the CDV topology push. Existing registrants are NOT
-	 *     reconsulted against the floor — survivor immunity is deliberate.
-	 *   admission_floor_seeded — tracks whether either seeding path (topology
+	 *     reconsulted against the floor - survivor immunity is deliberate.
+	 *   admission_floor_seeded - tracks whether either seeding path (topology
 	 *     push, or first AttachVolumes fallback) has run; guards against
 	 *     overwrites from later-arriving stale AttachVolumes payloads.
-	 *   handler_lock — serializes the preempt handler against the new
+	 *   handler_lock - serializes the preempt handler against the new
 	 *     REGISTER predicate in nvmeibt_register.c. Both paths acquire this
 	 *     lock BEFORE any per-seg_active lock. Lock order invariant:
-	 *       handler_lock → seg_active locks
+	 *       handler_lock -> seg_active locks
 	 *     Never reverse.
 	 */
 	uint64_t         admission_floor;
@@ -289,9 +289,9 @@ struct nvmeibt_cdv_alloc {
 	pthread_mutex_t  handler_lock;
 };
 
-/* ── Runtime config ─────────────────────────────────────────────────────────
+/* -- Runtime config ---------------------------------------------------------
  *
- * cdv_extent_zero_on_free — if non-zero, CDV data extents freed by a deleted
+ * cdv_extent_zero_on_free - if non-zero, CDV data extents freed by a deleted
  * TPV are zeroed (background WQ) before being made available for reuse.
  * Default 0 (zero-on-free disabled): extents are freed immediately.  The
  * NEEDS_ZEROING on-disk bit is still honored on restart regardless of this
@@ -302,10 +302,10 @@ struct nvmeibt_cdv_alloc {
  */
 extern int64_t nvmeibt_cdv_extent_zero_on_free;
 
-/* ── One-time init / shutdown ────────────────────────────────────────────── */
+/* -- One-time init / shutdown ---------------------------------------------- */
 
 /*
- * nvmeibt_cdv_alloc_one_time_init — allocate the global hash table.
+ * nvmeibt_cdv_alloc_one_time_init - allocate the global hash table.
  * Called from nvmeibt_toma_init(), after nvmeibt_local_disk_one_time_init().
  * Returns 0 on success, negative errno on fatal hash-create failure.
  * In-memory state is rebuilt lazily: the CDV allocator region is scanned
@@ -314,15 +314,15 @@ extern int64_t nvmeibt_cdv_extent_zero_on_free;
 int  nvmeibt_cdv_alloc_one_time_init(void);
 
 /*
- * nvmeibt_cdv_alloc_destroy — free all in-memory state.
+ * nvmeibt_cdv_alloc_destroy - free all in-memory state.
  * Called at TOMA shutdown.
  */
 void nvmeibt_cdv_alloc_destroy(void);
 
-/* ── Per-CDV operations (called from CDV_ALLOC/FREE/LIST handlers) ──────── */
+/* -- Per-CDV operations (called from CDV_ALLOC/FREE/LIST handlers) -------- */
 
 /*
- * nvmeibt_cdv_alloc_add_extent — record that extent_index within cdv_uuid has
+ * nvmeibt_cdv_alloc_add_extent - record that extent_index within cdv_uuid has
  * been allocated to tpv_uuid.
  * Returns 0 on success, negative errno on OOM.
  */
@@ -331,13 +331,13 @@ int nvmeibt_cdv_alloc_add_extent(const char *cdv_uuid,
 				 const char *tpv_uuid);
 
 /*
- * nvmeibt_cdv_alloc_remove_extent — mark extent_index in cdv_uuid as free.
+ * nvmeibt_cdv_alloc_remove_extent - mark extent_index in cdv_uuid as free.
  * Returns 0 on success, -ENOENT if the record was not found.
  */
 int nvmeibt_cdv_alloc_remove_extent(const char *cdv_uuid, uint64_t extent_index);
 
 /*
- * nvmeibt_cdv_alloc_list_for_tpv — collect all extent indices allocated to
+ * nvmeibt_cdv_alloc_list_for_tpv - collect all extent indices allocated to
  * tpv_uuid within cdv_uuid.  On success *out_indices is a NNVMEIBT_BM_ALLOC'd
  * array of *out_count uint64_t values; the caller must NNVMEIBT_BM_FREE it.
  * Returns 0 on success (including the empty case), negative errno on OOM.
@@ -348,7 +348,7 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 				    uint64_t    *out_count);
 
 /*
- * nvmeibt_cdv_alloc_gc_stale_entries — remove CDV allocator entries that no
+ * nvmeibt_cdv_alloc_gc_stale_entries - remove CDV allocator entries that no
  * longer have a matching live bdev.
  *
  * Iterates the global CDV allocator hash and removes any entry whose CDV UUID
@@ -362,15 +362,15 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 void nvmeibt_cdv_alloc_gc_stale_entries(void);
 
 /*
- * ── Per-client CDV preempt (§2.10) ──────────────────────────────────────────
+ * -- Per-client CDV preempt (S.2.10) ------------------------------------------
  *
- * nvmeibt_cdv_alloc_lookup — return the per-CDV state entry if present.
+ * nvmeibt_cdv_alloc_lookup - return the per-CDV state entry if present.
  * Safe to call from any context holding the cdv_alloc_hash read barrier.
  */
 struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup(const char *cdv_uuid);
 
 /*
- * nvmeibt_cdv_alloc_lookup_or_create_with_floor — return the per-CDV state
+ * nvmeibt_cdv_alloc_lookup_or_create_with_floor - return the per-CDV state
  * entry, creating it on the fly if not present and seeding admission_floor.
  *
  * Called from the preempt_client_from_cdv Kafka handler when the message
@@ -383,26 +383,26 @@ struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup_or_create_with_floor(
 		const char *cdv_uuid, uint64_t initial_floor);
 
 /*
- * nvmeibt_cdv_alloc_seed_floor — set the admission floor if not yet seeded,
+ * nvmeibt_cdv_alloc_seed_floor - set the admission floor if not yet seeded,
  * or max-merge with the existing value. Path A (topology push) uses this with
  * the full authoritative floor. Path B (first AttachVolumes for the CDV) uses
  * this only when admission_floor_seeded is still false, to close the window
  * where a REGISTER arrives before the topology push.
  *
- * Safe to call without handler_lock — updates are monotonic via max_t.
+ * Safe to call without handler_lock - updates are monotonic via max_t.
  */
 void nvmeibt_cdv_alloc_seed_floor(struct nvmeibt_cdv_alloc *alloc,
 				  uint64_t floor, bool from_topology);
 
 /*
- * nvmeibt_seg_active_get_cdv_alloc — return the per-CDV state entry for this
+ * nvmeibt_seg_active_get_cdv_alloc - return the per-CDV state entry for this
  * segment's parent CDV, or NULL if the segment's parent volume is not a CDV
  * (or the applied topology isn't yet available).
  *
  * Navigates the applied topology:
- *   seg_active → applied_seg_lot → praid_lot->my_praid → blkdev (via
- *   praid_mgmt.its_chunk.its_block_device) → from_config.is_cdv +
- *   urn_uuid.str → nvmeibt_cdv_alloc_lookup.
+ *   seg_active -> applied_seg_lot -> praid_lot->my_praid -> blkdev (via
+ *   praid_mgmt.its_chunk.its_block_device) -> from_config.is_cdv +
+ *   urn_uuid.str -> nvmeibt_cdv_alloc_lookup.
  *
  * Safe to call from the REGISTER admission path (read-only on the topology
  * chain). Used by check_cdv_admission_floor in nvmeibt_register.c and by the
@@ -413,13 +413,13 @@ struct nvmeibt_cdv_alloc *nvmeibt_seg_active_get_cdv_alloc(
 		struct nvmeibt_seg_active *seg_active);
 
 /*
- * nvmeibt_cdv_alloc_preempt_client — handle the preemptClientFromCDV Kafka
- * message. Raises admission_floor FIRST (order invariant — see §2.10.4),
+ * nvmeibt_cdv_alloc_preempt_client - handle the preemptClientFromCDV Kafka
+ * message. Raises admission_floor FIRST (order invariant - see S.2.10.4),
  * then terminates the named client's registrants on every CDV segment under
  * handler_lock. On completion, caller publishes the response with the value
  * returned in *out_terminated.
  *
- * Returns 0 on success (even if no reg_ctx matched — idempotent no-op).
+ * Returns 0 on success (even if no reg_ctx matched - idempotent no-op).
  * Returns -ENOMEM on allocation failure in the create-on-the-fly path.
  */
 int nvmeibt_cdv_alloc_preempt_client(const char *cdv_uuid,
@@ -428,7 +428,7 @@ int nvmeibt_cdv_alloc_preempt_client(const char *cdv_uuid,
 				     uint32_t   *out_terminated);
 
 /*
- * nvmeibt_cdv_alloc_send_preempt_response — publish preemptClientFromCDVResponse
+ * nvmeibt_cdv_alloc_send_preempt_response - publish preemptClientFromCDVResponse
  * to management after the preempt handler completes. Management aggregates
  * ACKs across all TOMAs before clearing EVICTING.
  */
@@ -440,11 +440,11 @@ void nvmeibt_cdv_alloc_send_preempt_response(const char *cdv_uuid,
 					     const char *error);
 
 /*
- * nvmeibt_cdv_alloc_remove — tear down the per-CDV allocator when a CDV is
+ * nvmeibt_cdv_alloc_remove - tear down the per-CDV allocator when a CDV is
  * deleted.
  *
  * Removes the entry for @cdv_uuid from the global hash and frees all
- * in-memory extent records.  The on-CDV metadata is not explicitly cleared —
+ * in-memory extent records.  The on-CDV metadata is not explicitly cleared -
  * it is discarded with the volume itself.
  *
  * Must be called from block_device_remove() for CDV blkdevs only.
@@ -456,7 +456,7 @@ void nvmeibt_cdv_alloc_remove(const char *cdv_uuid);
 struct nvmeibt_praid_topo_ctx;
 
 /*
- * nvmeibt_cdv_alloc_elect — elect the CDV allocator TOMA for a CDV.
+ * nvmeibt_cdv_alloc_elect - elect the CDV allocator TOMA for a CDV.
  *
  * Called by the RAFT leader for every stable CDV pRAID during topology
  * recalculation.  Operates purely on the caller-supplied topo_ctx (i.e. the
@@ -492,18 +492,18 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 			    struct nvmeibt_praid_topo_ctx *topo_ctx);
 
 /*
- * nvmeibt_cdv_alloc_on_topo_applied — hook fired from update_applied_topology
+ * nvmeibt_cdv_alloc_on_topo_applied - hook fired from update_applied_topology
  * on every committed topology change, on every TOMA (leader and followers).
  *
  * Called only for the first pRAID of a CDV (caller filters).  Diffs the
  * previously-applied (allocator_toma_id, allocator_generation) against the
  * newly-applied values and drives local role transitions:
  *  - Generation increased and allocator_toma_id == my_hostname, state not
- *    ACTIVE → promote to AWAITING_SATELLITE_ATTACH and fire Stage A
+ *    ACTIVE -> promote to AWAITING_SATELLITE_ATTACH and fire Stage A
  *    (cdv_send_attach_satellite_request).
- *  - Generation increased and previous allocator was me, new one isn't →
+ *  - Generation increased and previous allocator was me, new one isn't ->
  *    demote to NOT_ALLOCATOR, tear down satellite state.
- *  - Generation unchanged → no-op.
+ *  - Generation unchanged -> no-op.
  *
  * Also triggers CDV_ALLOCATOR_UPDATE push to any clients registered locally
  * so they learn the new allocator identity.
@@ -513,7 +513,7 @@ void nvmeibt_cdv_alloc_on_topo_applied(const char *cdv_uuid,
 				       const struct nvmeibt_praid_topo_ctx *new_applied);
 
 /*
- * nvmeibt_cdv_alloc_push_to_registrants — push CDV allocator identity to all
+ * nvmeibt_cdv_alloc_push_to_registrants - push CDV allocator identity to all
  * clients that have this CDV registered (attached) on this TOMA.
  *
  * Sends a CDV_ALLOCATOR_UPDATE message carrying (allocator_toma_id,
@@ -526,9 +526,9 @@ void nvmeibt_cdv_alloc_on_topo_applied(const char *cdv_uuid,
 void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid);
 
 /*
- * nvmeibt_cdv_alloc_handle_satellite_attach_response — Stage B handler.
+ * nvmeibt_cdv_alloc_handle_satellite_attach_response - Stage B handler.
  *
- * Called from the Kafka dispatch on attachSatelliteResponse (management → TOMA).
+ * Called from the Kafka dispatch on attachSatelliteResponse (management -> TOMA).
  * On status OK with a matching cdv_uuid + request_id: opens the satellite
  * volume's block device, dispatches the on-disk scan, and on scan completion
  * promotes the state to ACTIVE and pushes CDV_ALLOCATOR_UPDATE to registrants.
@@ -553,7 +553,7 @@ void nvmeibt_cdv_alloc_handle_satellite_attach_response(
 	uint64_t    allocator_generation);
 
 /*
- * nvmeibt_cdv_alloc_push_all_to_new_registrant — unicast CDV_ALLOCATOR_UPDATE
+ * nvmeibt_cdv_alloc_push_all_to_new_registrant - unicast CDV_ALLOCATOR_UPDATE
  * for every known elected CDV allocator to a single newly-registered client.
  *
  * Called after a successful RT_REGISTER_DISK_SEGMENT so that clients which
@@ -565,7 +565,7 @@ struct nvmeibt_registrant_ctx;
 void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx *reg_ctx);
 
 /*
- * nvmeibt_cdv_alloc_free_all_for_tpv — queue zeroing of all CDV data extents
+ * nvmeibt_cdv_alloc_free_all_for_tpv - queue zeroing of all CDV data extents
  * owned by a deleted TPV before making them available for reuse.
  *
  * Called from the Kafka CDVAllocatorFreeAll handler when a TPV is deleted.
@@ -578,7 +578,7 @@ void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx 
  *      - sets entry->needs_zeroing = true and increments n_pending_zeroing
  *      - writes an ALLOCATED|NEEDS_ZEROING ondisk record (geometry in reserved2)
  *      - dispatches a background zero write for the full CDV data extent
- *      - does NOT remove the entry from the list or decrement n_allocated —
+ *      - does NOT remove the entry from the list or decrement n_allocated -
  *        the entry blocks reallocation until zeroing completes
  *   4. Rewrites the allocator header.
  *
@@ -597,7 +597,7 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 					uint32_t    cdv_extent_size_mib);
 
 /*
- * nvmeibt_cdv_alloc_startup_scan — log in-memory state.
+ * nvmeibt_cdv_alloc_startup_scan - log in-memory state.
  *
  * Iterates all CDV allocators, logs per-CDV statistics, and emits
  * CDVCapacityWarning events for any CDV whose capacity is already known
@@ -605,7 +605,7 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
  */
 void nvmeibt_cdv_alloc_startup_scan(void);
 
-/* ── CDV wire-format structs (TOMA-local copies) ─────────────────────────────
+/* -- CDV wire-format structs (TOMA-local copies) -----------------------------
  *
  * Mirror the definitions in clnt/nvmeibc_msgs_shared.h so that TOMA
  * (user-space) can decode/encode CDV request and response payloads
@@ -652,7 +652,7 @@ struct nvmeibt_cdv_list_req {
 	uint64_t req_id;
 };
 
-/* CDV_LIST_EXTENTS response header; followed by n_extents × uint64_t */
+/* CDV_LIST_EXTENTS response header; followed by n_extents x uint64_t */
 struct nvmeibt_cdv_list_resp {
 	uint64_t req_id;
 	uint64_t n_extents;
@@ -660,7 +660,7 @@ struct nvmeibt_cdv_list_resp {
 };
 
 /*
- * CDV_ALLOCATOR_UPDATE — TOMA → client push.
+ * CDV_ALLOCATOR_UPDATE - TOMA -> client push.
  *
  * Sent to every client registrant of a CDV when the allocator identity is
  * first elected or changes.  The client stores (allocator_toma_id, generation)
@@ -675,10 +675,10 @@ struct nvmeibt_cdv_allocator_update {
 	uint64_t allocator_generation;
 };
 
-/* ── Status / observability ──────────────────────────────────────────────── */
+/* -- Status / observability ------------------------------------------------ */
 
 /*
- * nvmeibt_cdv_alloc_print_status — print CDV extent allocator state.
+ * nvmeibt_cdv_alloc_print_status - print CDV extent allocator state.
  *
  * For each CDV known to this TOMA node, prints: cdv_uuid, allocator_toma_id,
  * n_allocated, total_data_extents (if known), allocator_generation, and
@@ -689,19 +689,19 @@ struct nvmeibt_cdv_allocator_update {
 void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 
 /*
- * nvmeibt_cdv_alloc_print_status_detailed — per-CDV extent table dump.
+ * nvmeibt_cdv_alloc_print_status_detailed - per-CDV extent table dump.
  *
  * For each CDV, prints every allocated extent entry (extent_index + tpv_uuid).
  * Called from print_status_str() for NVMEIBS_TOMA_STATUS_CDV_DETAILED.
  */
 void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 
-/* ── Incoming-message handler (wired from nvmeibt_client.c dispatch) ─────── */
+/* -- Incoming-message handler (wired from nvmeibt_client.c dispatch) ------- */
 
 struct nvmeibt_register_msg;	/* forward; defined in nvmeibt_register.h */
 
 /*
- * nvmeibt_cdv_handle_incoming_msg — dispatch CDV_ALLOC/FREE/LIST messages.
+ * nvmeibt_cdv_handle_incoming_msg - dispatch CDV_ALLOC/FREE/LIST messages.
  *
  * Called from nvmeibt_client_handle_incoming_message() when the message
  * signature is NVMEIBT_PROTOCOL_SIGNATURE_CDV.  The request payload is in

@@ -4,7 +4,7 @@
 */
 
 /*
- * nvmeibc_tpv_test.c — TPV kernel self-tests and CDV transport stubs.
+ * nvmeibc_tpv_test.c - TPV kernel self-tests and CDV transport stubs.
  *
  * This file has two responsibilities:
  *
@@ -27,11 +27,11 @@
  *   2. Five self-tests exercising the TPV allocator, persistence, and
  *      recovery paths:
  *
- *        tpv_ktest_alloc_free      — basic xarray alloc / free cycle
- *        tpv_ktest_persist         — flush_state / load_state roundtrip
- *        tpv_ktest_pool_exhaustion — -EAGAIN when free pool is empty
- *        tpv_ktest_double_free     — -ENOENT on second free of same virt_idx
- *        tpv_ktest_recovery        — orphan extent adoption
+ *        tpv_ktest_alloc_free      - basic xarray alloc / free cycle
+ *        tpv_ktest_persist         - flush_state / load_state roundtrip
+ *        tpv_ktest_pool_exhaustion - -EAGAIN when free pool is empty
+ *        tpv_ktest_double_free     - -ENOENT on second free of same virt_idx
+ *        tpv_ktest_recovery        - orphan extent adoption
  *
  *      The tests are self-contained: each constructs a minimal nvmeibc_tpv
  *      directly (bypassing the full attach path which registers a gendisk),
@@ -47,14 +47,14 @@
  *   CDV buf = 6 MB          index 0 unused + tree ext 1 + data 2..5
  *
  * Locking / synchronisation notes:
- *   • The allocator spinlock (alloc->lock) is always held correctly because
+ *   - The allocator spinlock (alloc->lock) is always held correctly because
  *     we call the real production functions (alloc_extent / free_extent).
- *   • Work functions are initialised with the real handlers.  With an empty
+ *   - Work functions are initialised with the real handlers.  With an empty
  *     allocator_toma_id the cdv_alloc_work_fn bails early before accessing
  *     cdv_vol; persist_work_fn writes to the CDV buffer via sync_write.
- *   • tpv_ktest_destroy() sets TPV_DETACHING before cancel_work_sync() so
+ *   - tpv_ktest_destroy() sets TPV_DETACHING before cancel_work_sync() so
  *     both work handlers exit immediately without CDV access.
- *   • rcu_barrier() after cancel_work_sync() drains all kfree_rcu callbacks
+ *   - rcu_barrier() after cancel_work_sync() drains all kfree_rcu callbacks
  *     from free_extent() calls before we walk the xarray for cleanup.
  */
 
@@ -63,7 +63,7 @@
 #include "clnt/nvmeibc_msgs_shared.h"	/* nvmeibc_cdv_alloc_req/resp, free_req */
 #include "nvmeibc_tpv_test.h"
 
-/* ── Forward declarations (IB admin stubs defined below) ────────────────── */
+/* -- Forward declarations (IB admin stubs defined below) ------------------ */
 /*
  * The three IB admin functions are the only stubs still provided here.
  * The CDV block-layer transport functions (sync_read, sync_write, submit_bio)
@@ -84,7 +84,7 @@ int  nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 					const char *tpv_uuid,
 					u64 **out_indices, u64 *out_count);
 
-/* ── Test geometry constants ────────────────────────────────────────────── */
+/* -- Test geometry constants ---------------------------------------------- */
 
 #define TPV_KTEST_CDV_EXT_MB	1u		/* E: CDV_extent size in MB */
 #define TPV_KTEST_ALLOC_GB	0u		/* A: metadata region in GB (none) */
@@ -99,7 +99,7 @@ int  nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
  * Need 5 extent slots total. */
 #define TPV_KTEST_CDV_BUF_SZ	((u64)(TPV_KTEST_N_DATA_EXTS + 1u) * ((u64)(TPV_KTEST_CDV_EXT_MB) << 20))
 
-/* ── Global test context ────────────────────────────────────────────────── */
+/* -- Global test context -------------------------------------------------- */
 
 /*
  * Active only while nvmeibc_tpv_run_selftests() is executing.
@@ -114,8 +114,8 @@ static struct nvmeibc_tpv_ktest_ctx {
 	/*
 	 * Split-mode meta CDV backing store (optional). When non-NULL,
 	 * ktest_cdv_sync_read/write routes I/O from split-mode TPVs to this
-	 * buffer instead of cdv_buf — mirroring the production
-	 * tpv_cdv_sync_io → nvmeibc_tpv_meta_cdv() routing. Left NULL for
+	 * buffer instead of cdv_buf - mirroring the production
+	 * tpv_cdv_sync_io -> nvmeibc_tpv_meta_cdv() routing. Left NULL for
 	 * single-CDV tests.
 	 */
 	void    *meta_cdv_buf;
@@ -147,7 +147,7 @@ static struct nvmeibc_tpv_ktest_ctx {
 
 static DEFINE_MUTEX(g_tc_lock);	/* serialises concurrent selftest invocations */
 
-/* ── CDV sync I/O test hooks ─────────────────────────────────────────────── */
+/* -- CDV sync I/O test hooks ----------------------------------------------- */
 
 /*
  * The real CDV transport functions live in nvmeibc_tpv_cdv.c.  During kernel
@@ -212,7 +212,7 @@ static int ktest_cdv_sync_write(struct nvmeibc_tpv *tpv, u64 cdv_offset,
 }
 
 /*
- * CDV extent allocation from TOMA (IB admin channel) — test stub.
+ * CDV extent allocation from TOMA (IB admin channel) - test stub.
  * Simulates the TOMA response: CDV_FULL / WRONG_GEN injection, or hands
  * out the next sequential extent index.
  *
@@ -267,7 +267,7 @@ extern int (*nvmeibc_tpv_test_cdv_list_fn)(
 	const char *tpv_uuid, u64 **out_indices, u64 *out_count);
 
 /*
- * ktest_cdv_is_meta_side — does this cdv pointer point at a split-mode
+ * ktest_cdv_is_meta_side - does this cdv pointer point at a split-mode
  * meta_cdv sentinel? Split-mode tests use tpv->atom as a stable sentinel
  * (see tpv_ktest_upgrade_to_split). We recognise any pointer that isn't
  * the data-side cdv_vol of an active test TPV as "not the meta side",
@@ -315,7 +315,7 @@ static int ktest_cdv_list_extents(
 	return 0;
 }
 
-/* ── Test helper: output accumulator ────────────────────────────────────── */
+/* -- Test helper: output accumulator -------------------------------------- */
 
 struct tpv_ktest_output {
 	char   *buf;
@@ -337,19 +337,19 @@ struct tpv_ktest_output {
 		(kto)->failures++; \
 	} while (0)
 
-/* ── Test helper: TPV construction ──────────────────────────────────────── */
+/* -- Test helper: TPV construction ---------------------------------------- */
 
 /*
- * tpv_ktest_create — allocate and initialise a minimal struct nvmeibc_tpv
+ * tpv_ktest_create - allocate and initialise a minimal struct nvmeibc_tpv
  * for use in self-tests.
  *
  * Differences from a production attach:
- *   • No gendisk or request_queue is registered.
- *   • low_watermark is set to 0, preventing proactive CDV_extent pre-fetch
+ *   - No gendisk or request_queue is registered.
+ *   - low_watermark is set to 0, preventing proactive CDV_extent pre-fetch
  *     (cdv_alloc_work is only armed when the free pool is empty).
- *   • allocator_toma_id is set to the empty string by default so that
+ *   - allocator_toma_id is set to the empty string by default so that
  *     cdv_alloc_work_fn bails immediately without accessing cdv_vol.
- *   • cdv_vol is NULL; tests that need the work function to proceed past
+ *   - cdv_vol is NULL; tests that need the work function to proceed past
  *     the toma_id check set a non-empty toma_id instead.
  */
 static struct nvmeibc_tpv *tpv_ktest_create(void)
@@ -393,13 +393,13 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	alloc->toma_extent_count       = 0;
 
 	spin_lock_init(&tpv->allocator_id_lock);
-	tpv->allocator_toma_id[0] = '\0';	/* empty → cdv_alloc_work bails early */
+	tpv->allocator_toma_id[0] = '\0';	/* empty -> cdv_alloc_work bails early */
 	tpv->allocator_generation = 0;
 
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 
-	/* Split-mode fields default to single-CDV (null / zero) — callers
+	/* Split-mode fields default to single-CDV (null / zero) - callers
 	 * wanting split-mode initialize them via tpv_ktest_upgrade_to_split(). */
 	spin_lock_init(&tpv->meta_allocator_id_lock);
 	tpv->meta_cdv_vol      = NULL;
@@ -414,7 +414,7 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	tpv->dirty = false;
 
 	spin_lock_init(&tpv->pending_bio_lock);
-	/* pending_bios zeroed by kzalloc → head = tail = NULL (empty) */
+	/* pending_bios zeroed by kzalloc -> head = tail = NULL (empty) */
 
 	INIT_LIST_HEAD(&tpv->list_node);
 	atomic_set(&tpv->state, TPV_ATTACHED);
@@ -429,7 +429,7 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 }
 
 /*
- * tpv_ktest_seed_pool — inject L1 extent + n_data_extents into
+ * tpv_ktest_seed_pool - inject L1 extent + n_data_extents into
  * tpv->allocator without going through the TOMA work path.
  *
  * L1 extent at index TPV_KTEST_L1_EXT_IDX: slot 0 pinned (holds L1 table),
@@ -437,7 +437,7 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
  * Data extents at indices TPV_KTEST_L1_EXT_IDX+1 .. +n_data_extents.
  *
  * Slots are spliced at the tail so the free-pool order is L1-extent slots
- * first, then data-extent slots — matching the natural order in which
+ * first, then data-extent slots - matching the natural order in which
  * tpv_on_cdv_alloc_ok would insert them.
  */
 static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
@@ -513,7 +513,7 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 }
 
 /*
- * tpv_ktest_destroy — quiesce and free a test TPV.
+ * tpv_ktest_destroy - quiesce and free a test TPV.
  *
  * Order matters:
  *   1. Signal TPV_DETACHING so both work handlers exit immediately.
@@ -618,7 +618,7 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 }
 
 /*
- * tpv_ktest_upgrade_to_split — convert a fresh kzalloc'd TPV into split-mode
+ * tpv_ktest_upgrade_to_split - convert a fresh kzalloc'd TPV into split-mode
  * by allocating a meta_allocator instance with the given geometry. Callers
  * that exercise split-mode paths use this right after tpv_ktest_create().
  * Returns 0 on success, -ENOMEM on failure.
@@ -651,7 +651,7 @@ static int tpv_ktest_upgrade_to_split(struct nvmeibc_tpv *tpv,
 
 	tpv->meta_allocator = m;
 	/*
-	 * Non-NULL meta_cdv_vol triggers nvmeibc_tpv_is_split() → true. We
+	 * Non-NULL meta_cdv_vol triggers nvmeibc_tpv_is_split() -> true. We
 	 * use tpv->atom as a sentinel pointer value (never dereferenced in
 	 * the split-mode code paths exercised by these tests) since our
 	 * CDV sync I/O is fully stubbed by nvmeibc_tpv_cdv_test_*_fn.
@@ -660,17 +660,17 @@ static int tpv_ktest_upgrade_to_split(struct nvmeibc_tpv *tpv,
 	return 0;
 }
 
-/* ── Self-test functions ─────────────────────────────────────────────────── */
+/* -- Self-test functions --------------------------------------------------- */
 
 /*
- * tpv_ktest_alloc_free — basic xarray alloc / free cycle.
+ * tpv_ktest_alloc_free - basic xarray alloc / free cycle.
  *
  * Verifies:
- *   • alloc_extent() returns 0 and provides a valid entry for each call.
- *   • stat_tpv_alloc_ok increments correctly.
- *   • free_extent() returns 0 and removes the xarray entry.
- *   • stat_tpv_free_ok increments correctly.
- *   • free_extent() on an unmapped index returns -ENOENT.
+ *   - alloc_extent() returns 0 and provides a valid entry for each call.
+ *   - stat_tpv_alloc_ok increments correctly.
+ *   - free_extent() returns 0 and removes the xarray entry.
+ *   - stat_tpv_free_ok increments correctly.
+ *   - free_extent() on an unmapped index returns -ENOENT.
  */
 static void tpv_ktest_alloc_free(struct tpv_ktest_output *kto)
 {
@@ -760,12 +760,12 @@ done:
 }
 
 /*
- * tpv_ktest_persist — flush_state / load_state roundtrip.
+ * tpv_ktest_persist - flush_state / load_state roundtrip.
  *
  * Verifies:
- *   • flush_state() serialises the xarray to the CDV buffer.
- *   • load_state() on a fresh TPV reconstructs the identical xarray
- *     (same virtual-extent → phys-offset mapping) and the correct
+ *   - flush_state() serialises the xarray to the CDV buffer.
+ *   - load_state() on a fresh TPV reconstructs the identical xarray
+ *     (same virtual-extent -> phys-offset mapping) and the correct
  *     free-slot pool (mapped slots consumed; unmapped slots free).
  */
 static void tpv_ktest_persist(struct tpv_ktest_output *kto)
@@ -776,7 +776,7 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 	u64 E_b = (u64)TPV_KTEST_CDV_EXT_MB << 20;
 	u64 T_b = (u64)TPV_KTEST_TPV_EXT_KB << 10;
 	u64 A_b = (u64)TPV_KTEST_ALLOC_GB << 30;
-	u64 expect_phys;	/* phys of virt_idx=0 — first pool pop = L1 extent slot 1 */
+	u64 expect_phys;	/* phys of virt_idx=0 - first pool pop = L1 extent slot 1 */
 	u64 saved_toma_extents[2];
 	int rc;
 
@@ -829,7 +829,7 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 	tpv = NULL;
 
 	/*
-	 * Load state into a fresh TPV — no pool seeding, load_state does it.
+	 * Load state into a fresh TPV - no pool seeding, load_state does it.
 	 * load_state calls CDV_LIST_EXTENTS which uses g_tc.recovery_extents.
 	 * Configure the TOMA stub to report the tree extent + data extent.
 	 */
@@ -917,14 +917,14 @@ done:
 }
 
 /*
- * tpv_ktest_pool_exhaustion — exhaust all free slots, verify -EAGAIN.
+ * tpv_ktest_pool_exhaustion - exhaust all free slots, verify -EAGAIN.
  *
  * Verifies:
- *   • After allocating all TPV_KTEST_N_SLOTS slots, alloc_extent returns
+ *   - After allocating all TPV_KTEST_N_SLOTS slots, alloc_extent returns
  *     -EAGAIN.
- *   • stat_tpv_alloc_eagain increments.
- *   • Freeing one slot restores pool to 1 slot.
- *   • A subsequent alloc succeeds.
+ *   - stat_tpv_alloc_eagain increments.
+ *   - Freeing one slot restores pool to 1 slot.
+ *   - A subsequent alloc succeeds.
  */
 static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 {
@@ -1006,11 +1006,11 @@ done:
 }
 
 /*
- * tpv_ktest_double_free — free the same virt_idx twice, expect -ENOENT.
+ * tpv_ktest_double_free - free the same virt_idx twice, expect -ENOENT.
  *
  * Verifies:
- *   • First free_extent() returns 0.
- *   • Second free_extent() on the same virt_idx returns -ENOENT.
+ *   - First free_extent() returns 0.
+ *   - Second free_extent() on the same virt_idx returns -ENOENT.
  */
 static void tpv_ktest_double_free(struct tpv_ktest_output *kto)
 {
@@ -1059,11 +1059,11 @@ done:
 }
 
 /*
- * tpv_ktest_recovery — orphaned CDV_extent adoption.
+ * tpv_ktest_recovery - orphaned CDV_extent adoption.
  *
  * Verifies:
- *   • When load_state() reads an empty CDV buffer, 0 slots are in the pool.
- *   • When nvmeibc_ib_admin_cdv_list_extents returns extent_index=1 but
+ *   - When load_state() reads an empty CDV buffer, 0 slots are in the pool.
+ *   - When nvmeibc_ib_admin_cdv_list_extents returns extent_index=1 but
  *     that extent is absent from the in-memory tree, nvmeibc_tpv_recovery()
  *     adopts it: adds a CDV_extent_ref and TPV_KTEST_N_SLOTS free slots.
  */
@@ -1074,7 +1074,7 @@ static void tpv_ktest_recovery(struct tpv_ktest_output *kto)
 	u64 orphan_idx = 1;
 	int rc;
 
-	/* Zero CDV buffer → no L1 magic found → load_state maps nothing. */
+	/* Zero CDV buffer -> no L1 magic found -> load_state maps nothing. */
 	memset(g_tc.cdv_buf, 0, g_tc.cdv_len);
 
 	/*
@@ -1151,14 +1151,14 @@ cleanup:
 }
 
 /*
- * tpv_ktest_split_mode — structural smoke test for split-mode TPV helpers.
+ * tpv_ktest_split_mode - structural smoke test for split-mode TPV helpers.
  *
  * Verifies:
- *   • nvmeibc_tpv_is_split() toggles correctly based on meta_cdv_vol.
- *   • nvmeibc_tpv_meta_alloc() / nvmeibc_tpv_data_alloc() return distinct
+ *   - nvmeibc_tpv_is_split() toggles correctly based on meta_cdv_vol.
+ *   - nvmeibc_tpv_meta_alloc() / nvmeibc_tpv_data_alloc() return distinct
  *     allocator pointers once upgraded.
- *   • Single-CDV mode (default) returns the same pointer from both.
- *   • The two allocators can carry different tpv_extent_size_kb geometries.
+ *   - Single-CDV mode (default) returns the same pointer from both.
+ *   - The two allocators can carry different tpv_extent_size_kb geometries.
  *
  * Does not exercise the full alloc/free IO flow because that would require
  * parallel stub CDV buffers for both sides. Full IO-level split-mode tests
@@ -1229,7 +1229,7 @@ done:
 }
 
 /*
- * tpv_ktest_seed_meta_pool — seed the meta allocator with one L1 extent
+ * tpv_ktest_seed_meta_pool - seed the meta allocator with one L1 extent
  * plus n_data_extents data extents. Mirrors tpv_ktest_seed_pool but
  * targets tpv->meta_allocator. In split mode "data_extents" here mean
  * slots on the meta CDV that the persist path can use for L2 tables.
@@ -1299,7 +1299,7 @@ static int tpv_ktest_seed_meta_pool(struct nvmeibc_tpv *tpv, u64 n_l2_extents)
 }
 
 /*
- * tpv_ktest_split_alloc_free — verify that alloc / free on the data side
+ * tpv_ktest_split_alloc_free - verify that alloc / free on the data side
  * of a split-mode TPV do not touch the metadata allocator's pool or
  * extent list. This is the MVP split invariant: the two pools are
  * independent; data-path allocation stays on the data allocator.
@@ -1334,7 +1334,7 @@ static void tpv_ktest_split_alloc_free(struct tpv_ktest_output *kto)
 	}
 	if (tpv->meta_allocator->free_tpv_extent_count != meta_free_before) {
 		KTO_FAIL(kto, "split_alloc_free",
-			 "data alloc perturbed meta free pool %llu → %llu",
+			 "data alloc perturbed meta free pool %llu -> %llu",
 			 meta_free_before, tpv->meta_allocator->free_tpv_extent_count);
 		goto done;
 	}
@@ -1345,7 +1345,7 @@ static void tpv_ktest_split_alloc_free(struct tpv_ktest_output *kto)
 	}
 	if (tpv->meta_allocator->free_tpv_extent_count != meta_free_before) {
 		KTO_FAIL(kto, "split_alloc_free",
-			 "data free perturbed meta free pool %llu → %llu",
+			 "data free perturbed meta free pool %llu -> %llu",
 			 meta_free_before, tpv->meta_allocator->free_tpv_extent_count);
 		goto done;
 	}
@@ -1356,7 +1356,7 @@ done:
 }
 
 /*
- * tpv_ktest_split_persist — verify that flush_state writes the TPV's L1
+ * tpv_ktest_split_persist - verify that flush_state writes the TPV's L1
  * table to the meta CDV buffer, not the data CDV buffer. Uses a separate
  * backing buffer for the meta side; the ktest_cdv_sync_* stubs route to
  * it via nvmeibc_tpv_is_split(tpv).
@@ -1403,7 +1403,7 @@ static void tpv_ktest_split_persist(struct tpv_ktest_output *kto)
 
 	/* Read back the L1 header from what the stub considers the
 	 * appropriate buffer (meta in split mode). Use the local stub
-	 * directly — nvmeibc_tpv_cdv_sync_read is not declared in a
+	 * directly - nvmeibc_tpv_cdv_sync_read is not declared in a
 	 * header visible from this file; the stub is the same function
 	 * that production code would have called through the hook. */
 	rc = ktest_cdv_sync_read(tpv, 0, &hdr, sizeof(hdr));
@@ -1441,7 +1441,7 @@ done:
 }
 
 /*
- * tpv_ktest_split_pool_exhaustion — exhaust the data pool on a split-mode
+ * tpv_ktest_split_pool_exhaustion - exhaust the data pool on a split-mode
  * TPV and verify the meta pool is unaffected. Complements the single-CDV
  * pool_exhaustion test by asserting pool independence.
  */
@@ -1460,7 +1460,7 @@ static void tpv_ktest_split_pool_exhaustion(struct tpv_ktest_output *kto)
 	if (rc != 0) { KTO_FAIL(kto, "split_pool_exhaustion", "upgrade rc=%d", rc); goto done; }
 
 	/* Data side gets only the L1 extent's (N_SLOTS-1) data slots. No
-	 * data extents beyond that → small fixed pool we can exhaust. */
+	 * data extents beyond that -> small fixed pool we can exhaust. */
 	if (tpv_ktest_seed_pool(tpv, 0) < 0 || tpv_ktest_seed_meta_pool(tpv, 0) < 0) {
 		KTO_FAIL(kto, "split_pool_exhaustion", "seed failed");
 		goto done;
@@ -1486,7 +1486,7 @@ static void tpv_ktest_split_pool_exhaustion(struct tpv_ktest_output *kto)
 	/* Meta pool must not have been consumed by data-side exhaustion. */
 	if (tpv->meta_allocator->free_tpv_extent_count != meta_free) {
 		KTO_FAIL(kto, "split_pool_exhaustion",
-			 "meta pool perturbed by data exhaustion: %llu → %llu",
+			 "meta pool perturbed by data exhaustion: %llu -> %llu",
 			 meta_free, tpv->meta_allocator->free_tpv_extent_count);
 		goto done;
 	}
@@ -1497,7 +1497,7 @@ done:
 }
 
 /*
- * tpv_ktest_split_double_free — verify free-extent error paths work
+ * tpv_ktest_split_double_free - verify free-extent error paths work
  * normally when invoked on a split-mode TPV. Exercises the data side; the
  * metadata side allocator isn't touched since no L2 slot has been claimed.
  */
@@ -1535,7 +1535,7 @@ done:
 }
 
 /*
- * tpv_ktest_split_recovery — stage distinct TOMA extent lists for the data
+ * tpv_ktest_split_recovery - stage distinct TOMA extent lists for the data
  * and metadata CDVs, run nvmeibc_tpv_recovery, and verify that both sides
  * observed orphan adoption. Uses ktest_meta_cdv_sentinel so the stub's
  * cdv_list_extents can route per CDV pointer.
@@ -1583,13 +1583,13 @@ static void tpv_ktest_split_recovery(struct tpv_ktest_output *kto)
 
 	if (data_extents_after != data_extents_before + ARRAY_SIZE(data_orphans)) {
 		KTO_FAIL(kto, "split_recovery",
-			 "data side: expected +%zu extents, got %llu → %llu",
+			 "data side: expected +%zu extents, got %llu -> %llu",
 			 ARRAY_SIZE(data_orphans), data_extents_before, data_extents_after);
 		goto cleanup;
 	}
 	if (meta_extents_after != meta_extents_before + ARRAY_SIZE(meta_orphans)) {
 		KTO_FAIL(kto, "split_recovery",
-			 "meta side: expected +%zu extents, got %llu → %llu",
+			 "meta side: expected +%zu extents, got %llu -> %llu",
 			 ARRAY_SIZE(meta_orphans), meta_extents_before, meta_extents_after);
 		goto cleanup;
 	}
@@ -1605,10 +1605,10 @@ done:
 	tpv_ktest_destroy(tpv);
 }
 
-/* ── Proc fill function ─────────────────────────────────────────────────── */
+/* -- Proc fill function --------------------------------------------------- */
 
 /*
- * nvmeibc_tpv_run_selftests — proc fill function for "selftest".
+ * nvmeibc_tpv_run_selftests - proc fill function for "selftest".
  *
  * Reading /proc/nvmeibc/tpv/<name>/selftest runs all kernel self-tests
  * (six as of TPV_MetadataCDV.md: alloc/free, persist, pool exhaustion,

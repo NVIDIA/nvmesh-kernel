@@ -15,7 +15,7 @@
 #define __FILE_LITERAL__ nvmeibc_main_capi_manipulate_vols_inc_c
 
 /*
- * __setup_tpv — attach a Thin-Provisioned Volume (TPV).
+ * __setup_tpv - attach a Thin-Provisioned Volume (TPV).
  *
  * Called from try_setup_block_device() when the volume config has the
  * AUTO_EXTEND_VOLUME bit set (type & 0x4).
@@ -25,11 +25,11 @@
  * required parameters in fields that are otherwise unused for TPV volumes:
  *
  *   conf->blocks        - virtual size in 4 KiB management blocks
- *   conf->mdvUUID       - parent (data) CDV UUID — lookup in volumes list
+ *   conf->mdvUUID       - parent (data) CDV UUID - lookup in volumes list
  *   conf->stripeSize    - TPV extent size in KiB  (tpv_extent_size_kb)
  *   conf->dataBlocks    - CDV extent size in MiB  (cdv_extent_size_mib)
  *   conf->parityBlocks  - allocator area size in GiB within the CDV
- *                         (allocator_size_gib; 0 under satellite design —
+ *                         (allocator_size_gib; 0 under satellite design -
  *                         allocator metadata lives on the <cdv>-mgmt volume)
  *   conf->metaCdvUUID   - optional metadata CDV UUID (split-mode,
  *                         TPV_MetadataCDV.md). Empty for single-CDV TPVs.
@@ -74,20 +74,20 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	}
 
 	/* conf->blocks is in 4 KiB management units; convert to bytes. */
-	virtual_size_bytes  = (u64)conf->blocks << 12;  /* × 4096 */
+	virtual_size_bytes  = (u64)conf->blocks << 12;  /* x 4096 */
 
 	/* Decode repurposed fields. */
 	tpv_extent_size_kb  = (u32)conf->stripeSize;
 	cdv_extent_size_mib  = (u32)conf->dataBlocks;
 	allocator_size_gib   = (u64)(unsigned int)conf->parityBlocks;
 
-	/* sourceUUID is repurposed for TPVs: "sync_flush" → WAL-ordered
-	 * L1 metadata writes; empty → deferred background flush.       */
+	/* sourceUUID is repurposed for TPVs: "sync_flush" -> WAL-ordered
+	 * L1 metadata writes; empty -> deferred background flush.       */
 	sync_flush = (strncmp(conf->sourceUUID, "sync_flush",
 			      sizeof(conf->sourceUUID)) == 0);
 
 	/* allocator_size_gib may legitimately be 0 under the satellite design
-	 * (A = 0 — data extents start at CDV offset 0).                     */
+	 * (A = 0 - data extents start at CDV offset 0).                     */
 	if (!virtual_size_bytes || !tpv_extent_size_kb || !cdv_extent_size_mib) {
 		_NE(tpv_setup_bad_params,
 		    "TPV @STR: invalid params vsize=@LLU tpv_ext_kb=@UINT cdv_ext_mb=@UINT alloc_gb=@LLU",
@@ -104,7 +104,7 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	 * Metadata geometry (meta_tpv_extent_size_kb, meta_cdv_extent_size_mib)
 	 * is carried on the binary codec via dedicated fields that management
 	 * populates when the TPV is in split mode. Both may legitimately
-	 * differ from the data-side extent sizes — that's the whole point of
+	 * differ from the data-side extent sizes - that's the whole point of
 	 * split mode (small mirror-backed meta CDV paired with a larger EC
 	 * data CDV, for instance). */
 	if (conf->metaCdvUUID[0]) {
@@ -319,7 +319,7 @@ static enum_vol_status _calc_reply_on_attach(const char *vol_name, const struct 
 	}
 }
 
-/* ── CDV-not-ready retry for TPV attach ─────────────────────────────────────
+/* -- CDV-not-ready retry for TPV attach -------------------------------------
  *
  * Management may send the TPV config before the parent CDV config because
  * MongoDB query result order is non-deterministic.  When __setup_tpv()
@@ -336,7 +336,7 @@ static enum_vol_status _calc_reply_on_attach(const char *vol_name, const struct 
  * is an extreme edge case.  A per-instance cancel list can be added later.
  */
 #define TPV_CDV_RETRY_MAX  20	/* at most 20 retry attempts                    */
-#define TPV_CDV_RETRY_MS  500	/* 500 ms between attempts → 10 seconds total   */
+#define TPV_CDV_RETRY_MS  500	/* 500 ms between attempts -> 10 seconds total   */
 
 struct nvmeibc_tpv_cdv_retry {
 	struct delayed_work dwork;
@@ -360,7 +360,7 @@ static void tpv_cdv_retry_work_fn(struct work_struct *_w)
 	rv = __setup_tpv(p, msg);
 
 	if (rv == -ENODEV && ctx->retries_left > 0) {
-		/* CDV still absent — schedule the next attempt. */
+		/* CDV still absent - schedule the next attempt. */
 		ctx->retries_left--;
 		_NI(tpv_cdv_retry_waiting,
 		    "TPV @STR: CDV not yet attached, @INT retries left",
@@ -441,7 +441,7 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 	}
 	if (hdr->type & AUTO_EXTEND_VOLUME) {
 		/* TPV: handle grow, re-attach, or fresh attach.
-		 * Must be checked BEFORE reservation version correctness —
+		 * Must be checked BEFORE reservation version correctness -
 		 * TPVs have no nvmeibc_volume, so __verify_reservation_version_correctness
 		 * with volume=NULL returns non-zero when state != READY, which would
 		 * short-circuit into _calc_reply_on_attach and skip the TPV path entirely.
@@ -467,7 +467,7 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 				nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
 				goto _out;
 			} else if (!tpv) {
-				/* TPV not found — re-attach or first attach with
+				/* TPV not found - re-attach or first attach with
 				 * update_only (CDV already attached).  Fall through
 				 * to the fresh-attach path below.
 				 */
@@ -648,7 +648,7 @@ static void __detach_all_volumes_of_inst_work(struct workqe_struct *_w)
 	struct nvmeibc_volume *volume, *tvolume;
 	nvmeibc_assert_on_main_wq(w->p);
 
-	/* TPVs must be handled before CDVs — TPV flush issues IO to CDV.
+	/* TPVs must be handled before CDVs - TPV flush issues IO to CDV.
 	 * On upgrade: orphan (ATOM buffers BIOs, block device stays in /dev/).
 	 * On shutdown: full detach (block device removed). */
 	if (w->is_upgrade)

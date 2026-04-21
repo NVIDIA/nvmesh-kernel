@@ -4,7 +4,7 @@
 */
 
 /*
- * nvmeibt_cdv_alloc.c — CDV extent allocator: in-memory state + on-CDV persistence.
+ * nvmeibt_cdv_alloc.c - CDV extent allocator: in-memory state + on-CDV persistence.
  *
  * See nvmeibt_cdv_alloc.h for a full description.
  * Extent allocation metadata is persisted as 4 KiB records in the allocator
@@ -35,14 +35,14 @@
 #include "nvmeibt_node.h"	/* nvmeibt_node_get_node_by_id, nvmeibt_node_name */
 #include "nvmeibt_raft.h"	/* nvmeibt_raft_get_current_term */
 
-/* ── Forward declarations ────────────────────────────────────────────────── */
+/* -- Forward declarations -------------------------------------------------- */
 
 static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc);
 static void cdv_publish_alloc_stats(struct nvmeibt_cdv_alloc *alloc);
 
-/* ── Global state ────────────────────────────────────────────────────────── */
+/* -- Global state ---------------------------------------------------------- */
 
-/* cdv_uuid (ASCII string) → nvmeibt_cdv_alloc *; 32 buckets (5 bits) */
+/* cdv_uuid (ASCII string) -> nvmeibt_cdv_alloc *; 32 buckets (5 bits) */
 static XHASHTABLE_DECLARE(, struct nvmeibt_cdv_alloc, hash_link, 5) cdv_alloc_hash;
 static bool cdv_alloc_inited;
 
@@ -58,12 +58,12 @@ static struct nvmeibt_cdv_alloc *cdv_alloc_search(const char *uuid)
 }
 
 /*
- * Runtime config — see nvmeibt_cdv_alloc.h for semantics.
+ * Runtime config - see nvmeibt_cdv_alloc.h for semantics.
  * Registered in oper_params[] (nvmeibt_debug.c) as "cdv_extent_zero_on_free".
  */
 int64_t nvmeibt_cdv_extent_zero_on_free = CDV_EXTENT_ZERO_ON_FREE_DEFAULT;
 
-/* ── Per-CDV I/O infrastructure ─────────────────────────────────────────── */
+/* -- Per-CDV I/O infrastructure ------------------------------------------- */
 
 /*
  * All CDV disk I/O (reads during scan, writes for record/header persistence)
@@ -81,7 +81,7 @@ int64_t nvmeibt_cdv_extent_zero_on_free = CDV_EXTENT_ZERO_ON_FREE_DEFAULT;
 #define CDV_DEV_PATH_PREFIX	"/dev/nvmesh/"
 
 /*
- * cdv_ensure_io_wq — ensure the per-allocator I/O work queue exists and the
+ * cdv_ensure_io_wq - ensure the per-allocator I/O work queue exists and the
  * satellite (or, in legacy mode, CDV) device path is resolved.
  *
  * After Phase 3, the allocator metadata lives on the satellite volume named
@@ -123,7 +123,7 @@ static int cdv_ensure_io_wq(const char *cdv_uuid,
 	/*
 	 * Legacy: resolve the CDV path too.  Used by cdv_zero_execute (data
 	 * extent zeroing on free), which still targets the CDV directly.
-	 * This requires the CDV to be attached to this TOMA — only true when
+	 * This requires the CDV to be attached to this TOMA - only true when
 	 * cdv_extent_zero_on_free has been enabled with the operator-arranged
 	 * CDV attach.  See struct nvmeibt_cdv_alloc::cdv_fd doc comment.
 	 */
@@ -168,7 +168,7 @@ static int cdv_ensure_io_wq(const char *cdv_uuid,
 }
 
 /*
- * cdv_worker_open_fd — open the allocator-metadata block device (satellite if
+ * cdv_worker_open_fd - open the allocator-metadata block device (satellite if
  * bound, else legacy CDV) from the worker thread (lazy).
  *
  * Must ONLY be called from the io_wq worker thread.  Used by the header /
@@ -176,7 +176,7 @@ static int cdv_ensure_io_wq(const char *cdv_uuid,
  * satellite is preferred when its path is resolved (post-Stage-B); legacy
  * CDV is only used during the transition / before satellite is bound.
  *
- * NOTE: cdv_zero_execute (data-extent zeroing on free) must NOT use this —
+ * NOTE: cdv_zero_execute (data-extent zeroing on free) must NOT use this -
  * it must open the CDV directly via cdv_worker_open_cdv_fd_for_zeroing()
  * because zeroing targets data-extent offsets on the CDV, not the satellite.
  *
@@ -201,12 +201,12 @@ static int cdv_worker_open_fd(struct nvmeibt_cdv_alloc *alloc)
 }
 
 /*
- * cdv_worker_open_cdv_fd_for_zeroing — open the CDV block device specifically
+ * cdv_worker_open_cdv_fd_for_zeroing - open the CDV block device specifically
  * for cdv_zero_execute, which writes zeros to CDV data-extent offsets.
  *
  * Must ONLY be called from the io_wq worker thread.  Always targets the CDV
  * (alloc->dev_path), never the satellite.  Returns negative if the CDV is not
- * attached to this TOMA — which is the default state after the satellite
+ * attached to this TOMA - which is the default state after the satellite
  * migration; zero-on-free will fail gracefully in that case (the extent stays
  * in NEEDS_ZEROING and is not reused).
  */
@@ -227,7 +227,7 @@ static int cdv_worker_open_cdv_fd_for_zeroing(struct nvmeibt_cdv_alloc *alloc)
  * Layout helpers for extent records on the satellite live in the header
  * (cdv_ondisk_block_offset / cdv_ondisk_record_offset / cdv_ondisk_record_slot).
  *
- * The on-disk format packs 32 × 128-byte records per 4 KiB
+ * The on-disk format packs 32 x 128-byte records per 4 KiB
  * block. All record mutations here read the 4 KiB block containing the
  * target record, modify the target slot in place, and write the block
  * back. Concurrency on a shared block is serialised by
@@ -241,7 +241,7 @@ static int cdv_worker_open_cdv_fd_for_zeroing(struct nvmeibt_cdv_alloc *alloc)
  * I/O WQ.  See the "Async CDV writes" section below.
  */
 
-/* ── Async CDV ondisk scan (work-queue based) ──────────────────────────────
+/* -- Async CDV ondisk scan (work-queue based) ------------------------------
  *
  * CDV scans read the entire allocator region (header + per-extent records) and
  * can block for tens of seconds waiting on NVMesh volume I/O.  Running them on
@@ -256,7 +256,7 @@ static int cdv_worker_open_cdv_fd_for_zeroing(struct nvmeibt_cdv_alloc *alloc)
  * which will retry.
  */
 
-/* One scanned extent — populated by the worker, consumed by finalize. */
+/* One scanned extent - populated by the worker, consumed by finalize. */
 struct cdv_scan_result_entry {
 	uint64_t extent_index;
 	char     tpv_uuid[NVMEIBT_CDV_UUID_STRLEN];
@@ -269,13 +269,13 @@ struct cdv_scan_result_entry {
 struct cdv_ondisk_scan_wq_entry {
 	struct nvmeibt_wq_entry   wq_entry;
 
-	/* ── Input (set by dispatcher on main thread, read by worker) ── */
+	/* -- Input (set by dispatcher on main thread, read by worker) -- */
 	struct nvmeibt_cdv_alloc *alloc;	/* for cached fd; valid: we drain before remove */
 	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
-	uint32_t pre_sleep_ms;			/* worker sleeps this long before the I/O —
+	uint32_t pre_sleep_ms;			/* worker sleeps this long before the I/O -
 						 * drives the scan retry backoff */
 
-	/* ── Output (set by worker, consumed by finalize) ── */
+	/* -- Output (set by worker, consumed by finalize) -- */
 	int      rv;			/* 0 = success, negative = error */
 	bool     is_fresh;		/* true if CDV has no valid header (genuinely new) */
 	uint64_t total_data_extents;	/* from header */
@@ -285,10 +285,10 @@ struct cdv_ondisk_scan_wq_entry {
 };
 
 /*
- * cdv_scan_execute — worker thread: perform all blocking CDV I/O.
+ * cdv_scan_execute - worker thread: perform all blocking CDV I/O.
  *
  * Opens the CDV volume, reads the header and every extent record, and stores
- * the results in the wq_entry.  No shared state is modified here — all
+ * the results in the wq_entry.  No shared state is modified here - all
  * mutations happen in cdv_scan_finalize on the main thread.
  */
 static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
@@ -307,7 +307,7 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 	e->results = NULL;
 	e->n_results = 0;
 
-	/* Backoff delay from the previous failed scan (100ms → 1000ms). */
+	/* Backoff delay from the previous failed scan (100ms -> 1000ms). */
 	if (e->pre_sleep_ms) {
 		struct timespec ts = {
 			.tv_sec  = e->pre_sleep_ms / 1000,
@@ -400,8 +400,8 @@ static void cdv_scan_execute(struct nvmeibt_wq_entry *wq_entry)
 	/*
 	 * Read one 4 KiB block per 32 extents. Cache the most
 	 * recent block offset so consecutive indices in the same block
-	 * reuse the buffer — typical for sequentially-allocated CDVs this
-	 * cuts satellite read volume by 32× vs. an un-packed per-extent
+	 * reuse the buffer - typical for sequentially-allocated CDVs this
+	 * cuts satellite read volume by 32x vs. an un-packed per-extent
 	 * loop.
 	 */
 	for (i = 1; i <= total; i++) {
@@ -479,7 +479,7 @@ done:
 	if (results) NNVMEIBT_BM_FREE(cdv_async_scan_results_free, results);
 	if (hdr) NNVMEIBT_BM_FREE(cdv_async_scan_hdr_free, hdr);
 	if (block_buf) NNVMEIBT_BM_FREE(cdv_async_scan_rec_free, block_buf);
-	/* fd is cached in alloc->cdv_fd — do NOT close here. */
+	/* fd is cached in alloc->cdv_fd - do NOT close here. */
 
 	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ,
 				    &e->wq_entry);
@@ -494,7 +494,7 @@ static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
 				     uint32_t cdv_extent_size_mib);
 
 /*
- * cdv_scan_finalize — main thread: apply scan results to the allocator.
+ * cdv_scan_finalize - main thread: apply scan results to the allocator.
  *
  * Runs in TOMA's main thread after the worker completes.  All shared-state
  * mutations happen here (hash lookups, add_extent, flag updates).
@@ -573,11 +573,11 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 		/*
 		 * The scan worker failed (pread returned 0 bytes or I/O error).
 		 * This commonly happens when the CDV NVMesh block device is not
-		 * yet fully online — the device node exists but returns no data.
+		 * yet fully online - the device node exists but returns no data.
 		 *
 		 * Close the cached fd so the next scan attempt reopens the
 		 * device (it may have come online since the fd was first opened).
-		 * Leave ondisk_loaded=false — the next client request will
+		 * Leave ondisk_loaded=false - the next client request will
 		 * trigger another scan attempt.  Do NOT accept as fresh: the
 		 * CDV may have existing data that would be lost.
 		 */
@@ -594,14 +594,14 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 		 * expected for a genuinely new CDV that has never had an extent
 		 * allocated.  However, during a simultaneous client+TOMA restart
 		 * the CDV NVMesh block device may not be fully online yet, causing
-		 * the pread to return zeros — making an existing CDV look "fresh".
+		 * the pread to return zeros - making an existing CDV look "fresh".
 		 *
 		 * Heuristic: if the first scan after (re)creating the allocator
 		 * reports "fresh", we don't know whether the CDV is truly new or
 		 * was unreadable.  Close the cached fd (it may point to a
 		 * not-yet-connected NVMesh device) and leave ondisk_loaded=false
 		 * to force a retry.  On the second consecutive "fresh" result,
-		 * accept it — the CDV is genuinely new.
+		 * accept it - the CDV is genuinely new.
 		 */
 		if (!alloc->scan_fresh_seen_once) {
 			alloc->scan_fresh_seen_once = true;
@@ -643,7 +643,7 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 		goto out;
 	}
 
-	/* Apply extent entries — add_extent deduplicates. */
+	/* Apply extent entries - add_extent deduplicates. */
 	for (i = 0; i < e->n_results; i++) {
 		struct cdv_scan_result_entry *r = &e->results[i];
 
@@ -672,9 +672,9 @@ static void cdv_scan_finalize(struct nvmeibt_wq_entry *wq_entry)
 out:
 	/*
 	 * If this TOMA is the elected allocator but the scan has not yet
-	 * succeeded, self-reschedule with backoff (100ms → 1000ms).  Otherwise
+	 * succeeded, self-reschedule with backoff (100ms -> 1000ms).  Otherwise
 	 * the on-disk load depends on an external trigger (client request or
-	 * topology recalc) that may never arrive — e.g. for a fresh CDV whose
+	 * topology recalc) that may never arrive - e.g. for a fresh CDV whose
 	 * block device is still coming online.
 	 */
 	if (alloc) {
@@ -718,7 +718,7 @@ out:
 }
 
 /*
- * cdv_scan_free — release the WQ entry and its results array.
+ * cdv_scan_free - release the WQ entry and its results array.
  */
 static void cdv_scan_free(struct nvmeibt_wq_entry *wq_entry)
 {
@@ -731,7 +731,7 @@ static void cdv_scan_free(struct nvmeibt_wq_entry *wq_entry)
 }
 
 /*
- * cdv_ondisk_scan_async — dispatch an asynchronous CDV scan to the per-CDV WQ.
+ * cdv_ondisk_scan_async - dispatch an asynchronous CDV scan to the per-CDV WQ.
  *
  * If a scan is already in progress for this allocator, does nothing.
  * Sets alloc->scan_in_progress to prevent duplicate dispatches.
@@ -778,7 +778,7 @@ static void cdv_ondisk_scan_async(const char *cdv_uuid,
 	     cdv_uuid, alloc->dev_path);
 }
 
-/* ── Async CDV writes (work-queue based) ───────────────────────────────────
+/* -- Async CDV writes (work-queue based) -----------------------------------
  *
  * CDV record and header writes are dispatched to the per-CDV I/O WQ so they
  * don't block the main thread.  The main thread prepares the 4 KiB write
@@ -844,12 +844,12 @@ static void cdv_write_free(struct nvmeibt_wq_entry *wq_entry)
 	NNVMEIBT_BM_FREE(cdv_write_wqe_free, e);
 }
 
-/* ── Async CDV read-modify-write for single records (packed layout)
+/* -- Async CDV read-modify-write for single records (packed layout)
  *
- * Version 2 packs 32 × 128-byte records into each 4 KiB satellite block.
- * A record update can no longer be a single pwrite — we must read the block
+ * Version 2 packs 32 x 128-byte records into each 4 KiB satellite block.
+ * A record update can no longer be a single pwrite - we must read the block
  * containing the target slot, overwrite exactly 128 bytes in-place, and
- * write the block back. The per-CDV io_wq is single-threaded (see §2.2 of
+ * write the block back. The per-CDV io_wq is single-threaded (see S.2.2 of
  * ThinProvisioningImplementation.md), so RMW entries targeting the same
  * block are dispatched in the order they were enqueued on the main thread
  * under handler_lock, and executed sequentially by the worker. No
@@ -961,7 +961,7 @@ static void cdv_rmw_free(struct nvmeibt_wq_entry *wq_entry)
 }
 
 /*
- * cdv_dispatch_rmw_record — enqueue an RMW on the per-extent record.
+ * cdv_dispatch_rmw_record - enqueue an RMW on the per-extent record.
  *
  * Caller passes the *new* record contents; the worker reads the block,
  * overwrites exactly that 128-byte slot, and writes the block back.
@@ -994,7 +994,7 @@ static void cdv_dispatch_rmw_record(struct nvmeibt_cdv_alloc *alloc,
 }
 
 /*
- * cdv_dispatch_write — enqueue a single 4 KiB write to the per-CDV I/O WQ.
+ * cdv_dispatch_write - enqueue a single 4 KiB write to the per-CDV I/O WQ.
  *
  * @alloc:   per-CDV allocator (must have io_wq set up)
  * @buf:     page-aligned 4 KiB buffer; ownership transfers to the WQ entry
@@ -1010,7 +1010,7 @@ static void cdv_dispatch_write(struct nvmeibt_cdv_alloc *alloc,
 	struct cdv_write_wq_entry *e;
 
 	if (!alloc->io_wq) {
-		/* I/O WQ not ready — discard write (best-effort). */
+		/* I/O WQ not ready - discard write (best-effort). */
 		NNVMEIBT_BM_FREE(cdv_dispatch_wr_no_wq, buf);
 		return;
 	}
@@ -1035,7 +1035,7 @@ static void cdv_dispatch_write(struct nvmeibt_cdv_alloc *alloc,
 }
 
 /*
- * cdv_async_write_record — prepare a record buffer and dispatch to the I/O WQ.
+ * cdv_async_write_record - prepare a record buffer and dispatch to the I/O WQ.
  *
  * Called from the main thread after in-memory state has been updated.
  * If tpv_uuid is NULL, the record is written as free (zeroed flags).
@@ -1059,7 +1059,7 @@ static void cdv_async_write_record(struct nvmeibt_cdv_alloc *alloc,
 }
 
 /*
- * cdv_async_write_record_free_with_rollback — async clear-record RMW that
+ * cdv_async_write_record_free_with_rollback - async clear-record RMW that
  * reinserts the (extent_index, tpv_uuid) entry into alloc->extents if the
  * on-disk write fails. Callers that remove the in-memory entry BEFORE
  * dispatching (e.g. handle_cdv_free_extent, free_all_for_tpv) use this
@@ -1101,7 +1101,7 @@ static void cdv_async_write_record_free_with_rollback(
 }
 
 /*
- * cdv_async_write_header — prepare a header buffer and dispatch to the I/O WQ.
+ * cdv_async_write_header - prepare a header buffer and dispatch to the I/O WQ.
  *
  * Snapshots the current allocator state into the header buffer on the main
  * thread, then hands it to the worker for persistence.
@@ -1128,10 +1128,10 @@ static void cdv_async_write_header(struct nvmeibt_cdv_alloc *alloc)
 }
 
 /*
- * cdv_data_extent_offset — CDV byte offset of data extent @extent_index.
+ * cdv_data_extent_offset - CDV byte offset of data extent @extent_index.
  *
  * Data extents are 1-based (index 0 is unused so the on-satellite record at
- * offset 0 can remain the header — see cdv_ondisk_record_offset).
+ * offset 0 can remain the header - see cdv_ondisk_record_offset).
  * Post-satellite-migration the allocator metadata lives on the <cdv>-mgmt
  * satellite, so the entire CDV is data:
  *   Byte offset = (extent_index - 1) * cdv_extent_size_mib * 1 MiB
@@ -1147,7 +1147,7 @@ static inline uint64_t cdv_data_extent_offset(uint64_t extent_index,
 }
 
 /*
- * cdv_async_write_record_needs_zeroing — write an ALLOCATED|NEEDS_ZEROING record
+ * cdv_async_write_record_needs_zeroing - write an ALLOCATED|NEEDS_ZEROING record
  * carrying geometry in the reserved2 extension fields (not CRC-covered).
  */
 static void cdv_async_write_record_needs_zeroing(struct nvmeibt_cdv_alloc *alloc,
@@ -1171,7 +1171,7 @@ static void cdv_async_write_record_needs_zeroing(struct nvmeibt_cdv_alloc *alloc
 	cdv_dispatch_rmw_record(alloc, extent_index, &rec);
 }
 
-/* ── Background CDV data-extent zero (work-queue based) ────────────────────
+/* -- Background CDV data-extent zero (work-queue based) --------------------
  *
  * When a TPV is deleted, all CDV data extents it owned are zeroed in the
  * background before being made available for a new TPV.  This prevents data
@@ -1210,7 +1210,7 @@ static void cdv_zero_execute(struct nvmeibt_wq_entry *wq_entry)
 	int fd;
 
 	/*
-	 * DESIGN GAP — see ThinProvisioningImplementation.md §3.9 ("Design gap:
+	 * DESIGN GAP - see ThinProvisioningImplementation.md S.3.9 ("Design gap:
 	 * zero-on-free is non-functional after the satellite-volume migration").
 	 *
 	 * After the satellite-volume migration the CDV is no longer auto-attached
@@ -1235,7 +1235,7 @@ static void cdv_zero_execute(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	e->rv = 0;
-	/* Zero-on-free targets CDV data-extent offsets — must use the CDV fd,
+	/* Zero-on-free targets CDV data-extent offsets - must use the CDV fd,
 	 * NOT the satellite fd.  See cdv_worker_open_cdv_fd_for_zeroing doc. */
 	fd = cdv_worker_open_cdv_fd_for_zeroing(e->alloc);
 	if (fd < 0) {
@@ -1335,7 +1335,7 @@ static void cdv_zero_free(struct nvmeibt_wq_entry *wq_entry)
 }
 
 /*
- * cdv_dispatch_zero_extent — enqueue a background data-extent zero on the per-CDV WQ.
+ * cdv_dispatch_zero_extent - enqueue a background data-extent zero on the per-CDV WQ.
  */
 static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
 				     uint64_t extent_index,
@@ -1379,12 +1379,12 @@ static void cdv_dispatch_zero_extent(struct nvmeibt_cdv_alloc *alloc,
 	     alloc->cdv_uuid, extent_index, e->data_offset, cdv_extent_size_mib);
 }
 
-/* Forward declaration — defined in the incoming-message handler section. */
+/* Forward declaration - defined in the incoming-message handler section. */
 static int cdv_send_response(struct nvmeibt_registrant_ctx *reg_ctx,
 			     enum NVMEIBT_CLIENT_MSG_TYPES msg_type,
 			     int data_length, void *data);
 
-/* ── Persist-then-respond: ALLOC write with deferred client response ────── */
+/* -- Persist-then-respond: ALLOC write with deferred client response ------ */
 
 /*
  * WQ entry for the ALLOC path: writes record + header on the worker thread,
@@ -1401,7 +1401,7 @@ struct cdv_alloc_persist_wq_entry {
 
 	/*
 	 * Record contents prepared by main thread; worker does RMW on the
-	 * 4 KiB block containing extent_index's slot (§2.2).
+	 * 4 KiB block containing extent_index's slot (S.2.2).
 	 */
 	struct cdv_alloc_ondisk_record   new_rec;
 	uint64_t                         extent_index;
@@ -1409,7 +1409,7 @@ struct cdv_alloc_persist_wq_entry {
 	void                            *header_buf;
 
 	/* Response to send from finalize after write completes. */
-	struct nvmeibt_registrant_ctx    reg_ctx;	/* copy — msg may be freed */
+	struct nvmeibt_registrant_ctx    reg_ctx;	/* copy - msg may be freed */
 	struct nvmeibt_cdv_alloc_resp    resp;
 
 	int      write_rv;				/* result from pwrite */
@@ -1432,7 +1432,7 @@ static void cdv_alloc_persist_execute(struct nvmeibt_wq_entry *wq_entry)
 	}
 
 	/*
-	 * Write the allocation record — this is the critical write.
+	 * Write the allocation record - this is the critical write.
 	 * Packed layout: RMW the 4 KiB block containing the slot.
 	 */
 	block = NNVMEIBT_BM_ALIGNED_CALLOC(cdv_alloc_persist_rmw_block,
@@ -1481,7 +1481,7 @@ static void cdv_alloc_persist_finalize(struct nvmeibt_wq_entry *wq_entry)
 		/*
 		 * Roll back the in-memory extent entry that handle_cdv_alloc_extent
 		 * inserted before dispatching the persist. Without this the phantom
-		 * entry keeps the index reserved forever — the next alloc will pick
+		 * entry keeps the index reserved forever - the next alloc will pick
 		 * a different (higher) index, and the phantom never clears until
 		 * TOMA restart. Use remove_extent against the recorded cdv_uuid so
 		 * the hash lookup is valid even if alloc has been torn down.
@@ -1490,7 +1490,7 @@ static void cdv_alloc_persist_finalize(struct nvmeibt_wq_entry *wq_entry)
 						 e->extent_index);
 	}
 
-	/* Send the response to the client — on success the record is on disk. */
+	/* Send the response to the client - on success the record is on disk. */
 	cdv_send_response(&e->reg_ctx,
 			  NVMEIBT_CLIENT_MSG_TR_CDV_ALLOC_EXTENT_RSP,
 			  sizeof(e->resp), &e->resp);
@@ -1507,7 +1507,7 @@ static void cdv_alloc_persist_free(struct nvmeibt_wq_entry *wq_entry)
 }
 
 /*
- * cdv_dispatch_alloc_persist — persist an ALLOC record and defer the client
+ * cdv_dispatch_alloc_persist - persist an ALLOC record and defer the client
  * response until the write completes.
  *
  * Returns 0 if the work was successfully dispatched (response will be sent
@@ -1551,7 +1551,7 @@ static int cdv_dispatch_alloc_persist(struct nvmeibt_cdv_alloc *alloc,
 		hdr->crc32 = crc32_seedless(hdr,
 			offsetof(struct cdv_alloc_ondisk_header, crc32));
 	}
-	/* hdr alloc failure is non-fatal — header write is best-effort. */
+	/* hdr alloc failure is non-fatal - header write is best-effort. */
 
 	e->wq_entry.type     = "CDV_ALLOC_PERSIST";
 	e->wq_entry.execute  = cdv_alloc_persist_execute;
@@ -1569,10 +1569,10 @@ static int cdv_dispatch_alloc_persist(struct nvmeibt_cdv_alloc *alloc,
 	return 0;
 }
 
-/* ── Internal helpers ───────────────────────────────────────────────────── */
+/* -- Internal helpers ----------------------------------------------------- */
 
 /*
- * cdv_alloc_insert — find (or create) the per-CDV allocator and append a new
+ * cdv_alloc_insert - find (or create) the per-CDV allocator and append a new
  * extent entry to it.  Returns 0 on success, negative errno on OOM.
  */
 static int cdv_alloc_insert(const char *cdv_uuid,
@@ -1636,10 +1636,10 @@ static int cdv_alloc_insert(const char *cdv_uuid,
 	return 0;
 }
 
-/* ── Public API ──────────────────────────────────────────────────────────── */
+/* -- Public API ------------------------------------------------------------ */
 
 /*
- * ── Per-client CDV preempt (§2.10) ──────────────────────────────────────────
+ * -- Per-client CDV preempt (S.2.10) ------------------------------------------
  */
 
 struct nvmeibt_cdv_alloc *nvmeibt_cdv_alloc_lookup(const char *cdv_uuid)
@@ -1715,11 +1715,11 @@ void nvmeibt_cdv_alloc_seed_floor(struct nvmeibt_cdv_alloc *alloc,
 }
 
 /*
- * nvmeibt_cdv_alloc_preempt_client — raise the CDV's admission floor and
+ * nvmeibt_cdv_alloc_preempt_client - raise the CDV's admission floor and
  * terminate the named client's reg_ctx on every local CDV segment.
  *
- * Ordering invariant (TPV_PerClientCDVPreemption.md §2.10.4):
- *   1. Raise admission_floor FIRST under handler_lock — a concurrent REGISTER
+ * Ordering invariant (TPV_PerClientCDVPreemption.md S.2.10.4):
+ *   1. Raise admission_floor FIRST under handler_lock - a concurrent REGISTER
  *      predicate (check_cdv_admission_floor) that has already taken
  *      handler_lock will observe the new floor; the reverse order would let
  *      a retry REGISTER re-register at the old version in the window between
@@ -1731,7 +1731,7 @@ void nvmeibt_cdv_alloc_seed_floor(struct nvmeibt_cdv_alloc *alloc,
  *
  * Linear inner-walk is intentional: preempt is a control-plane event, not
  * I/O-path. A dedicated by-client hash index was considered and rejected in
- * §2.10.5 — the register/unregister maintenance cost isn't justified by the
+ * S.2.10.5 - the register/unregister maintenance cost isn't justified by the
  * preempt-path savings.
  */
 int nvmeibt_cdv_alloc_preempt_client(const char *cdv_uuid,
@@ -1754,19 +1754,19 @@ int nvmeibt_cdv_alloc_preempt_client(const char *cdv_uuid,
 
 	pthread_mutex_lock(&alloc->handler_lock);
 
-	/* Step 1: raise floor FIRST (order invariant, §2.10.4). */
+	/* Step 1: raise floor FIRST (order invariant, S.2.10.4). */
 	if (new_floor > alloc->admission_floor)
 		alloc->admission_floor = new_floor;
 	/* admission_floor_seeded is guaranteed true by lookup_or_create_with_floor. */
 
 	/*
 	 * Step 2: terminate this client's reg_ctx on every CDV segment served
-	 * by this TOMA. Outer walk: every local_disk → every seg_active; filter
+	 * by this TOMA. Outer walk: every local_disk -> every seg_active; filter
 	 * to segments of the target CDV via the helper (pointer-equality against
-	 * our alloc entry is correct — cdv_alloc_hash returns the same pointer
+	 * our alloc entry is correct - cdv_alloc_hash returns the same pointer
 	 * for the same UUID key). Inner walk: linear scan of the seg's active
 	 * registrants matching on registrant_node_id.str (hostname); a dedicated
-	 * by-client hash was considered and rejected per §2.10.5 (cost-of-
+	 * by-client hash was considered and rejected per S.2.10.5 (cost-of-
 	 * maintenance > benefit-on-this-rare-control-plane-path).
 	 *
 	 * XHASHTABLE_FOR_EACH_SAFE tolerates removal of the current entry during
@@ -1803,18 +1803,18 @@ struct nvmeibt_cdv_alloc *nvmeibt_seg_active_get_cdv_alloc(
 	/*
 	 * Navigate from the segment to its parent CDV via the applied topology:
 	 *   seg_active
-	 *     → applied_seg_lot              (nvmeibt_seg_active_get_applied_seg_lot)
-	 *       → praid_lot                   (seg_lot->praid_lot)
-	 *         → my_praid                  (praid_lot->my_praid)
-	 *           → blkdev                  (nvmeibt_praid_get_blkdev; follows
+	 *     -> applied_seg_lot              (nvmeibt_seg_active_get_applied_seg_lot)
+	 *       -> praid_lot                   (seg_lot->praid_lot)
+	 *         -> my_praid                  (praid_lot->my_praid)
+	 *           -> blkdev                  (nvmeibt_praid_get_blkdev; follows
 	 *                                      praid_mgmt.its_chunk.its_block_device)
-	 *             → from_config.is_cdv    (CDV predicate)
-	 *             → urn_uuid.str          (CDV UUID — hash key in cdv_alloc_hash)
+	 *             -> from_config.is_cdv    (CDV predicate)
+	 *             -> urn_uuid.str          (CDV UUID - hash key in cdv_alloc_hash)
 	 *
 	 * Returns NULL for non-CDV segments or when any link in the chain is
 	 * not yet established (e.g., topology not applied yet). A NULL return
 	 * causes check_cdv_admission_floor to admit the REGISTER, matching
-	 * pre-feature behavior — safe because non-CDV volumes have no floor
+	 * pre-feature behavior - safe because non-CDV volumes have no floor
 	 * semantics, and a segment without an applied topology can't have a
 	 * live reg_ctx to terminate.
 	 */
@@ -1972,7 +1972,7 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 		 * the committed topology naming an allocator for this CDV.  If no
 		 * entry exists here, topology has not yet been applied (cold-start
 		 * race with client requests, or this CDV is unknown to us).  Do
-		 * NOT create a zero-initialized entry — that historically led to
+		 * NOT create a zero-initialized entry - that historically led to
 		 * scan loops against an unattached CDV.  Return EAGAIN and let the
 		 * client retry after the topology push arrives.
 		 */
@@ -2032,7 +2032,7 @@ int nvmeibt_cdv_alloc_list_for_tpv(const char  *cdv_uuid,
 	return 0;
 }
 
-/* ── CDV removal ────────────────────────────────────────────────────────── */
+/* -- CDV removal ---------------------------------------------------------- */
 
 void nvmeibt_cdv_alloc_remove(const char *cdv_uuid)
 {
@@ -2078,7 +2078,7 @@ void nvmeibt_cdv_alloc_remove(const char *cdv_uuid)
 	NNVMEIBT_BM_FREE(cdv_alloc_remove_alloc, alloc);
 }
 
-/* ── Stale-entry garbage collection ─────────────────────────────────────── */
+/* -- Stale-entry garbage collection --------------------------------------- */
 
 /*
  * Maximum number of stale CDV allocator entries that can be cleaned up in a
@@ -2115,7 +2115,7 @@ void nvmeibt_cdv_alloc_gc_stale_entries(void)
 
 		bdev = nvmeibt_block_device_get_block_device_by_id(&bdev_uuid);
 
-		/* Live CDV bdev — nothing to do. */
+		/* Live CDV bdev - nothing to do. */
 		if (bdev && bdev->from_config.is_cdv && !nvmeibt_blkdev_is_being_deleted(bdev))
 			continue;
 
@@ -2152,10 +2152,10 @@ void nvmeibt_cdv_alloc_gc_stale_entries(void)
 		nvmeibt_cdv_alloc_remove(stale[i]);
 }
 
-/* ── Allocator election ─────────────────────────────────────────────────── */
+/* -- Allocator election --------------------------------------------------- */
 
 /*
- * find_or_create_alloc — look up the per-CDV allocator; create if absent.
+ * find_or_create_alloc - look up the per-CDV allocator; create if absent.
  */
 static struct nvmeibt_cdv_alloc *find_or_create_alloc(const char *cdv_uuid)
 {
@@ -2216,7 +2216,7 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 		}
 	}
 
-	/* Pick a candidate: single → use it; multiple → random. */
+	/* Pick a candidate: single -> use it; multiple -> random. */
 	if (n_candidates == 1) {
 		chosen = candidates[0];
 	} else {
@@ -2243,14 +2243,14 @@ int nvmeibt_cdv_alloc_elect(const char *cdv_uuid,
 	topo_ctx->allocator_toma_id[sizeof(topo_ctx->allocator_toma_id) - 1] = '\0';
 	topo_ctx->allocator_generation++;
 
-	return 1;   /* 1 = newly elected — caller marks topo as changed */
+	return 1;   /* 1 = newly elected - caller marks topo as changed */
 }
 
 /*
- * nvmeibt_cdv_alloc_push_to_registrants — broadcast CDV allocator identity.
+ * nvmeibt_cdv_alloc_push_to_registrants - broadcast CDV allocator identity.
  *
  * We reuse the CDV protocol signature + CDV_ALLOCATOR_UPDATE message type.
- * The message is sent to every active registrant on this TOMA node — only
+ * The message is sent to every active registrant on this TOMA node - only
  * clients that have the CDV attached will process it (matching by cdv_uuid).
  */
 void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid)
@@ -2303,7 +2303,7 @@ void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid)
 }
 
 /*
- * nvmeibt_cdv_alloc_push_all_to_new_registrant — unicast CDV_ALLOCATOR_UPDATE
+ * nvmeibt_cdv_alloc_push_all_to_new_registrant - unicast CDV_ALLOCATOR_UPDATE
  * for every elected CDV allocator to a single newly-registered client.
  *
  * Called right after a client's RT_REGISTER_DISK_SEGMENT succeeds so that
@@ -2338,7 +2338,7 @@ void nvmeibt_cdv_alloc_push_all_to_new_registrant(struct nvmeibt_registrant_ctx 
 }
 
 /*
- * cdv_send_attach_satellite_request — Stage A of the satellite attach handshake.
+ * cdv_send_attach_satellite_request - Stage A of the satellite attach handshake.
  *
  * Publishes an `attachSatelliteRequest` Kafka message asking management to attach
  * the CDV's satellite volume to this TOMA in EXCLUSIVE_READ_WRITE mode (with
@@ -2389,7 +2389,7 @@ static void cdv_send_attach_satellite_request(struct nvmeibt_cdv_alloc *alloc)
 }
 
 /*
- * nvmeibt_cdv_alloc_on_topo_applied — hook fired from update_applied_topology
+ * nvmeibt_cdv_alloc_on_topo_applied - hook fired from update_applied_topology
  * on every committed topology change, on every TOMA (leader and followers).
  *
  * Called only for the first pRAID of a CDV (the caller filters).  Diffs the
@@ -2470,7 +2470,7 @@ void nvmeibt_cdv_alloc_on_topo_applied(const char *cdv_uuid,
 		 * (the new attach carries a bumped reservation version at the target). */
 		if (alloc->state == NVMEIBT_CDV_ALLOC_STATE_ACTIVE &&
 		    alloc->satellite_attach_request_id == new_applied->allocator_generation) {
-			/* Already ACTIVE for this generation — nothing to do. */
+			/* Already ACTIVE for this generation - nothing to do. */
 			goto push;
 		}
 		if (alloc->io_wq) {
@@ -2509,7 +2509,7 @@ void nvmeibt_cdv_alloc_on_topo_applied(const char *cdv_uuid,
 		     cdv_uuid, new_applied->allocator_toma_id,
 		     new_applied->allocator_generation);
 	}
-	/* else: the allocator is still someone else — we just recorded identity. */
+	/* else: the allocator is still someone else - we just recorded identity. */
 
 push:
 	/* Push the updated allocator identity to any local registrants so clients
@@ -2597,7 +2597,7 @@ void nvmeibt_cdv_alloc_handle_satellite_attach_response(
 	/*
 	 * Set up the per-CDV I/O WQ now (resolves satellite_dev_path from
 	 * satellite_uuid) so subsequent scan + header writes can dispatch.  If the
-	 * satellite block device is not yet visible to this TOMA (timing race —
+	 * satellite block device is not yet visible to this TOMA (timing race -
 	 * the AddVolume Kafka message for the satellite may still be in flight),
 	 * leave state in AWAITING; the lazy retry on incoming ALLOC requests
 	 * (handle_cdv_alloc_extent state gate) will re-fire Stage A and we'll
@@ -2614,7 +2614,7 @@ void nvmeibt_cdv_alloc_handle_satellite_attach_response(
 	 * Scan the satellite to load any persisted allocator state.  The scan
 	 * worker opens alloc->satellite_dev_path lazily (see cdv_worker_open_fd).
 	 * On scan finalize the state is promoted to ACTIVE and the registrants
-	 * are notified — see cdv_scan_finalize / promote-on-load logic.
+	 * are notified - see cdv_scan_finalize / promote-on-load logic.
 	 */
 	if (!alloc->ondisk_loaded)
 		cdv_ondisk_scan_async(cdv_uuid, alloc);
@@ -2635,7 +2635,7 @@ void nvmeibt_cdv_alloc_handle_satellite_attach_response(
 	nvmeibt_cdv_alloc_push_to_registrants(cdv_uuid);
 }
 
-/* ── One-time init / shutdown ────────────────────────────────────────────── */
+/* -- One-time init / shutdown ---------------------------------------------- */
 
 int nvmeibt_cdv_alloc_one_time_init(void)
 {
@@ -2679,10 +2679,10 @@ void nvmeibt_cdv_alloc_destroy(void)
 	cdv_alloc_inited = false;
 }
 
-/* ── Capacity monitoring ─────────────────────────────────────────────────── */
+/* -- Capacity monitoring --------------------------------------------------- */
 
 /*
- * cdv_maybe_warn_capacity — check CDV usage and fire a Kafka CDVCapacityWarning
+ * cdv_maybe_warn_capacity - check CDV usage and fire a Kafka CDVCapacityWarning
  * when the utilisation crosses NVMEIBT_CDV_WARN_PCT.
  *
  * Deduplication: the flag alloc->capacity_warning_sent suppresses repeated
@@ -2703,13 +2703,13 @@ static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
 	used_pct = (unsigned int)(alloc->n_allocated * 100 / alloc->total_data_extents);
 
 	if (used_pct < NVMEIBT_CDV_WARN_CLEAR_PCT) {
-		/* Usage safely below hysteresis threshold — reset flag. */
+		/* Usage safely below hysteresis threshold - reset flag. */
 		alloc->capacity_warning_sent = false;
 		return;
 	}
 
 	if (used_pct < NVMEIBT_CDV_WARN_PCT)
-		return;   /* in hysteresis band [85–90%) — don't fire yet */
+		return;   /* in hysteresis band [85-90%) - don't fire yet */
 
 	if (alloc->capacity_warning_sent)
 		return;   /* already warned; suppress duplicate */
@@ -2745,7 +2745,7 @@ static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
 }
 
 /*
- * cdv_publish_alloc_stats — push a CDVAllocatorStats Kafka event.
+ * cdv_publish_alloc_stats - push a CDVAllocatorStats Kafka event.
  *
  * Sends current allocation counters (allocated / total data extents) to
  * management so the UI can display them without polling.  Uses a
@@ -2790,7 +2790,7 @@ static void cdv_publish_alloc_stats(struct nvmeibt_cdv_alloc *alloc)
 	NNVMEIBT_STR_FREE(cdv_stats_json_free, json);
 }
 
-/* ── Startup recovery scan ───────────────────────────────────────────────── */
+/* -- Startup recovery scan ------------------------------------------------- */
 
 void nvmeibt_cdv_alloc_startup_scan(void)
 {
@@ -2818,7 +2818,7 @@ void nvmeibt_cdv_alloc_startup_scan(void)
 	     n_cdvs, n_extents_total);
 }
 
-/* ── Status / observability ──────────────────────────────────────────────── */
+/* -- Status / observability ------------------------------------------------ */
 
 void nvmeibt_cdv_alloc_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
 {
@@ -2911,7 +2911,7 @@ void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const c
 	}
 }
 
-/* ── TPV deletion: free all extents + zero L1 tree ───────────────────────── */
+/* -- TPV deletion: free all extents + zero L1 tree ------------------------- */
 
 int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 					const char *tpv_uuid,
@@ -2922,7 +2922,7 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	struct nvmeibt_cdv_extent_entry *entry;
 	uint64_t n_released = 0;
 
-	/* ── 1. Look up the per-CDV allocator ── */
+	/* -- 1. Look up the per-CDV allocator -- */
 	alloc = cdv_alloc_search(cdv_uuid);
 	if (!alloc) {
 		/* Under the RAFT-embedded identity design, the alloc entry is
@@ -2961,14 +2961,14 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	if (!alloc->ondisk_loaded) {
 		cdv_ondisk_scan_async(cdv_uuid, alloc);
 		/*
-		 * Scan in progress — in-memory extent list may be incomplete.
+		 * Scan in progress - in-memory extent list may be incomplete.
 		 * Proceed with whatever is loaded; the scan finalize will
 		 * re-dispatch zeroing for any NEEDS_ZEROING entries it finds.
 		 */
 	}
 
 	/*
-	 * ── 2. Release extents ──
+	 * -- 2. Release extents --
 	 *
 	 * Two modes, chosen by the cdv_extent_zero_on_free TOMA config param:
 	 *
@@ -3033,7 +3033,7 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 		}
 	}
 
-	/* ── 3. Rewrite header (extent count may have changed) ── */
+	/* -- 3. Rewrite header (extent count may have changed) -- */
 	if (n_released > 0)
 		cdv_async_write_header(alloc);
 
@@ -3051,13 +3051,13 @@ int nvmeibt_cdv_alloc_free_all_for_tpv(const char *cdv_uuid,
 	return 0;
 }
 
-/* ── Incoming-message handler ────────────────────────────────────────────── */
+/* -- Incoming-message handler ---------------------------------------------- */
 
 /*
  * Helper: send a CDV response to the requesting client.
  *
  * Wraps nvmeibt_toma_send_msg_to_client() with a CDV-appropriate praid_version
- * (always 0 — CDV operations are topology-independent) and a unique msg_id.
+ * (always 0 - CDV operations are topology-independent) and a unique msg_id.
  */
 static int cdv_send_response(struct nvmeibt_registrant_ctx *reg_ctx,
 			     enum NVMEIBT_CLIENT_MSG_TYPES msg_type,
@@ -3073,7 +3073,7 @@ static int cdv_send_response(struct nvmeibt_registrant_ctx *reg_ctx,
 }
 
 /*
- * handle_cdv_alloc_extent — pick a free CDV_extent, record it, and reply.
+ * handle_cdv_alloc_extent - pick a free CDV_extent, record it, and reply.
  *
  * Algorithm:
  *   1. Look up (or note absence of) the per-CDV allocator.
@@ -3115,7 +3115,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	 * Split-brain gate: an allocator that has lost RAFT quorum contact
 	 * must not serve ALLOC.  The chosen allocator's identity is only ever
 	 * bumped by a RAFT leader (unique per term), so a partitioned minority
-	 * can never have elected a newer allocator — if we're still cached as
+	 * can never have elected a newer allocator - if we're still cached as
 	 * allocator here but RAFT is no longer valid, we're the stale side.
 	 * Respond WRONG_GEN so the client retries; when the partition heals,
 	 * the leader's notify will carry a higher gen and we'll update.
@@ -3172,7 +3172,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	}
 
 	/*
-	 * No in-memory allocator for this CDV — under the RAFT-embedded identity
+	 * No in-memory allocator for this CDV - under the RAFT-embedded identity
 	 * design, the alloc entry is created exclusively by the topology-apply
 	 * hook once this TOMA applies a committed pRAID topology naming us the
 	 * allocator.  If the client reached us before our apply ran (cold-start
@@ -3195,7 +3195,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	(void)cdv_ensure_io_wq(cdv_uuid, alloc);
 
 	/*
-	 * ── Verify we are the elected allocator for this CDV ────────────────
+	 * -- Verify we are the elected allocator for this CDV ----------------
 	 *
 	 * Only the elected allocator TOMA should serve ALLOC requests.  If
 	 * the allocator has been elected but it's a different node, reject
@@ -3212,7 +3212,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	/* ── Generation check ────────────────────────────────────────────────── */
+	/* -- Generation check -------------------------------------------------- */
 	if (req->client_generation != alloc->allocator_generation) {
 		N_If(cdv_alloc_wrong_gen,
 		     "CDV: ALLOC WRONG_GEN cdv=@STR client=@LLU toma=@LLU",
@@ -3222,7 +3222,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	/* ── Capacity info ───────────────────────────────────────────────────── */
+	/* -- Capacity info ----------------------------------------------------- */
 
 	/* Refresh cached capacity after a TOMA restart (stored value is 0). */
 	if (alloc->total_data_extents == 0 && req->total_data_extents > 0)
@@ -3239,7 +3239,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	/* ── CDV-full check ─────────────────────────────────────────────────── */
+	/* -- CDV-full check --------------------------------------------------- */
 	if (alloc->n_allocated >= total) {
 		N_Wf(cdv_alloc_full,
 		     "CDV: ALLOC cdv=@STR FULL allocated=@LLU total=@LLU",
@@ -3251,7 +3251,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	}
 
 	/*
-	 * ── Find first free extent index ────────────────────────────────────
+	 * -- Find first free extent index ------------------------------------
 	 *
 	 * Extent indices are 1-based: index 0 is unused (kept so the satellite
 	 * record at offset 0 stays the header); data extents are numbered
@@ -3275,7 +3275,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	}
 
 	if (!found) {
-		/* n_allocated < total yet no free slot — internal inconsistency */
+		/* n_allocated < total yet no free slot - internal inconsistency */
 		N_Ef(cdv_alloc_scan_bug,
 		     "CDV: ALLOC scan bug cdv=@STR n=@LLU total=@LLU",
 		     cdv_uuid, alloc->n_allocated, total);
@@ -3283,7 +3283,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 		goto send;
 	}
 
-	/* ── Record the allocation ───────────────────────────────────────────── */
+	/* -- Record the allocation --------------------------------------------- */
 	rv = cdv_alloc_insert(cdv_uuid, candidate, tpv_uuid);
 	if (rv) {
 		N_Ef(cdv_alloc_insert_fail,
@@ -3310,7 +3310,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 	/*
 	 * Persist the allocation record to the CDV and THEN send the response.
 	 * The client must not learn about the extent until the on-disk record
-	 * is confirmed written — otherwise a TOMA crash between response and
+	 * is confirmed written - otherwise a TOMA crash between response and
 	 * write would leave the client holding an untracked extent.
 	 *
 	 * cdv_dispatch_alloc_persist() queues the write on the per-CDV I/O WQ;
@@ -3324,7 +3324,7 @@ static int handle_cdv_alloc_extent(struct nvmeibt_register_msg *msg)
 						&msg->registrant_ctx, &resp) == 0)
 		return 0;   /* response will be sent from finalize */
 
-	/* Dispatch failed — send error response immediately. */
+	/* Dispatch failed - send error response immediately. */
 	if (resp.status == NVMEIBT_CDV_ALLOC_OK)
 		resp.status = NVMEIBT_CDV_ALLOC_ERROR;
 
@@ -3335,9 +3335,9 @@ send:
 }
 
 /*
- * handle_cdv_free_extent — CDV_FREE_EXTENT: validate ownership, free the extent.
+ * handle_cdv_free_extent - CDV_FREE_EXTENT: validate ownership, free the extent.
  *
- * Fire-and-forget: no response is sent.  The handler is idempotent — freeing
+ * Fire-and-forget: no response is sent.  The handler is idempotent - freeing
  * an already-free or unknown extent is a no-op (logged at WARN).
  */
 static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
@@ -3416,10 +3416,10 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 }
 
 /*
- * handle_cdv_list_extents — CDV_LIST_EXTENTS: return all extents owned by tpv.
+ * handle_cdv_list_extents - CDV_LIST_EXTENTS: return all extents owned by tpv.
  *
  * Sends a variable-length response: nvmeibt_cdv_list_resp header followed
- * immediately by n_extents × uint64_t extent indices.
+ * immediately by n_extents x uint64_t extent indices.
  */
 static int handle_cdv_list_extents(struct nvmeibt_register_msg *msg)
 {

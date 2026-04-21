@@ -4,7 +4,7 @@
 */
 
 /*
- * nvmeibc_tpv.c — TPV volume attach/detach and block device registration.
+ * nvmeibc_tpv.c - TPV volume attach/detach and block device registration.
  *
  * A Thin-Provisioned Volume (TPV) presents a sparse virtual address space
  * to a single exclusive client.  Physical storage is provided by a hidden
@@ -12,7 +12,7 @@
  * TPV.allocator (nvmeibc_tpv_allocator.c) and persisted in the per-TPV tree extent
  * (nvmeibc_tpv_persist.c).
  *
- * Attach flow (§3.8):
+ * Attach flow (S.3.8):
  *   1. Assert CDV is present in the volumes list.
  *   2. Allocate and initialise struct nvmeibc_tpv.
  *   3. Schedule deferred load_state_work (tree extent read + recovery).
@@ -22,11 +22,11 @@
  * Background load_state_work (nvmeibc_tpv_persist.c):
  *   a. Load allocator state from the per-TPV tree extent (nvmeibc_tpv_load_state).
  *      Retries on failure (CDV not ready, transport error) every 1 second.
- *   b. Run recovery (nvmeibc_tpv_recovery) — always, regardless of tree state.
+ *   b. Run recovery (nvmeibc_tpv_recovery) - always, regardless of tree state.
  *   c. Set state_loaded; drain pending_bios.
  *   d. Schedule initial CDV_extent request if pool empty.
  *
- * Detach flow (§3.8):
+ * Detach flow (S.3.8):
  *   1. Quiesce IO (freeze queue).
  *   2. Flush dirty allocator state to the tree extent (nvmeibc_tpv_flush_state).
  *   3. Unregister gendisk.
@@ -60,27 +60,27 @@ MODULE_PARM_DESC(tpv_cdv_retry_msecs,
 		 "Retry delay in milliseconds for TPV CDV operations (load_state, etc.)");
 
 /*
- * ATOM handover fops pointer — set by nvmeibc_os_api_layer_init() in
+ * ATOM handover fops pointer - set by nvmeibc_os_api_layer_init() in
  * nvmeibc_block_api_os.c.  Contains nvmeiba's .owner, .open, .release
  * handlers.  Used to populate tpv_live_fops at fresh attach and NDU adopt.
  */
 extern const struct block_device_operations *nvmeibc_atom_handover_fops;
 
-/* ── Forward declarations for sibling implementation files ────────────── */
+/* -- Forward declarations for sibling implementation files -------------- */
 
 /* nvmeibc_tpv_io.c */
 extern REQ_RET nvmeibc_tpv_make_request(struct request_queue *q, struct bio *bio);
 
-/* ── Block device fops ─────────────────────────────────────────────────── */
+/* -- Block device fops --------------------------------------------------- */
 
 /*
- * On kernels without make_request_fn (≥5.9), submit_bio fops takes a single
+ * On kernels without make_request_fn (>=5.9), submit_bio fops takes a single
  * (struct bio *) argument, not (queue *, bio *).  Bridge the gap here so
  * nvmeibc_tpv_make_request keeps the canonical (q, bio) signature used by all
  * NVMesh make_request implementations.
  */
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
-/* Forward declaration — satisfies -Wmissing-prototypes. */
+/* Forward declaration - satisfies -Wmissing-prototypes. */
 REQ_RET nvmeibc_tpv_submit_bio_wrapper(struct bio *bio);
 
 REQ_RET nvmeibc_tpv_submit_bio_wrapper(struct bio *bio)
@@ -106,11 +106,11 @@ static void nvmeibc_tpv_init_live_fops(struct block_device_operations *fops)
 #endif
 }
 
-/* ── Module-level active-TPV list ──────────────────────────────────────
+/* -- Module-level active-TPV list --------------------------------------
  *
  * All attached TPVs are registered here so that the MCS detach handler
  * can locate a struct nvmeibc_tpv* by UUID without needing the full
- * nvmeibc_volume infrastructure (TPVs bypass that path, see §3.2).
+ * nvmeibc_volume infrastructure (TPVs bypass that path, see S.3.2).
  */
 static LIST_HEAD(nvmeibc_tpv_active_list);
 static DEFINE_SPINLOCK(nvmeibc_tpv_list_lock);
@@ -150,7 +150,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_find_by_uuid(const char *uuid)
 }
 
 /*
- * nvmeibc_tpv_detach_all_for_inst — detach every active TPV that belongs to
+ * nvmeibc_tpv_detach_all_for_inst - detach every active TPV that belongs to
  * client instance @cinst (identified by tpv->cdv_vol->p).
  *
  * Must be called BEFORE the CDVs of the same instance are detached, so that
@@ -184,8 +184,8 @@ again:
 }
 
 /*
- * nvmeibc_tpv_handle_cdv_preempted — CDV preempted; tear down every TPV that
- * points at it (per-client CDV preempt cleanup barrier; §2.10).
+ * nvmeibc_tpv_handle_cdv_preempted - CDV preempted; tear down every TPV that
+ * points at it (per-client CDV preempt cleanup barrier; S.2.10).
  *
  * Called from the CDV block-device status 'P' handler in nvmeibc_block.c when
  * the CDV enters NCBD_PREEMPTED. This happens in two cases:
@@ -200,7 +200,7 @@ again:
  *
  * The block-device status handler invokes us from the siw/RDMA recv path,
  * which runs in softirq (tasklet) context.  nvmeibc_tpv_detach() eventually
- * calls del_gendisk() → bdev_mark_dead() → invalidate_bh_lrus() →
+ * calls del_gendisk() -> bdev_mark_dead() -> invalidate_bh_lrus() ->
  * on_each_cpu_cond_mask(), which BUG_ON's if called from a non-sleepable
  * context (kernel/smp.c smp_call_function_many_cond WARN).  So we only
  * SNAPSHOT the CDV identity here and defer the teardown loop to a workqueue
@@ -251,7 +251,7 @@ void nvmeibc_tpv_handle_cdv_preempted(const struct nvmeibc_volume *cdv)
 		return;
 
 	/* Allocate in the caller's (possibly softirq) context.  On OOM the
-	 * teardown is skipped — the CDV floor bump on TOMA still fences any
+	 * teardown is skipped - the CDV floor bump on TOMA still fences any
 	 * further I/O, so this is best-effort cleanup rather than a correctness
 	 * gate.  The TPV will be torn down on the next instance shutdown via
 	 * nvmeibc_tpv_detach_all_for_inst(), or when the TPV's own detach
@@ -269,7 +269,7 @@ void nvmeibc_tpv_handle_cdv_preempted(const struct nvmeibc_volume *cdv)
 	schedule_work(&ctx->work);
 }
 
-/* ── Allocator helpers ─────────────────────────────────────────────────── */
+/* -- Allocator helpers --------------------------------------------------- */
 
 /*
  * Low-watermark: keep at least 50 MB worth of TPV_extents pre-allocated.
@@ -309,13 +309,13 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 
 	alloc->low_watermark           = nvmeibc_tpv_calc_watermark(tpv_extent_size_kb);
 
-	/* Per-TPV L1/L2 tree tracking — populated by load_state or tpv_on_cdv_alloc_ok. */
+	/* Per-TPV L1/L2 tree tracking - populated by load_state or tpv_on_cdv_alloc_ok. */
 	alloc->l1_extent_index         = 0;
 	alloc->n_l2_tables_used        = 0;
 	xa_init(&alloc->l1_to_l2_ctx);
 
 	/*
-	 * L1 dirty-page bitmap — one bit per 4 KB page of the L1 table slot.
+	 * L1 dirty-page bitmap - one bit per 4 KB page of the L1 table slot.
 	 * Allocated here because T (slot size) is known only after the
 	 * allocator geometry fields above have been populated.  A NULL on
 	 * OOM is tolerated: flush_state treats NULL as "mark all pages dirty"
@@ -384,7 +384,7 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 	alloc->toma_extent_count = 0;
 }
 
-/* ── Block device registration ─────────────────────────────────────────── */
+/* -- Block device registration ------------------------------------------- */
 
 /*
  * Disk prefix used for TPV block devices: /dev/nvmesh-tpv/<name>
@@ -402,7 +402,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 
 	capacity = tpv->virtual_size >> KERNEL_SECTOR_SHIFT;
 
-	/* ── 1. Allocate disk and queue (kernel-version-aware) ─────────── */
+	/* -- 1. Allocate disk and queue (kernel-version-aware) ----------- */
 #if KS_HAS_BLK_ALLOC_DISK
 #  if KS_BLK_ALLOC_DISK_2PARAMS
 	disk = blk_alloc_disk(NULL, NUMA_NO_NODE);
@@ -439,7 +439,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	disk->queue = queue;
 #endif	/* KS_HAS_BLK_ALLOC_DISK */
 
-	/* ── 2. Wire ATOM and populate tpv_live_fops ───────────────────── */
+	/* -- 2. Wire ATOM and populate tpv_live_fops --------------------- */
 	atom->disk  = disk;
 	atom->queue = queue;
 	atom->alloc_size = sizeof(struct nvmeibc_tpv);
@@ -465,7 +465,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	/* Old kernels: make_request_fn is already set above. */
 #endif
 
-	/* ── 3. Configure disk ─────────────────────────────────────────── */
+	/* -- 3. Configure disk ------------------------------------------- */
 	disk->major       = 0;
 	disk->first_minor = 0;
 	disk->minors      = 0;
@@ -484,7 +484,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	 * Block size must match the CDV (4 KiB) so that every bio forwarded
 	 * to the CDV is 4 KiB-aligned.  A 512-byte logical block size would
 	 * allow sub-4 KiB writes that the CDV's RDMA transport and the
-	 * target's NVMe command path cannot handle atomically — two
+	 * target's NVMe command path cannot handle atomically - two
 	 * concurrent sub-4 KiB writes to the same physical 4 KiB block race
 	 * in the target's read-modify-write path, and one write is lost.
 	 *
@@ -530,7 +530,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 	atomic_set(&atom->gendisk_status, 3);	/* gendisk added, IO possible */
 	set_capacity(disk, capacity);		/* OS may start sending IO now */
 
-	/* ── 4. Register with ATOM (adds to global atom list) ──────────── */
+	/* -- 4. Register with ATOM (adds to global atom list) ------------ */
 	nvmeiba_os_api_constructor(atom);
 	atom->status = nvmeiba_status_live;
 
@@ -577,9 +577,9 @@ static void nvmeibc_tpv_blkdev_unregister(struct nvmeibc_tpv *tpv)
 	atom->queue = NULL;
 }
 
-/* ── nvmeibc_tpv_adopt — reconnect an orphaned TPV after NDU ───────────
+/* -- nvmeibc_tpv_adopt - reconnect an orphaned TPV after NDU -----------
  *
- * Steps A1–A14 from the design (§11.6).  Called from nvmeibc_tpv_attach()
+ * Steps A1-A14 from the design (S.11.6).  Called from nvmeibc_tpv_attach()
  * when an ATOM orphan is found by name.  The allocator state (xarray,
  * free lists, CDV extent refs) all survive in memory; we only need to
  * reconnect the CDV, reinitialise work-struct function pointers (which
@@ -610,7 +610,7 @@ static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 		 * volume list. meta_cdv may be NULL if the caller did not
 		 * locate the metadata CDV in the newly-attached volumes; in
 		 * that case the TPV's existing meta_cdv_vol is a dangling
-		 * pointer — we clear it and the next tree write will fail
+		 * pointer - we clear it and the next tree write will fail
 		 * cleanly with -ENODEV until the caller re-drives adopt with
 		 * the metadata CDV pointer. */
 		tpv->meta_cdv_vol = meta_cdv;
@@ -683,7 +683,7 @@ static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 	    !atomic_xchg(&tpv->cdv_alloc_pending, 1))
 		schedule_work(&tpv->cdv_alloc_work);
 
-	/* A14. Optionally reconcile state — schedule load_state for recovery. */
+	/* A14. Optionally reconcile state - schedule load_state for recovery. */
 	if (tpv->dirty) {
 		_NW(tpv_adopt_dirty,
 		    "TPV: @STR adopted with dirty state; scheduling recovery",
@@ -699,7 +699,7 @@ static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 	return tpv;
 }
 
-/* ── nvmeibc_tpv_abandon_all_for_inst — NDU abandon all TPVs ──────────
+/* -- nvmeibc_tpv_abandon_all_for_inst - NDU abandon all TPVs ----------
  *
  * Called from __detach_all_volumes_of_inst_work() when w->is_upgrade is
  * true.  For each active TPV belonging to @cinst, flush dirty state,
@@ -744,7 +744,7 @@ again:
 					    tpv->tpv_name, rv);
 			}
 
-			/* Step 5: Orphan the atom — ATOM buffers new BIOs.
+			/* Step 5: Orphan the atom - ATOM buffers new BIOs.
 			 * nvmeiba_os_api_orphan_abandon() swaps the fops and
 			 * increments orphan counters but does NOT set the
 			 * status field; the caller must transition it to
@@ -789,7 +789,7 @@ again:
 	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
 }
 
-/* ── nvmeibc_tpv_attach ─────────────────────────────────────────────────
+/* -- nvmeibc_tpv_attach -------------------------------------------------
  *
  * Called from nvmeibc_main_capi_manipulate_vols.inc.c when volume_class
  * == NVC_TPV in an AttachVolumes MCS message.  The CDV must already be
@@ -822,7 +822,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 			return NULL;
 	}
 
-	/* ── 0a. Idempotency: return existing TPV if already attached ────
+	/* -- 0a. Idempotency: return existing TPV if already attached ----
 	 *
 	 * Management may re-send an attach command (e.g. after a keepalive
 	 * gap or status-reporting race).  If the TPV is already in the
@@ -830,7 +830,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	 * without touching the disk or allocator.
 	 *
 	 * Also refresh cdv_vol in case the CDV was detached and re-attached
-	 * (new nvmeibc_volume object) while the TPV was still live — without
+	 * (new nvmeibc_volume object) while the TPV was still live - without
 	 * this, tpv->cdv_vol would be a dangling pointer.
 	 */
 	{
@@ -850,7 +850,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		}
 	}
 
-	/* ── 0b. NDU orphan: check ATOM for an orphaned TPV with matching name */
+	/* -- 0b. NDU orphan: check ATOM for an orphaned TPV with matching name */
 	{
 		char dev_name[DISK_NAME_LEN];
 		struct nvmeiba_atom_os_api *orphan_atom;
@@ -869,7 +869,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		}
 	}
 
-	/* ── 1. Verify CDV is attached ──────────────────────────────────── */
+	/* -- 1. Verify CDV is attached ------------------------------------ */
 	/*
 	 * The CDV must already be in the volumes list (attached hidden,
 	 * SHARED_RW, managed by nvmeibc_main_capi_manipulate_vols.inc.c).
@@ -882,7 +882,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 		return NULL;
 	}
 
-	/* ── 2. Allocate struct nvmeibc_tpv ─────────────────────────────── */
+	/* -- 2. Allocate struct nvmeibc_tpv ------------------------------- */
 	tpv = kzalloc(sizeof(*tpv), GFP_KERNEL);
 	if (!tpv) {
 		_NE(tpv_attach_kzalloc_fail, "TPV: kzalloc failed for @STR", tpv_name);
@@ -966,7 +966,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 
 	/*
 	 * Start with the attach timeout.  When io_max_retry_secs is 0
-	 * (default), fall back to 30 s — same as IO_TIME_OUT_ATTACH for
+	 * (default), fall back to 30 s - same as IO_TIME_OUT_ATTACH for
 	 * regular volumes.  Upgraded to the normal (long) timeout by
 	 * load_state_work_fn after state_loaded is set.
 	 */
@@ -978,7 +978,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	spin_lock_init(&tpv->pending_bio_lock);
 	tpv->sync_flush = sync_flush;
 
-	/* ── 3a. Initialise allocator(s) ─────────────────────────────────
+	/* -- 3a. Initialise allocator(s) ---------------------------------
 	 *
 	 * Data-side allocator always initialised.
 	 *
@@ -986,7 +986,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	 * manages L2-table slots on the metadata CDV (and will hold the L1
 	 * extent). The L1 bookkeeping fields (l1_extent_index,
 	 * n_l2_tables_used, l1_to_l2_ctx, l1_dirty_pages) live on whichever
-	 * allocator owns the L1 extent — nvmeibc_tpv_meta_alloc() returns
+	 * allocator owns the L1 extent - nvmeibc_tpv_meta_alloc() returns
 	 * that allocator and is used throughout the persist/recovery paths.
 	 *
 	 * virtual_extents_total on the meta allocator is the number of L2
@@ -994,7 +994,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	 * count. We pass the TPV's virtual size so the struct's book-keeping
 	 * of the TPV's logical range stays consistent, but the meta allocator
 	 * uses it only for the xarray key range (no xarray entries are
-	 * stored there — the xarray holding virt_idx -> extent_entry is on
+	 * stored there - the xarray holding virt_idx -> extent_entry is on
 	 * the data-side allocator).
 	 */
 	nvmeibc_tpv_allocator_init(&tpv->allocator, tpv_extent_size_kb,
@@ -1015,7 +1015,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 					   /* allocator_size_gib */ 0);
 	}
 
-	/* ── 3a-check. Verify 2-level L1/L2 tree can address all virtual extents. */
+	/* -- 3a-check. Verify 2-level L1/L2 tree can address all virtual extents. */
 	{
 		u64 T      = (u64)tpv_extent_size_kb << 10;
 		u64 n_l1   = (T - sizeof(struct tpv_l1_header)) /
@@ -1035,7 +1035,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	}
 
 	/*
-	 * ── 3b. Schedule deferred load of allocator state ──────────────
+	 * -- 3b. Schedule deferred load of allocator state --------------
 	 *
 	 * load_state (read per-TPV tree from CDV), recovery (TOMA orphan
 	 * check), and the initial CDV_extent pre-allocation run in the
@@ -1048,7 +1048,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	 */
 	schedule_delayed_work(&tpv->load_state_work, 0);
 
-	/* ── 4. Register block device and open IO gates ─────────────────── */
+	/* -- 4. Register block device and open IO gates ------------------- */
 	rv = nvmeibc_tpv_blkdev_register(tpv);
 	if (rv) {
 		_NE(tpv_blkdev_register_fail, "TPV: blkdev_register failed for @STR rv=@INT",
@@ -1097,7 +1097,7 @@ err_free_alloc:
 	return NULL;
 }
 
-/* ── nvmeibc_tpv_detach ─────────────────────────────────────────────────
+/* -- nvmeibc_tpv_detach -------------------------------------------------
  *
  * Called from nvmeibc_main_capi_manipulate_vols.inc.c when a DetachVolumes
  * MCS message arrives for a TPV UUID.
@@ -1119,14 +1119,14 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	tpv->max_retry_jiffies = HZ / 100;
 	mod_delayed_work(system_wq, &tpv->timeout_work, tpv->max_retry_jiffies);
 
-	/* ── 1. Remove from active list and cancel pending work ────────── */
+	/* -- 1. Remove from active list and cancel pending work ---------- */
 	cancel_delayed_work_sync(&tpv->load_state_work);
 	cancel_work_sync(&tpv->cdv_alloc_work);
 	cancel_work_sync(&tpv->meta_cdv_alloc_work);
 	cancel_work_sync(&tpv->persist_work);
 	cancel_delayed_work_sync(&tpv->timeout_work);
 
-	/* ── 2. Flush dirty allocator state synchronously ───────────────── */
+	/* -- 2. Flush dirty allocator state synchronously ----------------- */
 	if (tpv->dirty) {
 		int rv = nvmeibc_tpv_flush_state(tpv);
 
@@ -1136,11 +1136,11 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 			    tpv->tpv_name, rv);
 	}
 
-	/* ── 3. Unregister block device (quiesces IO via queue freeze) ──── */
+	/* -- 3. Unregister block device (quiesces IO via queue freeze) ---- */
 	nvmeibc_tpv_blkdev_unregister(tpv);
 
 	/*
-	 * ── 3b. Fail any bios parked waiting for CDV_extent allocation ──
+	 * -- 3b. Fail any bios parked waiting for CDV_extent allocation --
 	 *
 	 * Safe after blkdev_unregister: del_gendisk + queue cleanup
 	 * guarantee that no make_request call is in-flight, so no new
@@ -1163,7 +1163,7 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 			bio_endio(bio, -EIO);
 	}
 
-	/* ── 4. Deregister proc entries and free allocator state ────────── */
+	/* -- 4. Deregister proc entries and free allocator state ---------- */
 	nvmeibc_tpv_proc_deregister(tpv);
 	if (tpv->meta_allocator) {
 		nvmeibc_tpv_allocator_free(tpv->meta_allocator);
@@ -1174,7 +1174,7 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 
 	_NI(tpv_detached, "TPV: @STR (uuid=@STR) detached", tpv->tpv_name, tpv->tpv_uuid);
 
-	/* ── 5. MCS notification is sent by the caller (the MCS handler) ── */
+	/* -- 5. MCS notification is sent by the caller (the MCS handler) -- */
 	/*
 	 * The MCS detach-completion reply is sent by
 	 * nvmeibc_main_capi_manipulate_vols.inc.c after we return, using
@@ -1195,11 +1195,11 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 		nvmeiba_os_api_destructor(&tpv->atom);
 }
 
-/* ── nvmeibc_tpv_grow ───────────────────────────────────────────────────
+/* -- nvmeibc_tpv_grow ---------------------------------------------------
  *
- * Handle UpdateVolume MCS for a TPV (§3.10): management has extended the
+ * Handle UpdateVolume MCS for a TPV (S.3.10): management has extended the
  * TPV's virtual size.  Update in-kernel state and gendisk capacity.
- * No allocator flush needed — new extents start unmapped (reads = zero).
+ * No allocator flush needed - new extents start unmapped (reads = zero).
  */
 void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes)
 {
@@ -1221,7 +1221,7 @@ void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes)
 	 * the grown virtual size. The field is not consulted on the IO hot
 	 * path (L2 tables are demand-allocated from the meta free pool), but
 	 * /proc and future tree-capacity checks read it, so mismatched values
-	 * would mislead. Use the meta-side tpv_extent_size_kb — it may differ
+	 * would mislead. Use the meta-side tpv_extent_size_kb - it may differ
 	 * from the data side.
 	 */
 	if (tpv->meta_allocator) {
@@ -1266,10 +1266,10 @@ void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes)
 	    tpv->tpv_name, new_virtual_size_bytes >> 20, new_total_extents);
 }
 
-/* ── Allocator identity update (called on CDV topology push) ───────────── */
+/* -- Allocator identity update (called on CDV topology push) ------------- */
 
 /*
- * nvmeibc_tpv_update_allocator_id — update the CDV.allocator TOMA identity.
+ * nvmeibc_tpv_update_allocator_id - update the CDV.allocator TOMA identity.
  *
  * Called when TOMA pushes an updated CDV topology (new allocator elected or
  * generation incremented).  Clients must fence in-flight CDV_ALLOC_EXTENT
@@ -1290,7 +1290,7 @@ void nvmeibc_tpv_update_allocator_id(struct nvmeibc_tpv *tpv,
 EXPORT_SYMBOL(nvmeibc_tpv_update_allocator_id);
 
 /*
- * nvmeibc_tpv_update_meta_allocator_id — mirror of nvmeibc_tpv_update_allocator_id
+ * nvmeibc_tpv_update_meta_allocator_id - mirror of nvmeibc_tpv_update_allocator_id
  * for the metadata-side allocator identity (split-mode TPVs). Keeps the two
  * sides symmetric and gives callers a single named entry point per side
  * instead of open-coding the lock acquisition.
@@ -1311,7 +1311,7 @@ void nvmeibc_tpv_update_meta_allocator_id(struct nvmeibc_tpv *tpv,
 EXPORT_SYMBOL(nvmeibc_tpv_update_meta_allocator_id);
 
 /*
- * nvmeibc_tpv_update_allocator_for_cdv — update allocator for all TPVs on a CDV.
+ * nvmeibc_tpv_update_allocator_for_cdv - update allocator for all TPVs on a CDV.
  *
  * Iterates the active TPV list, finds all TPVs whose parent CDV UUID matches,
  * and calls nvmeibc_tpv_update_allocator_id() + re-arms cdv_alloc_work on each.

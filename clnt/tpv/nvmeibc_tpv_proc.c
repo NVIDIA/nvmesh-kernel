@@ -4,18 +4,18 @@
 */
 
 /*
- * nvmeibc_tpv_proc.c — /proc/nvmeibc/tpv/<name>/ entries for TPV diagnostics.
+ * nvmeibc_tpv_proc.c - /proc/nvmeibc/tpv/<name>/ entries for TPV diagnostics.
  *
  * Per-TPV proc directory layout:
  *
- *   status      — geometry, state, CDV.allocator identity and generation
- *   allocator   — live pool counters (cdv extents, free slots, watermark,
+ *   status      - geometry, state, CDV.allocator identity and generation
+ *   allocator   - live pool counters (cdv extents, free slots, watermark,
  *                 pending returns)
- *   tpv_extent_map  — full xarray dump: virtual index → physical offset in CDV,
+ *   tpv_extent_map  - full xarray dump: virtual index -> physical offset in CDV,
  *                     owning CDV_extent index
- *   cdv_extent_map  — per-allocated CDV_extent: sequence number → CDV extent index
+ *   cdv_extent_map  - per-allocated CDV_extent: sequence number -> CDV extent index
  *                     and how many TPV_extent slots within it are currently in use
- *   stats       — allocation/free counts and CDV round-trip timing (writable
+ *   stats       - allocation/free counts and CDV round-trip timing (writable
  *                 to reset counters)
  *
  * All fill functions snapshot state under the allocator spinlock where needed.
@@ -34,13 +34,13 @@
 #include "nvmeibc_tpv_test.h"		/* nvmeibc_tpv_run_selftests */
 #include "module/nvmeibc_module_main.h"	/* nvmeibc_get_module_proc_dir_entry */
 
-/* ── Module-level TPV proc root (/proc/nvmeibc/tpv/) ───────────────────── */
+/* -- Module-level TPV proc root (/proc/nvmeibc/tpv/) --------------------- */
 
 static struct proc_dir_entry *nvmeibc_tpv_proc_root;
 static DEFINE_MUTEX(nvmeibc_tpv_proc_root_lock);
 
 /*
- * tpv_proc_ensure_root — create /proc/nvmeibc/tpv/ on the first call.
+ * tpv_proc_ensure_root - create /proc/nvmeibc/tpv/ on the first call.
  * Returns the root dir on success, NULL on error.
  */
 static struct proc_dir_entry *tpv_proc_ensure_root(void)
@@ -61,7 +61,7 @@ static struct proc_dir_entry *tpv_proc_ensure_root(void)
 	return nvmeibc_tpv_proc_root;
 }
 
-/* ── Helper: state string ───────────────────────────────────────────────── */
+/* -- Helper: state string ------------------------------------------------- */
 
 static const char *tpv_state_str(int state)
 {
@@ -74,7 +74,7 @@ static const char *tpv_state_str(int state)
 	}
 }
 
-/* ── status fill ────────────────────────────────────────────────────────── */
+/* -- status fill ---------------------------------------------------------- */
 
 static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 {
@@ -132,7 +132,7 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	return count;
 }
 
-/* ── allocator fill ─────────────────────────────────────────────────────── */
+/* -- allocator fill ------------------------------------------------------- */
 
 static ssize_t tpv_proc_allocator_dump_side(const struct nvmeibc_tpv *tpv,
 					     const struct nvmeibc_tpv_allocator *alloc,
@@ -189,7 +189,7 @@ static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
 
 	/*
 	 * Data side always present; L1 fields live on whichever side owns the
-	 * tree — data in single-CDV mode, meta in split mode.
+	 * tree - data in single-CDV mode, meta in split mode.
 	 */
 	count = tpv_proc_allocator_dump_side(tpv, &tpv->allocator, "data",
 					      !nvmeibc_tpv_is_split(tpv),
@@ -206,7 +206,7 @@ static ssize_t tpv_proc_allocator_fill(void *arg, char *buf, size_t len)
 	return count;
 }
 
-/* ── tpv_extent_map fill ────────────────────────────────────────────────── */
+/* -- tpv_extent_map fill -------------------------------------------------- */
 
 /*
  * Dumps every mapped virtual extent from the xarray, annotated with its
@@ -267,12 +267,12 @@ static ssize_t tpv_proc_tpv_extent_map_fill(void *arg, char *buf, size_t len)
 	return count;
 }
 
-/* ── cdv_extent_map fill ────────────────────────────────────────────────── */
+/* -- cdv_extent_map fill -------------------------------------------------- */
 
 /*
  * Lists every CDV_extent currently allocated to this TPV from the
- * cdv_extent_list.  Acquired under alloc->lock (the list is short —
- * typically O(tens) of entries — so the brief hold is acceptable).
+ * cdv_extent_list.  Acquired under alloc->lock (the list is short -
+ * typically O(tens) of entries - so the brief hold is acceptable).
  *
  * Format per line:
  *   seq ==> cdv_extent_idx  (allocated_slots in use)
@@ -312,7 +312,7 @@ out:
 	return count;
 }
 
-/* ── stats fill ─────────────────────────────────────────────────────────── */
+/* -- stats fill ----------------------------------------------------------- */
 
 static ssize_t tpv_proc_stats_fill(void *arg, char *buf, size_t len)
 {
@@ -370,7 +370,7 @@ static ssize_t tpv_proc_stats_reset(void *arg, char *buf, size_t len)
 	return (ssize_t)len;
 }
 
-/* ── Public registration / deregistration ───────────────────────────────── */
+/* -- Public registration / deregistration --------------------------------- */
 
 /* Defined in nvmeibc_tpv_test.c (kernel build) or nvmeibc_tpv_simu.c (simulator).
  * nvmeibc_tpv_test.h guards the declaration under __KERNEL__, so declare here
@@ -431,7 +431,7 @@ void nvmeibc_tpv_proc_deregister(struct nvmeibc_tpv *tpv)
 EXPORT_SYMBOL(nvmeibc_tpv_proc_deregister);
 
 /*
- * nvmeibc_tpv_proc_destroy_root — remove /proc/nvmeibc/tpv/.
+ * nvmeibc_tpv_proc_destroy_root - remove /proc/nvmeibc/tpv/.
  *
  * Called at module unload (nvmeibc_module_procs_destroy) BEFORE the parent
  * /proc/nvmeibc/ directory is removed.  All per-TPV subdirectories must

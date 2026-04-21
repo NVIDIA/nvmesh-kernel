@@ -4,7 +4,7 @@
 */
 
 /*
- * nvmeibc_tpv_persist.c — TPV allocator persistence: per-TPV L1/L2 tree.
+ * nvmeibc_tpv_persist.c - TPV allocator persistence: per-TPV L1/L2 tree.
  *
  * Each TPV stores its own mapping tree across the CDV_extents allocated to
  * it.  Slot 0 of the "L1 extent" (the first CDV_extent allocated to this
@@ -19,18 +19,18 @@
  *   phys_offset = L2[L2_idx].cdv_offset   (0 = unmapped)
  *
  * Entry points:
- *   nvmeibc_tpv_load_state()  — attach: CDV_LIST_EXTENTS → find L1 extent
- *                                 → read L1/L2 → populate xarray.
- *   nvmeibc_tpv_flush_state() — write current xarray into L1/L2 tree on CDV.
- *   nvmeibc_tpv_persist_work_fn()  — deferred background flush.
- *   nvmeibc_tpv_install_data_extent() — no-op; TOMA records ownership.
+ *   nvmeibc_tpv_load_state()  - attach: CDV_LIST_EXTENTS -> find L1 extent
+ *                                 -> read L1/L2 -> populate xarray.
+ *   nvmeibc_tpv_flush_state() - write current xarray into L1/L2 tree on CDV.
+ *   nvmeibc_tpv_persist_work_fn()  - deferred background flush.
+ *   nvmeibc_tpv_install_data_extent() - no-op; TOMA records ownership.
  *
  * Crash-consistency model:
- *   • CDV_extent ownership (cdv_extent_md) is written by TOMA before the
+ *   - CDV_extent ownership (cdv_extent_md) is written by TOMA before the
  *     client receives CDV_ALLOC_OK, so ownership survives client crashes.
- *   • Virtual-extent mappings are persisted by flush_state.  Unflushed
+ *   - Virtual-extent mappings are persisted by flush_state.  Unflushed
  *     mappings are lost on crash (standard volatile-write semantics).
- *   • CDV_extents that were allocated (cdv_extent_md shows DATA/tpv_uuid)
+ *   - CDV_extents that were allocated (cdv_extent_md shows DATA/tpv_uuid)
  *     but have no tree leaves after a crash are orphaned.  NVCK detects
  *     and reclaims them by cross-referencing cdv_extent_md vs. the tree.
  */
@@ -40,7 +40,7 @@
 #include "clnt/nvmeibc_block.h"		/* KERNEL_SECTOR_SHIFT */
 #include "clnt/nvmeibc_volume.h"	/* struct nvmeibc_volume, cdv_allocator_toma_id */
 
-/* ── Forward declarations for synchronous CDV IO ───────────────────────── */
+/* -- Forward declarations for synchronous CDV IO ------------------------- */
 
 extern int nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 				      u64 cdv_offset, void *buf, u64 len);
@@ -49,7 +49,7 @@ extern int nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 				       u64 cdv_offset, const void *buf,
 				       u64 len);
 
-/* ── Forward declaration for CDV_LIST_EXTENTS IB admin message ────────── */
+/* -- Forward declaration for CDV_LIST_EXTENTS IB admin message ---------- */
 
 extern int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 					     const char *toma_id,
@@ -73,7 +73,7 @@ static inline bool tpv_is_detaching(const struct nvmeibc_tpv *tpv)
 	return atomic_read(&tpv->state) == TPV_DETACHING;
 }
 
-/* ── Geometry helpers ──────────────────────────────────────────────────── */
+/* -- Geometry helpers ---------------------------------------------------- */
 
 static inline u64 persist_alloc_bytes(const struct nvmeibc_tpv_allocator *a)
 {
@@ -130,7 +130,7 @@ static inline u64 persist_phys_of(const struct nvmeibc_tpv_allocator *a,
 }
 
 /*
- * Partial-page flush (§3.4.3).  Each L1/L2 table is flushed at 4 KB
+ * Partial-page flush (S.3.4.3).  Each L1/L2 table is flushed at 4 KB
  * granularity; a per-table bitmap records which pages carry uncommitted
  * changes.  TPV extent sizes are always a multiple of 4 KB (tpvExtentSizeKB
  * is a power of 2 from 64 up to 65536), so every page is exactly 4 KB.
@@ -214,7 +214,7 @@ static inline void persist_decode_phys(const struct nvmeibc_tpv_allocator *a,
 	*slot_out         = (off % E) / T;
 }
 
-/* ── nvmeibc_tpv_flush_state ───────────────────────────────────────────── */
+/* -- nvmeibc_tpv_flush_state --------------------------------------------- */
 
 /*
  * Write a full snapshot of the allocator xarray into the per-TPV L1/L2 tree.
@@ -236,7 +236,7 @@ static inline void persist_decode_phys(const struct nvmeibc_tpv_allocator *a,
  * if none exists yet.  Updates l1_to_l2_ctx and n_l2_tables_used.
  *
  * On first allocation the L2 slot on disk is garbage, so the ctx's
- * dirty_pages bitmap is set with every bit — forcing flush_state to write
+ * dirty_pages bitmap is set with every bit - forcing flush_state to write
  * the entire T-byte L2 table once.  Caller is responsible for marking
  * corresponding L1 dirty bits (the L1 entry page and the L1 header page).
  *
@@ -290,7 +290,7 @@ static int persist_get_or_alloc_l2_ctx(struct nvmeibc_tpv *tpv, u64 l1_idx,
 }
 
 /*
- * nvmeibc_tpv_mark_l2_leaf_dirty — IO-path hook for partial-page flush.
+ * nvmeibc_tpv_mark_l2_leaf_dirty - IO-path hook for partial-page flush.
  *
  * Called by alloc_extent and free_extent after the xarray mutation.  If
  * an L2 ctx exists for the owning L1 index, mark the 4 KB page holding
@@ -319,7 +319,7 @@ void nvmeibc_tpv_mark_l2_leaf_dirty(struct nvmeibc_tpv *tpv, u64 virt_idx)
 EXPORT_SYMBOL(nvmeibc_tpv_mark_l2_leaf_dirty);
 
 /*
- * nvmeibc_tpv_mark_l1_full_dirty — called after the L1 extent is first
+ * nvmeibc_tpv_mark_l1_full_dirty - called after the L1 extent is first
  * assigned (by tpv_on_cdv_alloc_ok or by recovery orphan promotion).
  * Marks every L1 page dirty so the initial flush writes the header and a
  * fresh all-null entry table to the CDV.
@@ -336,7 +336,7 @@ void nvmeibc_tpv_mark_l1_full_dirty(struct nvmeibc_tpv *tpv)
 EXPORT_SYMBOL(nvmeibc_tpv_mark_l1_full_dirty);
 
 /*
- * flush_state_write_l2_ctx — write the just-built L2 buffer to CDV at
+ * flush_state_write_l2_ctx - write the just-built L2 buffer to CDV at
  * ctx->phys, respecting ctx->dirty_pages (partial-page flush).  The L1
  * entry for @l1_idx is set to ctx->phys after a successful write, and
  * the L1-entry page is marked dirty if its value changed.
@@ -381,7 +381,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	 * metadata CDV may use a different cdv_extent_size_mib /
 	 * tpv_extent_size_kb than the data CDV. In single-CDV mode both
 	 * allocators are the same. extent_map iteration (data leaves) still
-	 * happens against the data-side allocator — see below.
+	 * happens against the data-side allocator - see below.
 	 */
 	struct nvmeibc_tpv_allocator *alloc      = nvmeibc_tpv_meta_alloc(tpv);
 	struct nvmeibc_tpv_allocator *data_alloc = nvmeibc_tpv_data_alloc(tpv);
@@ -517,7 +517,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	/*
 	 * Also flush L1 indices that have a ctx but no mapped leaves (all
 	 * leaves freed since last flush).  ctx->dirty_pages still carries
-	 * the bits set by free_extent — write only those pages.
+	 * the bits set by free_extent - write only those pages.
 	 */
 	{
 		unsigned long li;
@@ -560,7 +560,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	} else {
 		/* Fallback: init-time OOM left l1_dirty_pages NULL.  Write the
 		 * full L1 slot so correctness is preserved even though write
-		 * amplification is back to the pre-§3.4.3 level. */
+		 * amplification is back to the pre-S.3.4.3 level. */
 		rv = nvmeibc_tpv_cdv_sync_write(tpv,
 			persist_tree_slot_offset(alloc, l1_ei, 0),
 			l1_buf, T);
@@ -571,7 +571,7 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		    tpv->tpv_name, rv);
 
 	/* Mark all xarray entries as persisted so the IO path can release
-	 * parked sync_flush bios.  Only on success — failed flushes must
+	 * parked sync_flush bios.  Only on success - failed flushes must
 	 * not let data reach CDV with an unpersisted mapping. */
 	if (!rv) {
 		struct nvmeibc_tpv_extent_entry *e;
@@ -591,7 +591,7 @@ out:
 }
 EXPORT_SYMBOL(nvmeibc_tpv_flush_state);
 
-/* ── nvmeibc_tpv_load_state ────────────────────────────────────────────── */
+/* -- nvmeibc_tpv_load_state ---------------------------------------------- */
 
 /*
  * Per-CDV_extent tracking used during load to reconstruct the free-slot pool.
@@ -656,7 +656,7 @@ static void persist_free_le_list(struct list_head *le_list)
  * CDV_extent ref / free-slot lists.
  *
  * Steps:
- *   1. CDV_LIST_EXTENTS → get all CDV_extents owned by this TPV.
+ *   1. CDV_LIST_EXTENTS -> get all CDV_extents owned by this TPV.
  *   2. Scan for the tree extent (L1 magic + matching tpv_uuid).
  *   3. Read L1; for each non-null L1 entry, read L2 and populate xarray.
  *   4. Build cdv_extent_list and free_tpv_extents for data extents.
@@ -666,7 +666,7 @@ static void persist_free_le_list(struct list_head *le_list)
  * Called at attach time (single-threaded, no concurrent IO).
  */
 /*
- * load_state_snapshot_toma_id — pull the TOMA identity for a given allocator
+ * load_state_snapshot_toma_id - pull the TOMA identity for a given allocator
  * side into @toma_id_out (NVMEIB_HOST_NAME_LEN bytes). If the TPV's cached
  * copy is empty, re-reads the CDV's cache and primes the TPV if possible.
  *
@@ -731,9 +731,9 @@ static int load_state_snapshot_toma_id(struct nvmeibc_tpv *tpv,
 }
 
 /*
- * load_state_populate_data_side_from_toma_list — split-mode helper.
+ * load_state_populate_data_side_from_toma_list - split-mode helper.
  *
- * In split mode the data CDV never hosts L1/L2 — every extent TOMA reports
+ * In split mode the data CDV never hosts L1/L2 - every extent TOMA reports
  * as owned by this TPV is a pure data extent. Walk the list, match each
  * extent against the xarray leaves already installed (so already-used slots
  * are excluded from the free pool), and splice the remaining slots into the
@@ -857,18 +857,18 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	if (tpv_is_detaching(tpv))
 		return -ECANCELED;
 
-	/* ── 1. Snapshot TOMA identity for the tree-owning side ──────── */
+	/* -- 1. Snapshot TOMA identity for the tree-owning side -------- */
 	rv = load_state_snapshot_toma_id(tpv, nvmeibc_tpv_is_split(tpv), toma_id);
 	if (rv)
 		return rv;
 
-	/* ── 2. CDV_LIST_EXTENTS on the tree-owning CDV ─────────────── */
+	/* -- 2. CDV_LIST_EXTENTS on the tree-owning CDV --------------- */
 	rv = nvmeibc_ib_admin_cdv_list_extents(meta_cdv, toma_id,
 					       tpv->tpv_uuid,
 					       &toma_indices, &toma_count);
 	if (rv == -ENOTSUPP) {
 		/*
-		 * CDV transport stub (test mode) — no extents.  Treat as
+		 * CDV transport stub (test mode) - no extents.  Treat as
 		 * fresh TPV: empty allocator, load_state succeeds.
 		 */
 		_NI(tpv_load_no_cdv_bl,
@@ -891,7 +891,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		return 0;
 	}
 
-	/* ── 2b. Split mode: also fetch the data-CDV extent list up front ──
+	/* -- 2b. Split mode: also fetch the data-CDV extent list up front --
 	 *
 	 * The L1/L2 walk installs leaves pointing at data-CDV offsets into the
 	 * data-side allocator's extent_map. Decoding those offsets requires
@@ -917,7 +917,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 				tpv->tpv_uuid,
 				&data_toma_indices, &data_toma_count);
 			if (rv == -ENOTSUPP) {
-				/* test stub — fresh data side */
+				/* test stub - fresh data side */
 				data_toma_indices = NULL;
 				data_toma_count   = 0;
 			} else if (rv) {
@@ -930,10 +930,10 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		}
 	}
 
-	/* ── 3. Find L1 extent (scan TOMA list for magic in slot 0) ───── */
+	/* -- 3. Find L1 extent (scan TOMA list for magic in slot 0) ----- */
 	{
 		/*
-		 * Read a full page for the probe — the L1 header is only 64 bytes
+		 * Read a full page for the probe - the L1 header is only 64 bytes
 		 * but the CDV block device may have a 4096-byte sector size.  A
 		 * sub-sector bio is rejected as "wrong IO" by the block layer
 		 * and triggers a rider retry storm.
@@ -984,7 +984,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		goto store_toma_list;
 	}
 
-	/* ── 4. Read L1 table ─────────────────────────────────────────── */
+	/* -- 4. Read L1 table ------------------------------------------- */
 	l1_buf = vzalloc(T);
 	if (!l1_buf) {
 		rv = -ENOMEM;
@@ -1012,7 +1012,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	alloc->l1_extent_index  = l1_ei;
 	alloc->n_l2_tables_used = hdr->n_l2_tables_used;
 
-	/* ── 5. Walk L1, read L2 tables, populate xarray ──────────────── */
+	/* -- 5. Walk L1, read L2 tables, populate xarray ---------------- */
 	l2 = vzalloc(T);
 	if (!l2) {
 		rv = -ENOMEM;
@@ -1054,7 +1054,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		}
 
 		/*
-		 * Record L1→L2 location.  Create a fresh tpv_l2_ctx whose
+		 * Record L1->L2 location.  Create a fresh tpv_l2_ctx whose
 		 * dirty_pages bitmap is initially zero: the on-disk image we
 		 * just read IS the authoritative state, so no pages need
 		 * rewriting until alloc/free marks them.
@@ -1146,8 +1146,8 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			/* Sanity: L2 leaf must reference an extent that
 			 * TOMA says belongs to us. Skip the check when the
 			 * data-side TOMA list is unavailable (split mode,
-			 * data TOMA identity not yet known — already warned
-			 * at the §2b fetch site). */
+			 * data TOMA identity not yet known - already warned
+			 * at the S.2b fetch site). */
 			if (tp_verify_l1_l2_extent_ownership && own_list) {
 				u64 k;
 				bool owned = false;
@@ -1192,7 +1192,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			 * side's le_list. In single-CDV mode that side owns
 			 * both L1/L2 and data, so data-leaf slots need marking
 			 * here. In split mode data leaves live on a different
-			 * CDV — their extent tracking is handled by
+			 * CDV - their extent tracking is handled by
 			 * load_state_populate_data_side() below and they must
 			 * not enter meta's le_list (extent-index collisions
 			 * between the two CDVs would poison it).
@@ -1217,7 +1217,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	vfree(l1_buf);
 	l1_buf = NULL;
 
-	/* ── 6. Ensure every TOMA-owned extent has an le entry ──────────
+	/* -- 6. Ensure every TOMA-owned extent has an le entry ----------
 	 *
 	 * An extent that has no data mappings and no L2 slots would not be
 	 * in le_list (it wouldn't have been added by the L1/L2 walk above).
@@ -1233,7 +1233,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		}
 	}
 
-	/* ── 7. Build cdv_extent_list and free_tpv_extents ───────────── */
+	/* -- 7. Build cdv_extent_list and free_tpv_extents ------------- */
 	{
 		struct persist_load_extent *le;
 
@@ -1299,12 +1299,12 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 	    alloc->free_tpv_extent_count, l1_ei);
 
 store_toma_list:
-	/* ── 7. Store TOMA list for recovery ──────────────────────────── */
+	/* -- 7. Store TOMA list for recovery ---------------------------- */
 	alloc->toma_extent_list  = toma_indices;
 	alloc->toma_extent_count = toma_count;
 
 	/*
-	 * Split-mode: the data-side TOMA list was already fetched in §2b so
+	 * Split-mode: the data-side TOMA list was already fetched in S.2b so
 	 * the L1/L2 walk could use it for leaf-ownership checks. Use it here
 	 * to populate the data-side allocator's cdv_extent_list and free
 	 * pool. Data-leaf slots already installed in data_alloc->extent_map
@@ -1340,7 +1340,7 @@ out_free:
 }
 EXPORT_SYMBOL(nvmeibc_tpv_load_state);
 
-/* ── nvmeibc_tpv_persist_work_fn ───────────────────────────────────────── */
+/* -- nvmeibc_tpv_persist_work_fn ----------------------------------------- */
 
 /*
  * Deferred background flush scheduled by alloc_extent / free_extent when
@@ -1394,7 +1394,7 @@ void nvmeibc_tpv_persist_work_fn(struct work_struct *work)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_persist_work_fn);
 
-/* ── nvmeibc_tpv_load_state_work_fn ───────────────────────────────────── */
+/* -- nvmeibc_tpv_load_state_work_fn ------------------------------------- */
 
 /*
  * Background worker: load allocator state from the per-TPV tree extent,
@@ -1428,7 +1428,7 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 
 	/*
 	 * Transition from the attach timeout to the normal-operation timeout.
-	 * When io_max_retry_secs is 0 (default), fall back to ~infinite —
+	 * When io_max_retry_secs is 0 (default), fall back to ~infinite -
 	 * same as IO_TIME_OUT_NORMAL for regular volumes.  When nonzero, the
 	 * configured value is used (same value at all stages).
 	 */
@@ -1470,7 +1470,7 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_load_state_work_fn);
 
-/* ── nvmeibc_tpv_install_data_extent ───────────────────────────────────── */
+/* -- nvmeibc_tpv_install_data_extent ------------------------------------- */
 
 /*
  * Called from tpv_on_cdv_alloc_ok() after TOMA allocates a new data

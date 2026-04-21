@@ -4,10 +4,10 @@
 */
 
 /*
- * nvmeibc_tpv_recovery.c — TPV cold recovery: orphaned CDV_extent detection.
+ * nvmeibc_tpv_recovery.c - TPV cold recovery: orphaned CDV_extent detection.
  *
  * Background
- * ──────────
+ * ----------
  * The L1/L2 tree in the per-TPV tree extent records only virtual extents
  * that have been mapped AND flushed.  TOMA's cdv_extent_md records every CDV_extent
  * allocated to a TPV regardless of whether any virtual extent has been
@@ -18,11 +18,11 @@
  * allocator's cdv_extent_list or free pool.
  *
  * Recovery
- * ────────
+ * --------
  * nvmeibc_tpv_recovery() is called unconditionally from
  * nvmeibc_tpv_attach() after nvmeibc_tpv_load_state() succeeds.  We
  * do not know what happened while the TPV was offline, so the TOMA
- * extent list must always be cross-checked — even for a volume whose
+ * extent list must always be cross-checked - even for a volume whose
  * tree is empty (all CDV_extents may have been allocated after the
  * last flush, or the volume may have been fully DISCARDed).
  *
@@ -39,14 +39,14 @@
  *   4. Log a summary and return 0.
  *
  * Failure policy
- * ──────────────
+ * --------------
  * Recovery errors are non-fatal.  If the TOMA query fails or slot
  * allocations fail, recovery logs the problem and continues.  The allocator
  * runs with a reduced free pool; NVCK will reclaim any unrecovered orphans
  * on the next maintenance scan.
  *
  * Locking
- * ───────
+ * -------
  * No allocator.lock is taken: recovery runs at attach time, before IO gates
  * open and before work structs are scheduled, so the allocator is single-
  * threaded.  allocator_id_lock is taken only for the TOMA ID snapshot.
@@ -56,10 +56,10 @@
 #include "nvmeibc_tpv.h"
 #include "clnt/nvmeibc_volume.h"	/* nvmeibc_volume, hdr.uuid */
 
-/* ── Forward declaration ─────────────────────────────────────────────────── */
+/* -- Forward declaration --------------------------------------------------- */
 
 /*
- * nvmeibc_ib_admin_cdv_list_extents — query TOMA for the set of data
+ * nvmeibc_ib_admin_cdv_list_extents - query TOMA for the set of data
  * CDV_extents whose cdv_extent_md is DATA / tpv_uuid.
  *
  * On success, *out_indices is set to a kvmalloc'd array of *out_count u64
@@ -69,7 +69,7 @@
  * Returns 0 on success, negative errno on failure.
  * Blocks; called only from process context (attach / recovery path).
  *
- * Implemented in nvmeibc_ib_admin_channel.c (§2.8).
+ * Implemented in nvmeibc_ib_admin_channel.c (S.2.8).
  */
 extern int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 					     const char *toma_id,
@@ -77,7 +77,7 @@ extern int nvmeibc_ib_admin_cdv_list_extents(struct nvmeibc_volume *cdv,
 					     u64 **out_indices,
 					     u64 *out_count);
 
-/* ── Local geometry helpers ─────────────────────────────────────────────── */
+/* -- Local geometry helpers ----------------------------------------------- */
 
 /*
  * Mirror the geometry helpers in nvmeibc_tpv_allocator.c.  Kept local to
@@ -112,7 +112,7 @@ static inline u64 recov_slot_phys(const struct nvmeibc_tpv_allocator *a,
 	       slot * recov_slot_bytes(a);
 }
 
-/* ── tpv_recovery_is_known ──────────────────────────────────────────────────
+/* -- tpv_recovery_is_known --------------------------------------------------
  *
  * Returns true if extent_index is already in the allocator's cdv_extent_list.
  * Called from single-threaded recovery context; no lock held.
@@ -129,7 +129,7 @@ static bool tpv_recovery_is_known(const struct nvmeibc_tpv_allocator *alloc,
 	return false;
 }
 
-/* ── tpv_recovery_adopt_orphan ──────────────────────────────────────────────
+/* -- tpv_recovery_adopt_orphan ----------------------------------------------
  *
  * Integrate an orphaned CDV_extent into the allocator.
  *
@@ -227,7 +227,7 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
 	return 0;
 }
 
-/* ── nvmeibc_tpv_recovery ───────────────────────────────────────────────────
+/* -- nvmeibc_tpv_recovery ---------------------------------------------------
  *
  * Cold recovery entry point.  See file header for full description.
  *
@@ -235,7 +235,7 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
  * abort recovery of the remaining extents, and do not fail the attach.
  */
 /*
- * tpv_recovery_one_side — run orphan reconciliation for a single CDV side.
+ * tpv_recovery_one_side - run orphan reconciliation for a single CDV side.
  *
  * Returns 0 always; adoption failures are logged but non-fatal.
  */
@@ -268,7 +268,7 @@ static int tpv_recovery_one_side(struct nvmeibc_tpv *tpv, bool is_meta_side)
 	if (!alloc || !cdv_vol)
 		return 0;
 
-	/* ── 1. Snapshot the allocator TOMA identity ─────────── */
+	/* -- 1. Snapshot the allocator TOMA identity ----------- */
 	spin_lock_irqsave(id_lock, flags);
 	strncpy(toma_id, id_src, sizeof(toma_id) - 1);
 	toma_id[sizeof(toma_id) - 1] = '\0';
@@ -281,7 +281,7 @@ static int tpv_recovery_one_side(struct nvmeibc_tpv *tpv, bool is_meta_side)
 		return 0;
 	}
 
-	/* ── 2. Get TOMA extent list (prefer cached from load_state) ── */
+	/* -- 2. Get TOMA extent list (prefer cached from load_state) -- */
 	if (alloc->toma_extent_list && alloc->toma_extent_count > 0) {
 		toma_indices = alloc->toma_extent_list;
 		toma_count   = alloc->toma_extent_count;
@@ -304,7 +304,7 @@ static int tpv_recovery_one_side(struct nvmeibc_tpv *tpv, bool is_meta_side)
 	    "TPV: @STR: TOMA reports @LLU CDV_extents (meta=@INT); tree has @LLU",
 	    tpv->tpv_name, toma_count, (int)is_meta_side, alloc->cdv_extents_count);
 
-	/* ── 3. Cross-reference and adopt orphans ─────────────── */
+	/* -- 3. Cross-reference and adopt orphans --------------- */
 	for (i = 0; i < toma_count; i++) {
 		u64 eidx = toma_indices[i];
 		bool known;
@@ -344,7 +344,7 @@ int nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv)
 {
 	/*
 	 * Recover data side (always). In split mode, also recover the
-	 * metadata side — its extents host L1/L2 only but orphans still
+	 * metadata side - its extents host L1/L2 only but orphans still
 	 * need adopting so the tree-write pool is replenished.
 	 */
 	(void)tpv_recovery_one_side(tpv, /*is_meta_side=*/false);

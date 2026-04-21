@@ -23,11 +23,11 @@
 #include "common_public/nvmeib_public_procfs.h"	/* nvmeib_public_procfs_ent, proc_fill_t */
 #include "clnt/atom/nvmeiba_nvmesh_api.h"	/* nvmeiba_atom_os_api, nvmeiba_status_* */
 
-/* Forward declarations — full definitions live outside this header. */
+/* Forward declarations - full definitions live outside this header. */
 struct nvmeibc_volume;
 struct nvmeibc_cinst_params_main;
 
-/* ── Volume class discriminator ────────────────────────────────────────── */
+/* -- Volume class discriminator ------------------------------------------ */
 
 enum nvmeibc_volume_class {
 	NVC_REGULAR = 0,		/* thick-provisioned, default */
@@ -35,10 +35,10 @@ enum nvmeibc_volume_class {
 	NVC_TPV     = 2,		/* Thin-Provisioned Volume */
 };
 
-/* ── TPV.allocator state ───────────────────────────────────────────────── */
+/* -- TPV.allocator state ------------------------------------------------- */
 
 /*
- * Per-L2-table persistence context (partial-page flush, §3.4.3).
+ * Per-L2-table persistence context (partial-page flush, S.3.4.3).
  *
  * Each L2 table living in the TPV-owned pool is tracked by a tpv_l2_ctx
  * in alloc->l1_to_l2_ctx (xarray keyed by L1_idx).  dirty_pages is a
@@ -86,7 +86,7 @@ struct nvmeibc_tpv_free_slot {
  * Tracks a single CDV_extent allocated from the CDV.allocator (TOMA).
  * One CDV_extent holds n_slots = (cdv_extent_size / tpv_extent_size) TPV_extents.
  *
- * Slots within this extent may be (a) free — on alloc->free_tpv_extents,
+ * Slots within this extent may be (a) free - on alloc->free_tpv_extents,
  * (b) a data slot referenced by the xarray, (c) an L2 table (dynamic L2
  * placement, see nvmeibc_tpv_persist.c), or (d) slot 0 of the L1 extent.
  *
@@ -118,7 +118,7 @@ struct nvmeibc_tpv_allocator {
 	u64              virtual_extents_total;
 
 	/*
-	 * CDV geometry — learned from the parent CDV's config at attach time.
+	 * CDV geometry - learned from the parent CDV's config at attach time.
 	 * Needed to compute n_slots and physical offsets of each TPV_extent slot
 	 * within a newly allocated CDV_extent.
 	 */
@@ -143,7 +143,7 @@ struct nvmeibc_tpv_allocator {
 						/* default: 50 MB / tpv_extent_size */
 
 	/*
-	 * Per-allocator statistics — updated via atomic ops (no lock required).
+	 * Per-allocator statistics - updated via atomic ops (no lock required).
 	 * Readable at any time from /proc; reset via the stats proc entry.
 	 */
 	atomic64_t       stat_tpv_alloc_ok;	/* successful alloc_extent() calls */
@@ -160,7 +160,7 @@ struct nvmeibc_tpv_allocator {
 	/*
 	 * Per-TPV L1/L2 tree metadata (dynamic L2 placement).
 	 *
-	 * L1 lives in slot 0 of the "L1 extent" — the first CDV_extent ever
+	 * L1 lives in slot 0 of the "L1 extent" - the first CDV_extent ever
 	 * allocated to this TPV.  The L1 extent is a normal data extent in
 	 * every other respect: its remaining slots (1..n_slots-1) enter
 	 * free_tpv_extents and are used for data or for L2 tables.
@@ -176,7 +176,7 @@ struct nvmeibc_tpv_allocator {
 	 * new L1 indices first become non-null.
 	 *
 	 * l1_dirty_pages tracks which 4 KB pages of the L1 table itself have
-	 * been modified since the last flush (partial-page flush, §3.4.3).
+	 * been modified since the last flush (partial-page flush, S.3.4.3).
 	 * Bit 0 covers the L1 header; subsequent bits cover the L1 entries.
 	 */
 	u64              l1_extent_index;	/* CDV_extent holding L1 in slot 0; 0 = none yet */
@@ -193,7 +193,7 @@ struct nvmeibc_tpv_allocator {
 	u64              toma_extent_count;
 };
 
-/* ── TPV state enum ────────────────────────────────────────────────────── */
+/* -- TPV state enum ------------------------------------------------------ */
 
 enum nvmeibc_tpv_state {
 	TPV_ATTACHING  = 0,
@@ -202,7 +202,7 @@ enum nvmeibc_tpv_state {
 	TPV_ORPHAN     = 3,	/* NDU: nvmeibc gone, ATOM buffering BIOs */
 };
 
-/* ── Per-TPV instance ──────────────────────────────────────────────────── */
+/* -- Per-TPV instance ---------------------------------------------------- */
 
 struct nvmeibc_tpv {
 	struct nvmeiba_atom_os_api    atom;		/* MUST be first for container_of */
@@ -229,7 +229,7 @@ struct nvmeibc_tpv {
 	atomic_t                      state;		/* enum nvmeibc_tpv_state */
 
 	/*
-	 * CDV.allocator identity — learned from CDV topology at attach time,
+	 * CDV.allocator identity - learned from CDV topology at attach time,
 	 * updated via topology push when allocator TOMA changes.
 	 * Data-side identity. Split mode maintains a parallel identity for
 	 * the metadata CDV's allocator in meta_allocator_toma_id below.
@@ -292,7 +292,7 @@ struct nvmeibc_tpv {
 	bool                          dirty;
 
 	/*
-	 * IO timeout for parked bios — mirrors regular volume max_retry_jiffies.
+	 * IO timeout for parked bios - mirrors regular volume max_retry_jiffies.
 	 * Uses nvmeibc_io_max_retry_secs module param (shared with regular
 	 * volumes); when 0, falls back to IO_TIME_OUT_ATTACH (30 s) at
 	 * attach or IO_TIME_OUT_NORMAL (~infinite) after state_loaded.
@@ -335,23 +335,23 @@ struct nvmeibc_tpv {
 	atomic_t                      io_inflight;
 };
 
-/* ── ATOM disk/queue accessors ─────────────────────────────────────────── */
+/* -- ATOM disk/queue accessors ------------------------------------------- */
 
 #define tpv_disk(tpv)   ((tpv)->atom.disk)
 #define tpv_queue(tpv)  ((tpv)->atom.queue)
 
-/* ── Split-mode helpers ────────────────────────────────────────────────── */
+/* -- Split-mode helpers -------------------------------------------------- */
 
 /*
  * A split-mode TPV stores its L1/L2 tree on a second CDV. These helpers
  * return the allocator / CDV that owns the tree. In single-CDV mode both
  * return the data-side allocator / CDV so existing call sites Just Work.
  *
- * nvmeibc_tpv_is_split() — true iff split-mode.
- * nvmeibc_tpv_meta_alloc() — allocator that hosts the L1 extent + L2 tables.
- * nvmeibc_tpv_meta_cdv()   — CDV volume where tree reads/writes go.
- * nvmeibc_tpv_data_alloc() — allocator that hosts user-data slots.
- * nvmeibc_tpv_data_cdv()   — CDV volume where data reads/writes go.
+ * nvmeibc_tpv_is_split() - true iff split-mode.
+ * nvmeibc_tpv_meta_alloc() - allocator that hosts the L1 extent + L2 tables.
+ * nvmeibc_tpv_meta_cdv()   - CDV volume where tree reads/writes go.
+ * nvmeibc_tpv_data_alloc() - allocator that hosts user-data slots.
+ * nvmeibc_tpv_data_cdv()   - CDV volume where data reads/writes go.
  */
 static inline bool nvmeibc_tpv_is_split(const struct nvmeibc_tpv *tpv)
 {
@@ -378,10 +378,10 @@ static inline struct nvmeibc_volume *nvmeibc_tpv_data_cdv(struct nvmeibc_tpv *tp
 	return tpv->cdv_vol;
 }
 
-/* ── L1/L2 tree on-disk entry format ────────────────────────────────────── */
+/* -- L1/L2 tree on-disk entry format -------------------------------------- */
 
 /*
- * Every entry at every level (L1, L2) is 8 bytes — a raw CDV byte offset.
+ * Every entry at every level (L1, L2) is 8 bytes - a raw CDV byte offset.
  * cdv_offset == TPV_TREE_NULL (0) means the entry is empty / not present.
  * Valid entries always satisfy cdv_offset >= A > 0 in production (A defaults
  * to 1 GiB), and A == 0 is permitted only in unit tests that never store a
@@ -414,7 +414,7 @@ struct tpv_tree_entry {
 
 #define TPV_TREE_NULL  0ULL
 
-/* ── L1 table on-disk header (first 64 bytes of L1 extent slot 0) ───── */
+/* -- L1 table on-disk header (first 64 bytes of L1 extent slot 0) ----- */
 
 #define TPV_L1_MAGIC		0x5450564C31544142ULL	/* "TPVL1TAB" */
 #define TPV_L1_VERSION		2			/* bumped for 8-byte tree entries */
@@ -428,7 +428,7 @@ struct tpv_l1_header {
 	u8  reserved[16];		/* pad to 64 bytes total */
 };
 
-/* ── IO API (implemented in nvmeibc_tpv_io.c) ─────────────────────────── */
+/* -- IO API (implemented in nvmeibc_tpv_io.c) --------------------------- */
 
 /*
  * Module-level init/exit for the IO subsystem (bioset for bio splitting).
@@ -449,7 +449,7 @@ void nvmeibc_tpv_retry_pending_bios(struct nvmeibc_tpv *tpv);
  */
 void nvmeibc_tpv_forward_l1_flush_bios(struct nvmeibc_tpv *tpv);
 
-/* ── Public API (implemented in nvmeibc_tpv.c) ────────────────────────── */
+/* -- Public API (implemented in nvmeibc_tpv.c) -------------------------- */
 
 /*
  * Returns the new nvmeibc_tpv on success, NULL on error.
@@ -474,17 +474,17 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 
 /*
  * Detach a TPV. MUST be idempotent (callable more than once per TPV without
- * harm) — both the CDV-preempted hook (nvmeibc_tpv_handle_cdv_preempted) and
+ * harm) - both the CDV-preempted hook (nvmeibc_tpv_handle_cdv_preempted) and
  * the subsequent management-driven DetachVolumes path can invoke this. The
  * body gates mutating work on the TPV state (TPV_DETACHING / TPV_DETACHED);
  * a second entry observes the transition and returns without re-running
- * teardown. See TPV_PerClientCDVPreemption.md §2.10.5 "`nvmeibc_tpv_detach`
+ * teardown. See TPV_PerClientCDVPreemption.md S.2.10.5 "`nvmeibc_tpv_detach`
  * must be idempotent."
  */
 void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv);
 
 /*
- * Per-client CDV preempt cleanup barrier (TPV_PerClientCDVPreemption.md §2.10).
+ * Per-client CDV preempt cleanup barrier (TPV_PerClientCDVPreemption.md S.2.10).
  *
  * Called when the parent CDV's block device enters NCBD_PREEMPTED, either
  * because TOMA terminated this client's reg_ctx on the CDV or because a
@@ -492,7 +492,7 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv);
  * tears down every TPV whose cdv_vol points to this CDV: extent_maps
  * discarded, cdv_alloc_work cancelled, parked bios failed with -EIO, gendisk
  * unregistered. Without this cleanup, stale CDV offsets remain in memory and
- * a re-attached client could replay them — defeating the preempt.
+ * a re-attached client could replay them - defeating the preempt.
  */
 void nvmeibc_tpv_handle_cdv_preempted(const struct nvmeibc_volume *cdv);
 
@@ -530,7 +530,7 @@ void nvmeibc_tpv_update_meta_allocator_id(struct nvmeibc_tpv *tpv,
 					   u64 generation);
 
 /*
- * nvmeibc_tpv_update_allocator_for_cdv — update allocator identity for all
+ * nvmeibc_tpv_update_allocator_for_cdv - update allocator identity for all
  * TPVs backed by the given CDV UUID.
  *
  * Called from the topology handler when a CDV_ALLOCATOR_UPDATE message is
@@ -544,7 +544,7 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 					   u64 generation);
 
 /*
- * nvmeibc_tpv_alloc_l2_slot — claim a free TPV_extent slot for use as an L2
+ * nvmeibc_tpv_alloc_l2_slot - claim a free TPV_extent slot for use as an L2
  * table.  Pops one slot off alloc->free_tpv_extents and increments the owning
  * cdv_extent_ref's allocated_count and l2_slots.  Used by flush_state when a
  * new L1 index becomes non-null and must be backed by a fresh L2 table.
@@ -556,7 +556,7 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out);
 
 /*
- * Partial-page flush hooks (§3.4.3).  Called by the IO-path allocator and
+ * Partial-page flush hooks (S.3.4.3).  Called by the IO-path allocator and
  * by the extent-bootstrap code so flush_state writes only the 4 KB pages
  * that actually changed.
  *
@@ -571,7 +571,7 @@ int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out);
 void nvmeibc_tpv_mark_l2_leaf_dirty(struct nvmeibc_tpv *tpv, u64 virt_idx);
 void nvmeibc_tpv_mark_l1_full_dirty(struct nvmeibc_tpv *tpv);
 
-/* ── IB admin CDV response dispatch (implemented in nvmeibc_tpv_ib_admin.c) ── */
+/* -- IB admin CDV response dispatch (implemented in nvmeibc_tpv_ib_admin.c) -- */
 
 struct nvmeibc_cdv_alloc_resp;
 struct nvmeibc_cdv_list_resp;
@@ -590,7 +590,7 @@ extern int (*nvmeibc_tpv_test_cdv_free_fn)(
 	struct nvmeibc_volume *cdv, const char *toma_id,
 	const struct nvmeibc_cdv_free_req *req);
 
-/* ── Allocator API (implemented in nvmeibc_tpv_allocator.c) ───────────── */
+/* -- Allocator API (implemented in nvmeibc_tpv_allocator.c) ------------- */
 
 int  nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 			      struct nvmeibc_tpv_extent_entry **out);
@@ -603,13 +603,13 @@ void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);
 /*
  * Background work handlers: return empty CDV_extents, then request new ones.
  * Two separate entry points so container_of unambiguously resolves to the
- * correct struct embed — single-CDV TPVs only use _fn; split-mode TPVs use
+ * correct struct embed - single-CDV TPVs only use _fn; split-mode TPVs use
  * _fn for the data side and _meta_fn for the metadata side.
  */
 void nvmeibc_tpv_cdv_alloc_work_fn(struct work_struct *work);
 void nvmeibc_tpv_meta_cdv_alloc_work_fn(struct work_struct *work);
 
-/* ── Persistence API (implemented in nvmeibc_tpv_persist.c) ───────────── */
+/* -- Persistence API (implemented in nvmeibc_tpv_persist.c) ------------- */
 
 int  nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv);
 int  nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv);
@@ -626,27 +626,27 @@ void nvmeibc_tpv_timeout_work_fn(struct work_struct *work);
 /* Background work handler: load allocator state from the tree extent + recovery. */
 void nvmeibc_tpv_load_state_work_fn(struct work_struct *work);
 
-/* ── Recovery API (implemented in nvmeibc_tpv_recovery.c) ─────────────── */
+/* -- Recovery API (implemented in nvmeibc_tpv_recovery.c) --------------- */
 
 int  nvmeibc_tpv_recovery(struct nvmeibc_tpv *tpv);
 
-/* ── Proc API (implemented in nvmeibc_tpv_proc.c) ─────────────────────── */
+/* -- Proc API (implemented in nvmeibc_tpv_proc.c) ----------------------- */
 
 /*
- * nvmeibc_tpv_proc_register — create /proc/nvmeibc/tpv/<name>/ entries.
+ * nvmeibc_tpv_proc_register - create /proc/nvmeibc/tpv/<name>/ entries.
  * Called from nvmeibc_tpv_attach() after the TPV is added to the active list.
  * Silently skips registration if the module proc root is not yet available.
  */
 void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv);
 
 /*
- * nvmeibc_tpv_proc_deregister — remove /proc/nvmeibc/tpv/<name>/ entries.
+ * nvmeibc_tpv_proc_deregister - remove /proc/nvmeibc/tpv/<name>/ entries.
  * Called from nvmeibc_tpv_detach() before the allocator is freed.
  */
 void nvmeibc_tpv_proc_deregister(struct nvmeibc_tpv *tpv);
 
 /*
- * nvmeibc_tpv_proc_destroy_root — remove /proc/nvmeibc/tpv/ at module unload.
+ * nvmeibc_tpv_proc_destroy_root - remove /proc/nvmeibc/tpv/ at module unload.
  * Must be called after all per-TPV entries are gone and before the parent
  * /proc/nvmeibc/ directory is removed.
  */
