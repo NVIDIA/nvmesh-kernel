@@ -1390,14 +1390,13 @@ static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *C
 			} else {
 				N_Tf(__AUTOID__, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
-			break;	// Do we need to break after parsing the payload? Probably meaningless
 		}
 	}
 }
 	N_Tf(4vsdywb,
 		 LOCAL_DISK_LOG_FMT " vendor=@INT uuid=@STR tomaToken=@INT formatType=@STR formatRequestCounter=@INT blockSize=@INT metadataSize=@INT dbUUID=@STR",
-		 CMD_params->ldisk_id.str, CMD_params->fmt.native_serial.str, CMD_params->fmt.nsid, CMD_params->vendor, CMD_params->generic_uuid, CMD_params->tomaToken, CMD_params->formatType, CMD_params->formatRequestCounter, CMD_params->blockSize,
-		 CMD_params->metadataSize, CMD_params->dbUUID.str);
+		 CMD_params->fmt.ldisk_id.str, CMD_params->fmt.native_serial.str, CMD_params->fmt.nsid, CMD_params->fmt.vendor, CMD_params->generic_uuid, CMD_params->tomaToken, CMD_params->fmt.formatType, CMD_params->fmt.formatRequestCounter, CMD_params->fmt.blockSize,
+		 CMD_params->fmt.metadataSize, CMD_params->dbUUID.str);
 	NFOUT;
 	return rv;
 }
@@ -2724,8 +2723,8 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 
 	NFIN;
 	if (strcmp(messageType_params->messageType, "formatDrive") == 0) {
-		wakeup_format_event(&(CMD_params->ldisk_id), CMD_params->vendor, CMD_params->generic_uuid, CMD_params->blockSize,
-							CMD_params->metadataSize, CMD_params->formatRequestCounter, CMD_params->bootTime, &(CMD_params->dbUUID),
+		wakeup_format_event(&(CMD_params->fmt.ldisk_id), CMD_params->fmt.vendor, CMD_params->generic_uuid, CMD_params->fmt.blockSize,
+							CMD_params->fmt.metadataSize, CMD_params->fmt.formatRequestCounter, CMD_params->bootTime, &(CMD_params->dbUUID),
 							&(CMD_params->fmt.native_serial), CMD_params->fmt.nsid, CMD_params->fmt.native_nguid);
 		TODO(Make sure that when this is done, the format will go all the way even if we boot, and there is no need for resend of format CMD by MGMT);
 	} else if (strcmp(messageType_params->messageType, "reservationModeChange") == 0) {
