@@ -8,7 +8,8 @@
  *
  * Per-TPV proc directory layout:
  *
- *   status      - geometry, state, CDV.allocator identity and generation
+ *   status      - geometry, state, CDV.allocator identity and generation;
+ *                 in split mode prints separate [data] and [meta] sections
  *   allocator   - live pool counters (cdv extents, free slots, watermark,
  *                 pending returns)
  *   tpv_extent_map  - full xarray dump: virtual index -> physical offset in CDV,
@@ -114,19 +115,61 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("state:               %s\n",  tpv_state_str(atomic_read(&tpv->state)));
 	BUF_ADD("state_loaded:        %s\n",  READ_ONCE(tpv->state_loaded) ? "yes" : "no");
 	BUF_ADD("sync_flush:          %s\n",  tpv->sync_flush ? "yes" : "no");
+	BUF_ADD("split_mode:          %s\n",  nvmeibc_tpv_is_split(tpv) ? "yes" : "no");
 	BUF_ADD("virtual_size_mb:     %llu\n", tpv->virtual_size >> 20);
-	BUF_ADD("tpv_extent_size_kb:  %u\n",  alloc->tpv_extent_size_kb);
-	BUF_ADD("cdv_extent_size_mib:  %u\n",  alloc->cdv_extent_size_mib);
-	BUF_ADD("allocator_size_gib:   %llu\n", alloc->allocator_size_gib);
 	BUF_ADD("virtual_extents:     %llu\n", alloc->virtual_extents_total);
 	BUF_ADD("low_watermark:       %llu\n", alloc->low_watermark);
-	BUF_ADD("cdv_extents_allocated: %llu / %llu\n",
+
+	/* Data side */
+	BUF_ADD("[data] tpv_extent_size_kb:   %u\n",  alloc->tpv_extent_size_kb);
+	BUF_ADD("[data] cdv_extent_size_mib:  %u\n",  alloc->cdv_extent_size_mib);
+	BUF_ADD("[data] allocator_size_gib:   %llu\n", alloc->allocator_size_gib);
+	BUF_ADD("[data] cdv_extents_allocated:%llu / %llu\n",
 		cdv_extents_allocated, cdv_extents_total);
-	BUF_ADD("free_tpv_slots:      %llu\n", free_tpv_slots);
-	BUF_ADD("l1_extent_index:     %llu\n", alloc->l1_extent_index);
-	BUF_ADD("n_l2_tables_used:    %llu\n", alloc->n_l2_tables_used);
-	BUF_ADD("allocator_toma:      %s\n",  toma_id[0] ? toma_id : "(none)");
-	BUF_ADD("allocator_gen:       %llu\n", gen);
+	BUF_ADD("[data] free_tpv_slots:       %llu\n", free_tpv_slots);
+	if (!nvmeibc_tpv_is_split(tpv)) {
+		BUF_ADD("[data] l1_extent_index:      %llu\n", alloc->l1_extent_index);
+		BUF_ADD("[data] n_l2_tables_used:     %llu\n", alloc->n_l2_tables_used);
+	}
+	BUF_ADD("[data] allocator_toma:       %s\n",  toma_id[0] ? toma_id : "(none)");
+	BUF_ADD("[data] allocator_gen:        %llu\n", gen);
+
+	/* Meta side (split mode only) */
+	if (nvmeibc_tpv_is_split(tpv) && tpv->meta_allocator) {
+		struct nvmeibc_tpv_allocator *malloc = tpv->meta_allocator;
+		char meta_toma[NVMEIB_HOST_NAME_LEN];
+		u64  meta_gen, meta_cdv_extents, meta_free_slots;
+		u64  meta_cdv_extents_total = 0;
+
+		spin_lock_irqsave(&tpv->meta_allocator_id_lock, flags);
+		memcpy(meta_toma, tpv->meta_allocator_toma_id, sizeof(meta_toma));
+		meta_gen = tpv->meta_allocator_generation;
+		spin_unlock_irqrestore(&tpv->meta_allocator_id_lock, flags);
+
+		spin_lock(&malloc->lock);
+		meta_cdv_extents = malloc->cdv_extents_count;
+		meta_free_slots  = malloc->free_tpv_extent_count;
+		spin_unlock(&malloc->lock);
+
+		if (tpv->meta_cdv_vol && malloc->cdv_extent_size_mib > 0) {
+			u64 cdv_bytes  = (u64)nvmeibc_volume_get_size(tpv->meta_cdv_vol)
+					  << NVMEIBC_SECTOR_SHIFT;
+			u64 meta_bytes = malloc->allocator_size_gib << 30;
+			u64 data_bytes = (cdv_bytes > meta_bytes) ? cdv_bytes - meta_bytes : 0;
+			meta_cdv_extents_total = data_bytes / ((u64)malloc->cdv_extent_size_mib << 20);
+		}
+
+		BUF_ADD("[meta] tpv_extent_size_kb:   %u\n",  malloc->tpv_extent_size_kb);
+		BUF_ADD("[meta] cdv_extent_size_mib:  %u\n",  malloc->cdv_extent_size_mib);
+		BUF_ADD("[meta] allocator_size_gib:   %llu\n", malloc->allocator_size_gib);
+		BUF_ADD("[meta] cdv_extents_allocated:%llu / %llu\n",
+			meta_cdv_extents, meta_cdv_extents_total);
+		BUF_ADD("[meta] free_tpv_slots:       %llu\n", meta_free_slots);
+		BUF_ADD("[meta] l1_extent_index:      %llu\n", malloc->l1_extent_index);
+		BUF_ADD("[meta] n_l2_tables_used:     %llu\n", malloc->n_l2_tables_used);
+		BUF_ADD("[meta] allocator_toma:       %s\n",  meta_toma[0] ? meta_toma : "(none)");
+		BUF_ADD("[meta] allocator_gen:        %llu\n", meta_gen);
+	}
 
 #undef BUF_ADD
 	return count;
