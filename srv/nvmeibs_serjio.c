@@ -4251,10 +4251,9 @@ static void zero_journal_batch_cb(void *arg, int status, u32 result)
 		}
 	}
 	op_rsrc->status = status;
-	if (op_rsrc->comp) {
-		if (!op_rsrc->comp_ctr || atomic_dec_return(op_rsrc->comp_ctr) == 0)
-			complete(op_rsrc->comp);
-	}
+	if (op_rsrc->comp &&
+	    (!op_rsrc->comp_ctr || atomic_dec_return(op_rsrc->comp_ctr) == 0))
+		complete(op_rsrc->comp);
 	return_jrnl_bulk_nvme_op_rsrc(op_rsrc);
 	NFOUT;
 }
@@ -5411,10 +5410,9 @@ static void read_jmdc_batch_cb(void *arg, int status, u32 result)
 	}
 
 complete:
-	if (op_rsrc->comp) {
-		if (!op_rsrc->comp_ctr || atomic_dec_return(op_rsrc->comp_ctr) == 0)
-			complete(op_rsrc->comp);
-	}
+	if (op_rsrc->comp &&
+	    (!op_rsrc->comp_ctr || atomic_dec_return(op_rsrc->comp_ctr) == 0))
+		complete(op_rsrc->comp);
 	return_jrnl_bulk_nvme_op_rsrc(op_rsrc);
 	NFOUT;
 }
