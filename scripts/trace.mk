@@ -51,8 +51,11 @@ $(foreach fl,$(TRACE_MODULE_OBJ),$(eval $(call set_per_file_cflags2,$(fl),$(fl))
 
 PP_OUTDIR := $(shell realpath $(obj))/.trace_pp_dir
 
-# It is important to keep here = and not := as this line shall be resolved on evaluation
-PREPROCESSED = $(patsubst %.o,$(PP_OUTDIR)/%.i,$(TRACE_MODULE_OBJ))
+TRACE_ALL_HEADERS := $(shell find $(src) -name '*.h' 2>/dev/null)
+
+# .i file list for clean only: use $(obj)-relative paths so kbuild removes the right files
+# (realpath $(obj) can resolve wrongly when make -C $(KSRC) M=$(PWD) clean runs with cwd in KSRC).
+PREPROCESSED = $(patsubst %.o,$(obj)/.trace_pp_dir/%.i,$(TRACE_MODULE_OBJ))
 
 PP_DEP_FILES = $(foreach f,$(PREPROCESSED),$(dir $f).$(notdir $f).d)
 
@@ -66,10 +69,10 @@ clean-files += $(shell find $(obj) -name 'dict.*.json')
 -include $(PP_DEP_FILES)
 
 $(PP_OUTDIR)/%.i: ORIG_OBJ_NAME = $(subst $(PP_OUTDIR)/,,$(patsubst %.i,%.o,$@))
-$(PP_OUTDIR)/%.i: $(src)/%.c
+$(PP_OUTDIR)/%.i: $(src)/%.c $(TRACE_ALL_HEADERS)
 	$(shell mkdir -p $(dir $@))
 	[ -f $(obj)/.trace_pp_dir/$*.c_gen_events.h ] || touch $(obj)/.trace_pp_dir/$*.c_gen_events.h
-	$(CC) $(c_flags) $(call per_file_iflags_varval,$(ORIG_OBJ_NAME)) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -o $@ $?
+	$(CC) $(c_flags) $(call per_file_iflags_varval,$(ORIG_OBJ_NAME)) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -o $@ $<
 
 $(PP_OUTDIR)/%.i: $(src)/%.S
 	+$(shell mkdir -p $(dir $@))
