@@ -1075,7 +1075,7 @@ static void cdv_async_write_record_free_with_rollback(
 	if (!alloc->io_wq)
 		return;
 
-	e = NNVMEIBT_BM_CALLOC(cdv_rmw_wqe_alloc, sizeof(*e));
+	e = NNVMEIBT_BM_CALLOC(cdv_rmw_free_wqe_alloc, sizeof(*e));
 	if (!e)
 		return;
 

@@ -51,7 +51,7 @@ $(foreach fl,$(TRACE_MODULE_OBJ),$(eval $(call set_per_file_cflags2,$(fl),$(fl))
 
 PP_OUTDIR := $(shell realpath $(obj))/.trace_pp_dir
 
-TRACE_ALL_HEADERS := $(shell find $(src) -name '*.h' 2>/dev/null)
+TRACE_ALL_HEADERS := $(shell find $(src) -name '*.h' -not -path '*/.trace_pp_dir/*' 2>/dev/null)
 
 # .i file list for clean only: use $(obj)-relative paths so kbuild removes the right files
 # (realpath $(obj) can resolve wrongly when make -C $(KSRC) M=$(PWD) clean runs with cwd in KSRC).
