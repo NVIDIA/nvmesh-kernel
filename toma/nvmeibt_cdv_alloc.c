@@ -918,6 +918,10 @@ out:
 	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_WQ, &e->wq_entry);
 }
 
+/* Forward declaration — cdv_alloc_insert is defined later in this file. */
+static int cdv_alloc_insert(const char *cdv_uuid, uint64_t extent_index,
+			     const char *tpv_uuid);
+
 static void cdv_rmw_finalize(struct nvmeibt_wq_entry *wq_entry)
 {
 	struct cdv_rmw_wq_entry *e =
