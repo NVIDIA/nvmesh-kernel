@@ -121,8 +121,8 @@ function T_SANDBOX_trace_compress_test() {
 	__abort_ci_on_failure;
 }
 
-PAGER="_root/var/log/nvmesh/trace_daemon/pager";
 TRACE_DIR="_root/var/log/nvmesh/trace_daemon";
+PAGER="${TRACE_DIR}/pager";
 function T_SANDBOX_trace_compress_comparison() {
 	__build_if_needed;
 	mkdir -p out;
@@ -286,7 +286,7 @@ function T_SANDBOX_main_self_unit_test() {
 	__build_if_needed;
 	./${EXE_NAME};
 	__abort_ci_on_failure;
-	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > ${TOMA_TXT_LOGS};
+	${PAGER} ${TRACE_DIR} --toma --color  > ${TOMA_TXT_LOGS};
 }
 
 function T_SANDBOX_incremental_topo_main() {
@@ -333,7 +333,7 @@ case "$1" in
   gpt*)			T_SANDBOX_gpt_util_self_unit_test ${@:2};;
   persi*)		T_SANDBOX_toma_persist_json_test;;
   cover*)		T_SANDBOX_coverage;;
-  gen_logs*)	_root/var/log/nvmesh/trace_daemon/pager _root/var/log/nvmesh/trace_daemon --toma --color  > ${TOMA_TXT_LOGS};;
+  gen_logs*)	cmd="${PAGER} ${TRACE_DIR} --toma --color  > ${TOMA_TXT_LOGS}"; __run_cmd "${cmd}";;
   ci*)
 	clear;
 	#__force_rebuild BUILD_RELEASE=1;
