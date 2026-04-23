@@ -2687,12 +2687,16 @@ void nvmeibt_cdv_alloc_destroy(void)
 
 /*
  * cdv_maybe_warn_capacity - check CDV usage and fire a Kafka CDVCapacityWarning
- * when the utilisation crosses NVMEIBT_CDV_WARN_PCT.
+ * when the utilisation crosses NVMEIBT_CDV_WARN_PCT, and a matching
+ * CDVCapacityRestore when it falls back below NVMEIBT_CDV_WARN_CLEAR_PCT.
  *
  * Deduplication: the flag alloc->capacity_warning_sent suppresses repeated
- * events while usage stays above the threshold.  The flag is cleared when
- * usage drops below NVMEIBT_CDV_WARN_CLEAR_PCT (hysteresis) so that a later
- * rise above WARN_PCT fires a fresh event.
+ * WARNING events while usage stays above the threshold.  The flag is cleared
+ * when usage drops below NVMEIBT_CDV_WARN_CLEAR_PCT (hysteresis) so that a
+ * later rise above WARN_PCT fires a fresh event.  The same transition emits a
+ * single CDVCapacityRestore so management can clear any alert it raised in
+ * response to the WARNING - without this, a CDV that recovers capacity leaves
+ * a stale warning banner until the next management poll / reconcile.
  *
  * Safe to call with total_data_extents == 0 (returns immediately).
  */
@@ -2707,8 +2711,56 @@ static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
 	used_pct = (unsigned int)(alloc->n_allocated * 100 / alloc->total_data_extents);
 
 	if (used_pct < NVMEIBT_CDV_WARN_CLEAR_PCT) {
+		bool was_warned = alloc->capacity_warning_sent;
+
 		/* Usage safely below hysteresis threshold - reset flag. */
 		alloc->capacity_warning_sent = false;
+
+		/*
+		 * Only fire RESTORE on the WARNING-set -> clear transition.
+		 * Steady-state below the threshold stays silent, and a CDV
+		 * that never crossed WARN_PCT in the first place never emits
+		 * a spurious RESTORE.
+		 */
+		if (was_warned) {
+			json = NNVMEIBT_STR_ALLOC(cdv_cap_restore_json_alloc);
+			if (!json) {
+				N_Ef(cdv_cap_restore_oom,
+				     "CDV: CDVCapacityRestore OOM cdv=@STR used_pct=@UINT",
+				     alloc->cdv_uuid, used_pct);
+				return;
+			}
+
+			nvmeibt_Str_sprintf(json,
+				"{" KAFKA_PRODUCER_MSG_HEADER_FMT
+				"\"payload\": {\"cdvUUID\": \"%s\", "
+				"\"nAllocated\": %llu, \"totalExtents\": %llu, "
+				"\"usedPct\": %u}}",
+				KAFKA_PRODUCER_MSG_HEADER_VAR("cdvCapacityRestore", 1),
+				alloc->cdv_uuid,
+				alloc->n_allocated, alloc->total_data_extents,
+				used_pct);
+
+			N_If(cdv_cap_restore,
+			     "CDV: CDVCapacityRestore cdv=@STR used_pct=@UINT n=@LLU total=@LLU",
+			     alloc->cdv_uuid, used_pct, alloc->n_allocated,
+			     alloc->total_data_extents);
+
+			/*
+			 * Same unique_key as CDVCapacityWarning so the Kafka
+			 * queue coalesces WARN->RESTORE->WARN rapid oscillations
+			 * into whatever event is current at flush time.  The
+			 * consumer side is idempotent: RESTORE clears any latched
+			 * WARNING alert; WARNING (re-)raises it.
+			 */
+			nvmeibt_kafka_outgoing_msgs_queue_add(
+				alloc->cdv_uuid,
+				nvmeibt_Str_str(json),
+				nvmeibt_Str_strlen(json) + 1,
+				NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+
+			NNVMEIBT_STR_FREE(cdv_cap_restore_json_free, json);
+		}
 		return;
 	}
 
