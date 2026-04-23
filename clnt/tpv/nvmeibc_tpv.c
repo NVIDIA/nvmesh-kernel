@@ -358,7 +358,8 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 		u64 T        = (u64)tpv_extent_size_kb << 10;
 		u64 n_pages  = (T + 4095ULL) / 4096ULL;
 
-		alloc->l1_dirty_pages = bitmap_zalloc(n_pages, GFP_KERNEL);
+		alloc->l1_dirty_pages    = bitmap_zalloc(n_pages, GFP_KERNEL);
+		alloc->l1_dirty_snapshot = bitmap_zalloc(n_pages, GFP_KERNEL);
 	}
 
 	alloc->toma_extent_list        = NULL;
@@ -403,6 +404,7 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 
 		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
 			if (ctx) {
+				bitmap_free(ctx->dirty_snapshot);
 				bitmap_free(ctx->dirty_pages);
 				kfree(ctx);
 			}
@@ -410,6 +412,8 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 		xa_destroy(&alloc->l1_to_l2_ctx);
 		(void)li;
 	}
+	bitmap_free(alloc->l1_dirty_snapshot);
+	alloc->l1_dirty_snapshot = NULL;
 	bitmap_free(alloc->l1_dirty_pages);
 	alloc->l1_dirty_pages = NULL;
 	kvfree(alloc->toma_extent_list);

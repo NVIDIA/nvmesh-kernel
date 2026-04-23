@@ -53,6 +53,18 @@ enum nvmeibc_volume_class {
 struct tpv_l2_ctx {
 	u64              phys;		/* CDV byte offset of this L2 slot */
 	unsigned long   *dirty_pages;	/* bitmap: DIV_ROUND_UP(T, 4096) bits */
+	/*
+	 * Per-flush snapshot of dirty_pages.  Populated by
+	 * nvmeibc_tpv_flush_state at the top of each flush cycle via an
+	 * atomic xchg per word of dirty_pages, clearing the live bitmap in
+	 * the same step.  persist_write_dirty_pages walks this snapshot
+	 * (not the live bitmap) so concurrent mark_l2_leaf_dirty calls
+	 * during the flush do not race with the write-then-clear pattern:
+	 * their set_bit lands in dirty_pages (post-clear) and is caught
+	 * by the next flush.  See TPV_Trimming.md Commit 1 for the race
+	 * analysis.
+	 */
+	unsigned long   *dirty_snapshot;
 };
 
 /*
@@ -100,11 +112,48 @@ struct nvmeibc_tpv_free_slot {
  */
 struct nvmeibc_cdv_extent_ref {
 	u64              extent_index;		/* CDV_extent index i */
-	u64              allocated_count;	/* data + L2 slots in use */
+	u64              allocated_count;	/* data + L2 slots in use (does NOT include pending_free_count) */
 	u64              l2_slots;		/* L2 tables currently in this extent */
 	bool             is_l1_extent;		/* slot 0 holds the L1 table; extent pinned */
 	struct list_head node;
+
+	/*
+	 * Deferred slot visibility (Step 2 / Step 5 of TPV_Trimming.md).
+	 *
+	 * pending_free_slots holds slots that have been logically freed
+	 * (xa_erased) but whose covering L2 page has not yet been flushed
+	 * to CDV.  Such slots are INVISIBLE to the allocator: they are
+	 * neither in free_tpv_extents nor counted in allocated_count, so
+	 * they cannot be re-allocated until their on-disk L2 leaf is
+	 * durable-null.  This prevents the crash-window race where a
+	 * freed slot is reused before its mapping change is on disk and a
+	 * subsequent crash leaves two virt_idx entries pointing at the
+	 * same physical slot.
+	 *
+	 * flushing_free_slots is the snapshot taken at the top of each
+	 * persist_work cycle.  Slots move pending -> flushing under
+	 * alloc->lock, then the flush proceeds.  On success they are
+	 * promoted to alloc->free_tpv_extents; on failure they are put
+	 * back on pending_free_slots for the next cycle.
+	 */
+	struct list_head pending_free_slots;
+	struct list_head flushing_free_slots;
+	u32              pending_free_count;
+	u32              flushing_free_count;
 };
+
+/*
+ * Initialize the list_head fields of a freshly kzalloc'd ref.  kzalloc
+ * only zeroes memory, but list_heads must be INIT_LIST_HEAD'd to be
+ * valid empty lists.  Every site that allocates a ref must call this.
+ */
+static inline void nvmeibc_cdv_extent_ref_init_lists(
+		struct nvmeibc_cdv_extent_ref *ref)
+{
+	INIT_LIST_HEAD(&ref->node);
+	INIT_LIST_HEAD(&ref->pending_free_slots);
+	INIT_LIST_HEAD(&ref->flushing_free_slots);
+}
 
 /*
  * Sparse map: xarray keyed by virtual extent index -> nvmeibc_tpv_extent_entry*.
@@ -188,6 +237,7 @@ struct nvmeibc_tpv_allocator {
 	u64              n_l2_tables_used;	/* L2 tables currently allocated */
 	struct xarray    l1_to_l2_ctx;		/* L1_idx -> struct tpv_l2_ctx * */
 	unsigned long   *l1_dirty_pages;	/* bitmap: DIV_ROUND_UP(T, 4096) bits */
+	unsigned long   *l1_dirty_snapshot;	/* per-flush snapshot; see tpv_l2_ctx::dirty_snapshot */
 
 	/*
 	 * Cached CDV_LIST_EXTENTS result from load_state.
@@ -615,6 +665,20 @@ int  nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx);
  */
 int  nvmeibc_tpv_discard_range(struct nvmeibc_tpv *tpv,
 			       u64 start_byte, u64 len_bytes);
+
+/*
+ * Snapshot every ref's pending_free_slots, call flush_state, then
+ * either promote the snapshot to free_tpv_extents (flush success) or
+ * put it back on pending_free_slots (flush failure).  The snapshot-
+ * before-flush discipline is what makes this crash-safe: only slots
+ * whose L2 pages were dirty at the top of this cycle become
+ * allocator-visible, and only if the flush that covered them landed.
+ *
+ * Called from persist_work_fn in the async path; exposed here for the
+ * kernel self-tests and for a future /proc/.../flush_now knob.
+ * Returns the flush_state result code.
+ */
+int  nvmeibc_tpv_flush_and_promote(struct nvmeibc_tpv *tpv);
 
 /* Free all nvmeibc_tpv_free_slot entries on a list. Called at detach. */
 void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);

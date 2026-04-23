@@ -158,27 +158,38 @@ static inline u64 persist_l1_entry_page(u64 l1_idx)
 }
 
 /*
- * Write pages marked in @dirty_pages from @buf to CDV at @base_phys.
- * Adjacent set bits are coalesced into a single contiguous write.  Cleared
- * bits are skipped.  The bitmap is zeroed for the pages successfully
- * written.  Partial failure leaves the bitmap in the "remaining dirty"
- * state so the next flush can retry.
+ * Write pages marked in @snapshot from @buf to CDV at @base_phys, using
+ * the snapshot-then-write discipline:
+ *
+ *   1. @snapshot is a flush-local bitmap that flush_state has already
+ *      atomically xchg'd out of the live dirty-pages bitmap; any
+ *      concurrent set_bit during the write lands in @live (the live
+ *      bitmap, post-xchg) and is caught by the next flush.
+ *   2. On success, @snapshot is consumed (bits are implicitly discarded
+ *      on the next xchg-and-clear cycle).  No live bitmap mutation here.
+ *   3. On partial failure, the unsent remainder of @snapshot is ORed
+ *      back into @live so the next flush retries it.
+ *
+ * Adjacent set bits in @snapshot are coalesced into one contiguous write.
  */
 static int persist_write_dirty_pages(struct nvmeibc_tpv *tpv, u64 base_phys,
-				     const void *buf, unsigned long *dirty_pages,
+				     const void *buf,
+				     unsigned long *snapshot,
+				     unsigned long *live,
 				     u64 n_pages)
 {
 	unsigned long pos = 0;
+	unsigned long j;
 	int rv = 0;
 
 	while (pos < n_pages) {
-		unsigned long start = find_next_bit(dirty_pages, n_pages, pos);
+		unsigned long start = find_next_bit(snapshot, n_pages, pos);
 		unsigned long end;
 
 		if (start >= n_pages)
 			break;
 
-		end = find_next_zero_bit(dirty_pages, n_pages, start);
+		end = find_next_zero_bit(snapshot, n_pages, start);
 		if (end > n_pages)
 			end = n_pages;
 
@@ -186,12 +197,30 @@ static int persist_write_dirty_pages(struct nvmeibc_tpv *tpv, u64 base_phys,
 			base_phys + start * PERSIST_PAGE_BYTES,
 			(const u8 *)buf + start * PERSIST_PAGE_BYTES,
 			(end - start) * PERSIST_PAGE_BYTES);
-		if (rv)
+		if (rv) {
+			/*
+			 * Merge the unsent remainder [start, n_pages) back
+			 * into the live bitmap so the next flush retries
+			 * them.  Atomic set_bit composes safely with any
+			 * concurrent mark_*_dirty set_bit on the same word.
+			 */
+			for (j = start; j < n_pages; j++)
+				if (test_bit(j, snapshot))
+					set_bit(j, live);
+			/* Leave snapshot non-empty for the failure retry path. */
 			return rv;
-
-		bitmap_clear(dirty_pages, start, end - start);
+		}
 		pos = end;
 	}
+
+	/*
+	 * All pages in the snapshot are now on disk.  Zero the snapshot so
+	 * flush_state's subsequent orphan-ctx loop sees bitmap_empty() and
+	 * skips this ctx (we already wrote it).  The live bitmap is not
+	 * touched: concurrent mark_*_dirty set_bit calls during the write
+	 * are preserved there for the next flush.
+	 */
+	bitmap_zero(snapshot, n_pages);
 	return 0;
 }
 
@@ -275,10 +304,25 @@ static int persist_get_or_alloc_l2_ctx(struct nvmeibc_tpv *tpv, u64 l1_idx,
 		kfree(ctx);
 		return -ENOMEM;
 	}
-	bitmap_set(ctx->dirty_pages, 0, n_pages);	/* fresh: full write */
+	ctx->dirty_snapshot = bitmap_zalloc(n_pages, GFP_NOIO);
+	if (!ctx->dirty_snapshot) {
+		bitmap_free(ctx->dirty_pages);
+		kfree(ctx);
+		return -ENOMEM;
+	}
+	/*
+	 * Fresh ctx: on-disk image is garbage.  Force a full write on this
+	 * flush cycle by pre-seeding the snapshot.  Do NOT seed dirty_pages
+	 * (the live bitmap) - it stays empty so concurrent mark_l2_leaf_dirty
+	 * can land there cleanly.  The snapshot drives this cycle's write;
+	 * any new dirties during the flush land in dirty_pages for the next
+	 * cycle.
+	 */
+	bitmap_set(ctx->dirty_snapshot, 0, n_pages);
 
 	rv = xa_err(xa_store(&alloc->l1_to_l2_ctx, l1_idx, ctx, GFP_NOIO));
 	if (rv) {
+		bitmap_free(ctx->dirty_snapshot);
 		bitmap_free(ctx->dirty_pages);
 		kfree(ctx);
 		return rv;
@@ -356,6 +400,7 @@ static int flush_state_write_l2_ctx(struct nvmeibc_tpv *tpv,
 		return -ECANCELED;
 
 	rv = persist_write_dirty_pages(tpv, ctx->phys, l2_buf,
+				       ctx->dirty_snapshot,
 				       ctx->dirty_pages, n_pages);
 	if (rv) {
 		_NE(tpv_flush_l2_write_fail,
@@ -434,6 +479,15 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	 * L1 pages we do NOT need to rewrite retain their correct content in
 	 * case find_next_bit picks up a dirty page that straddles an L1 entry
 	 * we're not touching this flush.
+	 *
+	 * At the same time, snapshot-and-clear each ctx's dirty_pages into
+	 * its dirty_snapshot.  Concurrent mark_l2_leaf_dirty calls that
+	 * happen AFTER the xchg land in dirty_pages (the live bitmap,
+	 * now zeroed by the xchg) and are caught by the next flush.  This
+	 * is the fix for the clear-vs-set race in
+	 * persist_write_dirty_pages: we no longer clear live bits there,
+	 * so there is no window in which a concurrent set_bit gets
+	 * discarded by a bitmap_clear.
 	 */
 	{
 		unsigned long li;
@@ -442,6 +496,15 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
 			if (li < N_L1 && ctx)
 				l1_entries[li].cdv_offset = ctx->phys;
+
+			if (ctx && ctx->dirty_pages && ctx->dirty_snapshot) {
+				u64 n_longs = BITS_TO_LONGS(n_pages);
+				u64 w;
+
+				for (w = 0; w < n_longs; w++)
+					ctx->dirty_snapshot[w] = xchg(
+						&ctx->dirty_pages[w], 0UL);
+			}
 		}
 	}
 
@@ -516,21 +579,22 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 
 	/*
 	 * Also flush L1 indices that have a ctx but no mapped leaves (all
-	 * leaves freed since last flush).  ctx->dirty_pages still carries
-	 * the bits set by free_extent - write only those pages.
+	 * leaves freed since last flush).  We consult ctx->dirty_snapshot
+	 * (populated at the top of flush_state) rather than dirty_pages,
+	 * because dirty_pages was cleared by the snapshot-and-clear at
+	 * entry.  Slots flushed by the main loop have empty dirty_snapshot
+	 * (persist_write_dirty_pages consumes it on success); those are
+	 * skipped by the bitmap_empty check below.
 	 */
 	{
 		unsigned long li;
 		struct tpv_l2_ctx *ctx;
 
 		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
-			if (li >= N_L1 || !ctx || !ctx->dirty_pages)
+			if (li >= N_L1 || !ctx || !ctx->dirty_snapshot)
 				continue;
-			/* Already handled in the main loop? (prev_l1_idx hit). */
-			if (bitmap_empty(ctx->dirty_pages, n_pages))
+			if (bitmap_empty(ctx->dirty_snapshot, n_pages))
 				continue;
-			/* If the main loop already rewrote this L2, its dirty
-			 * bits were cleared; nothing to do. */
 			if (tpv_is_detaching(tpv)) {
 				rv = -ECANCELED;
 				goto out;
@@ -553,10 +617,29 @@ int nvmeibc_tpv_flush_state(struct nvmeibc_tpv *tpv)
 	    alloc->l1_dirty_pages)
 		set_bit(0, alloc->l1_dirty_pages);
 
-	if (alloc->l1_dirty_pages) {
+	/*
+	 * Snapshot-and-clear the L1 dirty bitmap AFTER the iteration loop
+	 * so that L1-entry updates from flush_state_write_l2_ctx (which
+	 * set bits during iteration as new L2 ctxs were created) are
+	 * captured in the snapshot and written this cycle.  Concurrent
+	 * mark_l1_full_dirty after this xchg lands in the live bitmap and
+	 * is caught by the next flush.  Same race argument as the per-L2
+	 * ctx snapshot above.
+	 */
+	if (alloc->l1_dirty_pages && alloc->l1_dirty_snapshot) {
+		u64 n_longs = BITS_TO_LONGS(n_pages);
+		u64 w;
+
+		for (w = 0; w < n_longs; w++)
+			alloc->l1_dirty_snapshot[w] = xchg(
+				&alloc->l1_dirty_pages[w], 0UL);
+	}
+
+	if (alloc->l1_dirty_pages && alloc->l1_dirty_snapshot) {
 		rv = persist_write_dirty_pages(tpv,
 			persist_tree_slot_offset(alloc, l1_ei, 0),
-			l1_buf, alloc->l1_dirty_pages, n_pages);
+			l1_buf, alloc->l1_dirty_snapshot,
+			alloc->l1_dirty_pages, n_pages);
 	} else {
 		/* Fallback: init-time OOM left l1_dirty_pages NULL.  Write the
 		 * full L1 slot so correctness is preserved even though write
@@ -796,7 +879,7 @@ static int load_state_populate_data_side(struct nvmeibc_tpv *tpv,
 			ref->allocated_count = data_cnt;
 			ref->l2_slots        = 0;		/* no L2 on data side */
 			ref->is_l1_extent    = false;	/* no L1 on data side */
-			INIT_LIST_HEAD(&ref->node);
+			nvmeibc_cdv_extent_ref_init_lists(ref);
 			list_add_tail(&ref->node, &data_alloc->cdv_extent_list);
 			data_alloc->cdv_extents_count++;
 
@@ -1075,10 +1158,19 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 				rv = -ENOMEM;
 				goto out_free;
 			}
+			ctx->dirty_snapshot = bitmap_zalloc(persist_n_pages(alloc),
+							    GFP_NOIO);
+			if (!ctx->dirty_snapshot) {
+				bitmap_free(ctx->dirty_pages);
+				kfree(ctx);
+				rv = -ENOMEM;
+				goto out_free;
+			}
 
 			rv = xa_err(xa_store(&alloc->l1_to_l2_ctx, i, ctx,
 					     GFP_NOIO));
 			if (rv) {
+				bitmap_free(ctx->dirty_snapshot);
 				bitmap_free(ctx->dirty_pages);
 				kfree(ctx);
 				goto out_free;
@@ -1253,7 +1345,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			ref->allocated_count = data_cnt + l2_cnt;
 			ref->l2_slots        = l2_cnt;
 			ref->is_l1_extent    = is_l1;
-			INIT_LIST_HEAD(&ref->node);
+			nvmeibc_cdv_extent_ref_init_lists(ref);
 			list_add_tail(&ref->node, &alloc->cdv_extent_list);
 			alloc->cdv_extents_count++;
 
@@ -1366,7 +1458,15 @@ void nvmeibc_tpv_persist_work_fn(struct work_struct *work)
 	tpv->dirty = false;
 	spin_unlock(&tpv->persist_lock);
 
-	rv = nvmeibc_tpv_flush_state(tpv);
+	/*
+	 * flush_and_promote implements the snapshot-before-flush
+	 * discipline from Step 2 / Step 5 of TPV_Trimming.md: snapshot
+	 * pending_free_slots, flush L2 state, then either promote
+	 * (success) or revert (failure).  Deferred slot visibility is
+	 * what makes trim and online compaction crash-safe without a
+	 * journal.
+	 */
+	rv = nvmeibc_tpv_flush_and_promote(tpv);
 	if (rv) {
 		_NE(tpv_bg_flush_fail, "TPV: @STR: background flush failed rv=@INT",
 		    tpv->tpv_name, rv);

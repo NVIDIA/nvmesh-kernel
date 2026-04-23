@@ -387,7 +387,8 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 		u64 T       = (u64)TPV_KTEST_TPV_EXT_KB << 10;
 		u64 n_pages = (T + 4095ULL) / 4096ULL;
 
-		alloc->l1_dirty_pages = bitmap_zalloc(n_pages, GFP_KERNEL);
+		alloc->l1_dirty_pages    = bitmap_zalloc(n_pages, GFP_KERNEL);
+		alloc->l1_dirty_snapshot = bitmap_zalloc(n_pages, GFP_KERNEL);
 	}
 	alloc->toma_extent_list        = NULL;
 	alloc->toma_extent_count       = 0;
@@ -459,7 +460,7 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 		ref->allocated_count = 0;
 		ref->l2_slots        = 0;
 		ref->is_l1_extent    = true;
-		INIT_LIST_HEAD(&ref->node);
+		nvmeibc_cdv_extent_ref_init_lists(ref);
 		list_add_tail(&ref->node, &alloc->cdv_extent_list);
 		alloc->cdv_extents_count++;
 		alloc->l1_extent_index  = TPV_KTEST_L1_EXT_IDX;
@@ -492,7 +493,7 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 		ref->allocated_count = 0;
 		ref->l2_slots        = 0;
 		ref->is_l1_extent    = false;
-		INIT_LIST_HEAD(&ref->node);
+		nvmeibc_cdv_extent_ref_init_lists(ref);
 		list_add_tail(&ref->node, &alloc->cdv_extent_list);
 		alloc->cdv_extents_count++;
 
@@ -567,12 +568,15 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 
 		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
 			if (ctx) {
+				bitmap_free(ctx->dirty_snapshot);
 				bitmap_free(ctx->dirty_pages);
 				kfree(ctx);
 			}
 		}
 		xa_destroy(&alloc->l1_to_l2_ctx);
 	}
+	bitmap_free(alloc->l1_dirty_snapshot);
+	alloc->l1_dirty_snapshot = NULL;
 	bitmap_free(alloc->l1_dirty_pages);
 	alloc->l1_dirty_pages = NULL;
 	kvfree(alloc->toma_extent_list);
@@ -602,12 +606,14 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 
 			xa_for_each(&m->l1_to_l2_ctx, li, ctx) {
 				if (ctx) {
+					bitmap_free(ctx->dirty_snapshot);
 					bitmap_free(ctx->dirty_pages);
 					kfree(ctx);
 				}
 			}
 			xa_destroy(&m->l1_to_l2_ctx);
 		}
+		bitmap_free(m->l1_dirty_snapshot);
 		bitmap_free(m->l1_dirty_pages);
 		kvfree(m->toma_extent_list);
 		kfree(m);
@@ -647,7 +653,8 @@ static int tpv_ktest_upgrade_to_split(struct nvmeibc_tpv *tpv,
 	xa_init(&m->l1_to_l2_ctx);
 	T       = (u64)meta_tpv_extent_size_kb << 10;
 	n_pages = (T + 4095ULL) / 4096ULL;
-	m->l1_dirty_pages = bitmap_zalloc(n_pages, GFP_KERNEL);
+	m->l1_dirty_pages    = bitmap_zalloc(n_pages, GFP_KERNEL);
+	m->l1_dirty_snapshot = bitmap_zalloc(n_pages, GFP_KERNEL);
 
 	tpv->meta_allocator = m;
 	/*
@@ -1252,7 +1259,7 @@ static int tpv_ktest_seed_meta_pool(struct nvmeibc_tpv *tpv, u64 n_l2_extents)
 		if (!ref) return -ENOMEM;
 		ref->extent_index    = TPV_KTEST_L1_EXT_IDX;
 		ref->is_l1_extent    = true;
-		INIT_LIST_HEAD(&ref->node);
+		nvmeibc_cdv_extent_ref_init_lists(ref);
 		list_add_tail(&ref->node, &alloc->cdv_extent_list);
 		alloc->cdv_extents_count++;
 		alloc->l1_extent_index  = TPV_KTEST_L1_EXT_IDX;
@@ -1279,7 +1286,7 @@ static int tpv_ktest_seed_meta_pool(struct nvmeibc_tpv *tpv, u64 n_l2_extents)
 		ref = kzalloc(sizeof(*ref), GFP_KERNEL);
 		if (!ref) return -ENOMEM;
 		ref->extent_index    = ei;
-		INIT_LIST_HEAD(&ref->node);
+		nvmeibc_cdv_extent_ref_init_lists(ref);
 		list_add_tail(&ref->node, &alloc->cdv_extent_list);
 		alloc->cdv_extents_count++;
 
@@ -1606,19 +1613,29 @@ done:
 }
 
 /*
- * tpv_ktest_discard_whole_extent - Step 1 of TPV_Trimming.md.
+ * tpv_ktest_discard_whole_extent - Step 1 + Step 2 of TPV_Trimming.md.
  *
- * Allocate virt_idx=0, then invoke nvmeibc_tpv_discard_range with an
- * extent-aligned byte range covering exactly that virt_idx.  Verify
- * the slot is unmapped, the free pool grew, and stat_discard_ok ticked
- * exactly once with no misaligned-skipped ticks.
+ * After Step 2's deferred-visibility rewrite, freeing a slot is a two-
+ * phase operation:
+ *   Phase A - free_extent parks the slot on ref->pending_free_slots;
+ *             the slot is invisible to the allocator (not in
+ *             free_tpv_extents), allocated_count is unchanged.
+ *   Phase B - nvmeibc_tpv_flush_and_promote flushes the L2 page and,
+ *             on success, promotes parked slots to free_tpv_extents
+ *             and decrements allocated_count.
+ *
+ * This test exercises both phases, verifying that state snapshots at
+ * each point match the design.
  */
 static void tpv_ktest_discard_whole_extent(struct tpv_ktest_output *kto)
 {
 	struct nvmeibc_tpv              *tpv;
 	struct nvmeibc_tpv_allocator    *alloc;
+	struct nvmeibc_cdv_extent_ref   *ref;
 	struct nvmeibc_tpv_extent_entry *entry = NULL;
 	u64 extent_bytes;
+	u64 free_after_alloc;
+	u64 alloc_after_alloc;
 	int rc;
 
 	tpv = tpv_ktest_create();
@@ -1643,6 +1660,12 @@ static void tpv_ktest_discard_whole_extent(struct tpv_ktest_output *kto)
 		goto done;
 	}
 
+	/* seed_pool(1) creates exactly one ref - the L1 extent. */
+	ref = list_first_entry(&alloc->cdv_extent_list,
+			       struct nvmeibc_cdv_extent_ref, node);
+	free_after_alloc  = alloc->free_tpv_extent_count;
+	alloc_after_alloc = ref->allocated_count;
+
 	/* The first data slot sits one T beyond slot 0 (L1 header). */
 	(void)nvmeibc_tpv_discard_range(tpv, 1ULL * extent_bytes,
 					extent_bytes);
@@ -1658,8 +1681,29 @@ static void tpv_ktest_discard_whole_extent(struct tpv_ktest_output *kto)
 	 */
 	(void)nvmeibc_tpv_discard_range(tpv, 0, extent_bytes);
 
+	/* --- Phase A checks: slot parked, not yet promoted. --- */
 	if (xa_load(&alloc->extent_map, 0) != NULL) {
 		KTO_FAIL(kto, "discard_whole", "xa_load(0) non-NULL after discard");
+		goto done;
+	}
+	if (ref->pending_free_count != 1) {
+		KTO_FAIL(kto, "discard_whole",
+			 "pending_free_count=%u, want 1 (slot should be parked)",
+			 ref->pending_free_count);
+		goto done;
+	}
+	if (alloc->free_tpv_extent_count != free_after_alloc) {
+		KTO_FAIL(kto, "discard_whole",
+			 "free_tpv_extent_count=%llu, want %llu (slot must NOT be in pool yet)",
+			 (unsigned long long)alloc->free_tpv_extent_count,
+			 (unsigned long long)free_after_alloc);
+		goto done;
+	}
+	if (ref->allocated_count != alloc_after_alloc) {
+		KTO_FAIL(kto, "discard_whole",
+			 "allocated_count=%llu, want %llu (must not decrement until promote)",
+			 (unsigned long long)ref->allocated_count,
+			 (unsigned long long)alloc_after_alloc);
 		goto done;
 	}
 	if (atomic64_read(&alloc->stat_discard_ok) != 1) {
@@ -1673,6 +1717,34 @@ static void tpv_ktest_discard_whole_extent(struct tpv_ktest_output *kto)
 			 "stat_discard_misaligned_skipped=%lld, want 0",
 			 (long long)atomic64_read(
 			     &alloc->stat_discard_misaligned_skipped));
+		goto done;
+	}
+
+	/* --- Phase B: force flush + promote. --- */
+	rc = nvmeibc_tpv_flush_and_promote(tpv);
+	if (rc != 0) {
+		KTO_FAIL(kto, "discard_whole",
+			 "flush_and_promote rc=%d", rc);
+		goto done;
+	}
+	if (ref->pending_free_count != 0 || ref->flushing_free_count != 0) {
+		KTO_FAIL(kto, "discard_whole",
+			 "after promote: pending=%u flushing=%u, want 0/0",
+			 ref->pending_free_count, ref->flushing_free_count);
+		goto done;
+	}
+	if (alloc->free_tpv_extent_count != free_after_alloc + 1) {
+		KTO_FAIL(kto, "discard_whole",
+			 "after promote: free_count=%llu, want %llu",
+			 (unsigned long long)alloc->free_tpv_extent_count,
+			 (unsigned long long)(free_after_alloc + 1));
+		goto done;
+	}
+	if (ref->allocated_count != alloc_after_alloc - 1) {
+		KTO_FAIL(kto, "discard_whole",
+			 "after promote: allocated_count=%llu, want %llu",
+			 (unsigned long long)ref->allocated_count,
+			 (unsigned long long)(alloc_after_alloc - 1));
 		goto done;
 	}
 
@@ -1758,6 +1830,145 @@ done:
 	tpv_ktest_destroy(tpv);
 }
 
+/*
+ * tpv_ktest_discard_crash_before_flush - Step 2 crash safety.
+ *
+ * Validates the deferred-visibility rule: a slot whose discard was
+ * parked on pending_free_slots but never flushed to CDV must be
+ * recoverable on re-attach.  Because the on-disk L2 still references
+ * the slot, load_state should re-adopt it as allocated.  The
+ * post-crash state is "the DISCARD appeared to complete to the guest
+ * but did not actually reclaim" - documented weaker-than-sync_flush
+ * semantics, healed by the next fstrim (Step 1 item 4).
+ *
+ * Without Commit 1's deferred visibility, a concurrent alloc could
+ * reuse the slot before the flush, then a crash would leave two
+ * virt_idx entries pointing at the same physical slot on recovery.
+ * This test certifies that the parked slot is invisible to the
+ * allocator and thus unreachable as a reuse target.
+ */
+static void tpv_ktest_discard_crash_before_flush(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv              *tpv;
+	struct nvmeibc_tpv              *tpv2 = NULL;
+	struct nvmeibc_tpv_allocator    *alloc;
+	struct nvmeibc_cdv_extent_ref   *ref;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	struct nvmeibc_tpv_extent_entry *e2;
+	u64 saved_toma_extents[1];
+	u64 extent_bytes;
+	u64 expect_phys;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) {
+		KTO_FAIL(kto, "discard_crash_before_flush", "create failed");
+		return;
+	}
+	alloc        = &tpv->allocator;
+	extent_bytes = (u64)alloc->tpv_extent_size_kb << 10;
+
+	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
+		KTO_FAIL(kto, "discard_crash_before_flush", "seed_pool failed");
+		goto done;
+	}
+	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	if (rc != 0 || !entry) {
+		KTO_FAIL(kto, "discard_crash_before_flush",
+			 "alloc_extent rc=%d", rc);
+		goto done;
+	}
+	expect_phys = entry->phys_offset;
+
+	/*
+	 * Flush the allocation to disk so the L2 leaf for virt_idx=0
+	 * points at expect_phys in the CDV buffer.  Subsequent free +
+	 * crash should leave that L2 leaf intact (because we don't
+	 * flush after the free).
+	 */
+	rc = nvmeibc_tpv_flush_state(tpv);
+	if (rc != 0) {
+		KTO_FAIL(kto, "discard_crash_before_flush",
+			 "initial flush rc=%d", rc);
+		goto done;
+	}
+
+	/*
+	 * Discard virt_idx=0.  The slot parks on pending_free_slots;
+	 * the L2 page is dirty in memory but NOT written to CDV.
+	 */
+	(void)nvmeibc_tpv_discard_range(tpv, 0, extent_bytes);
+
+	ref = list_first_entry(&alloc->cdv_extent_list,
+			       struct nvmeibc_cdv_extent_ref, node);
+	if (ref->pending_free_count != 1) {
+		KTO_FAIL(kto, "discard_crash_before_flush",
+			 "pre-crash pending_free_count=%u, want 1",
+			 ref->pending_free_count);
+		goto done;
+	}
+
+	/*
+	 * Simulate crash: tear down the in-memory TPV without flushing
+	 * persist_work.  The CDV buffer retains the pre-discard state.
+	 */
+	tpv_ktest_destroy(tpv);
+	tpv = NULL;
+
+	/*
+	 * Re-attach.  CDV_LIST_EXTENTS returns just the L1 extent;
+	 * load_state walks its L2 and adopts whatever it finds.  Since
+	 * we never flushed the discard, the L2 leaf for virt_idx=0
+	 * still points at expect_phys, and load_state re-adopts the
+	 * slot as allocated.
+	 */
+	saved_toma_extents[0] = TPV_KTEST_L1_EXT_IDX;
+	g_tc.recovery_extents = saved_toma_extents;
+	g_tc.recovery_count   = 1;
+
+	tpv2 = tpv_ktest_create();
+	if (!tpv2) {
+		KTO_FAIL(kto, "discard_crash_before_flush",
+			 "create (phase 2) failed");
+		g_tc.recovery_extents = NULL;
+		g_tc.recovery_count   = 0;
+		return;
+	}
+	strncpy(tpv2->allocator_toma_id, "ktest-toma",
+		sizeof(tpv2->allocator_toma_id) - 1);
+
+	rc = nvmeibc_tpv_load_state(tpv2);
+
+	g_tc.recovery_extents = NULL;
+	g_tc.recovery_count   = 0;
+
+	if (rc != 0) {
+		KTO_FAIL(kto, "discard_crash_before_flush",
+			 "load_state rc=%d", rc);
+		goto done;
+	}
+
+	e2 = xa_load(&tpv2->allocator.extent_map, 0);
+	if (!e2) {
+		KTO_FAIL(kto, "discard_crash_before_flush",
+			 "xa_load(0) NULL after recovery (parked-slot leak)");
+		goto done;
+	}
+	if (e2->phys_offset != expect_phys) {
+		KTO_FAIL(kto, "discard_crash_before_flush",
+			 "re-adopted phys 0x%llx != pre-crash 0x%llx",
+			 e2->phys_offset, expect_phys);
+		goto done;
+	}
+
+	KTO_PASS(kto, "discard_crash_before_flush");
+done:
+	if (tpv)
+		tpv_ktest_destroy(tpv);
+	if (tpv2)
+		tpv_ktest_destroy(tpv2);
+}
+
 /* -- Proc fill function --------------------------------------------------- */
 
 /*
@@ -1828,8 +2039,9 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg __maybe_unused, char *buf, size_t le
 	tpv_ktest_split_recovery(&kto);
 	tpv_ktest_discard_whole_extent(&kto);
 	tpv_ktest_discard_misaligned(&kto);
+	tpv_ktest_discard_crash_before_flush(&kto);
 
-#define TPV_KTEST_N_TESTS	13
+#define TPV_KTEST_N_TESTS	14
 	KTO_ADD(&kto, "\n");
 	if (kto.failures == 0)
 		KTO_ADD(&kto, "all %d tests passed\n", TPV_KTEST_N_TESTS);

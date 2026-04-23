@@ -194,7 +194,7 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
 	ref->allocated_count = 0;
 	ref->l2_slots        = 0;
 	ref->is_l1_extent    = promote_to_l1;
-	INIT_LIST_HEAD(&ref->node);
+	nvmeibc_cdv_extent_ref_init_lists(ref);
 
 	for (s = first_s; s < n_slots; s++) {
 		fs = kzalloc(sizeof(*fs), GFP_NOIO);

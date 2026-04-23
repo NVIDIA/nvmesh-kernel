@@ -361,8 +361,6 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 	struct nvmeibc_tpv_free_slot    *slot;
 	struct nvmeibc_cdv_extent_ref   *ref;
 	struct nvmeibc_cdv_extent_ref   *found_ref;
-	struct nvmeibc_tpv_free_slot    *s, *stmp;
-	bool schedule_work_flag = false;
 
 	entry = xa_erase(&alloc->extent_map, virt_idx);
 	if (!entry)
@@ -403,10 +401,7 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 
 	spin_lock(&alloc->lock);
 
-	list_add_tail(&slot->node, &alloc->free_tpv_extents);
-	alloc->free_tpv_extent_count++;
-
-	/* Decrement allocated_count of the owning CDV_extent_ref. */
+	/* Find the owning CDV_extent_ref. */
 	found_ref = NULL;
 	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
 		if (ref->extent_index == slot->cdv_extent_index) {
@@ -415,41 +410,34 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 		}
 	}
 
-	if (WARN_ON(!found_ref))
+	if (WARN_ON(!found_ref)) {
+		/* Orphan slot - shouldn't happen. Free directly. */
+		kfree(slot);
 		goto out_unlock;
-
-	found_ref->allocated_count--;
+	}
 
 	/*
-	 * Return the CDV_extent to TOMA when it holds no data or L2 slots
-	 * and is not the L1 extent.  The L1 extent is pinned for the TPV
-	 * lifetime because its slot 0 holds the L1 table.  An extent that
-	 * still hosts L2 tables keeps allocated_count > 0 via the L2 count
-	 * and is therefore implicitly retained.
+	 * Park the slot on the owning ref's pending_free_slots list.
+	 * Do NOT push to alloc->free_tpv_extents yet, and do NOT
+	 * decrement allocated_count: this slot is still logically
+	 * allocated from the CDV's perspective because the on-disk L2
+	 * still references it.  A concurrent allocator must not be able
+	 * to hand this slot out to a different virt_idx until the L2
+	 * leaf is durable-null on CDV - otherwise a crash between the
+	 * reuse and the flush leaves two virt_idx entries pointing at
+	 * the same physical slot.
+	 *
+	 * The flush-completion path (nvmeibc_tpv_flush_and_promote)
+	 * snapshots pending_free_slots, flushes L2, and then promotes
+	 * the snapshotted slots to free_tpv_extents under alloc->lock.
+	 * allocated_count is decremented and the ref moved to
+	 * pending_return_list there, not here.
+	 *
+	 * See TPV_Trimming.md Step 2 "Persistence ordering" and Step 5
+	 * "Deferred slot visibility" for the correctness argument.
 	 */
-	if (found_ref->allocated_count == 0 && !found_ref->is_l1_extent) {
-		/*
-		 * All TPV_extents within this CDV_extent are free.
-		 * Remove all its slots from free_tpv_extents (they
-		 * cannot be reused once the extent is returned) and
-		 * move the ref to pending_return_list for deferred
-		 * CDV_FREE_EXTENT processing.
-		 */
-		list_del(&found_ref->node);
-		alloc->cdv_extents_count--;
-
-		list_for_each_entry_safe(s, stmp,
-					 &alloc->free_tpv_extents, node) {
-			if (s->cdv_extent_index == found_ref->extent_index) {
-				list_del(&s->node);
-				alloc->free_tpv_extent_count--;
-				kfree(s);
-			}
-		}
-
-		list_add_tail(&found_ref->node, &alloc->pending_return_list);
-		schedule_work_flag = true;
-	}
+	list_add_tail(&slot->node, &found_ref->pending_free_slots);
+	found_ref->pending_free_count++;
 
 out_unlock:
 	spin_unlock(&alloc->lock);
@@ -461,7 +449,13 @@ out_unlock:
 	 */
 	nvmeibc_tpv_mark_l2_leaf_dirty(tpv, virt_idx);
 
-	/* Mark dirty: the tree leaf for this virt_idx must be cleared. */
+	/*
+	 * Mark dirty: persist_work_fn will flush the L2 and then promote
+	 * this (and any other parked) slot to free_tpv_extents via
+	 * nvmeibc_tpv_flush_and_promote(), which also handles the
+	 * eventual CDV_FREE_EXTENT when a ref's allocated_count reaches
+	 * zero.
+	 */
 	spin_lock(&tpv->persist_lock);
 	if (!tpv->dirty) {
 		tpv->dirty = true;
@@ -469,14 +463,159 @@ out_unlock:
 	}
 	spin_unlock(&tpv->persist_lock);
 
-	/* Defer CDV_FREE_EXTENT send to the work function. */
-	if (schedule_work_flag && !atomic_xchg(&tpv->cdv_alloc_pending, 1))
-		schedule_work(&tpv->cdv_alloc_work);
-
 	atomic64_inc(&alloc->stat_tpv_free_ok);
 	return 0;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_free_extent);
+
+/* -- nvmeibc_tpv_flush_and_promote ------------------------------------------
+ *
+ * Deferred-visibility commit path.  Implements the snapshot-before-
+ * flush discipline described in Step 2 / Step 5 of TPV_Trimming.md:
+ *
+ *   1. Under alloc->lock, splice every ref's pending_free_slots into
+ *      its flushing_free_slots.  Slots that land on pending_free_slots
+ *      during the flush (step 3) stay parked for the next cycle.
+ *   2. Release the lock.  flush_state writes any dirty L2 pages to
+ *      CDV (may sleep).  The pages covering the snapshotted slots are
+ *      dirty at entry (free_extent marked them) and, on success, are
+ *      clean on disk at exit.
+ *   3. On flush success: under alloc->lock, splice each ref's
+ *      flushing_free_slots into alloc->free_tpv_extents and decrement
+ *      allocated_count.  A ref whose count reaches zero (and is not
+ *      the L1 extent) is moved to pending_return_list so cdv_alloc_work
+ *      can send CDV_FREE_EXTENT.  Its slots are freed outright rather
+ *      than spliced into the pool - the extent is going away.
+ *   4. On flush failure: splice flushing_free_slots back onto
+ *      pending_free_slots.  The next successful flush retries them.
+ *
+ * Returns the flush_state result (0 on success).  Called from the
+ * persist_work_fn async path; exposed in the header for kernel
+ * self-tests that need synchronous behavior.
+ */
+
+static void tpv_snapshot_pending_frees_locked(struct nvmeibc_tpv_allocator *alloc)
+{
+	struct nvmeibc_cdv_extent_ref *ref;
+
+	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
+		if (ref->pending_free_count == 0)
+			continue;
+		list_splice_tail_init(&ref->pending_free_slots,
+				      &ref->flushing_free_slots);
+		ref->flushing_free_count += ref->pending_free_count;
+		ref->pending_free_count = 0;
+	}
+}
+
+static void tpv_revert_flushing_frees_locked(struct nvmeibc_tpv_allocator *alloc)
+{
+	struct nvmeibc_cdv_extent_ref *ref;
+
+	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
+		if (ref->flushing_free_count == 0)
+			continue;
+		/*
+		 * Prepend: the snapshotted slots were freed before any
+		 * that may have been added during the failed flush.
+		 */
+		list_splice_init(&ref->flushing_free_slots,
+				 &ref->pending_free_slots);
+		ref->pending_free_count += ref->flushing_free_count;
+		ref->flushing_free_count = 0;
+	}
+}
+
+/*
+ * Promote flushing_free_slots to the TPV-wide free pool.  Returns the
+ * number of refs that transitioned to pending_return_list; caller
+ * schedules cdv_alloc_work if > 0.
+ */
+static u32 tpv_promote_flushing_frees_locked(struct nvmeibc_tpv_allocator *alloc)
+{
+	struct nvmeibc_cdv_extent_ref *ref, *rtmp;
+	struct nvmeibc_tpv_free_slot  *s, *stmp;
+	u32 refs_returnable = 0;
+
+	list_for_each_entry_safe(ref, rtmp, &alloc->cdv_extent_list, node) {
+		if (ref->flushing_free_count == 0)
+			continue;
+
+		ref->allocated_count -= ref->flushing_free_count;
+
+		if (ref->allocated_count == 0 && !ref->is_l1_extent) {
+			/*
+			 * Extent is fully empty and returnable.  Don't
+			 * splice its slots into the pool - they'd be
+			 * purged out again when we return the extent.
+			 * Free them directly.  Also purge any slots for
+			 * this extent that already landed in the free
+			 * pool from an earlier promote cycle.
+			 */
+			list_for_each_entry_safe(s, stmp,
+						 &ref->flushing_free_slots,
+						 node) {
+				list_del(&s->node);
+				kfree(s);
+			}
+			ref->flushing_free_count = 0;
+
+			list_for_each_entry_safe(s, stmp,
+						 &alloc->free_tpv_extents,
+						 node) {
+				if (s->cdv_extent_index ==
+				    ref->extent_index) {
+					list_del(&s->node);
+					alloc->free_tpv_extent_count--;
+					kfree(s);
+				}
+			}
+
+			list_move_tail(&ref->node, &alloc->pending_return_list);
+			alloc->cdv_extents_count--;
+			refs_returnable++;
+		} else {
+			/*
+			 * Extent stays allocated; promote its parked
+			 * slots to the TPV-wide free pool.
+			 */
+			list_splice_tail_init(&ref->flushing_free_slots,
+					      &alloc->free_tpv_extents);
+			alloc->free_tpv_extent_count +=
+				ref->flushing_free_count;
+			ref->flushing_free_count = 0;
+		}
+	}
+
+	return refs_returnable;
+}
+
+int nvmeibc_tpv_flush_and_promote(struct nvmeibc_tpv *tpv)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	u32 refs_returnable = 0;
+	int rv;
+
+	spin_lock(&alloc->lock);
+	tpv_snapshot_pending_frees_locked(alloc);
+	spin_unlock(&alloc->lock);
+
+	rv = nvmeibc_tpv_flush_state(tpv);
+
+	spin_lock(&alloc->lock);
+	if (rv == 0)
+		refs_returnable = tpv_promote_flushing_frees_locked(alloc);
+	else
+		tpv_revert_flushing_frees_locked(alloc);
+	spin_unlock(&alloc->lock);
+
+	if (refs_returnable > 0 &&
+	    !atomic_xchg(&tpv->cdv_alloc_pending, 1))
+		schedule_work(&tpv->cdv_alloc_work);
+
+	return rv;
+}
+EXPORT_SYMBOL(nvmeibc_tpv_flush_and_promote);
 
 /* -- nvmeibc_tpv_discard_range ---------------------------------------------
  *
@@ -681,7 +820,7 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 		ref->allocated_count = 0;	/* slot 0 is pinned via is_l1_extent */
 		ref->l2_slots        = 0;
 		ref->is_l1_extent    = true;
-		INIT_LIST_HEAD(&ref->node);
+		nvmeibc_cdv_extent_ref_init_lists(ref);
 
 		for (s = first_free_slot; s < n_slots; s++) {
 			fs = kzalloc(sizeof(*fs), GFP_NOIO);
@@ -734,7 +873,7 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 	ref->allocated_count = 0;
 	ref->l2_slots        = 0;
 	ref->is_l1_extent    = false;
-	INIT_LIST_HEAD(&ref->node);
+	nvmeibc_cdv_extent_ref_init_lists(ref);
 
 	/*
 	 * Allocate all slot structs into a local batch list (no pointer array).
