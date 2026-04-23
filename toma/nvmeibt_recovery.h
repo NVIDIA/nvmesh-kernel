@@ -97,7 +97,7 @@ void nvmeibt_start_encrypt_for_tpv(struct nvmeibt_block_device *vol, struct nvme
 /* TPV namebased path: called from start_encrypt_action() when vol == NULL.
  * TOMA's server-side hash never contains TPVs (chunks:[]).  Uses volumeName
  * and volumeUUID from the Kafka payload to run cryptsetup against
- * /dev/nvmesh-tpv/<vol_name> without a vol struct.
+ * /dev/nvmesh/<vol_name> without a vol struct.
  * Returns 0 on success (exec started), 1 on allocation failure. */
 bool nvmeibt_start_encrypt_for_tpv_by_name(const char *vol_name, const union nvmeib_uuid *vol_uuid,
 											int encrypt_idx, const char *encrypt_args,

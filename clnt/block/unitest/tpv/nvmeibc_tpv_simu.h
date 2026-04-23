@@ -63,7 +63,7 @@
 /*
  * Simulator gendisk convention: add_disk() → __disk_name_to_index() scans the
  * name for the last "_0<digit>" token and BUGs if absent.  The TPV disk name
- * is "nvmesh-tpv/<tpv_name>", so tpv_name must contain "_0<digit>".
+ * is "nvmesh/<tpv_name>", so tpv_name must contain "_0<digit>".
  *
  * We use "_09" to land in OS bds[] slot 9.  NVMeshSystem setup typically uses
  * low slot numbers (0, 1, ...) for pre-existing client volumes; slot 9 avoids

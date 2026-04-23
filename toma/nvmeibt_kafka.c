@@ -1173,7 +1173,7 @@ struct generic_CMD_params_ctx {
 	uint64_t						preempt_new_floor;
 	/* TPV encryption: the volume name from the Kafka payload, parsed so the
 	 * namebased fallback path in start_encrypt_action() can identify the target
-	 * device (/dev/nvmesh-tpv/<name>) when the TOMA server-side
+	 * device (/dev/nvmesh/<name>) when the TOMA server-side
 	 * block_devices_hash_by_uuid has no entry for the TPV (TPVs have chunks:[]
 	 * and are not ingested into the TOMA server's hash). */
 	char							tpv_vol_name[32];
@@ -2583,7 +2583,7 @@ void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name, const struct 
 	nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*unique_key*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 }
 
-/* Defined in nvmeibt_recovery.c. Runs cryptsetup against /dev/nvmesh-tpv/<name>
+/* Defined in nvmeibt_recovery.c. Runs cryptsetup against /dev/nvmesh/<name>
  * using name+uuid from the Kafka payload, without a server-side vol struct. */
 extern bool nvmeibt_start_encrypt_for_tpv_by_name(const char *vol_name, const union nvmeib_uuid *vol_uuid,
 												   int encrypt_idx, const char *encrypt_args,
@@ -2613,7 +2613,7 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 		/* TOMA's server-side block_devices_hash_by_uuid does not contain TPVs:
 		 * they have chunks:[] and are never ingested into the server's hash.
 		 * If the Kafka payload carried a volumeName and the corresponding
-		 * /dev/nvmesh-tpv/<name> device exists (TOMA-as-client has the TPV
+		 * /dev/nvmesh/<name> device exists (TOMA-as-client has the TPV
 		 * attached), run encryption directly against that path.  Otherwise fall
 		 * through to the "Volume doesn't exist" error. */
 		if (CMD_params->tpv_vol_name[0]) {

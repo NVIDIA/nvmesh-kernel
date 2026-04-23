@@ -433,10 +433,10 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 /* -- Block device registration ------------------------------------------- */
 
 /*
- * Disk prefix used for TPV block devices: /dev/nvmesh-tpv/<name>
+ * Disk prefix used for TPV block devices: /dev/nvmesh/<name>
  * Matches the existing convention of other NVMesh volumes.
  */
-#define NVMEIBC_TPV_DISK_PREFIX		"nvmesh-tpv"
+#define NVMEIBC_TPV_DISK_PREFIX		"nvmesh"
 
 static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 {

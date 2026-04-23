@@ -2731,7 +2731,7 @@ When a TPV is selected in the volume list, show an informational banner (no func
 
 TPV encryption follows architecture decision #18: encryption is at the TPV level, not the CDV level. The CDV stores raw (unencrypted) extents; each TPV independently manages its own LUKS container in its own virtual address space. The LUKS header is written as the first bytes of the TPV — the client-side TPV allocator binds those logical bytes to whichever CDV extent it allocates first, on demand. **No pre-allocation of CDV extents is required.**
 
-The management-side workflow mirrors regular volume encryption as closely as possible: the same "Encryption" dropdown button (Init Encryption, Add/Rotate/Delete Passphrase, Acknowledge Error), the same REST endpoints (`POST /volumes/initEncryption`, etc.), the same Kafka message types and payload schema, and the same TOMA-side `cryptsetup` execution pattern. The **only** TPV-specific difference on the TOMA is which block-device path cryptsetup runs against — `/dev/nvmesh-tpv/<tpv_name>` instead of `/dev/nvmesh/e_<name>` — because the TPV itself is attached on the TOMA node (exclusively, with preempt) before the Kafka command arrives. There is no dm-linear wrapper, no shadow-volume clone, and no CDV-geometry plumbing in the Kafka payload.
+The management-side workflow mirrors regular volume encryption as closely as possible: the same "Encryption" dropdown button (Init Encryption, Add/Rotate/Delete Passphrase, Acknowledge Error), the same REST endpoints (`POST /volumes/initEncryption`, etc.), the same Kafka message types and payload schema, and the same TOMA-side `cryptsetup` execution pattern. The **only** TPV-specific difference on the TOMA is which block-device path cryptsetup runs against — `/dev/nvmesh/<tpv_name>` instead of `/dev/nvmesh/e_<name>` — because the TPV itself is attached on the TOMA node (exclusively, with preempt) before the Kafka command arrives. There is no dm-linear wrapper, no shadow-volume clone, and no CDV-geometry plumbing in the Kafka payload.
 
 ### 5.2 How Regular Volume Encryption Works (reference)
 
@@ -2776,8 +2776,8 @@ volumeEncryption.js                DB: status = EXECUTED, isInitialized = true, 
 20. **LUKS header location**: The LUKS header occupies the first bytes of the TPV's virtual address space. The default encryption header size is 16 MB — well within the minimum TPV extent size of 64 KB and the minimum CDV extent size of 64 MB. The client-side TPV allocator materialises the backing CDV extent on the first write, which is `cryptsetup luksFormat`'s header write during Init Encryption; no upfront CDV reservation is required.
 21. **~~First-extent pre-allocation~~ (removed)**: Earlier revisions of this plan called for a management-issued `CDV_ALLOC_EXTENT` round-trip before TPV insert so the LUKS header was guaranteed backing storage. This has been **removed**. The TPV's own first-write path triggers extent allocation transparently via the existing client-↔-TOMA admin channel (see §3). No `firstExtentIndex` field, no management-side IB admin message, no pre-insert allocator dependency. The only CDV-capacity failure path is "CDV full at first write", which surfaces to the client as the existing `CDV_ALLOC_CDV_FULL` response during cryptsetup's header I/O.
 22. **TOMA selection for TPV encryption**: Instead of zone-based round-robin (regular volumes), TPV encryption commands are sent to a TOMA node that hosts one of the CDV's first pRAID RW disk segments (and therefore can attach the CDV). Preference order: the CDV's current allocator TOMA (best locality for extent allocation during LUKS header write), then a random pick from the remaining candidates.
-23. **Attach the TPV exclusively on the TOMA**: Before sending the encryption Kafka command, management attaches the TPV itself to the chosen TOMA node using the existing client-attach path (`clientModule.attachTPV`) with `{preempt: true, mode: EXCLUSIVE_READ_WRITE}`. The TOMA's client kernel module then exposes the TPV at `/dev/nvmesh-tpv/<tpv_name>` — the exact same device path a real client would see. Preempt is used so any stale holder (e.g., a crashed client that was never cleaned up) is fenced; refusing to run encryption while a live client holds the TPV is a higher-layer policy decision not enforced by management today.
-24. **No shadow and no dm-linear**: Because the TPV is already locally attached on the TOMA when the Kafka command arrives, TOMA skips `nvmeibt_attach_vol_for_encryption` entirely and runs `cryptsetup` directly against `/dev/nvmesh-tpv/<tpv_name>`. No dm-linear wrapper, no shadow-clone, no CDV-byte-offset arithmetic.
+23. **Attach the TPV exclusively on the TOMA**: Before sending the encryption Kafka command, management attaches the TPV itself to the chosen TOMA node using the existing client-attach path (`clientModule.attachTPV`) with `{preempt: true, mode: EXCLUSIVE_READ_WRITE}`. The TOMA's client kernel module then exposes the TPV at `/dev/nvmesh/<tpv_name>` — the exact same device path a real client would see. Preempt is used so any stale holder (e.g., a crashed client that was never cleaned up) is fenced; refusing to run encryption while a live client holds the TPV is a higher-layer policy decision not enforced by management today.
+24. **No shadow and no dm-linear**: Because the TPV is already locally attached on the TOMA when the Kafka command arrives, TOMA skips `nvmeibt_attach_vol_for_encryption` entirely and runs `cryptsetup` directly against `/dev/nvmesh/<tpv_name>`. No dm-linear wrapper, no shadow-clone, no CDV-byte-offset arithmetic.
 25. **Reuse existing REST endpoints and Kafka schema**: The same endpoints (`POST /volumes/initEncryption`, `addPassphrase`, `deletePassphrase`, `rotatePassphrase`) and Kafka message types work for both regular volumes and TPVs. The Kafka payload schema is **unchanged** — no new `cdvName`/`cdvByteOffset`/`shadowSizeSectors` fields. The TOMA side distinguishes TPV from regular volume by the chunk-less shape of the block-device record: `(vol->from_config.n_chunks == 0) && !vol->from_config.is_cdv`. TOMA's `struct nvmeibt_block_device` has no kernel-client `type` enum; a TPV is the only class that arrives with `chunks: []` from management.
 26. **Management auto-detaches after response**: When the Kafka encryption response arrives at `handleCommandResponse`, management calls the symmetric `clientModule.detachTPV` so the TOMA releases the TPV. The real client (user) can then attach it normally.
 
@@ -2802,9 +2802,9 @@ volumeEncryption.js                runEncryptionCommand():
 TOMA (nvmeibt_kafka.c)             toma_CMD_handler():
   ├─ Validate bootTime             (unchanged)
   ├─ Detect TPV mode               vol->from_config.n_chunks == 0 && !is_cdv
-  ├─ Skip shadow attach            /dev/nvmesh-tpv/<tpv_name> already exists
+  ├─ Skip shadow attach            /dev/nvmesh/<tpv_name> already exists
   ├─ Write passphrase to file      (unchanged)
-  ├─ cryptsetup luksFormat          On /dev/nvmesh-tpv/<tpv_name>
+  ├─ cryptsetup luksFormat          On /dev/nvmesh/<tpv_name>
   │                                 (client-side TPV allocator materialises CDV extent(s)
   │                                  transparently during LUKS header write)
   └─ Send response via Kafka       encryptionCommandResponse  (unchanged)
@@ -2846,7 +2846,7 @@ if (volume.volumeClass === consts.volumeClass.TPV) {
 
 Inside `start_encrypt_action()` the existing code builds a `cryptsetup` command targeting `/dev/nvmesh/<shadow_vol_name>` and calls `nvmeibt_attach_vol_for_encryption(vol, shadow_vol_name, encrypt_params)` to create the shadow and drive the exec. For TPVs (detected by `(vol->from_config.n_chunks == 0) && !vol->from_config.is_cdv`) the branch:
 
-1. Builds the same `cryptsetup` command string, but with device path `/dev/nvmesh-tpv/<vol->from_config.client_blkdev_name>`.
+1. Builds the same `cryptsetup` command string, but with device path `/dev/nvmesh/<vol->from_config.client_blkdev_name>`.
 2. Calls `nvmeibt_start_encrypt_for_tpv(vol, encrypt_params)` instead of `nvmeibt_attach_vol_for_encryption`.
 
 `nvmeibt_start_encrypt_for_tpv` (new, `nvmeibt_recovery.c`) skips the shadow-clone and attach-WQ scheduling entirely. It sets `encrypt_params->exec_ctx.blkdev = vol; encrypt_params->origin_vol = vol; vol->encrypt_params = encrypt_params;` allocates stdout/stderr buffers, sets a TPV-specific exec-done callback `tpv_encrypt_after_exec_cb`, and invokes `nvmeibt_run_exec_on_blkdev(exec_ctx)` directly.
@@ -3178,7 +3178,7 @@ Add to `test/integration/`:
 
 **Step 8: TOMA branch in `start_encrypt_action`** (`nvmeibt_kafka.c`)
 - Detect TPV via `(vol->from_config.n_chunks == 0) && !vol->from_config.is_cdv`
-- Retarget the `cryptsetup` command to `/dev/nvmesh-tpv/<vol->from_config.client_blkdev_name>`
+- Retarget the `cryptsetup` command to `/dev/nvmesh/<vol->from_config.client_blkdev_name>`
 - Call `nvmeibt_start_encrypt_for_tpv(vol, encrypt_params)` instead of `nvmeibt_attach_vol_for_encryption`
 - No changes to `encrypt_cmd_t` or `parse_CMD`
 - Use a local name other than `dev_dir` for the device-directory local — it collides with the `dev_dir` macro defined in `nvmeibt_local_disk.h:316` (`#define dev_dir TOMA_ROOT_DIR "dev/"`). The implementation uses `enc_dev_dir` / `enc_dev_name`.
@@ -3190,7 +3190,7 @@ Add to `test/integration/`:
 
 **Step 10: TOMA integration test**
 - Send a mock `initEncryption` Kafka message for a TPV that management has pre-attached to this TOMA
-- Verify `cryptsetup luksFormat` runs against `/dev/nvmesh-tpv/<name>` (no dm-linear, no shadow volume)
+- Verify `cryptsetup luksFormat` runs against `/dev/nvmesh/<name>` (no dm-linear, no shadow volume)
 - Verify the TOMA's client kernel module allocates CDV extents on demand during the LUKS header write
 - Verify the response Kafka message carries the correct result code
 
@@ -3244,7 +3244,7 @@ Add to `test/integration/`:
 
 4. **CDV full during LUKS header write**: `cryptsetup luksFormat` writes ~16 MB of LUKS metadata at offset 0. This triggers CDV extent allocation through the client's normal first-write path; on `CDV_ALLOC_CDV_FULL` the client I/O fails, cryptsetup exits non-zero, and the existing TOMA encryption response builder reports `CMD_ERR`. No new error path.
 
-5. **Client-side LUKS open at attach**: After encryption init the TPV is reattached to a real client; the client's management agent runs `cryptsetup open` against `/dev/nvmesh-tpv/<tpv_name>` — the same flow as regular encrypted volumes, just on a different device prefix. Verify the client agent's cryptsetup invocation is path-agnostic (`/dev/nvmesh/` vs `/dev/nvmesh-tpv/`).
+5. **Client-side LUKS open at attach**: After encryption init the TPV is reattached to a real client; the client's management agent runs `cryptsetup open` against `/dev/nvmesh/<tpv_name>` — the same flow as regular encrypted volumes, just on a different device prefix. Verify the client agent's cryptsetup invocation is path-agnostic (`/dev/nvmesh/` vs `/dev/nvmesh/`).
 
 6. **Passphrase operations after TPV extend**: Extending a TPV changes only `virtualSizeGB`; the LUKS header stays at offset 0 of the TPV's address space and is bound to whichever CDV extent backs that offset. Passphrase ops target only the LUKS header and are unaffected by subsequent extent allocations.
 
@@ -3716,7 +3716,7 @@ Replace `nvmeibc_tpv_blkdev_register()` internals.  Instead of calling
 7. `set_capacity(disk, 0)` → `add_disk(disk)` → `set_capacity(disk, capacity)`.
 8. Transition atom status to `nvmeiba_status_live`.
 
-The TPV now appears at `/dev/nvmesh-tpv/<name>` with ATOM-managed reference counting
+The TPV now appears at `/dev/nvmesh/<name>` with ATOM-managed reference counting
 (`nvmeiba_bdev_open` / `nvmeiba_bdev_close`), and `.owner = nvmeiba` ensures module
 reference counting keeps nvmeiba (not nvmeibc) pinned by open handles.
 
@@ -3789,7 +3789,7 @@ pointer.  Two possible triggers:
   attach function detects the ATOM orphan and adopts instead of creating fresh.
 - **Trigger B (proactive scan):** After CDV adoption completes, scan ATOM's list for
   atoms with `status == nvmeiba_status_orphan` whose `disk_name` starts with the TPV
-  prefix (`nvmesh-tpv/`).  For each, adopt immediately without waiting for management.
+  prefix (`nvmesh/`).  For each, adopt immediately without waiting for management.
   This provides faster resume at the cost of running before management confirms the
   TPV should still be attached.
 
@@ -3936,11 +3936,11 @@ the function pointer value is stale between module unload and adopt step A6.
 ### 11.11 ATOM Discovery — Distinguishing TPV Atoms from Regular Atoms
 
 ATOM's `nvmeiba_os_api_orphan_adopt(dev_dir, dev_name)` matches by directory and name.
-TPV disk names use the `nvmesh-tpv/` prefix (e.g., `nvmesh-tpv/my-tpv-01`), which is
+TPV disk names use the `nvmesh/` prefix (e.g., `nvmesh/my-tpv-01`), which is
 distinct from regular volume names.  No additional type field in the atom is needed.
 
 For proactive scan (Trigger B, if implemented in the future): iterate ATOM's list via
-`nvmeiba_os_api_exec_for_each_atom()`, filter by `strncmp(atom->dev_name, "nvmesh-tpv/", 11)`.
+`nvmeiba_os_api_exec_for_each_atom()`, filter by `strncmp(atom->dev_name, "nvmesh/", 11)`.
 
 ### 11.12 Implementation Checklist
 

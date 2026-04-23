@@ -69,7 +69,7 @@ struct nvmeibt_encrypt_params {
 	/* TPV namebased path (design/TPV_EncryptionPlan.md Phase 3).
 	 * Used when origin_vol == NULL: TOMA's server-side block_devices_hash_by_uuid
 	 * does not contain TPVs (chunks:[]) so we identify the target by name and
-	 * run cryptsetup against /dev/nvmesh-tpv/<tpv_vol_name>. */
+	 * run cryptsetup against /dev/nvmesh/<tpv_vol_name>. */
 	char									tpv_vol_name[32];
 	struct nvmeibt_urn_uuid					tpv_urn_uuid;
 };

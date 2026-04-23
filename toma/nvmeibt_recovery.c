@@ -1327,7 +1327,7 @@ void nvmeibt_start_encrypt_for_tpv(struct nvmeibt_block_device *vol, struct nvme
  * nvmeibt_block_device_get_block_device_by_id() returns NULL (TPVs are not
  * in TOMA's server-side block_devices_hash_by_uuid because they carry no
  * physical disk chunks).  Uses the volumeName and volumeUUID parsed from the
- * Kafka payload.  cryptsetup runs against /dev/nvmesh-tpv/<tpv_vol_name>,
+ * Kafka payload.  cryptsetup runs against /dev/nvmesh/<tpv_vol_name>,
  * which exists because management attached the TPV to this TOMA node's client
  * kernel as EXCLUSIVE_READ_WRITE before firing the initEncryption Kafka.
  */
@@ -1366,12 +1366,12 @@ bool nvmeibt_start_encrypt_for_tpv_by_name(const char *vol_name, const union nvm
 	exec_ctx->blkdev = NULL; /* no server-side vol - callback uses tpv_vol_name/tpv_urn_uuid */
 	if (old_passphrase[0] && new_passphrase[0]) {
 		snprintf(exec_ctx->executable_str, sizeof(exec_ctx->executable_str),
-				 "cryptsetup %s --key-file=%.256s /dev/nvmesh-tpv/%s %.256s",
+				 "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s %.256s",
 				 encrypt_args, encrypt_params->old_passphrase_file_name, vol_name, encrypt_params->new_passphrase_file_name);
 	} else {
 		const char *key_path = old_passphrase[0] ? encrypt_params->old_passphrase_file_name : encrypt_params->new_passphrase_file_name;
 		snprintf(exec_ctx->executable_str, sizeof(exec_ctx->executable_str),
-				 "cryptsetup %s --key-file=%.256s /dev/nvmesh-tpv/%s",
+				 "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s",
 				 encrypt_args, key_path, vol_name);
 	}
 
@@ -1588,12 +1588,12 @@ static void run_exec_on_blkdev_wrapper(struct nvmeibt_wq_entry *wq_entry)
 	} else {
 		/* TPV namebased encryption (design/TPV_EncryptionPlan.md S.Phase 3):
 		 * no server-side blkdev.  Derive encrypt_params from the embedded
-		 * exec_ctx via container_of, and wait for /dev/nvmesh-tpv/<name>
+		 * exec_ctx via container_of, and wait for /dev/nvmesh/<name>
 		 * (where management attached the TPV to this TOMA node's client
 		 * kernel).  The passphrase-file and spawn logic below is unchanged -
 		 * it operates on encrypt_params only. */
 		encrypt_params = container_of(entry->run_exec_on_blkdev_ctx, struct nvmeibt_encrypt_params, exec_ctx);
-		snprintf(blkdev_path, sizeof(blkdev_path), "/dev/nvmesh-tpv/%s", encrypt_params->tpv_vol_name);
+		snprintf(blkdev_path, sizeof(blkdev_path), "/dev/nvmesh/%s", encrypt_params->tpv_vol_name);
 	}
 	N_Tf(tskoawm, "blkdev=@STR path=@STR", blkdev ? nvmeibt_blkdev_name(blkdev) : encrypt_params->tpv_vol_name, blkdev_path);
 	getnstimeofday_boot(&start_timestamp);
