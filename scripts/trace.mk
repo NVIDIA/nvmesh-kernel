@@ -54,6 +54,7 @@ PP_OUTDIR := $(shell realpath $(obj))/.trace_pp_dir
 TRACE_SOURCE_HEADERS := $(shell find $(src) $(src)/../common $(src)/../common_public $(src)/../autogen -name '*.h' \
     -not -path '*/.trace_pp_dir/*' \
     -not -name 'gen_events.h' \
+    -not -name 'nvmeib_build_info.h' \
     2>/dev/null)
 
 $(PP_OUTDIR)/.headers.stamp: $(TRACE_SOURCE_HEADERS)
