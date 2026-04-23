@@ -104,11 +104,21 @@ static inline u64 recov_slots_per_extent(const struct nvmeibc_tpv_allocator *a)
 	return recov_extent_bytes(a) / recov_slot_bytes(a);
 }
 
+/*
+ * Encode (1-based extent_index, slot) back to a CDV byte offset.  Must mirror
+ * tpv_slot_phys_offset() in nvmeibc_tpv_allocator.c and persist_decode_phys()
+ * in nvmeibc_tpv_persist.c, both of which treat extent_index as 1-based
+ * (persist_decode_phys adds 1 to the quotient; tpv_slot_phys_offset subtracts
+ * 1 before multiplying).  An earlier version of this helper used
+ * extent_index * E, which places slot 0 of extent 1 at A + E - one full
+ * CDV_extent past the correct location - causing orphan adoption to install
+ * free_slots with phys_offsets pointing at the wrong extent.
+ */
 static inline u64 recov_slot_phys(const struct nvmeibc_tpv_allocator *a,
 				   u64 extent_index, u64 slot)
 {
 	return recov_alloc_bytes(a) +
-	       extent_index * recov_extent_bytes(a) +
+	       (extent_index - 1) * recov_extent_bytes(a) +
 	       slot * recov_slot_bytes(a);
 }
 
