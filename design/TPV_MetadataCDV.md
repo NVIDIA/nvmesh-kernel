@@ -27,6 +27,106 @@ Everything the main design specifies at and below the CDV level — satellite al
 
 ---
 
+## 2A. Layout at a glance
+
+This section shows where L1, L2, and data physically live on the CDV(s) in single-CDV mode (the baseline from `TPV_ThinProvisioningImplementation.md` §3.4.1) and in split mode. The CDV data region starts at offset `0` on the CDV volume itself; the TOMA allocator region `[0, A)` lives on the separate `<CDV>-mgmt` satellite (main design §1.5) and is not drawn here. Horizontal braces (`╰──┬──╯`) below each CDV strip mark which CDV\_extents are owned by a specific TPV (`tpv-X`). Extent indices are shown arbitrarily — a TPV's extents are scattered across the CDV, not contiguous.
+
+Sample geometry used for all diagrams: `E = cdvExtentSizeMib * 1 MiB`, `T = tpvExtentSizeKB * 1 KiB`, `n_slots = E / T`. Numbers chosen for readability, not realism.
+
+### 2A.1 Single-CDV TPV
+
+The TPV owns a sparse set of CDV\_extents on one CDV. The very first CDV\_extent ever allocated to the TPV is pinned as the **L1 host** (`is_l1_extent == true`); L2 tables are placed lazily into any free slot of any extent the TPV owns (main design §3.4.1).
+
+```
+Data CDV    (n_slots = 8)
+ extent #:     3         7        12        18        24        31        42        55
+           ┌─────────┬─────────┬─────────┬─────────┬─────────┬─────────┬─────────┬─────────┐
+           │    E    │    E    │    E    │    E    │    E    │    E    │    E    │    E    │
+           └─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
+            ╰───┬───╯           ╰────────┬────────╯                    ╰────────┬────────╯
+              tpv-X                    tpv-X                                  tpv-X
+            (L1 host)            (data + lazy L2)                       (data + lazy L2)
+```
+
+Zoom into `tpv-X`'s first CDV\_extent (extent 3, the L1 host). Slot 0 is permanently the L1 table plus its `tpv_l1_header`; the remaining `n_slots - 1` slots enter the free pool and can later be claimed by a data write or by a lazy L2 placement when `flush_state` first needs to emit a leaf for an L1 index whose L2 slot has not yet been assigned:
+
+```
+tpv-X, CDV_extent 3   (L1 host)
+ slot:       0          1          2          3          4          5          6          7
+         ┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐
+         │    L1    │   data   │    L2    │   data   │   data   │   data   │    L2    │   data   │
+         │  (+hdr)  │   slot   │  table   │   slot   │   slot   │   slot   │  table   │   slot   │
+         └──────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘
+               │                      ▲                                          ▲
+               │                      │                                          │
+               ╰──────────────────────┴──── L1 entries point at L2 tables ───────╯
+                                            e.g. L1[K].cdv_offset = 3*E + 2*T
+
+         L2 leaves inside each L2 table above point at data slots on THIS CDV
+         (cdv_offset = i*E + s*T for data slot s within extent i)
+```
+
+L1 entries and L2 leaves both store a `u64 cdv_offset` (main design §3.4.2); whether the offset resolves to an L2 table or to a data slot is determined by the tree level, not by any on-disk tag.
+
+### 2A.2 Split-CDV TPV
+
+Two physically independent CDVs, each with its own allocator, extent size, and RAID class. All L1/L2 tables live on the **metadata CDV**; all user data lives on the **data CDV**. No slot on the data CDV ever holds a tree table, and no slot on the metadata CDV ever holds user data.
+
+The metadata CDV typically uses a smaller `cdvExtentSizeMib` and a mirror-class RAID to keep leaf-flush latency low (§1); geometry on the two sides is independent.
+
+```
+Data CDV    (E_data per extent, n_slots_data = 8)
+ extent #:     5        11        19        26        33        40        48        57
+           ┌─────────┬─────────┬─────────┬─────────┬─────────┬─────────┬─────────┬─────────┐
+           │ E_data  │ E_data  │ E_data  │ E_data  │ E_data  │ E_data  │ E_data  │ E_data  │
+           └─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┴─────────┘
+            ╰───┬───╯                     ╰────────┬────────╯            ╰───┬───╯
+              tpv-X                              tpv-X                     tpv-X
+           (data only)                       (data only)                (data only)
+
+Metadata CDV    (E_meta per extent, typically smaller + mirrored)
+ extent #:      2           9          14          20
+            ┌──────────┬──────────┬──────────┬──────────┐
+            │  E_meta  │  E_meta  │  E_meta  │  E_meta  │
+            └──────────┴──────────┴──────────┴──────────┘
+             ╰────┬────╯
+                tpv-X
+            (L1 host; L1/L2 only)
+```
+
+Zoom into the **metadata CDV**'s first TPV extent (extent 2) — the L1 host on the metadata side. Slot 0 is the L1 table; every other allocated slot is an L2 table. The metadata allocator's free-slot pool feeds L2 placements only (§6.1) — a data write never lands here:
+
+```
+tpv-X, metadata CDV_extent 2   (metadata-side L1 host; L2-only body)
+ slot:       0          1          2          3         …        N-1
+         ┌──────────┬──────────┬──────────┬──────────┬─── ──┬──────────┐
+         │    L1    │    L2    │    L2    │    L2    │      │  (free)  │
+         │  (+hdr)  │  table   │  table   │  table   │      │          │
+         └──────────┴──────────┴──────────┴──────────┴─── ──┴──────────┘
+               │          ▲
+               │          │
+               ╰──────────╯  L1 entries point at L2 tables on the METADATA CDV
+                             (cdv_offset resolves against meta_alloc->cdv_vol)
+
+         L2 leaves inside each L2 table above point at data slots on the DATA CDV
+         (cdv_offset resolves against data_alloc->cdv_vol)
+```
+
+Zoom into the **data CDV**'s first TPV extent (extent 5). Every slot is a data slot; there is no pinned slot 0 and no `is_l1_extent` marker on the data side (§6.1) — the data allocator treats extent 5 like any other extent:
+
+```
+tpv-X, data CDV_extent 5   (data only)
+ slot:       0          1          2          3         …    n_slots_data-1
+         ┌──────────┬──────────┬──────────┬──────────┬─── ──┬──────────┐
+         │   data   │   data   │   data   │   data   │      │   data   │
+         │   slot   │   slot   │   slot   │   slot   │      │   slot   │
+         └──────────┴──────────┴──────────┴──────────┴─── ──┴──────────┘
+```
+
+The `cdv_offset` value stored in a tree entry is still decoded with the formulas in main design §3.4.2; the kernel picks which CDV's geometry to decode against based on the tree level at which the entry was read — L1 entry → metadata CDV geometry; L2 leaf → data CDV geometry. This is spelled out in §6.2.
+
+---
+
 ## 3. Data model
 
 ### 3.1 CDV document — unchanged
