@@ -1062,11 +1062,19 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 					const struct nvmeibt_topology_serialized_topo_header *r_topo = (typeof(r_topo))req->cnst_data;									// Leaders topology
 					      struct nvmeibt_active_topo_header              *f_topo = (typeof(f_topo))out_r_msg->persist_and_wire_buf.data;			// Folowers topology reply
 					const int leader_topo_len = LE_SWAP32(in_r_msg->persist_and_wire_buf.topo_ctx.tlv_len);
-					const int non_topo_len = (int)req->data_len - leader_topo_len;
 					const int act_topo_len = peer_toma_simu_build_act_topo_reply(peer, r_topo, leader_topo_len, (char*)f_topo, (int)req->data_len);		// Build peer's ACT_TOPO directly into reply buffer
 					struct nvmeibt_wire_type_len_value *out_topo_ctx = &out_r_msg->persist_and_wire_buf.topo_ctx;
-					if (non_topo_len > 0)		// Copy non-topo (config, raft quorum,...) sections from leader after the ACT_TOPO
-						memcpy((char*)f_topo + act_topo_len, (const char *)r_topo + leader_topo_len, (size_t)non_topo_len);
+					// Real follower REPs only carry ACT_TOPO -- zero the three non-topo TLV descriptors copied from the incoming AE header, then recompute each TLV CRC so is_tlv_crc_ok accepts the REP.
+					struct nvmeibt_wire_type_len_value *empty_tlvs[] = {
+						&out_r_msg->persist_and_wire_buf.topo_config_ctx,
+						&out_r_msg->persist_and_wire_buf.kafka_mgmt_config_ctx,
+						&out_r_msg->persist_and_wire_buf.raft_members_ctx,
+					};
+					for (unsigned i = 0; i < ARRAY_SIZE(empty_tlvs); i++) {
+						empty_tlvs[i]->tlv_len = 0;
+						empty_tlvs[i]->tlv_crc = 0;
+						empty_tlvs[i]->tlv_crc = LE_SWAP32(crc32(0, empty_tlvs[i], sizeof(*empty_tlvs[i])));
+					}
 					// Update topo TLV: length and CRC (CRC covers TLV header + data)
 					out_topo_ctx->tlv_len = LE_SWAP32(act_topo_len);
 					out_topo_ctx->tlv_crc = 0;
@@ -1075,11 +1083,9 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 						crc = crc32(crc, f_topo, (size_t)act_topo_len);
 						out_topo_ctx->tlv_crc = LE_SWAP32(crc);
 					}
-					{	// Update persist_and_wire_total_len = header + all section lengths: Calculated in persist_and_wire_recalc_total_len()
-						const int new_data_len = act_topo_len + non_topo_len;
-						out_r_msg->persist_and_wire_buf.persist_and_wire_total_len = LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf) + new_data_len);
-						msg->data_len = req->msg_len + new_data_len; // Update total message data length
-					}
+					// Total body = ACT_TOPO only. persist_and_wire_buf_validate_len (nvmeibt_raft.c:362) asserts total == sizeof(buf) + sum(tlv_lens).
+					out_r_msg->persist_and_wire_buf.persist_and_wire_total_len = LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf) + act_topo_len);
+					msg->data_len = req->msg_len + act_topo_len;
 				}
 				peer->append_entries_rep_ser_ver++;
 				out_r_msg->local_serialization_version = LE_SWAP64(peer->append_entries_rep_ser_ver);	// Much like in raft_send_msg_to_peer()
