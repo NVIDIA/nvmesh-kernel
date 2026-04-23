@@ -46,6 +46,7 @@ void sim_broker_topic_destroy(struct sim_broker_topic *t) {
 	for (int64_t i = sim_broker_topic_get_msg_offset_first(t); i <= sim_broker_topic_get_msg_offset_last(t); i++)
 		free(t->msgs[i % t->capacity].payload);		// Can use //for (uint32_t i = 0; i < t->capacity; i++) free(t->msgs[i].payload);
 	free(t->msgs);
+	pthread_mutex_destroy(&t->lock);
 }
 
 #define B_TYPE "KBROKER@CHAR_K."
