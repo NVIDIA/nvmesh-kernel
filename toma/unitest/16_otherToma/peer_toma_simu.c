@@ -121,7 +121,7 @@ int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *T, const struct n
 			const struct sb_seg_conf *sb_seg;
 			nvmeibt_disk_segment_convert_topo_le_be(&wire_seg[j], &ld_seg);
 			sb_seg = sb_cluster_get_seg_ptr_from_uuid(cfg, (uint32_t)ld_seg.uuid.ll[0]);
-			if (sb_cluster_get_node_idx_from_disk_uuid(cfg, sb_seg->disk_uuid) != my_node_idx)			// Filter: does this segment belong to this peer?
+			if (sb_cluster_get_node_idx_from_disk_uuid(sb_seg->disk_uuid) != my_node_idx)			// Filter: does this segment belong to this peer?
 				continue;
 			__gen_seg_reply_to_leader(T, sb_seg, &ld_seg, nvmeibt_act_topo_builder_append(&builder));
 		}

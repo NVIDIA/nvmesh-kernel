@@ -37,18 +37,10 @@ static void __subscribe_to_disk(struct clnt_simu *clnt, struct sb_disk_conf *dis
 
 static void __subscribe_to_vol_disks_of_live_toma(struct clnt_simu *clnt, const struct sb_volume_conf *vol, bool do_subscribe) {
 	const struct sb_cluster_conf *cfg = clnt->cfg;
-	unsigned ci, ri, si;
-	for (ci = 0; ci < vol->num_chunks; ci++) {
-		const struct sb_chunk_conf *c = &vol->chunks[ci];
-		for (ri = 0; ri < c->n_raids; ri++) {
-			const struct sb_praid_conf *r = &c->raids[ri];
-			for (si = 0; si < (r->D + r->P); si++) {
-				if (sb_cluster_node_is_live_toma(sb_cluster_get_node_idx_from_disk_uuid(cfg, r->segs[si].disk_uuid))) {
-					struct sb_disk_conf *disk = &cfg->live->disks[sb_cluster_get_disk_idx_from_disk_uuid_n(cfg, r->segs[si].disk_uuid)];
-					__subscribe_to_disk(clnt, disk, do_subscribe);			// Already subscribed to this disk via another segment
-				}
-			}
-		}
+	topo_declare_iterator(c, r, seg, ci, ri, si);
+	topo_for_each_live_toma_seg(vol, c, ci, r, ri, seg, si) {
+		struct sb_disk_conf *disk = &cfg->live->disks[sb_cluster_get_disk_idx_from_disk_uuid_n(seg->disk_uuid)];
+		__subscribe_to_disk(clnt, disk, do_subscribe);			// Already subscribed to this disk via another segment
 	}
 }
 

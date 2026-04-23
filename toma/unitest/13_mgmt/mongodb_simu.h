@@ -109,8 +109,8 @@ const struct sb_cluster_conf *sb_cluster_get_const_conf(void);
       struct sb_cluster_conf *sb_cluster_get_conf(void);
 int  sb_cluster_get_disk_idx_from_disk_name(const struct sb_cluster_conf *, const char *disk_name);
 int  sb_cluster_get_disk_idx_from_disk_uuid_s(const struct sb_cluster_conf *, const char *disk_uuid);
-int  sb_cluster_get_node_idx_from_disk_uuid(  const struct sb_cluster_conf *, uint32_t    disk_uuid);
-int  sb_cluster_get_disk_idx_from_disk_uuid_n(const struct sb_cluster_conf *, uint32_t    disk_uuid);
+int  sb_cluster_get_node_idx_from_disk_uuid(                                  uint32_t    disk_uuid);
+int  sb_cluster_get_disk_idx_from_disk_uuid_n(                                uint32_t    disk_uuid);
 bool sb_cluster_update_disk_namespace_from_name(     struct sb_disk_conf *, const char *disk_name);
 void sb_cluster_update_disk_vendor_and_verify(       struct sb_disk_conf *, const char *vendor);
 void sb_cluster_praid_alloc_replacement_seg(      struct sb_cluster_conf *, struct sb_praid_conf* pr /*, Todo: give destination disk here */ );
@@ -124,5 +124,15 @@ void                        sb_cluster_get_seg_idx_from_uuid_n(uint32_t seg_uuid
 bool sb_cluster_topo_prd_is_ioable(const struct sb_praid_topo*);
 bool sb_cluster_vol_has_any_live_toma_local_segs(const struct sb_cluster_conf *sb, uint32_t vol_idx);
 static inline bool sb_cluster_node_is_live_toma(unsigned node_idx) { return node_idx == 0; }
+
+// Iterators over configuration. Below for loops emulate the same clients defines
+#define topo_for_each_chunk(  vol, chunk, ci)	for (ci = 0, chunk = vol->chunks;    ci < vol->num_chunks;     ++ci, ++chunk)
+#define chunk_for_each_raid1(chunk, raid, ri)	for (ri = 0, raid = chunk->raids;    ri < chunk->n_raids;      ++ri, ++raid)
+#define raid1_for_each_seg(  raid,  seg,  si)	for (si = 0, seg  = raid->segs;      si < (raid->D + raid->P); ++si, ++seg)
+#define chunk_for_each_seg(chunk, raid, ri, seg, si)	chunk_for_each_raid1(chunk, raid, ri)	 raid1_for_each_seg(  raid,  seg,  si)
+#define topo_for_each_raid1(vol, chunk, ci, raid, ri)	topo_for_each_chunk(  vol, chunk, ci)	 chunk_for_each_raid1(chunk, raid, ri)
+#define topo_for_each_seg(vol, c, ci, r1, ri, seg, si)	topo_for_each_raid1(  vol, c, ci, r1, ri) raid1_for_each_seg(    r1,  seg,  si)
+#define topo_for_each_live_toma_seg(vol, c, ci, r1, ri, seg, si)	topo_for_each_seg(vol, c, ci, r1, ri, seg, si) if (sb_cluster_node_is_live_toma(sb_cluster_get_node_idx_from_disk_uuid(seg->disk_uuid)))
+#define topo_declare_iterator(c, r, seg, ci, ri, si)	const struct sb_chunk_conf *c;	const struct sb_praid_conf *r;	const struct sb_seg_conf *seg;	unsigned ci, ri, si;
 
 // Todo: Add functions here to dynamically create and remove volumes in mongo-db instead of static during init creation

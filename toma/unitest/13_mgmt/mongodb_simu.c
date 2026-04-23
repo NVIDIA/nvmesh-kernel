@@ -148,8 +148,8 @@ void sb_cluster_update_disk_vendor_and_verify(struct sb_disk_conf *D, const char
 }
 
 #define DISK_UUID_GET_IDX_MASK(u) ((u ^ DISK_UUID_BASE) - (NODE_UUID_BASE & 0xFFFF0000))
-int sb_cluster_get_node_idx_from_disk_uuid(  const struct sb_cluster_conf *D, uint32_t u) { (void)D; return DISK_UUID_GET_IDX_MASK(u) >> 20; }
-int sb_cluster_get_disk_idx_from_disk_uuid_n(const struct sb_cluster_conf *D, uint32_t u) { (void)D; return u&0xf; }
+int sb_cluster_get_node_idx_from_disk_uuid(  uint32_t u) { return DISK_UUID_GET_IDX_MASK(u) >> 20; }
+int sb_cluster_get_disk_idx_from_disk_uuid_n(uint32_t u) { return u&0xf; }
 
 int sb_cluster_get_disk_idx_from_disk_uuid_s(const struct sb_cluster_conf *sb, const char *disk_uuid) {
 	unsigned uuid_u32 = 0, n, d;
@@ -177,16 +177,9 @@ bool sb_cluster_topo_prd_is_ioable(const struct sb_praid_topo* pr) {
 
 bool sb_cluster_vol_has_any_live_toma_local_segs(const struct sb_cluster_conf *sb, uint32_t vol_idx) {
 	const struct sb_volume_conf *vol = &sb->vols[vol_idx];
-	unsigned ci, ri, si;
-	for (ci = 0; ci < vol->num_chunks; ci++) {
-		const struct sb_chunk_conf *c = &vol->chunks[ci];
-		for (ri = 0; ri < c->n_raids; ri++) {
-			const struct sb_praid_conf *r = &c->raids[ri];
-			for (si = 0; si < (r->D + r->P); si++) {
-				if (sb_cluster_node_is_live_toma(sb_cluster_get_node_idx_from_disk_uuid(sb, r->segs[si].disk_uuid)))
-					return true;
-			}
-		}
+	topo_declare_iterator(c, r, seg, ci, ri, si);
+	topo_for_each_live_toma_seg(vol, c, ci, r, ri, seg, si) {
+		return true;
 	}
 	return false;
 }
