@@ -222,10 +222,19 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 				if (r->extent_index !=
 				    slot->cdv_extent_index)
 					continue;
-				/* Cancel the pending return. */
+				/*
+				 * Cancel the pending return.  cdv_extents_count
+				 * is NOT incremented: the count was never
+				 * decremented when this ref was moved to
+				 * pending_return_list (see
+				 * tpv_promote_flushing_frees_locked).  The
+				 * count tracks "CDV extents owned by this TPV
+				 * from TOMA's perspective" and decrements only
+				 * in tpv_drain_pending_returns after a
+				 * successful CDV_FREE_EXTENT send.
+				 */
 				list_move_tail(&r->node,
 					       &alloc->cdv_extent_list);
-				alloc->cdv_extents_count++;
 				r->on_pending_return_list = false;
 				r->allocated_count++;
 				atomic64_inc(&alloc->stat_cdv_returns_cancelled);
@@ -594,8 +603,18 @@ static u32 tpv_promote_flushing_frees_locked(struct nvmeibc_tpv_allocator *alloc
 		ref->flushing_free_count      = 0;
 
 		if (ref->allocated_count == 0 && !ref->is_l1_extent) {
+			/*
+			 * Move ref to pending_return_list but KEEP
+			 * cdv_extents_count unchanged: the extent is still
+			 * owned by this TPV from TOMA's perspective (no
+			 * CDV_FREE_EXTENT sent yet).  The count decrements
+			 * only in tpv_drain_pending_returns after a
+			 * successful IB admin send, or if alloc-cancels-
+			 * return leaves the ref on cdv_extent_list forever
+			 * (in which case it never decrements, which is
+			 * correct: the extent stays ours).
+			 */
 			list_move_tail(&ref->node, &alloc->pending_return_list);
-			alloc->cdv_extents_count--;
 			ref->on_pending_return_list = true;
 			atomic64_inc(&alloc->stat_cdv_returns_queued);
 			refs_returnable++;
@@ -810,6 +829,15 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
 			    "TPV: @STR: CDV_extent[@LLU] returned to TOMA",
 			    tpv->tpv_name, ref->extent_index);
 			atomic64_inc(&alloc->stat_cdv_free_ok);
+			/*
+			 * Decrement cdv_extents_count only now, on successful
+			 * CDV_FREE_EXTENT send.  The count tracks TOMA's view
+			 * of ownership, which changes only when TOMA
+			 * acknowledges the return (by accepting the send).
+			 */
+			spin_lock(&alloc->lock);
+			alloc->cdv_extents_count--;
+			spin_unlock(&alloc->lock);
 			list_del(&ref->node);
 			kfree(ref);
 		}
@@ -972,7 +1000,31 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 	 * GFP_NOIO: we are a storage driver - GFP_KERNEL can trigger writeback
 	 * that re-enters this driver, causing deadlock.
 	 */
+	/*
+	 * Skip any slot whose physical byte offset would be 0.  That value is
+	 * reserved as TPV_TREE_NULL ("unmapped") in on-disk L2 leaves; a data
+	 * slot at phys_offset 0 would be silently dropped by load_state.
+	 *
+	 * When does phys_offset == 0 happen?  It happens iff the allocator
+	 * area is empty (A = allocator_size_gib << 30 == 0) AND this is
+	 * extent 1 AND slot 0.  In single-CDV mode A > 0 (the allocator
+	 * region holds CDV metadata), so the collision cannot occur.  In
+	 * split mode the data CDV carries no allocator region (A = 0), so
+	 * slot 0 of data extent 1 computes to offset 0 -- triggered by the
+	 * smoke test's virt_idx 0 cross-reboot loss.  Reserving that one slot
+	 * costs at most a single TPV_extent (64 KiB default) per TPV, which
+	 * is negligible.
+	 *
+	 * We generalise the check to "skip if phys_offset == 0" rather than
+	 * hard-coding "split mode && extent 1 && slot 0" so the invariant is
+	 * enforced structurally regardless of future layout changes.
+	 */
 	for (s = 0; s < n_slots; s++) {
+		u64 phys = tpv_slot_phys_offset(alloc, extent_index, s);
+
+		if (phys == 0)
+			continue;
+
 		fs = kzalloc(sizeof(*fs), GFP_NOIO);
 		if (!fs) {
 			struct nvmeibc_tpv_free_slot *tmp;
@@ -985,7 +1037,7 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 			kfree(ref);
 			return -ENOMEM;
 		}
-		fs->phys_offset      = tpv_slot_phys_offset(alloc, extent_index, s);
+		fs->phys_offset      = phys;
 		fs->cdv_extent_index = extent_index;
 		list_add_tail(&fs->node, &batch);
 	}

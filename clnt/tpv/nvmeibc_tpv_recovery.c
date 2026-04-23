@@ -207,6 +207,16 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
 	nvmeibc_cdv_extent_ref_init_lists(ref);
 
 	for (s = first_s; s < n_slots; s++) {
+		u64 phys = recov_slot_phys(alloc, extent_index, s);
+
+		/*
+		 * Skip slots whose offset is 0; collides with TPV_TREE_NULL.
+		 * See nvmeibc_tpv_allocator.c tpv_on_cdv_alloc_ok_for_side for
+		 * the canonical rationale (split mode, data CDV, A = 0).
+		 */
+		if (phys == 0)
+			continue;
+
 		fs = kzalloc(sizeof(*fs), GFP_NOIO);
 		if (!fs) {
 			struct nvmeibc_tpv_free_slot *tmp;
@@ -219,7 +229,7 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
 			kfree(ref);
 			return -ENOMEM;
 		}
-		fs->phys_offset      = recov_slot_phys(alloc, extent_index, s);
+		fs->phys_offset      = phys;
 		fs->cdv_extent_index = extent_index;
 		INIT_LIST_HEAD(&fs->node);
 		list_add_tail(&fs->node, &batch);
@@ -250,8 +260,14 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
 	 * pool is deep enough to allow the return.
 	 */
 	if (ref->allocated_count == 0 && !ref->is_l1_extent) {
+		/*
+		 * Keep cdv_extents_count at its post-increment value: the
+		 * extent is still owned by this TPV from TOMA's perspective
+		 * until the drain sends CDV_FREE_EXTENT.  The count decrements
+		 * only on successful IB admin send in
+		 * tpv_drain_pending_returns.
+		 */
 		list_move_tail(&ref->node, &alloc->pending_return_list);
-		alloc->cdv_extents_count--;
 		ref->on_pending_return_list = true;
 		atomic64_inc(&alloc->stat_cdv_returns_queued);
 	}

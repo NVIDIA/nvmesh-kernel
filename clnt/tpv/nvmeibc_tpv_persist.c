@@ -885,13 +885,24 @@ static int load_state_populate_data_side(struct nvmeibc_tpv *tpv,
 
 			for (s = 0; s < le->n_slots; s++) {
 				struct nvmeibc_tpv_free_slot *fs;
+				u64 phys;
 
 				if (test_bit(s, le->used_bm))
 					continue;
+				/*
+				 * Skip slot whose offset is 0 -- collides with
+				 * TPV_TREE_NULL.  In split mode the data CDV has
+				 * A = 0, so slot 0 of extent 1 is unusable.  See
+				 * nvmeibc_tpv_allocator.c tpv_on_cdv_alloc_ok_for_side
+				 * for the canonical rationale.
+				 */
+				phys = persist_phys_of(data_alloc,
+						       le->extent_index, s);
+				if (phys == 0)
+					continue;
 				fs = kzalloc(sizeof(*fs), GFP_NOIO);
 				if (!fs) { rv = -ENOMEM; goto out; }
-				fs->phys_offset      = persist_phys_of(data_alloc,
-							le->extent_index, s);
+				fs->phys_offset      = phys;
 				fs->cdv_extent_index = le->extent_index;
 				INIT_LIST_HEAD(&fs->node);
 				list_add_tail(&fs->node, &data_alloc->free_tpv_extents);
@@ -1356,6 +1367,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 
 			for (s = 0; s < le->n_slots; s++) {
 				struct nvmeibc_tpv_free_slot *fs;
+				u64 phys;
 
 				/* Skip slot 0 of the L1 extent (holds L1 table). */
 				if (is_l1 && s == 0)
@@ -1367,13 +1379,23 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 				if (test_bit(s, le->l2_bm))
 					continue;
 
+				/*
+				 * Skip any slot whose byte offset would collide with
+				 * TPV_TREE_NULL (0).  Triggered in split mode where
+				 * the data CDV's A = 0 makes slot 0 of extent 1
+				 * encode to 0.  See nvmeibc_tpv_allocator.c for the
+				 * canonical rationale.
+				 */
+				phys = persist_phys_of(alloc, le->extent_index, s);
+				if (phys == 0)
+					continue;
+
 				fs = kzalloc(sizeof(*fs), GFP_NOIO);
 				if (!fs) {
 					rv = -ENOMEM;
 					goto out_free;
 				}
-				fs->phys_offset      = persist_phys_of(alloc,
-							le->extent_index, s);
+				fs->phys_offset      = phys;
 				fs->cdv_extent_index = le->extent_index;
 				INIT_LIST_HEAD(&fs->node);
 				list_add_tail(&fs->node,
