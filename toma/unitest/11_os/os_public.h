@@ -52,10 +52,17 @@ int     accept( int __fd, struct sockaddr* __addr, unsigned int *__addr_len);
 #define _NETINET_IN_H		// #include <netinet/in.h>
 #define _LINUX_IF_H			// #include <linux/if.h>
 
-#define ntohl(x)	__uint32_identity (x)
-#define ntohs(x)	__uint16_identity (x)
-#define htonl(x)	__uint32_identity (x)
-#define htons(x)	__uint16_identity (x)
+#if (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+	#define ntohl(x)	__builtin_bswap32 (x)
+	#define ntohs(x)	__builtin_bswap16 (x)
+	#define htonl(x)	__builtin_bswap32 (x)
+	#define htons(x)	__builtin_bswap16 (x)
+#else
+	#define ntohl(x)	__uint32_identity (x)
+	#define ntohs(x)	__uint16_identity (x)
+	#define htonl(x)	__uint32_identity (x)
+	#define htons(x)	__uint16_identity (x)
+#endif
 
 int override_open(const char *path, int flags, ... /*int mode*/);
 int override_close(int fd);
