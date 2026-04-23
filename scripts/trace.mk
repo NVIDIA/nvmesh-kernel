@@ -81,7 +81,12 @@ $(PP_OUTDIR)/%.i: ORIG_OBJ_NAME = $(subst $(PP_OUTDIR)/,,$(patsubst %.i,%.o,$@))
 $(PP_OUTDIR)/%.i: $(src)/%.c $(PP_OUTDIR)/.headers.stamp
 	$(shell mkdir -p $(dir $@))
 	[ -f $(obj)/.trace_pp_dir/$*.c_gen_events.h ] || touch $(obj)/.trace_pp_dir/$*.c_gen_events.h
-	$(CC) $(c_flags) $(call per_file_iflags_varval,$(ORIG_OBJ_NAME)) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -o $@ $<
+	$(CC) $(c_flags) $(call per_file_iflags_varval,$(ORIG_OBJ_NAME)) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -o $@.new $<
+	@if cmp -s $@.new $@ 2>/dev/null; then \
+	    rm -f $@.new; \
+	else \
+	    mv -f $@.new $@; \
+	fi
 
 $(PP_OUTDIR)/%.i: $(src)/%.S
 	+$(shell mkdir -p $(dir $@))

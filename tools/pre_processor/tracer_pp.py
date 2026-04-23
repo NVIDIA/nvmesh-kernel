@@ -414,8 +414,20 @@ def main():
         for trace in subl:
         	res.append(trace)
         	
-    with open(args.output, 'w') as fp:
-        json.dump(res, fp, indent=2)
+    # Only overwrite args.output if the serialized content differs from
+    # what is already on disk. Preserving mtime when nothing changed lets
+    # downstream steps (merge_dictionary.sh, the object-file compiles)
+    # skip their work on no-op re-builds.
+    new_bytes = json.dumps(res, indent=2)
+    try:
+        with open(args.output, 'r') as fp:
+            old_bytes = fp.read()
+    except (FileNotFoundError, OSError):
+        old_bytes = None
+
+    if old_bytes != new_bytes:
+        with open(args.output, 'w') as fp:
+            fp.write(new_bytes)
 
     return 0
 

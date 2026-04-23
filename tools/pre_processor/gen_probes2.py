@@ -638,12 +638,25 @@ def main():
         trace = Trace(ctx, FIRST_TRACE_ID + idx, trace)
         ctx.register_trace(trace)
 
-    if not args.only_trace_ids:
-        with open(args.output_file_name, 'w') as fd:
-            fd.writelines(ctx.render())
+    # Write only if content changed, so unchanged generated headers don't
+    # bump mtime and trigger downstream .o rebuilds.
+    def write_if_changed(path, lines):
+        new = "".join(lines)
+        try:
+            with open(path, 'r') as fd:
+                old = fd.read()
+        except (FileNotFoundError, OSError):
+            old = None
+        if old != new:
+            with open(path, 'w') as fd:
+                fd.write(new)
 
-    with open(os.path.join(os.path.dirname(args.output_file_name), "traces_ids.c"), 'w') as fd:
-        fd.writelines(ctx.render_traces_ids_c_file())
+    if not args.only_trace_ids:
+        write_if_changed(args.output_file_name, ctx.render())
+
+    write_if_changed(
+        os.path.join(os.path.dirname(args.output_file_name), "traces_ids.c"),
+        ctx.render_traces_ids_c_file())
 
     return 0
 

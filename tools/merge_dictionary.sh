@@ -75,8 +75,21 @@ __MERGED_TRACES_FILE__
 
 echo $CKSUM > $CKSUMFILE
 
-mv -f "$TMPFILE" "$1"
-touch "$1" -r "$CKSUMFILE"
-cp -f "$1" $(dirname "$1")/dict.$CKSUM.json
+# Only bump $1's mtime if content actually changed. Preserves mtime so
+# downstream rebuilds (object files that transitively depend on this
+# dictionary) can be skipped on no-op re-builds.
+if cmp -s "$TMPFILE" "$1"; then
+    rm -f "$TMPFILE"
+else
+    mv -f "$TMPFILE" "$1"
+    touch "$1" -r "$CKSUMFILE"
+fi
+
+# Same guard for the cksum-named copy. If the cksum is unchanged the
+# filename is identical and the content is identical; skip the cp.
+DICTFILE=$(dirname "$1")/dict.$CKSUM.json
+if ! cmp -s "$1" "$DICTFILE" 2>/dev/null; then
+    cp -f "$1" "$DICTFILE"
+fi
 
 exit 0
