@@ -198,7 +198,6 @@ static inline bool is_replace_syslog_with_printf(void)
 }
 
 #define get_my_tid() (unsigned long)pthread_self()	//syscall(__NR_gettid)
-int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_fmt, const char *filename, int line, const char *func_name);
 #define SEND_TO_SYSLOG(_syslog_lvl, auto_generated_printf_fmt, ...) ({															\
 	const int __errno_save = errno;																										\
 	if (is_replace_syslog_with_printf()) {																								\

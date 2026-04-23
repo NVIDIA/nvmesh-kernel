@@ -536,17 +536,3 @@ void print_stack(void) {
 		//N_Wf(teps01, " @STRRCHR", strrchr(strings[j], '/'));	// Dont trust this as bin traces may not work, so can stuck in infinite loop
 	}
 }
-
-int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* auto_generated_printf_fmt, const char *filename, int line, const char *func_name) {
-	char *p = printf_fmt;
-	const int max_len = (printf_fmt_len - 100); 	// keep 100 for safety, and needs at least 120
-	if ((printf_fmt_len > 10) && ((int)strnlen(auto_generated_printf_fmt, max_len) >= (max_len-1))) {
-		p += sprintf(p, "STRING TOO LONG!");
-		return -1;
-	}
-	p += sprintf(p, "%s[%d]:%s:%s", filename, line, func_name, auto_generated_printf_fmt);
-	if (*(p - 1) == '\n')
-		--p;	// remove last "\n"
-	*p = '\0';
-	return 0;
-}
