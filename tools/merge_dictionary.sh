@@ -88,8 +88,21 @@ fi
 # Same guard for the cksum-named copy. If the cksum is unchanged the
 # filename is identical and the content is identical; skip the cp.
 DICTFILE=$(dirname "$1")/dict.$CKSUM.json
+LASTFILE="$1.lastdict"
+
+# Remove the previous dict.<cksum>.json we wrote for this input (if any),
+# so stale dict files don't accumulate across builds. Scoped per-input
+# to stay safe under parallel make.
+if [ -f "$LASTFILE" ]; then
+    PREV_DICT=$(cat "$LASTFILE" 2>/dev/null)
+    if [ -n "$PREV_DICT" ] && [ "$PREV_DICT" != "$DICTFILE" ] && [ -f "$PREV_DICT" ]; then
+        rm -f "$PREV_DICT"
+    fi
+fi
+
 if ! cmp -s "$1" "$DICTFILE" 2>/dev/null; then
     cp -f "$1" "$DICTFILE"
 fi
+echo "$DICTFILE" > "$LASTFILE"
 
 exit 0
