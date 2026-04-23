@@ -387,12 +387,24 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 	xa_destroy(&alloc->extent_map);
 	(void)idx;
 
-	/* Free CDV_extent reference list (active and pending-return). */
+	/*
+	 * Free CDV_extent reference list (active and pending-return).  Each
+	 * ref may carry parked slot structs on pending_free_slots (freed but
+	 * not yet flushed) and flushing_free_slots (mid-flush, haven't yet
+	 * promoted or reverted).  Both lists would otherwise leak when the
+	 * ref is kfreed; drain them first.  nvmeibc_tpv_free_slots_list is
+	 * generic -- it walks any list of nvmeibc_tpv_free_slot entries --
+	 * so we can reuse it here.
+	 */
 	list_for_each_entry_safe(ref, tmp, &alloc->cdv_extent_list, node) {
+		nvmeibc_tpv_free_slots_list(&ref->pending_free_slots);
+		nvmeibc_tpv_free_slots_list(&ref->flushing_free_slots);
 		list_del(&ref->node);
 		kfree(ref);
 	}
 	list_for_each_entry_safe(ref, tmp, &alloc->pending_return_list, node) {
+		nvmeibc_tpv_free_slots_list(&ref->pending_free_slots);
+		nvmeibc_tpv_free_slots_list(&ref->flushing_free_slots);
 		list_del(&ref->node);
 		kfree(ref);
 	}
