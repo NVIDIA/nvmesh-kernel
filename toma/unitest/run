@@ -162,8 +162,8 @@ function T_SANDBOX_trace_compress_comparison() {
 
 	# --- Report ---
 	echo "-----------------------------------------------";
-	echo "  Plain:      ${plain_n_files} files, ${plain_size} bytes";
-	echo "  Compressed: ${compressed_n_files} files, ${compressed_size} bytes (${lz4_count} .lz4)";
+	echo "  Plain:      ${plain_n_files} files, $((plain_size/1024))[kb]";
+	echo "  Compressed: ${compressed_n_files} files, $((compressed_size/1024))[kb] (${lz4_count} .lz4)";
 
 	# --- Assertions ---
 	if [ "${lz4_count}" -eq 0 ]; then

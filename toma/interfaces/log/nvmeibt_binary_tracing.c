@@ -233,7 +233,7 @@ int64_t nvmeibt_binary_tracing_get_tracer_debug_level(void)
 
 void nvmeibt_binary_tracing_set_trace_compress(int64_t is_enabled)
 {
-	bool new_val = is_enabled;
+	bool new_val = !!is_enabled;
 	if (is_trace_compress_enabled != new_val) {
 		N_IMf(u66tc1, "is_trace_compress_enabled: @BOOL-->@BOOL (takes effect on next log rotation)",
 			  is_trace_compress_enabled, new_val);

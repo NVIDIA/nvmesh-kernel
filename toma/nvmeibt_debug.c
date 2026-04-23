@@ -483,7 +483,6 @@ void nvmeibt_debug_config_params_print(struct nvmeibt_Str *s, bool print_values,
 	nvmeibt_Str_sprintf(s, "%s=%x\n", TOMA_PARAMS_ENCODING_STRING, TOMA_ENCODING_VER);
 	for (i=0; i<ARRAY_SIZE(oper_params); i++) {
 		struct oper_param_t *param = &oper_params[i];
-
 		if (print_values) {
 			int64_t val=0;
 			if (param->getf)
