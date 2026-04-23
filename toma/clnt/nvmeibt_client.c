@@ -13,22 +13,17 @@
 #include "nvmeibt_register.h"
 #include "nvmeibt_global.h"
 
-/**********************                       ***************************/
-#define NVMEIBT_CLIENT_DUMP(__name__, cl) \
-	N_Tf(__name__, "uuid=@UUID_LE hostname=@HOSTNAME disk=@STR cid=@CID", &(cl)->client_provided_uuid, (cl)->net.host_name, (cl)->ldisk_id.str, (cl)->cid)
+#define NVMEIBT_CLIENT_DUMP(__name__, cl) N_Tf(__name__, "uuid=@UUID_LE hostname=@HOSTNAME disk=@STR cid=@CID", &(cl)->client_provided_uuid, (cl)->net.host_name, (cl)->ldisk_id.str, (cl)->cid)
 
 static struct nvmeibt_client *nvmeibt_client_find_by_cid(u32 cid)
 {
-	struct nvmeibt_client	*client;
-
-	client = nvmeib_hash_search_uint32_t(nvmeibt_global_get_global()->clients_hash_by_cid, cid);
+	struct nvmeibt_client	*client = nvmeib_hash_search_uint32_t(nvmeibt_global_get_global()->clients_hash_by_cid, cid);
 	if (client == NULL) {
 		N_Tf(4vham4q, "client not found cid=@CID", cid);
 	} else {
-		N_Tf(nvmeibt_client_find_by_cid_2, "client found cid=@CID client=@PPP", client->cid, client);
+		N_Tf(nvmeibt_client_find_by_cid_2, "client found cid=@CID client=@PTR", client->cid, client);
 		NVMEIBT_CLIENT_DUMP(nvmeibt_client_find_by_cid_3, client);
 	}
-
 	return client;
 }
 
@@ -38,14 +33,12 @@ static struct nvmeibt_client *nvmeibt_client_add(struct nvmeibs_msg_s2t_subscrib
 	struct nvmeibt_topology	*cur_topo = nvmeibt_global_get_global();
 
 	NFIN;
-
-	// Find or create a client object.
-	client = nvmeibt_client_find_by_cid(msg->cid);
+	client = nvmeibt_client_find_by_cid(msg->cid);	// Find or create a client object.
 	if (!client) {
 		if (nvmeib_hash_get_n_elements(cur_topo->clients_hash_by_cid) >= NVMEIBT_MAX_N_CLIENTS_PER_NODE) {
 			N_Wf(ovmdh7f, "Reached MAX_N_CLIENTS_PER_NODE=@MAX_N_CLIENTS_PER_NODE", NVMEIBT_MAX_N_CLIENTS_PER_NODE);
 		}
-		client = NNVMEIBT_TOMA_CALLOC(nvmeibt_client_add_2, 1, sizeof *client);
+		client = NNVMEIBT_TOMA_CALLOC(nvmeibt_client_add_2, 1, sizeof(*client));
 		nvmeib_hash_add_uint32_t(cur_topo->clients_hash_by_cid, msg->cid, client);
 		client->client_provided_uuid = msg->client_uuid;
 		client->cid = msg->cid;
@@ -57,34 +50,28 @@ static struct nvmeibt_client *nvmeibt_client_add(struct nvmeibs_msg_s2t_subscrib
 		client->client_provided_urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&(client->client_provided_uuid));
 		NVMEIBT_CLIENT_DUMP(nvmeibt_client_add_3, client);
 	}
-
 	NFOUT;
 	return client;
 }
 
 static void nvmeibt_client_del_if_not_connected_and_no_reg_ctx_refs(struct nvmeibt_client *client) {
-	NFIN;
 	if (!client) {
-		N_Wf(nvmeibt_client_del_if_not_connected_and_no_reg_ctx_refs_1, "client=NULL");
-		goto out;
+		N_Wf(tcdifcanr0, "client=NULL");
+		return;
 	}
-	NVMEIBT_CLIENT_DUMP(nvmeibt_client_del_if_not_connected_and_no_reg_ctx_refs_4, client);
+	NVMEIBT_CLIENT_DUMP(tcdifcanr1, client);
 	if (client->n_reg_ctx_refs || client->is_connected) {
-		N_Tf(nvmeibt_client_del_if_not_connected_and_no_reg_ctx_refs_2, "Skipping cid=@CID n_reg_ctx_refs=@N_REGISTRANTS is_connected=@IS_CONNECTED", client->cid, client->n_reg_ctx_refs, client->is_connected);
-		goto out;
+		N_Tf(tcdifcanr2, "Skipping cid=@CID n_reg_ctx_refs=@N_REGISTRANTS is_connected=@IS_CONNECTED", client->cid, client->n_reg_ctx_refs, client->is_connected);
+	} else {
+		nvmeib_hash_delete_uint32_t(nvmeibt_global_get_global()->clients_hash_by_cid, client->cid);
+		NNVMEIBT_TOMA_FREE(tcdifcanr3, client);
 	}
-
-	nvmeib_hash_delete_uint32_t(nvmeibt_global_get_global()->clients_hash_by_cid, client->cid);
-	NNVMEIBT_TOMA_FREE(nvmeibt_client_del_if_not_connected_and_no_reg_ctx_refs_3, client);
-
-out:
-	NFOUT;
 }
 
 void nvmeibt_client_reg_ctx_ref_added(struct nvmeibt_client *client, struct nvmeibt_registrant_ctx *reg_ctx_for_logging)
 {
 	client->n_reg_ctx_refs++;
-	N_Tf(trace_client_nvmeibt_client_reg_ctx_ref_added, "cid=@CID reg_ctx=@PTR n_reg_ctx_refs=@N_REGISTRANTS", client->cid, reg_ctx_for_logging, client->n_reg_ctx_refs);
+	N_Tf(tcdifcanr4, "cid=@CID reg_ctx=@PTR n_reg_ctx_refs=@N_REGISTRANTS", client->cid, reg_ctx_for_logging, client->n_reg_ctx_refs);
 }
 
 void nvmeibt_client_reg_ctx_ref_removed(struct nvmeibt_client *client, struct nvmeibt_registrant_ctx *reg_ctx_for_logging)
@@ -104,6 +91,7 @@ int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *
 	struct nvmeibt_host_name			msg_hdr_net;
 	struct nvmeibt_urn_uuid				seg_urn_uuid;
 	enum NVMEIBT_CLIENT_MSG_DECODE_RES	decode_res;
+	struct nvmeibt_registrant_ctx      *ctx = &registrant_msg.registrant_ctx;
 
 	const int min_size = sizeof(msg_buf->handle) + sizeof(*pcl);
 
@@ -118,38 +106,38 @@ int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *
 		goto out;
 	}
 
-	registrant_msg.registrant_ctx.client_messaging_handle = msg_buf->handle;
+	ctx->client_messaging_handle = msg_buf->handle;
 	size -= sizeof(msg_buf->handle);
 
 	decode_res = nvmeibt_client_thick_msg_read((u8*)msg_buf->buf, size,
 			&(registrant_msg.msg_type), &(registrant_msg.reason),
 			msg_hdr_net.host_name /* deprecated */, sizeof(msg_hdr_net.host_name),
-			&(registrant_msg.registrant_ctx.client_protocol_version),
-			&(registrant_msg.registrant_ctx.config_version),
-			&(registrant_msg.registrant_ctx.volume_config_version),
+			&(ctx->client_protocol_version),
+			&(ctx->config_version),
+			&(ctx->volume_config_version),
 			&(registrant_msg.cookie),
 			&(topology_version),
-			&(registrant_msg.registrant_ctx.praid_version),
+			&(ctx->praid_version),
 			seg_urn_uuid.str, sizeof(seg_urn_uuid.str),
 			&(reg_lock_id_raw),
-			&(registrant_msg.registrant_ctx.reservation_mode_version),
-			&(registrant_msg.registrant_ctx.client_conversation_index),
-			&(registrant_msg.registrant_ctx.rt_never_reged_on_seg),
-			(u8 *)&(registrant_msg.registrant_ctx.is_recoverer),
+			&(ctx->reservation_mode_version),
+			&(ctx->client_conversation_index),
+			&(ctx->rt_never_reged_on_seg),
+			(u8 *)&(ctx->is_recoverer),
 			&(registrant_msg.data_length),
 			(void **)&(registrant_msg.msg_data),
 			&pcl);
-	nvmeibt_urn_uuid_str_to_union_uuid(&(registrant_msg.registrant_ctx.seg_uuid), seg_urn_uuid.str);
+	nvmeibt_urn_uuid_str_to_union_uuid(&(ctx->seg_uuid), seg_urn_uuid.str);
 	if (decode_res != NVMEIBT_CLIENT_MSG_DECODE_OK) {
 		struct nvmeibt_client_msg_summary msg_smr = nvmeibt_client_decode_msg_summary((u8*)msg_buf->buf, size);
 		N_Wf(ghuy7t5, "Failed to read the message, msg_type=@MSG_TYPE reason=@REASON proto_ver=@TOMA_CLIENT_PROTOCOL_VERSION data_len=@DATA_LEN cookie=@COOKIE",
 			 msg_smr.msg_type, msg_smr.reason, msg_smr.protocol_version, msg_smr.data_length, registrant_msg.cookie);
-		registrant_msg.registrant_ctx.client = nvmeibt_client_find_by_cid(client_messaging_handle_to_cid(registrant_msg.registrant_ctx.client_messaging_handle));
-		registrant_msg.registrant_ctx.client_protocol_version = msg_smr.protocol_version;
-		if (!registrant_msg.registrant_ctx.client) {
+		ctx->client = nvmeibt_client_find_by_cid(client_messaging_handle_to_cid(ctx->client_messaging_handle));
+		ctx->client_protocol_version = msg_smr.protocol_version;
+		if (!ctx->client) {
 			N_Wf(skiur56, "bad msg_type=@MSG_TYPE reason=@REASON from a non-connected clnt=@HOSTNAME handle=@HANDLE cookie=@COOKIE. Ignoring",
 				 registrant_msg.msg_type, registrant_msg.reason,
-				msg_hdr_net.host_name, registrant_msg.registrant_ctx.client_messaging_handle, registrant_msg.cookie);
+				msg_hdr_net.host_name, ctx->client_messaging_handle, registrant_msg.cookie);
 		} else if (decode_res == NVMEIBT_CLIENT_MSG_DECODE_PROTOCOL_MISMATCH) {
 			const enum NVMEIBT_CLIENT_TR_REASON mismatch_reason = NVMEIBT_CLIENT_TR_REASON_PROTO_VERSION_MISMATCH;
 			nvmeibt_register_send_toma_not_ready(&registrant_msg.registrant_ctx, mismatch_reason, &msg_smr);
@@ -160,17 +148,17 @@ int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *
 	NTOMA_ASSERT(glo090t, nvmeibt_ib_protocol_signature(registrant_msg.msg_type) != NVMEIBT_PROTOCOL_SIGNATURE_LOCAL_SERVER, "wrong callback");
 
 	registrant_msg.topology_version = topology_version;
-	registrant_msg.registrant_ctx.reg_lock_id.all = reg_lock_id_raw;
+	ctx->reg_lock_id.all = reg_lock_id_raw;
 
-	registrant_msg.registrant_ctx.client = nvmeibt_client_find_by_cid(client_messaging_handle_to_cid(registrant_msg.registrant_ctx.client_messaging_handle));
-	if (!registrant_msg.registrant_ctx.client) {
+	ctx->client = nvmeibt_client_find_by_cid(client_messaging_handle_to_cid(ctx->client_messaging_handle));
+	if (!ctx->client) {
 		N_Wf(ddjiir5, "msg_type=@MSG_TYPE reason=@REASON from a non-connected clnt=@HOSTNAME handle=@HANDLE cookie=@COOKIE. Ignoring",
 			 registrant_msg.msg_type, registrant_msg.reason,
-			msg_hdr_net.host_name, registrant_msg.registrant_ctx.client_messaging_handle, registrant_msg.cookie);
+			msg_hdr_net.host_name, ctx->client_messaging_handle, registrant_msg.cookie);
 		rv = 0;
 		goto out;
 	}
-	if (nvmeibt_client_is_delete_in_the_air(registrant_msg.registrant_ctx.client)) {
+	if (nvmeibt_client_is_delete_in_the_air(ctx->client)) {
 		N_Tf(uznlweo, "Ignoring msg from removed local_disk");
 		rv = 0;
 		goto out;
@@ -179,20 +167,20 @@ int nvmeibt_client_handle_incoming_message(struct nvmeibs_toma_server_proc_buf *
 	N_Tf(6fgwcon, "handle=@HANDLE msg_type=@MSG_TYPE reason=@REASON clnt=@HOSTNAME proto_ver=@TOMA_CLIENT_PROTOCOL_VERSION config=@CONFIG vol_ver=@VOL_VER topo=@TOPO_LLONG praid_ver=@PRAID_VERSION seg=@UUID_8 lock_id=@C_LID @RES_MOD_VER cci=@CCI data_len=@DATA_LEN cookie=@COOKIE",
 		msg_buf->handle,
 		registrant_msg.msg_type, registrant_msg.reason,
-		nvmeibt_client_get_hostname(registrant_msg.registrant_ctx.client),
-		registrant_msg.registrant_ctx.client_protocol_version,
-		registrant_msg.registrant_ctx.config_version,
-		registrant_msg.registrant_ctx.volume_config_version,
+		nvmeibt_client_get_hostname(ctx->client),
+		ctx->client_protocol_version,
+		ctx->config_version,
+		ctx->volume_config_version,
 		registrant_msg.topology_version,
-		registrant_msg.registrant_ctx.praid_version,
-		nvmeib_uuid_first_4_bytes(&(registrant_msg.registrant_ctx.seg_uuid)),
-		registrant_msg.registrant_ctx.reg_lock_id.all,
-		(long long)registrant_msg.registrant_ctx.reservation_mode_version,
-		(unsigned long long)registrant_msg.registrant_ctx.client_conversation_index,
+		ctx->praid_version,
+		nvmeib_uuid_first_4_bytes(&(ctx->seg_uuid)),
+		ctx->reg_lock_id.all,
+		(long long)ctx->reservation_mode_version,
+		(unsigned long long)ctx->client_conversation_index,
 		registrant_msg.data_length,
 		registrant_msg.cookie);
 
-	registrant_msg.registrant_ctx.seg_active = nvmeibt_find_seg_active_on_all_local_disks_by_uuid(&registrant_msg.registrant_ctx.seg_uuid);
+	ctx->seg_active = nvmeibt_find_seg_active_on_all_local_disks_by_uuid(&ctx->seg_uuid);
 	// Dispatch the msg
 	switch (registrant_msg.msg_type & 0xffff0000) {
 	case NVMEIBT_PROTOCOL_SIGNATURE_CLIENT:
@@ -216,32 +204,21 @@ out:
 
 void handle_client_remove(uint32_t cid)
 {
-	struct nvmeibt_client		*client;
-
-	NFIN;
-
-	client = nvmeibt_client_find_by_cid(cid);
-
+	struct nvmeibt_client		*client = nvmeibt_client_find_by_cid(cid);
 	if (client) {
 		NVMEIBT_CLIENT_DUMP(handle_client_remove_1, client);
 	} else {
 		N_Wf(handle_client_remove_2, "OOPS. No client object for cid=@CID", cid); // There are a few concurent flows which call nvmeibt_client_del(). Typically, Not an error
-		goto out;
+		return;
 	}
-
-	// launch client-disconnect thread per client's registrant on disk's segments
-	// (will also remove the client from longing_registrants)
+	NFIN;
+	// launch client-disconnect thread per client's registrant on disk's segments (will also remove the client from longing_registrants)
 	if (nvmeibt_register_launch_disconnected_client_removal_from_all_segments(cid, NULL) < 0) {
 		N_Ef(handle_client_remove_3, "Fail to handle client disconnect event cid=@CID", cid);
-		goto out;
-	}
-
-	if (client) {
+	} else if (client) {
 		client->is_connected = 0;   // Only now, so that the client is not deleted by earlier calls to nvmeibt_client_del()
 		nvmeibt_client_del_if_not_connected_and_no_reg_ctx_refs(client);
 	}
-
-out:
 	NFOUT;
 }
 
@@ -257,33 +234,27 @@ void handle_client_disconnect_event(const struct nvmeibs_msg_s2t_client_disconne
 
 void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 {
-	struct nvmeibt_client			*client;
-	struct nvmeibt_registrant_ctx	*reg_ctx;
-	struct nvmeibt_registrant_ctx	*longing_reg_ctx;
-	struct nvmeibt_local_disk		*local_disk;
-	struct nvmeibt_seg_active		*seg_active;
-	bool							is_found = 0;
-
 	NFIN;
-	N_Tf(trace_client_handle_subscriber_event, "cid=@CID handle=@HANDLE host_name=@HOSTNAME disk=@STR is_subscribe=@BOOL",
-		 msg->cid, msg->toma_conn_proc_handle, msg->host_name, msg->disk_name, msg->is_subscribe);
+	N_Tf(tcdifcanr5, "cid=@CID handle=@HANDLE host_name=@HOSTNAME disk=@STR is_subscribe=@BOOL", msg->cid, msg->toma_conn_proc_handle, msg->host_name, msg->disk_name, msg->is_subscribe);
 
 	if (msg->is_subscribe) {
-		client = nvmeibt_client_add(msg);
+		struct nvmeibt_client *client = nvmeibt_client_add(msg);
 		if (client) {
 			client->is_connected = 1;
 			client->is_delete_in_the_air = 0;
 		}
 	} else {
-		local_disk = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, msg->disk_name);
+		struct nvmeibt_local_disk *local_disk = nvmeib_hash_search_ascii_str(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, msg->disk_name);
 		if (local_disk) {
+			struct nvmeibt_seg_active *seg_active;
+			bool is_found = 0;
 			TODO(Once we have the seg_uuid, locate it in the local_disks hash of seg_actives);
 			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
 				// The HANDLE is unique (handle per subscribe).
 				// FYI, The same CID is used also for other segs on this disk (with a different client_messaging_handle)
 				// We might have two+ active handles from the same client (say recoverer + encrypt + attach). same CID different handles
-				reg_ctx = nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle, msg->toma_conn_proc_handle);
-				longing_reg_ctx = nvmeib_hash_search_uint64_t(seg_active->longing_registrants_hash_by_handle, msg->toma_conn_proc_handle);
+				struct nvmeibt_registrant_ctx	*reg_ctx =         nvmeib_hash_search_uint64_t(seg_active->active_registrants_hash_by_handle,  msg->toma_conn_proc_handle);
+				struct nvmeibt_registrant_ctx	*longing_reg_ctx = nvmeib_hash_search_uint64_t(seg_active->longing_registrants_hash_by_handle, msg->toma_conn_proc_handle);
 				if (!reg_ctx && !longing_reg_ctx) {
 					continue;
 				}
@@ -296,13 +267,11 @@ void handle_subscriber_event(struct nvmeibs_msg_s2t_subscriber_change *msg)
 					nvmeibt_register_launch_unsubscribed_active_registrant_removal(reg_ctx);
 					is_found = 1;
 				}
-				if (is_found) {
-					break;
-				}
+				if (is_found)
+					break;	//Stop the search in hash
 			}
 		}
 		nvmeibt_register_remove_unsubscribed_longing_registrant_on_invalid_seg(msg->toma_conn_proc_handle, 0);	// A subscribe is on a specific seg
 	}
 	NFOUT;
 }
-
