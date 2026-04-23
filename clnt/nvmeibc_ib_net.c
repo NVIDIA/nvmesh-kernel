@@ -17,6 +17,7 @@
 #include "nvmeibc_trend_types.h"
 #include "nvmeib_srq.h"
 #include "nvmeib_version_shared.h"
+#include "nvmeib_build_info.h"
 #include "nvmeib_public.h"
 #include <linux/bug.h>
 #include "core/nvmeibc_core_common.h"

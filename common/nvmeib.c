@@ -15,6 +15,7 @@
 #include "nvmeib_public_procfs.h"
 #include "nvmeib_version_shared.h"
 #include "nvmeib_version_kernel.h"
+#include "nvmeib_build_info.h"
 #include "nvmeib_rdma.h"
 #include "poll/nvmeib_public_intr_poll.h"
 #include "nvmeibm_trace.h"

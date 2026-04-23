@@ -18,6 +18,7 @@
 #include "nvmeib_ib_driver.h"
 #include "nvmeibc_msgs_shared.h"
 #include "nvmeib_public.h"
+#include "nvmeib_build_info.h"
 #include "nvmeibs_test.h"
 #include "nvmeibs_toma.h"
 #include "nvmeib_utils.h"

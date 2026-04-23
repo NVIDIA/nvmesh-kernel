@@ -12,6 +12,7 @@
 #include "nvmeibm_trace.h"
 #include "nvmeib_q.h"
 #include "nvmeib_version_shared.h"
+#include "nvmeib_build_info.h"
 
 #if !HAS_IB_QUERY_GID
 #include "rdma/ib_cache.h"

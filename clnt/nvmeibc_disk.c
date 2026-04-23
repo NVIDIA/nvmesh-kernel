@@ -10,6 +10,7 @@
 #include "nvmeib.h"
 #include "nvmeib_public.h"
 #include "nvmeib_types.h"
+#include "nvmeib_build_info.h"
 #include "nvmeib_event.h"
 #include "nvmeibc_block.h"
 #include "nvmeibc_disk.h"

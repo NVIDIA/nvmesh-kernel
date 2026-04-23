@@ -22,6 +22,7 @@
 #include "nvmeib_srq.h"
 #include "nvmeib_public.h"
 #include "nvmeib_version_shared.h"
+#include "nvmeib_build_info.h"
 #include "nvmeibc_disk_gen_cmds.h"
 #include "nvmeibc_trace.h"
 #include "main/utils/nvmeibc_main_block_gen_work_sched.h"

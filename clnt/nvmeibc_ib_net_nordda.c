@@ -6,6 +6,7 @@
 #define C_IB_NET_NR_C
 
 #include "kr_incs.h"
+#include "nvmeib_build_info.h"
 #include "nvmeibc_defs.h"
 #include "nvmeibc_ib_net_nordda.h"
 #include "nvmeibc_ib_nordda_channel.h"

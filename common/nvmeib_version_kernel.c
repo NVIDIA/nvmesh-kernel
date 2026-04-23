@@ -5,6 +5,7 @@
 
 #include "nvmeib_version_kernel.h"
 #include "nvmeib_version_shared.h"
+#include "nvmeib_build_info.h"
 
 #include "nvmeib.h"
 #include "nvmeib_public_procfs.h"
@@ -16,6 +17,21 @@
 #else
 	#error "Tracing not not supported, fix compilation or use kr_incs_dummy_empty_traces.h"
 #endif
+
+bool nvmeib_version_protocol_lt(const union nvmeib_version *va,
+				const union nvmeib_version *vb)
+{
+	bool lt;
+	if ((lt = ((va)->protocol.all < (vb)->protocol.all))) {
+		_NT(trace_nvmeib_version_protocol_lt,
+			NVMEIB_VERSION_TRACE_FMT() " < "
+			NVMEIB_VERSION_TRACE_FMT(),
+			NVMEIB_VERSION_PRINT_ARG(va),
+			NVMEIB_VERSION_PRINT_ARG(vb));
+	}
+	return lt;
+}
+EXPORT_SYMBOL(nvmeib_version_protocol_lt);
 
 static struct nvmeib_public_procfs_ent *version_proc = NULL;
 static struct nvmeib_public_procfs_ent *version_json_proc = NULL;
