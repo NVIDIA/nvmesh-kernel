@@ -100,10 +100,10 @@ static void __destroy_trace_channels(void) {
 static void __start_trace_poller(pthread_t *poller, struct trace_channel *channel, const char *basename, const char *workdir) {
 	struct nvmeib_trace_channel_descriptor *descr = malloc(sizeof(struct nvmeib_trace_channel_descriptor));  // Quick assignment instead of calling nvmeib_init_trace_channel_descriptor()
 #ifndef NVMEIBC_TRACER_UNITEST_ALTERNATIVE_COMPILATION
-	*descr = (struct nvmeib_trace_channel_descriptor){channel, basename, workdir, -1, -1, 0, 0};
+	*descr = (struct nvmeib_trace_channel_descriptor){channel, basename, workdir, -1, -1, 0, 0, NULL, NULL};
 #else
 	/*This is for tracer unitest - if compiled with this special flag - preserve old logs*/
-	*descr = (struct nvmeib_trace_channel_descriptor){channel, basename, workdir, -1, -1, 1, 0};
+	*descr = (struct nvmeib_trace_channel_descriptor){channel, basename, workdir, -1, -1, 1, 0, NULL, NULL};
 #endif /*NVMEIBC_TRACER_UNITEST_ALTERNATIVE_COMPILATION*/
 	pthread_create(poller, NULL, trace_poller_thread, descr);
 }
@@ -7651,7 +7651,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 		sim_kfree(buni);
 		return 0;
 	}
-	
+
 	test_safe_casting();
 	test_metrics();
 	test_wq_metrics();
