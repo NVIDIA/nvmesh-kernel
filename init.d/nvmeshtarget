@@ -562,7 +562,7 @@ start_toma() {
 	export KAFKA_TOMA_KEY
 	export KAFKA_TOMA_DISABLE_HOSTNAME_VERIFICATION
 
-	toma_args=($toma_log_size_flag $toma_cloud_mode_flag $toma_sm_query_burst_flag $toma_roce_ipv4_flag $toma_raft_udp $toma_libcm_flag $toma_nm_lib_path $toma_cgroup "${toma_cfg_flags[@]}")
+	toma_args=(-Z $toma_log_size_flag $toma_cloud_mode_flag $toma_sm_query_burst_flag $toma_roce_ipv4_flag $toma_raft_udp $toma_libcm_flag $toma_nm_lib_path $toma_cgroup "${toma_cfg_flags[@]}")
 	toma_cmd="nice -n -10 nohup $tomaPath"
 
 	if [ ! -d /sys/module/ib_uverbs ]; then

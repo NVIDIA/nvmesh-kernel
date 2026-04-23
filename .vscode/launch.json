@@ -109,7 +109,7 @@
 			"type": "cppdbg",
 			"request": "launch",
 			"program": "${workspaceFolder}/toma/unitest/nvmeibt_toma",
-			"args": ["-x","16","-z","4","-k","?","-a","-N","nm_dummy.dll"],
+			"args": ["-x","16","-z","4","-Z","-k","?","-a","-N","nm_dummy.dll"],
 			//"args": ["--convert-to-json", "--input-file", "_root/var/opt/nvmesh/toma/toma_persistence_2_8_0_raft_and_topo.1", "--output-file", "z.json"],
 			//"args": ["--convert-to-persistence", "--input-file", "z.json", "--output-file", "z.json.bin"],
 			//"args": ["gpt_util", "-T"],
