@@ -1845,7 +1845,7 @@ static void rebuild_stats_to_json(struct nvmeibt_Str *json_payload)
 	nvmeibt_Str_sprintf(json_payload, "}"); // rebuildStats ends
 }
 
-void send_keepalive_msgs_as_needed(void)
+void nvmeibt_kafka_send_keepalive_msgs_as_needed(void)
 {
 	static struct timespec		last_follower_keepalive_ts = TIMESPEC_ZERO;
 	static struct timespec		last_leader_keepalive_ts = TIMESPEC_ZERO;
@@ -2231,7 +2231,6 @@ static void *nvmeibt_kafka_main_thread(void *args __attribute__((__unused__))) {
 			}
 			getnstimeofday_boot(&kafka_last_restart_timestamp);
 		}
-		send_keepalive_msgs_as_needed();
 		// Here, everything must be properly initialized and stable (no free() etc)
 		kafka_outgoing_msgs_queue_send_pending_msgs_to_kafka_producer();
 		//

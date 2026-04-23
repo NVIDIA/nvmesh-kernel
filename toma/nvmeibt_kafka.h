@@ -129,6 +129,7 @@ void nvmeibt_kafka_req_start_consuming_leader_VOL_msgs(int64_t kafka_offset_VOL,
 void nvmeibt_kafka_req_start_consuming_leader_TARGET_msgs(int64_t kafka_offset_TARGET, int64_t seq_no_TARGET, unsigned long long raft_term);
 
 void nvmeibt_kafka_outgoing_msgs_queue_add(const char *unique_key, const char *val, size_t val_len, enum NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY outgoing_msg_priority);
+void nvmeibt_kafka_send_keepalive_msgs_as_needed(void);
 
 void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name,
 											 const struct nvmeibt_urn_uuid *vol_uuid,

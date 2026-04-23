@@ -959,6 +959,7 @@ void nvmeibt_global_idle_time_activities(void)
 		nvmeibt_topology_leader_resend_all_praids_report_to_mgmt();
 	}
 
+	nvmeibt_kafka_send_keepalive_msgs_as_needed();
 	nvmeibt_global_issue_leader_report_praids_status_to_mgmt();
 	nvmeibt_recovery_report_rebuild_progress_to_mgmt();
 
