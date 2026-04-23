@@ -938,7 +938,8 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 	struct nvmeibc_tpv           *tpv;
 	struct nvmeibc_tpv_allocator *alloc;
 	struct nvmeibc_tpv_extent_entry *entry;
-	u64 v;
+	u64 v, after_l2_free, n_more;
+	u64 last_v;
 	int rc;
 
 	memset(g_tc.cdv_buf, 0, g_tc.cdv_len);
@@ -955,8 +956,38 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 		goto done;
 	}
 
-	/* Exhaust the pool: alloc all 16 slots. */
-	for (v = 0; v < TPV_KTEST_N_SLOTS; v++) {
+	/*
+	 * Allocate one virt_idx and force a flush BEFORE draining the
+	 * pool.  flush_state allocates an L2-table slot the first time a
+	 * new L1_idx becomes non-null; if we wait until the pool is dry,
+	 * the end-of-test flush_and_promote fails with -EAGAIN because
+	 * alloc_l2_slot has nothing to pop.  Doing it here burns the L2
+	 * slot up front - subsequent flushes re-use the existing ctx.
+	 */
+	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	if (rc != 0) {
+		KTO_FAIL(kto, "pool_exhaustion",
+			 "initial alloc rc=%d", rc);
+		goto done;
+	}
+	rc = nvmeibc_tpv_flush_and_promote(tpv);
+	if (rc != 0) {
+		KTO_FAIL(kto, "pool_exhaustion",
+			 "initial flush_and_promote rc=%d", rc);
+		goto done;
+	}
+
+	/*
+	 * After the initial alloc + flush:
+	 *   - virt_idx=0 is mapped (one data slot consumed).
+	 *   - The L2 ctx for L1_idx=0 exists (one L2 slot consumed).
+	 * The remaining free-pool size drives how many more allocs we need
+	 * to drain it.
+	 */
+	after_l2_free = alloc->free_tpv_extent_count;
+	n_more        = after_l2_free;	/* drain exactly these */
+
+	for (v = 1; v <= n_more; v++) {
 		rc = nvmeibc_tpv_alloc_extent(tpv, v, &entry);
 		if (rc != 0) {
 			KTO_FAIL(kto, "pool_exhaustion",
@@ -964,6 +995,7 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 			goto done;
 		}
 	}
+	last_v = n_more + 1;
 
 	if (alloc->free_tpv_extent_count != 0) {
 		KTO_FAIL(kto, "pool_exhaustion",
@@ -973,7 +1005,7 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 	}
 
 	/* Next alloc must return -EAGAIN. */
-	rc = nvmeibc_tpv_alloc_extent(tpv, TPV_KTEST_N_SLOTS, &entry);
+	rc = nvmeibc_tpv_alloc_extent(tpv, last_v, &entry);
 	if (rc != -EAGAIN) {
 		KTO_FAIL(kto, "pool_exhaustion",
 			 "alloc past full returned %d (want -EAGAIN)", rc);
@@ -985,22 +1017,29 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 	}
 
 	/*
-	 * Free one slot (virt_idx=0) while others remain allocated so the
-	 * extent stays on cdv_extent_list (allocated_count = 15 after free).
-	 * The slot returns to free_tpv_extents immediately.
+	 * Free one slot (virt_idx=0).  Under deferred-visibility (Step 2
+	 * Commit 1), the slot parks on pending_free_slots and is NOT in
+	 * free_tpv_extents until flush_and_promote lands.  The L2 ctx
+	 * already exists (we created it above) so the flush does not
+	 * need a fresh L2 slot and succeeds against the empty pool.
 	 */
 	rc = nvmeibc_tpv_free_extent(tpv, 0);
 	if (rc != 0) {
 		KTO_FAIL(kto, "pool_exhaustion", "free_extent(0) rc=%d", rc);
 		goto done;
 	}
+	rc = nvmeibc_tpv_flush_and_promote(tpv);
+	if (rc != 0) {
+		KTO_FAIL(kto, "pool_exhaustion",
+			 "flush_and_promote rc=%d (expected 0)", rc);
+		goto done;
+	}
 
 	/*
 	 * Allocating a new virt_idx (beyond the ones already in xarray)
-	 * should now succeed.  virt_idx = N_SLOTS is unused (the failed
-	 * -EAGAIN alloc did not store anything).
+	 * should now succeed - the promoted slot is back in the pool.
 	 */
-	rc = nvmeibc_tpv_alloc_extent(tpv, TPV_KTEST_N_SLOTS, &entry);
+	rc = nvmeibc_tpv_alloc_extent(tpv, last_v, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "pool_exhaustion",
 			 "alloc after free returned %d (want 0)", rc);
@@ -1104,6 +1143,14 @@ static void tpv_ktest_recovery(struct tpv_ktest_output *kto)
 	 */
 	strncpy(tpv->allocator_toma_id, "test-toma-001",
 		sizeof(tpv->allocator_toma_id) - 1);
+
+	/*
+	 * tpv_recovery_one_side bails early if tpv->cdv_vol is NULL.  Use a
+	 * non-null sentinel (never dereferenced in this test because
+	 * list_extents is fully stubbed via nvmeibc_tpv_test_cdv_list_fn).
+	 * Matches the pattern tpv_ktest_upgrade_to_split uses for meta_cdv_vol.
+	 */
+	tpv->cdv_vol = (struct nvmeibc_volume *)&tpv->atom;
 
 	/* load_state: reads empty CDV buf, no mapped extents. */
 	rc = nvmeibc_tpv_load_state(tpv);
@@ -1561,6 +1608,16 @@ static void tpv_ktest_split_recovery(struct tpv_ktest_output *kto)
 
 	rc = tpv_ktest_upgrade_to_split(tpv, TPV_KTEST_TPV_EXT_KB, TPV_KTEST_CDV_EXT_MB);
 	if (rc != 0) { KTO_FAIL(kto, "split_recovery", "upgrade rc=%d", rc); goto done; }
+
+	/*
+	 * tpv_recovery_one_side bails early if the side's cdv_vol is NULL.
+	 * upgrade_to_split sets meta_cdv_vol; we still need a data-side
+	 * sentinel so the data-side recovery proceeds.  Both sentinels are
+	 * never dereferenced: list_extents is stubbed by
+	 * nvmeibc_tpv_test_cdv_list_fn, which only uses the cdv pointer for
+	 * identity (meta vs. data) comparison.
+	 */
+	tpv->cdv_vol = (struct nvmeibc_volume *)&tpv->allocator;
 
 	/* Route list-extents calls for the meta-side pointer to the meta list. */
 	ktest_meta_cdv_sentinel = tpv->meta_cdv_vol;
