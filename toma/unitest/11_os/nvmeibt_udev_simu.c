@@ -1,3 +1,7 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
 #include "nvmeibt_debug.h"	// Binary tracing
 #include "nvmeibt_udev_simu_internal.h"
 #include "../10_local_hw/nvme_disk_simu.h"

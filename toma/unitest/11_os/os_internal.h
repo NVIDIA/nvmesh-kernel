@@ -3,7 +3,6 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
-
 #pragma once
 /* Emulation of operating system backend which implements the public API */
 #include "os_public.h"

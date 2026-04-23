@@ -3,8 +3,7 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
-#ifndef TOMA_TEST_FRAMEWORK_H
-#define TOMA_TEST_FRAMEWORK_H
+#pragma once
 /**
  * toma_test_framework.h - Minimal test framework for TOMA
  *
@@ -144,5 +143,3 @@ int test_run_suite(const char *suite_name,
 				   void *ctx,
 				   const char *selection,
 				   int quiet_mode);
-
-#endif // #ifndef TOMA_TEST_FRAMEWORK_H

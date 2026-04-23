@@ -5,7 +5,6 @@
 
 /**
  * trace_compress_test.c - Tests for LZ4 trace compression in the poller
- *
  * Invoked via: ./nvmeibt_toma trace_compress_test [selection]
  * Validates:
  *   1. parse_log_filename accepts plain, .lz4, and rejects unknown suffixes

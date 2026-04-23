@@ -1,6 +1,9 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
 /**
  * wire_buf_test.c - Wire buffer unit tests
- *
  * Tests persist_and_wire_buf operations:
  * - Per-section merge via TEST_raft_merge_data_to_section
  * - Follower realloc_and_upd orchestration via TEST_realloc_and_upd_follower_persist_and_wire_bufs

@@ -5,7 +5,6 @@
 
 /**
  * toma_test_framework_smoke.c - Smoke test for the test framework itself
- *
  * Invoked via: ./nvmeibt_toma test_framework [selection]
  * Validates that the framework's assertion macros, test registration, and
  * selection/reporting work correctly.

@@ -1,3 +1,9 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+
+#pragma once
 /**
  * toma_test_helpers.h - Shared TEST_ function declarations for component tests
  *
@@ -5,10 +11,6 @@
  * in 91_tests_components/. Each TEST_ function is defined in the production
  * source file that owns the state it accesses.
  */
-
-#ifndef TOMA_TEST_HELPERS_H
-#define TOMA_TEST_HELPERS_H
-
 #include "nvmeibt_persistency_info.h"
 
 /* Test environment init — 00_framework/toma_test_helpers.c */
@@ -75,5 +77,3 @@ extern bool TEST_is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_a
 
 /* Validation — nvmeibt_raft.c (non-static, no header decl) */
 extern void persist_and_wire_buf_validate_len(const struct nvmeibt_persist_and_wire_buf *b);
-
-#endif /* TOMA_TEST_HELPERS_H */

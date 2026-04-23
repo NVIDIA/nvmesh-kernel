@@ -2,7 +2,6 @@
 * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
-
 #include "peer_toma_simu.h"
 #include "nvmeibt_debug.h"	// Binary tracing
 #include "nvmeibt_disk_segment_basics.h"

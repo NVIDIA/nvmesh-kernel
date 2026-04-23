@@ -1,15 +1,14 @@
+/*
+* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+*/
+#pragma once
 /**
  * wire_buf_test.h - Wire buffer unit tests
- *
  * Tests for persist_and_wire_buf operations: per-section merge, follower
  * realloc_and_upd orchestration, and incremental selection logic.
- *
  * Invoked via: ./nvmeibt_toma wire_buf_test [selection]
  */
-
-#ifndef WIRE_BUF_TEST_H
-#define WIRE_BUF_TEST_H
-
 #include "nvmeibt_common.h"
 
 #define WIRE_BUF_TEST_MAX_PRAIDS		64
@@ -136,5 +135,3 @@ struct section_merge_test_ctx {
 	X(generate_mixed_buf_types_correct,				"Generate: mixed types correct",			"Topo incremental + configs complete sets correct TLV types")
 
 int wire_buf_test_main(int argc, char *argv[]);
-
-#endif // #ifndef WIRE_BUF_TEST_H

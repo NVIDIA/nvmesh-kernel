@@ -3,8 +3,7 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
-#ifndef TOMA_SANDBOX_KAFKA_INTERNAL_H
-#define TOMA_SANDBOX_KAFKA_INTERNAL_H
+#pragma once
 /* Provides interface to the Kafka simulator and broker backend. Used only by simulators/unit-tests. */
 #include "../sandbox_util.h"
 
@@ -27,6 +26,3 @@ void sandbox_kafka_destroy(struct kafka_simulator_t *ks);
 
 // Errors injection:
 void sim_broker_topic_msg_inject_next_msg_offset(struct sim_broker_topic *t, int delta_offset);
-
-
-#endif // TOMA_SANDBOX_KAFKA_INTERNAL_H
