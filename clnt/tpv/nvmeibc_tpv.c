@@ -1460,3 +1460,59 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 }
 EXPORT_SYMBOL(nvmeibc_tpv_update_allocator_for_cdv);
 
+/*
+ * nvmeibc_tpv_notify_capacity_restore_for_cdv - re-arm allocator work for
+ * every TPV backed by the named CDV.
+ *
+ * Called from the client-side NVMEIBT_CLIENT_MSG_TR_CDV_CAPACITY_RESTORE
+ * handler when TOMA reports that the CDV has recovered capacity headroom.
+ * Matches on both data-side and metadata-side CDV UUIDs (in split mode the
+ * same CDV cannot be both, but the caller does not know which side this
+ * CDV sits on, so we check both).
+ *
+ * The only side effect is scheduling cdv_alloc_work: we do not touch the
+ * allocator identity fields (CDV_ALLOCATOR_UPDATE carries those; this
+ * message carries only capacity state).  Scheduling is idempotent via the
+ * cdv_alloc_pending xchg guard.
+ */
+void nvmeibc_tpv_notify_capacity_restore_for_cdv(const char *cdv_uuid)
+{
+	struct nvmeibc_tpv *tpv;
+	unsigned long flags;
+	int n_notified = 0;
+
+	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
+	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
+		bool data_match = tpv->cdv_vol &&
+			strncmp(tpv->cdv_vol->hdr.uuid, cdv_uuid,
+				NVMEIBC_BD_UUID_LEN) == 0;
+		bool meta_match = tpv->meta_cdv_vol &&
+			strncmp(tpv->meta_cdv_vol->hdr.uuid, cdv_uuid,
+				NVMEIBC_BD_UUID_LEN) == 0;
+
+		if (!data_match && !meta_match)
+			continue;
+
+		_NI(tpv_cap_restore_notify,
+		    "TPV @STR: CDV capacity restored cdv=@STR side=@STR; re-arming cdv_alloc_work",
+		    tpv->tpv_name, cdv_uuid,
+		    data_match ? "data" : "meta");
+
+		if (data_match) {
+			if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
+				schedule_work(&tpv->cdv_alloc_work);
+		} else {
+			if (!atomic_xchg(&tpv->meta_cdv_alloc_pending, 1))
+				schedule_work(&tpv->meta_cdv_alloc_work);
+		}
+		n_notified++;
+	}
+	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+
+	if (n_notified == 0)
+		_ND(tpv_cap_restore_no_match,
+		    "TPV: CDV capacity restore cdv=@STR -- no matching TPVs",
+		    cdv_uuid);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_notify_capacity_restore_for_cdv);
+

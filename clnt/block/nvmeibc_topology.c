@@ -2802,6 +2802,25 @@ static void __block_toma_msg_handler(void *unused_cinst, u64 handle, u8 *buf, in
 		break;
 	}
 
+	case NVMEIBT_CLIENT_MSG_TR_CDV_CAPACITY_RESTORE: {
+		const struct nvmeibc_cdv_capacity_restore *cr;
+
+		if (len < (int)sizeof(*cr)) {
+			_NETR(tpv_cap_restore_short,
+			      "CDV_CAPACITY_RESTORE short len=@INT", len);
+			break;
+		}
+		cr = (const struct nvmeibc_cdv_capacity_restore *)&pl[1];
+
+		/*
+		 * The allocator identity did not change; only capacity state
+		 * did.  Re-arm every matching TPV's cdv_alloc_work so bios
+		 * parked on a prior CDV_ALLOC_CDV_FULL response retry.
+		 */
+		nvmeibc_tpv_notify_capacity_restore_for_cdv(cr->cdv_uuid);
+		break;
+	}
+
 	case NVMEIBT_CLIENT_MSG_TC_LOCK_CLEANED: {
 		stale_lock_resolver_set_resolved(&tr->hdr->slr, tr->seg, (void*)&pl[1]);
 		break;

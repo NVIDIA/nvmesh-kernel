@@ -675,6 +675,21 @@ struct nvmeibt_cdv_allocator_update {
 	uint64_t allocator_generation;
 };
 
+/*
+ * CDV_CAPACITY_RESTORE message payload (TOMA -> client).
+ *
+ * Sent when the CDV's used-extent ratio falls below the hysteresis threshold
+ * (NVMEIBT_CDV_WARN_CLEAR_PCT) after previously triggering a WARNING.  The
+ * client uses cdv_uuid to locate matching TPVs and re-arm their
+ * cdv_alloc_work, unsticking bios parked on CDV_ALLOC_CDV_FULL.
+ *
+ * Field layout MUST stay in sync with struct nvmeibc_cdv_capacity_restore in
+ * clnt/nvmeibc_msgs_shared.h.
+ */
+struct nvmeibt_cdv_capacity_restore {
+	char     cdv_uuid[NVMEIBT_CDV_UUID_STRLEN];
+};
+
 /* -- Status / observability ------------------------------------------------ */
 
 /*

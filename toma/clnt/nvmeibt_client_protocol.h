@@ -332,6 +332,11 @@ enum NVMEIBT_CLIENT_MSG_TYPES {
 	NVMEIBT_CLIENT_MSG_TR_CDV_LIST_EXTENTS_RSP   = 0xA4 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
 	// CDV allocator identity push (TOMA -> client; sent on election / change)
 	NVMEIBT_CLIENT_MSG_TR_CDV_ALLOCATOR_UPDATE   = 0xA5 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
+	// CDV capacity-restore push (TOMA -> client; sent when the CDV's
+	// used-extent ratio falls back below NVMEIBT_CDV_WARN_CLEAR_PCT after
+	// having previously crossed NVMEIBT_CDV_WARN_PCT). Re-arms the client's
+	// cdv_alloc_work so bios parked on CDV_ALLOC_CDV_FULL retry.
+	NVMEIBT_CLIENT_MSG_TR_CDV_CAPACITY_RESTORE   = 0xA6 | NVMEIBT_PROTOCOL_SIGNATURE_CDV,
 
 	//Client recovery/rebuild messages
 	NVMEIBT_CLIENT_MSG_RT_RECOVER_ANNOUNCE      = 0x90 | NVMEIBT_PROTOCOL_SIGNATURE_TOMA_REBUILD,

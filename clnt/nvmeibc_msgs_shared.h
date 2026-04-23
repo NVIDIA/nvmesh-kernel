@@ -409,6 +409,23 @@ struct nvmeibc_cdv_allocator_update {
 	u64  allocator_generation;
 };
 
+/*
+ * CDV_CAPACITY_RESTORE - TOMA -> client push.
+ *
+ * Sent by TOMA when the CDV's used-extent ratio falls below the hysteresis
+ * threshold (NVMEIBT_CDV_WARN_CLEAR_PCT) after a previous CDV_ALLOC_CDV_FULL
+ * response blocked a client's allocation.  The client finds every TPV whose
+ * parent CDV matches cdv_uuid and re-arms the side-appropriate cdv_alloc_work
+ * so bios parked waiting for capacity get retried.  No allocator identity
+ * fields: allocator is unchanged; only capacity state is.
+ *
+ * Field layout MUST stay in sync with struct nvmeibt_cdv_capacity_restore in
+ * toma/nvmeibt_cdv_alloc.h.
+ */
+struct nvmeibc_cdv_capacity_restore {
+	char cdv_uuid[NVMEIBC_BD_UUID_LEN];
+};
+
 /* -- end CDV_extent allocation protocol ------------------------------------ */
 
 enum {

@@ -624,6 +624,19 @@ void nvmeibc_tpv_update_allocator_for_cdv(const char *cdv_uuid,
 					   u64 generation);
 
 /*
+ * nvmeibc_tpv_notify_capacity_restore_for_cdv - re-arm cdv_alloc_work for
+ * every TPV backed by the given CDV UUID, on either side (data or meta).
+ *
+ * Called from the topology handler when a CDV_CAPACITY_RESTORE message
+ * arrives from TOMA.  The allocator identity is unchanged; only the
+ * per-TPV cdv_alloc_work is re-armed so bios parked on CDV_ALLOC_CDV_FULL
+ * get retried now that the CDV has recovered capacity headroom.
+ *
+ * Safe to call from any context (uses spinlock internally).
+ */
+void nvmeibc_tpv_notify_capacity_restore_for_cdv(const char *cdv_uuid);
+
+/*
  * nvmeibc_tpv_alloc_l2_slot - claim a free TPV_extent slot for use as an L2
  * table.  Pops one slot off alloc->free_tpv_extents and increments the owning
  * cdv_extent_ref's allocated_count and l2_slots.  Used by flush_state when a

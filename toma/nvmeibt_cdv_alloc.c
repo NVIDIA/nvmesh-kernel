@@ -2307,6 +2307,56 @@ void nvmeibt_cdv_alloc_push_to_registrants(const char *cdv_uuid)
 }
 
 /*
+ * cdv_push_capacity_restore - broadcast CDV_CAPACITY_RESTORE to all registrants.
+ *
+ * Counterpart to nvmeibt_cdv_alloc_push_to_registrants but carrying capacity
+ * state rather than allocator identity.  Called from cdv_maybe_warn_capacity
+ * on the hysteresis-set->clear transition so clients whose cdv_alloc_work
+ * parked bios after a CDV_ALLOC_CDV_FULL response re-arm and retry.
+ *
+ * Static-local because only cdv_maybe_warn_capacity ever needs to fire it;
+ * no other call site in TOMA (there's no "CDV has spare capacity" event
+ * outside the Warning->Restore hysteresis pair).
+ */
+static void cdv_push_capacity_restore(const char *cdv_uuid)
+{
+	struct nvmeibt_cdv_capacity_restore msg;
+
+	memset(&msg, 0, sizeof(msg));
+	strncpy(msg.cdv_uuid, cdv_uuid, NVMEIBT_CDV_UUID_STRLEN - 1);
+
+	N_If(cdv_push_cap_restore,
+	     "CDV-alloc: push CDV_CAPACITY_RESTORE cdv=@STR",
+	     msg.cdv_uuid);
+
+	/*
+	 * Broadcast to all active registrants on this TOMA node.  Clients
+	 * without this CDV attached ignore the unknown cdv_uuid; clients
+	 * with it re-arm their side-matching cdv_alloc_work via the TPV
+	 * topology handler.
+	 */
+	{
+		struct nvmeibt_local_disk     *local_disk;
+		struct nvmeibt_seg_active     *seg_active;
+		struct nvmeibt_registrant_ctx *reg_ctx;
+
+		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
+			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
+				NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
+					if (nvmeibt_register_is_processing_registrant_removal(reg_ctx))
+						continue;
+					nvmeibt_register_send_msg_to_registrant(
+						reg_ctx,
+						NVMEIBT_CLIENT_MSG_TR_CDV_CAPACITY_RESTORE,
+						NVMEIBT_CLIENT_TR_REASON_NONE,
+						sizeof(msg), &msg);
+				}
+			}
+		}
+	}
+}
+
+/*
  * nvmeibt_cdv_alloc_push_all_to_new_registrant - unicast CDV_ALLOCATOR_UPDATE
  * for every elected CDV allocator to a single newly-registered client.
  *
@@ -2760,6 +2810,14 @@ static void cdv_maybe_warn_capacity(struct nvmeibt_cdv_alloc *alloc)
 				NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 
 			NNVMEIBT_STR_FREE(cdv_cap_restore_json_free, json);
+
+			/*
+			 * IB broadcast to clients so their cdv_alloc_work
+			 * re-arms and bios parked on CDV_ALLOC_CDV_FULL get
+			 * retried.  The Kafka event above is for the UI only;
+			 * this is what actually unsticks blocked IO.
+			 */
+			cdv_push_capacity_restore(alloc->cdv_uuid);
 		}
 		return;
 	}
