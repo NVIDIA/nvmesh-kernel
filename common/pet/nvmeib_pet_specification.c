@@ -3,10 +3,9 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
+#include "kr_incs.h"
 #include "pet/nvmeib_pet_specification.h"
 #include "nvmeib_build_info.h"
-#include <linux/compiler.h>
-#include <linux/module.h>
 
 struct nvmeib_pet_stream nvmeib_pet_stream_make(struct iovec data)
 {
