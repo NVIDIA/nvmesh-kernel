@@ -504,7 +504,7 @@ void nvmeib_split_page(struct page *page, unsigned int order)
 	u32 i, n_pages = (1 << order);
 	u8 *mem;
 	for (i = 0, mem = page->mapped_vaddr; i < n_pages; i++, mem += PAGE_SIZE) {
-		page[i].split._head = i+10000;
+		page[i].split._head = i+SPLIT_HEAD_BIAS;
 		page[i].mapped_vaddr = mem;
 	}
 	page->split.is_split = 1;
@@ -528,9 +528,21 @@ int get_user_pages_fast(unsigned long start, int nr_pages, int write, struct pag
 	BUG_ON(!write);
 	return rv;
 }
+
+void get_page(struct page *page) {
+	struct page *head = PageHead(page);
+	head->split.n_refs++;
+}
+
 void put_page(struct page *page) {
-	BUG_ON(page->split.is_pinned != true);
-	page->split.is_pinned = false;
+	struct page *head = PageHead(page);
+	
+	if (page->split.is_pinned) {
+		page->split.is_pinned = false;
+	}
+	
+	BUG_ON(head->split.n_refs == 0);
+	head->split.n_refs--;
 }
 
 void __free_pages(struct page *page, unsigned int order) {
@@ -539,7 +551,7 @@ void __free_pages(struct page *page, unsigned int order) {
 
 void __free_page(struct page *page) {
 	if (page->split._head) {
-		struct page *head = &page[-page->split._head+10000];
+		struct page *head = PageHead(page);
 		BUG_ON((head->split.n_refs <= 0)||(!head->split.is_split));
 		if (--head->split.n_refs == 0)
 			__free_pages(head, head->split.order);

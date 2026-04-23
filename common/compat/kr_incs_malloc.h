@@ -27,6 +27,7 @@
 			u64 all_flags;
 		};
 	};
+	#define SPLIT_HEAD_BIAS 10000
 	#define virt_to_head_page(x) virt_to_page(x)				// This is incorrect, however good for now (virt / phys)
 	#define page_address(page)      ((void*)(page)->mapped_vaddr)
 
@@ -34,6 +35,7 @@
 	static inline bool PageSlab(struct page *page) { return (page == NULL); }		// page == NULL means: Allocation not via page_alloc, but via kmalloc()
 	static inline bool PageWriteback(struct page *page) { (void)page; return false; }
 	static inline bool PageDirty(struct page *page) { (void)page; return false; }
+	static inline struct page *PageHead(struct page *page) { return page->split._head ? page - (page->split._head - SPLIT_HEAD_BIAS) : page; }
 	#define nth_page(page, n)      (page + n)
 	struct page *virt_to_page(const void* vaddr);
 	#define page_to_phys(page)      virt_to_phys(page_address(page))
@@ -67,6 +69,7 @@
 	void nvmeib_split_page(struct page *page, unsigned int order);
 	void __free_pages(struct page *page, unsigned int order);
 	void __free_page(struct page *page);
+	void get_page(struct page *page);
 	void put_page(struct page *page);
 
 	static inline void *alloc_pages_exact(size_t size, gfp_t gfp_mask) { return kmalloc(size, gfp_mask); }
