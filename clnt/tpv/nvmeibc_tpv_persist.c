@@ -1567,9 +1567,19 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 
 	nvmeibc_tpv_retry_pending_bios(tpv);
 
-	if (tpv->allocator.free_tpv_extent_count == 0) {
+	/*
+	 * Schedule the per-side cdv_alloc_work when either:
+	 *   - the free pool is empty (need a CDV_ALLOC_EXTENT to unstall IO
+	 *     or the L2 ctx allocator), or
+	 *   - pending_return_list is non-empty (recovery may have adopted
+	 *     an empty orphan and pushed it there; without this wake, the
+	 *     drain never fires and the orphan sits until the next
+	 *     alloc-driven shortfall).
+	 */
+	if (tpv->allocator.free_tpv_extent_count == 0 ||
+	    !list_empty(&tpv->allocator.pending_return_list)) {
 		_NI(tpv_pool_empty_after_load,
-		    "TPV: @STR: data pool empty after load; scheduling CDV alloc",
+		    "TPV: @STR: data pool empty or returns pending after load; scheduling CDV alloc",
 		    tpv->tpv_name);
 		if (!atomic_xchg(&tpv->cdv_alloc_pending, 1))
 			schedule_work(&tpv->cdv_alloc_work);
@@ -1580,11 +1590,14 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 	 * flush_state's L2-slot allocator draws from. If it's empty at
 	 * load time the first flush would stall until a CDV_ALLOCATOR_UPDATE
 	 * topology push kicks the meta side. Prefetch symmetrically.
+	 * Also wake meta-side if recovery parked any orphans on its
+	 * pending_return_list.
 	 */
 	if (tpv->meta_allocator &&
-	    tpv->meta_allocator->free_tpv_extent_count == 0) {
+	    (tpv->meta_allocator->free_tpv_extent_count == 0 ||
+	     !list_empty(&tpv->meta_allocator->pending_return_list))) {
 		_NI(tpv_meta_pool_empty_after_load,
-		    "TPV: @STR: meta pool empty after load; scheduling meta CDV alloc",
+		    "TPV: @STR: meta pool empty or returns pending after load; scheduling meta CDV alloc",
 		    tpv->tpv_name);
 		if (!atomic_xchg(&tpv->meta_cdv_alloc_pending, 1))
 			schedule_work(&tpv->meta_cdv_alloc_work);

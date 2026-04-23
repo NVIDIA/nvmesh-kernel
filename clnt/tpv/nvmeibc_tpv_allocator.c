@@ -723,20 +723,35 @@ EXPORT_SYMBOL(nvmeibc_tpv_discard_range);
 /* -- tpv_drain_pending_returns ----------------------------------------------
  *
  * Called from nvmeibc_tpv_cdv_alloc_work_fn() (process context, may sleep).
- * Drains pending_return_list: for each empty CDV_extent, sends
- * NVMEIBC_MA_CDV_FREE_EXTENT to TOMA.  On failure, the extent stays in the
- * list for the next work invocation.
+ * Drains pending_return_list for the specified side: for each empty
+ * CDV_extent, sends NVMEIBC_MA_CDV_FREE_EXTENT to TOMA.  On failure, the
+ * extent stays in the list for the next work invocation.
+ *
+ * The side must match the caller's is_meta_side branch in
+ * nvmeibc_tpv_cdv_alloc_work_run: each side has its own allocator,
+ * pending_return_list, cdv_vol, and TOMA identity.
  */
 static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
+				      bool is_meta_side,
 				      const char *toma_id)
 {
-	struct nvmeibc_tpv_allocator  *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_allocator  *alloc;
+	struct nvmeibc_volume         *cdv_vol;
 	struct nvmeibc_cdv_extent_ref *ref, *tmp;
 	struct nvmeibc_tpv_free_slot  *s, *stmp;
 	struct nvmeibc_cdv_free_req    freq;
-	u64 n_slots = tpv_slots_per_cdv_extent(alloc);
+	u64 n_slots;
 	LIST_HEAD(to_send);
 	int rv;
+
+	if (is_meta_side) {
+		alloc   = tpv->meta_allocator;
+		cdv_vol = tpv->meta_cdv_vol;
+	} else {
+		alloc   = &tpv->allocator;
+		cdv_vol = tpv->cdv_vol;
+	}
+	n_slots = tpv_slots_per_cdv_extent(alloc);
 
 	/*
 	 * Under alloc->lock, walk pending_return_list head-to-tail.  For
@@ -801,12 +816,11 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
 	list_for_each_entry_safe(ref, tmp, &to_send, node) {
 		memset(&freq, 0, sizeof(freq));
 		strncpy(freq.tpv_uuid, tpv->tpv_uuid, sizeof(freq.tpv_uuid) - 1);
-		strncpy(freq.cdv_uuid, tpv->cdv_vol->hdr.uuid,
+		strncpy(freq.cdv_uuid, cdv_vol->hdr.uuid,
 			sizeof(freq.cdv_uuid) - 1);
 		freq.extent_index = ref->extent_index;
 
-		rv = nvmeibc_ib_admin_cdv_free_extent(tpv->cdv_vol, toma_id,
-						      &freq);
+		rv = nvmeibc_ib_admin_cdv_free_extent(cdv_vol, toma_id, &freq);
 		if (rv) {
 			/*
 			 * Send failed.  The extent's slots have already been
@@ -1142,7 +1156,7 @@ static void nvmeibc_tpv_cdv_alloc_work_run(struct nvmeibc_tpv *tpv,
 	}
 
 	if (!list_empty(&alloc->pending_return_list))
-		tpv_drain_pending_returns(tpv, toma_id);
+		tpv_drain_pending_returns(tpv, is_meta_side, toma_id);
 
 	if (alloc->free_tpv_extent_count >= alloc->low_watermark)
 		goto out_clear_pending;
