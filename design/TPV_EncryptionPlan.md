@@ -1,5 +1,41 @@
 # TPV Encryption — Full Execution Plan
 
+## Table of Contents
+
+- [Comparison: Regular volume encryption vs TPV encryption](#comparison-regular-volume-encryption-vs-tpv-encryption)
+  - [Side-by-side table](#side-by-side-table)
+  - [Sequence diagram — regular volume encryption](#sequence-diagram--regular-volume-encryption)
+  - [Sequence diagram — TPV encryption](#sequence-diagram--tpv-encryption)
+  - [Detach driver audit](#detach-driver-audit)
+- [Phase map](#phase-map)
+- [Phase 1 — Management Backend](#phase-1--management-backend)
+  - [Step 1. `createTPV()` encryption support — `nvmesh-management/modules/volume.js`](#step-1-createtpv-encryption-support--nvmesh-managementmodulesvolumejs)
+  - [Step 2. TOMA selection — `nvmesh-management/modules/volumeEncryption.js`](#step-2-toma-selection--nvmesh-managementmodulesvolumencryptionjs)
+  - [Step 3. Attach / detach orchestration — `nvmesh-management/modules/volumeEncryption.js`](#step-3-attach--detach-orchestration--nvmesh-managementmodulesvolumencryptionjs)
+  - [Step 4. Backend integration test — `nvmesh-management/test/`](#step-4-backend-integration-test--nvmesh-managementtest)
+- [Phase 2 — UI](#phase-2--ui)
+  - [Step 5. `CreateTPVModal.jsx` encryption fields](#step-5-createtpvmodaljsx-encryption-fields)
+  - [Step 6. `ThinProvisioning.jsx` encryption toolbar and column](#step-6-thinprovisioningjsx-encryption-toolbar-and-column)
+  - [Step 7. UI integration test](#step-7-ui-integration-test)
+- [Phase 3 — TOMA](#phase-3--toma)
+  - [Step 8. Branch in `start_encrypt_action` — `nvmesh-kernel/toma/nvmeibt_kafka.c`](#step-8-branch-in-start_encrypt_action--nvmesh-kerneltomannvmeibt_kafkac)
+  - [Step 9. TPV exec entry point — `nvmesh-kernel/toma/nvmeibt_recovery.c` / `nvmeibt_recovery.h`](#step-9-tpv-exec-entry-point--nvmesh-kerneltomannvmeibt_recoveryc--nvmeibt_recoveryh)
+  - [Step 10. TOMA integration test](#step-10-toma-integration-test)
+- [Phase 4 — CLI](#phase-4--cli)
+  - [Step 11. TPV entity encryption params and ops — `nvmesh-infra/xlro/core/entities/rest.yaml`](#step-11-tpv-entity-encryption-params-and-ops--nvmesh-infraxlrocoreentitiesrestyaml)
+  - [Step 12. Regenerate golden files and smoke-test](#step-12-regenerate-golden-files-and-smoke-test)
+- [Phase 5 — CSI Driver](#phase-5--csi-driver)
+  - [Step 13. Thread `secrets` and parse StorageClass encryption — `nvmesh-csi-driver/driver/controller_service.py`](#step-13-thread-secrets-and-parse-storageclass-encryption--nvmesh-csi-driverdrivercontroller_servicepy)
+  - [Step 14. Post-create init-encryption — `controller_service.py`](#step-14-post-create-init-encryption--controller_servicepy)
+  - [Step 15. `delete_tpv` management helper — `nvmesh-csi-driver/driver/nvmesh_mgmt_api.py`](#step-15-delete_tpv-management-helper--nvmesh-csi-driverdrivernvmesh_mgmt_apipy)
+  - [Step 16. StorageClass example — `deploy/kubernetes/helm/nvmesh-csi-driver/templates/storage-classes.yaml`](#step-16-storageclass-example--deploykuberneteshelmnnvmesh-csi-drivertemplatestorage-classesyaml)
+  - [Step 17. Integration tests — `nvmesh-csi-driver/test/integration/`](#step-17-integration-tests--nvmesh-csi-drivertestintegration)
+- [Phase 6 — End-to-end](#phase-6--end-to-end)
+  - [Step 18. Full-flow verification](#step-18-full-flow-verification)
+  - [Error scenarios](#error-scenarios)
+- [Risks and open questions](#risks-and-open-questions)
+- [Done criteria](#done-criteria)
+
 **Scope:** everything required to ship encrypted Thin-Provisioned Volumes (TPVs) end-to-end: management backend, Web UI, TOMA kernel-space, NVMesh CLI, and the Kubernetes CSI driver.
 
 **Reference:** `nvmesh-kernel/design/TPV_ThinProvisioningImplementation.md` Part 5 is the authoritative design. This document is the execution plan derived from it.

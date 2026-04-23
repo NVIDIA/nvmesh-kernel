@@ -1,5 +1,41 @@
 # TPV Metadata CDV — Minor Design
 
+## Table of Contents
+
+- [1. Goal](#1-goal)
+- [2. Building blocks reused](#2-building-blocks-reused)
+- [2A. Layout at a glance](#2a-layout-at-a-glance)
+  - [2A.1 Single-CDV TPV](#2a1-single-cdv-tpv)
+  - [2A.2 Split-CDV TPV](#2a2-split-cdv-tpv)
+- [3. Data model](#3-data-model)
+  - [3.1 CDV document — unchanged](#31-cdv-document--unchanged)
+  - [3.2 TPV `tpvConfig` — three fields become seven](#32-tpv-tpvconfig--three-fields-become-seven)
+  - [3.3 Metadata capacity — auto-sized, hidden from the create dialog](#33-metadata-capacity--auto-sized-hidden-from-the-create-dialog)
+- [4. Create / attach / detach / delete](#4-create--attach--detach--delete)
+  - [4.1 Create](#41-create)
+  - [4.2 Attach — both CDVs hidden-attached](#42-attach--both-cdvs-hidden-attached)
+  - [4.3 Detach (voluntary and involuntary)](#43-detach-voluntary-and-involuntary)
+  - [4.4 Delete](#44-delete)
+  - [4.5 Eviction (per-CDV preemption, `TPV_PerClientCDVPreemption.md`)](#45-eviction-per-cdv-preemption-tpv_perclientcdvpreemptionmd)
+- [5. MCS / Kafka extensions](#5-mcs--kafka-extensions)
+  - [5.1 `AttachVolumes` for split-mode TPV](#51-attachvolumes-for-split-mode-tpv)
+  - [5.2 CM codec (binary attach record)](#52-cm-codec-binary-attach-record)
+  - [5.3 `CDVAllocatorFreeAll` — unchanged per message](#53-cdvallocatorfreeall--unchanged-per-message)
+- [6. Kernel changes — delta from §3](#6-kernel-changes--delta-from-3)
+  - [6.1 Two allocators per TPV, two `cdv_alloc_work` instances](#61-two-allocators-per-tpv-two-cdv_alloc_work-instances)
+  - [6.2 IO path — `make_request`](#62-io-path--make_request)
+  - [6.3 `flush_state`, `load_state`, partial-page flush (§3.4.3)](#63-flush_state-load_state-partial-page-flush-3343)
+  - [6.4 Recovery (`nvmeibc_tpv_recovery`)](#64-recovery-nvmeibc_tpv_recovery)
+  - [6.5 `/proc` entries](#65-proc-entries)
+  - [6.6 Self-tests (`nvmeibc_tpv_test.c`)](#66-self-tests-nvmeibc_tpv_testc)
+- [7. CSI driver](#7-csi-driver)
+- [8. CLI (`nvmesh-infra/xlro/tools/cli`)](#8-cli-nvmesh-infraxlrotoolscli)
+- [9. UI](#9-ui)
+- [10. Encryption and zero-on-free](#10-encryption-and-zero-on-free)
+- [11. Scope and non-goals](#11-scope-and-non-goals)
+- [12. Resolved design choices](#12-resolved-design-choices)
+- [13. Implementation plan](#13-implementation-plan)
+
 > **Status: design proposal.** Extends `TPV_ThinProvisioningImplementation.md`. Anything not called out here is inherited from that document unchanged. For the MVP, the data/metadata split is a **one-way choice made at TPV create time** — a single-CDV TPV cannot be converted to split later, and a split TPV cannot be merged.
 
 ---

@@ -1,5 +1,38 @@
 # Embed CDV Allocator Identity in RAFT — Implementation Plan
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Problem Statement](#problem-statement)
+- [Goals](#goals)
+- [Non-goals](#non-goals)
+- [Design](#design)
+  - [State schema](#state-schema)
+  - [Leader-side election](#leader-side-election)
+  - [Follower-side apply (new hook)](#follower-side-apply-new-hook)
+  - [Lazy bootstrap removal](#lazy-bootstrap-removal)
+  - [Client propagation (unchanged)](#client-propagation-unchanged)
+- [Phased delivery](#phased-delivery)
+  - [Phase 1 — schema, no behavior change](#phase-1--schema-no-behavior-change)
+  - [Phase 2 — leader writes fields; apply hook is a no-op](#phase-2--leader-writes-fields-apply-hook-is-a-no-op)
+  - [Phase 3 — apply hook drives state transitions](#phase-3--apply-hook-drives-state-transitions)
+  - [Phase 4 — retire the unicast path](#phase-4--retire-the-unicast-path)
+  - [Phase 5 — client-side cleanup (optional, parallel)](#phase-5--client-side-cleanup-optional-parallel)
+- [Code changes by file](#code-changes-by-file)
+  - [Headers](#headers)
+  - [Leader-side](#leader-side)
+  - [Follower apply path](#follower-apply-path)
+  - [Serialization](#serialization)
+  - [Observability](#observability)
+  - [Tests](#tests)
+- [Backward compatibility](#backward-compatibility)
+  - [Wire-format extension](#wire-format-extension)
+  - [mNDU interaction](#mndu-interaction)
+  - [On-disk header (CDV volume's first block)](#on-disk-header-cdv-volumes-first-block)
+- [Correctness argument](#correctness-argument)
+- [Testing](#testing)
+- [Open questions](#open-questions)
+
 ## Overview
 
 Move `(allocator_toma_id, allocator_generation)` out of the bespoke unicast delivery path (`RAFT_MSG_CDV_ALLOC_NOTIFY` + receive-side monotonicity guard) and into the RAFT-replicated pRAID topology record. The leader writes the fields during `nvmeibt_topology_calc_topology`; RAFT `AppendEntries` delivers them to every follower via the existing TOPO TLV; every TOMA converges on the allocator identity through the same linearized topology-apply path that already carries all other pRAID state changes.

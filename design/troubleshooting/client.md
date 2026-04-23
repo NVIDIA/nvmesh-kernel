@@ -1,5 +1,9 @@
 # Client Troubleshooting
 
+## Table of Contents
+
+- [Client does not appear in management / no clients in DB](#client-does-not-appear-in-management--no-clients-in-db)
+
 ## Client does not appear in management / no clients in DB
 
 **Symptom:** Management shows no clients after install or upgrade. Kafka topics `<node>.client.main` and `<node>.managementAgent.main` are never created.

@@ -1,5 +1,43 @@
 # Satellite Volume for CDV Allocator — Implementation Plan
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Phase 1 — Management](#phase-1--management)
+  - [1.1 Schema and validation](#11-schema-and-validation)
+  - [1.2 Create path — single raw allocation, sliced into N volumes](#12-create-path--single-raw-allocation-sliced-into-n-volumes)
+  - [1.3 Delete path — atomic double-delete](#13-delete-path--atomic-double-delete)
+  - [1.4 Extend path — CDV-only](#14-extend-path--cdv-only)
+  - [1.5 Attach / detach — private satellite path](#15-attach--detach--private-satellite-path)
+  - [1.6 Retire `cdvTomaAutoAttach` on the CDV](#16-retire-cdvtomautoattach-on-the-cdv)
+  - [1.7 Client-facing behavior](#17-client-facing-behavior)
+  - [1.8 Tests](#18-tests)
+- [Phase 2 — Kafka: TOMA to management satellite attach](#phase-2--kafka-toma-to-management-satellite-attach)
+  - [2.0 Alternative considered: TOMA-driven RAFT eviction](#20-alternative-considered-toma-driven-raft-eviction)
+  - [2.1 Request message](#21-request-message)
+  - [2.2 Management handler — `modules/kafka.js`](#22-management-handler--moduleskafkajs)
+  - [2.3 Response message](#23-response-message)
+  - [2.4 Failure / timeout semantics](#24-failure--timeout-semantics)
+  - [2.5 Tests](#25-tests)
+- [Phase 3 — TOMA allocator on the satellite](#phase-3--toma-allocator-on-the-satellite)
+  - [3.1 Topology push carries satellite UUID](#31-topology-push-carries-satellite-uuid)
+  - [3.2 Election handoff — two-stage flow](#32-election-handoff--two-stage-flow)
+  - [3.3 Offset rebase in `nvmeibt_cdv_alloc.c`](#33-offset-rebase-in-nvmeibt_cdv_allocc)
+  - [3.4 Per-satellite I/O work queue](#34-per-satellite-io-work-queue)
+  - [3.5 Handling preempt on the satellite](#35-handling-preempt-on-the-satellite)
+  - [3.6 RAFT-leader election logic unchanged](#36-raft-leader-election-logic-unchanged)
+  - [3.7 Simulator](#37-simulator)
+  - [3.8 Tests](#38-tests)
+- [Phase 4 — CLI: satellite rows under CDVs](#phase-4--cli-satellite-rows-under-cdvs)
+  - [4.1 Entity registration — `rest.yaml`](#41-entity-registration--restyaml)
+  - [4.2 `rest_custom.py`](#42-rest_custompy)
+  - [4.3 Golden files](#43-golden-files)
+  - [4.4 SDK — `volume.py`](#44-sdk--volumepy)
+  - [4.5 UI — parallel to CLI](#45-ui--parallel-to-cli)
+  - [4.6 Tests](#46-tests)
+- [Ordering and dependencies](#ordering-and-dependencies)
+- [Open items to resolve before coding](#open-items-to-resolve-before-coding)
+
 > **Shipped status (retrospective, 2026-04).** Several plan bullets below diverged from what actually shipped. Where the plan says "Retire `cdvConfig.allocatorSizeGib`" / "fixed at 1 GiB", the implementation kept the field as a user-configurable CDV parameter (minimum 1 GiB, default 1 GiB). The max-extents ceiling therefore scales with the admin-chosen `allocatorSizeGib` rather than being pinned. All other elements (CDV_MGMT volumeClass, single raw allocation sliced into two volumes, preempt-based fencing) shipped as written. Treat this document as historical design with the `allocatorSizeGib` override noted inline.
 
 ## Overview
