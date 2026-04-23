@@ -62,7 +62,20 @@ def main():
 
     with open(output, "w+") as f:
         json.dump(merged_json, f, indent=4)
-    shutil.copyfile(output, os.path.join(os.path.dirname(output), "dict.{}.json".format(str(merged_json['cksum']))))
+
+    dict_file = os.path.join(os.path.dirname(output), "dict.{}.json".format(str(merged_json['cksum'])))
+    last_file = output + ".lastdict"
+    try:
+        with open(last_file, "r") as f:
+            prev_dict = f.read().strip()
+        if prev_dict and prev_dict != dict_file and os.path.isfile(prev_dict):
+            os.remove(prev_dict)
+    except (IOError, OSError):
+        pass
+
+    shutil.copyfile(output, dict_file)
+    with open(last_file, "w") as f:
+        f.write(dict_file)
 
 
 if __name__ == '__main__':
