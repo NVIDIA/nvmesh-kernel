@@ -9,7 +9,7 @@
 struct clnt_simu {
 	struct sb_cluster_conf *cfg;						// Global configuration (access to LiveToma's local nvme drives, attach to volumes)
 	int node_idx;										// Node on which this client resides
-	struct clnt_praid_reg_ctx {
+	struct clnt_praid_reg_ctx1 {
 		struct sb_praid_conf *ptr;						// The praid client is registering due to volume attach
 		u32 praid_version;								//
 		// Todo: Save minimal info about Toma topology to know which dbits to write

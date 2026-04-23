@@ -92,6 +92,10 @@ const struct sb_seg_conf* sb_cluster_get_seg_ptr_from_uuid(const struct sb_clust
 	return &D->vols[((u>>16)&0xF)-1].chunks[((u>>8)&0xF)-1].raids[((u>>4)&0xF)-1].segs[((u)&0xF)-1];
 }
 
+void sb_cluster_get_seg_idx_from_uuid_n(uint32_t u, unsigned *vi, unsigned *ci, unsigned *ri, unsigned *si) {
+	*vi = ((u>>16)&0xF)-1;	*ci = ((u>>8 )&0xF)-1;	*ri = ((u>>4 )&0xF)-1;	*si = ((u    )&0xF)-1;
+}
+
 struct sb_praid_topo* sb_cluster_get_topo_prd_ptr_from_uuid(struct sb_cluster_conf *D, const char *raid_uuid) {
 	unsigned u;
 	BUG_ON(sscanf(raid_uuid, "%x", &u) != 1);	// Scan 1 argument

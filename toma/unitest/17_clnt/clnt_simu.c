@@ -76,7 +76,7 @@ void clnt_simu_vol_detach(struct sb_cluster_conf *cfg, int node_idx, int vol_idx
 
 void clnt_simu_vol_unregister(struct sb_cluster_conf *cfg, int node_idx, int vol_idx /*, int praid_idx*/) {
 	struct clnt_simu *C = cfg->nodes[node_idx].clnt;
-	struct clnt_praid_reg_ctx *reg = &C->regs[vol_idx+1000];	// Todo: properly extract from registered client
+	struct clnt_praid_reg_ctx1 *reg = &C->regs[vol_idx+1000];	// Todo: properly extract from registered client
 	BUG_ON(reg->lock_id == 0); // All the acquired locks are abandoned and become stale
 	N_Tf(__AUTOID__, "Clnt=@X, unreg_lock=@LOCKID, leaving @INT stale locks" , cfg->nodes[node_idx].uuid, reg->lock_id, reg->n_ios);
 	reg->lock_id = 0;
@@ -85,7 +85,7 @@ void clnt_simu_vol_unregister(struct sb_cluster_conf *cfg, int node_idx, int vol
 #include "../10_local_hw/nvme_disk_simu.h"
 static void __simulate_io_to_disk(struct clnt_simu *C, struct sandbox_nvme_device *disk, u32 dlba_blockset) {
 	union nvmeib_lock_blkset_entry *ptr = &((union nvmeib_lock_blkset_entry *)disk->ram.addr)[dlba_blockset];
-	struct clnt_praid_reg_ctx *reg = &C->regs[5];	// Todo: properly extract from registered client
+	struct clnt_praid_reg_ctx1 *reg = &C->regs[5];	// Todo: properly extract from registered client
 	BUG_ON((disk->ram.addr == NULL) || (disk->ram.len <= dlba_blockset));
 	ptr->lock_id.all = reg->lock_id;
 	ptr->blkset_info.bits.dirty = 0;		// Todo: inject dbits

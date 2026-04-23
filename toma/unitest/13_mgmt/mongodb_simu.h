@@ -10,6 +10,7 @@
 #define SB_CLUSTER_CONF_N_NODES_TOTAL (3)			// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n39
 #define SB_CLUSTER_CONF_MAX_VOLS      (4)			// Maximum number of volumes in the cluster configuration
 #define SB_CLUSTER_CONF_MAX_CHUNKS    (2)			// Maximum number of chunks in a volume, For now, 2 chunks only, Support for volume extend once
+#define SB_CLUSTER_CONF_MAX_PR_IN_CH  (1)			// Maximum number of Protection raids in chunk, For now, each chunk has only 1 praid. Dont support Raid-0
 #define SB_CLUSTER_CONF_MAX_PR_SEGS   (4)			// Maximum number of segments in protection raid. Up to R1-3Mirror+1seg for replacement, for now
 #define SB_CLUSTER_CONF_N_CLNTS_TOTAL (3)			// Each Node can be a client. Either local to live toma or remote
 struct sb_cluster_conf {
@@ -62,7 +63,7 @@ struct sb_cluster_conf {
 					unsigned block_start;			// Disk block address of segment start
 					unsigned block_end;				// All disk segments in chunk have identical length
 				} segs[SB_CLUSTER_CONF_MAX_PR_SEGS];
-			} raids[1];								// For now, each chunk has only 1 praid. Dont support Raid-0
+			} raids[SB_CLUSTER_CONF_MAX_PR_IN_CH];
 		} chunks[SB_CLUSTER_CONF_MAX_CHUNKS];
 		// --------------- Client reports
 		struct sb_attachment_info {					// Each client can be attached to each volume
@@ -70,23 +71,36 @@ struct sb_cluster_conf {
 			struct nvmeibc_reservation reserv;		// Todo: Use this to test enforcing reservation version attached by Toma
 			bool ioEnabled;							// Client reports that its IO is enabled (after conversation with Toma).
 			bool is_recovery_attach;
-		} clnts[SB_CLUSTER_CONF_N_CLNTS_TOTAL];		// All possible clients (shared-RW mode), though in exclusive mode only 1 client is attached
+			struct sb_chunk_reg {							// Registration vs Live Toma on disk segments
+				struct clnt_praid_reg_ctx {					// The praid client is registering due to volume attach
+					struct sb_praid_topo *topo;				// Direct link to Toma topology for verification.
+					uint16_t version_major;					// Major praid version given by Toma, 0 if unknown
+					uint16_t is_seg_registered_bmp;			// Bitmap of registered segments, Need to register only vs live Toma, no need to talk to Simulated Toma
+					uint16_t conversation_id;				// Taken from the real client, goes up on each unregister, Not mandatory, Just for easy debugging
+					// Todo: Save minimal info about Toma topology to know which dbits to write
+					u32 lock_id;							// Lock id given by Toma, 0 if unregistered
+					u32 n_ios;								// N simulated ios to praid blocksets that were done
+				} raids[  SB_CLUSTER_CONF_MAX_PR_IN_CH];
+			} chunks[     SB_CLUSTER_CONF_MAX_CHUNKS];
+		} clnts[          SB_CLUSTER_CONF_N_CLNTS_TOTAL];	// All possible clients (shared-RW mode), though in exclusive mode only 1 client is attached
 		// --------------- Toma reports
 		struct sb_chunk_topo {
 			struct sb_praid_topo {
-				const struct sb_praid_conf *cfg;	// Pointer to config of praid
+				const struct sb_praid_conf *cfg;			// Pointer to config of praid
 				uint16_t version_major;
 				uint16_t version_minor;
 				struct sb_seg_topo {
 					enum seg_topo_state { mdb_seg_UNK = 0, mdb_seg_BOOT = 'B', mdb_seg_ZERO = '0', mdb_seg_INIT = 'I', mdb_seg_CORRUPTED = '!', mdb_seg_RW = 'R', mdb_DEAD = 'D', mdb_WRITE = 'W', mdb_seg_dep='v', mdb_seg_rep='^',  } status;
-					bool vitality;					// True = reports to leader, false = node not conencted to leader
-				} segs[4];							// Up to 3+1 EC, for now
-			} raids[1];								// For now, each chunk has only 1 praid. Dont support Raid-0
-		} topo_chunks[SB_CLUSTER_CONF_MAX_CHUNKS];
-	} vols[SB_CLUSTER_CONF_MAX_VOLS];				// For now, up to 4 volumes
+					bool vitality;							// Deprecated: True = reports to leader, false = node not conencted to leader
+				} segs[SB_CLUSTER_CONF_MAX_PR_SEGS];
+			} raids[   SB_CLUSTER_CONF_MAX_PR_IN_CH];
+		} topo_chunks[ SB_CLUSTER_CONF_MAX_CHUNKS];
+	} vols[            SB_CLUSTER_CONF_MAX_VOLS];
 	int n_vols;
-	int zone_idx;									// All those volume exist in a specific zone
+	int zone_idx;											// All those volume exist in a specific zone
 };
+
+#define UUID_from_U32 			 "%8x-0000-0000-0000-000000000000"		// All the UUID's have unique first u32 so we dont use the rest of 12[b]
 
 void sb_cluster_conf_create( struct sb_cluster_conf *);
 void sb_cluster_conf_destroy(struct sb_cluster_conf *);
@@ -102,6 +116,7 @@ void sb_cluster_update_disk_vendor_and_verify(       struct sb_disk_conf *, cons
 void sb_cluster_praid_alloc_replacement_seg(      struct sb_cluster_conf *, struct sb_praid_conf* pr /*, Todo: give destination disk here */ );
 
 const struct sb_seg_conf*   sb_cluster_get_seg_ptr_from_uuid(const struct sb_cluster_conf *, uint32_t  seg_uuid);
+void                        sb_cluster_get_seg_idx_from_uuid_n(uint32_t seg_uuid, unsigned *vi, unsigned *ci, unsigned *ri, unsigned *si);
       struct sb_praid_topo* sb_cluster_get_topo_prd_ptr_from_uuid( struct sb_cluster_conf *, const char *raid_uuid);
       struct sb_seg_topo*   sb_cluster_get_topo_seg_ptr_from_uuid_n( struct sb_cluster_conf *, uint32_t    seg_uuid);
       struct sb_seg_topo*   sb_cluster_get_topo_seg_ptr_from_uuid_s( struct sb_cluster_conf *, const char *seg_uuid);

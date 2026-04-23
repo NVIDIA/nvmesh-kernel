@@ -10,7 +10,6 @@
 #include "nvmeibt_debug.h"	// Binary tracing
 
 #define MGMT_DB_UUID_JSON "\"dbUUID\":\"141d3140-c3c0-11f0-bc49-e391b6ca4c2b\""
-#define UUID_from_U32 			 "%8x-0000-0000-0000-000000000000"
 
 enum e_disk_format_state {
 	FMT_IDLE = 'I',
