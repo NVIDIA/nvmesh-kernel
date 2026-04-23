@@ -26,3 +26,7 @@ void clnt_simu_vol_lock_blockset_v(        struct sb_cluster_conf *, int node_id
 void clnt_simu_vol_lock_blockset_d(        struct sb_cluster_conf *, int node_idx, int disk_idx, u32 dlba_blockset);
 void clnt_simu_vol_unregister(             struct sb_cluster_conf *, int node_idx, int vol_idx /*, int praid_idx*/);		// Possibly leave stale lock
 void clnt_simu_vol_detach(                 struct sb_cluster_conf *, int node_idx, int vol_idx);
+
+// API towards server simulator
+struct nvmeibs_toma_client_proc_buf;
+void clnt_simu_receive_msg_from_toma(const struct nvmeibs_toma_client_proc_buf *msg, int len);

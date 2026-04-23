@@ -13,6 +13,7 @@ static struct nvmeibs_simulator *g_srvr_simu = NULL;
 
 static void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu *s) {
 	s->max_reply_length_bytes = 64;				// Ask to fill at most 64[b] of reply, currently not verifying the reply itself
+	pthread_mutex_init(&s->clnt_msgs.lock, NULL);
 }
 
 void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type) {
@@ -23,14 +24,27 @@ void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type) {
 	R->n_total++;
 }
 
+void nvmeibs_simu_send_clnts_msg(u64 handle, struct nvmeibt_client_msg *m) {
+	struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
+	struct clinets_msg_type_ring_buf_t *R = &s->clnt_msgs;
+	BUG_ON(pthread_mutex_lock(&R->lock) != 0);
+	N_Tf(__AUTOID__, "Schedule: clnt_q[@INT]<=msg[@INT] handle=@HANDLE", R->n_total, m->hdr.msg_type, handle);
+	R->handles[R->n_total % (int)ARRAY_SIZE(R->q)] = handle;
+	R->q[      R->n_total % (int)ARRAY_SIZE(R->q)] = m;
+	R->n_total++;
+	BUG_ON(pthread_mutex_unlock(&R->lock) != 0);
+}
+
 static bool server_simu_has_next_msg_for_toma(void) {
 	const struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
-	return (s->msgs.n_total > s->msgs.n_sent);
+	return (s->msgs.n_total + s->clnt_msgs.n_total) > (s->msgs.n_sent + s->clnt_msgs.n_sent);
 }
 
 static void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *s, bool do_veridy_used) {
 	BUG_ON(s->expecting_reply_cookie);						// Did not get a reply from Toma
 	BUG_ON(s->msgs.n_sent != s->msgs.n_total);				// Remaining stuff in ring buffers
+	BUG_ON(s->clnt_msgs.n_sent != s->clnt_msgs.n_total);	// Remaining stuff in ring buffers
+	pthread_mutex_destroy(&s->clnt_msgs.lock);
 	if (do_veridy_used) {
 		BUG_ON(s->n_toma_replies_received <= 0);			// Coverage tests did not receive any reply from Toma
 		BUG_ON(s->msgs.n_sent <= 0);						// Coverage tests did not invoke any server action
@@ -55,7 +69,7 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 	BUG_ON(n <= sizeof(*msg_buf));
 	BUG_ON(!server_simu_has_next_msg_for_toma());	// Toma is trying to read a non-existing message; bug in epoll/select simulator
 	memset(msg_buf, 0, sizeof(*msg_buf));
-	if (1) {
+	if (me->msgs.n_sent < me->msgs.n_total) {
 		const int ring_size = (int)ARRAY_SIZE(me->msgs.q); // Dispatch the next server event message
 		msg_buf->type = me->msgs.q[me->msgs.n_sent % ring_size];
 		if (msg_buf->type == NVMEIBS_TOMA_REPORT_EVENT_SUBSCRIBER_CHANGE) {
@@ -93,6 +107,18 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 		N_Tf(__AUTOID__, "Delivering: srvr_q[@INT]=>msg[@INT] ", me->msgs.n_sent, msg_buf->type);
 		me->msgs.n_sent++;
 		return sizeof(*msg_buf);
+	} else {		// Dispatch the next client message
+		struct clinets_msg_type_ring_buf_t *ring = &me->clnt_msgs;
+		const int ring_size = (int)ARRAY_SIZE(ring->q);
+		struct nvmeibt_client_msg *clnt_msg = ring->q[ring->n_sent % ring_size];			// Todo: Support here clients payload
+		const ssize_t clnt_msg_size = (ssize_t)sizeof(*clnt_msg);
+		BUG_ON((size_t)(sizeof(msg_buf->handle) + clnt_msg_size) > n);
+		msg_buf->handle = ring->handles[ring->n_sent % ring_size];
+		memcpy(msg_buf->buf, clnt_msg, clnt_msg_size);
+		N_Tf(__AUTOID__, "Delivering: clnt_q[@INT]=>msg[@INT] handle=@HANDLE", ring->n_sent, clnt_msg->hdr.msg_type, msg_buf->handle);
+		free(clnt_msg);
+		ring->n_sent++;
+		return (ssize_t)(sizeof(msg_buf->handle) + clnt_msg_size);
 	}
 }
 
@@ -129,17 +155,15 @@ static ssize_t _srvr_simu_nvmeibs_toma_server_proc_recv(int fd, const void *buf,
 	return n;
 }
 
+extern void clnt_simu_receive_msg_from_toma(const struct nvmeibs_toma_client_proc_buf *msg, int len);
 static ssize_t _srvr_simu_nvmeibs_toma_client_proc_recv(int fd, const void *buf, size_t n, off_t offset, int flags) {
 	struct TSB_server_toma_status_req_simu *me = &g_srvr_simu->s_req_simu;
 	const struct nvmeibs_toma_client_proc_buf *m = buf;
-	const u32 cid = (m->handle >> 32);		// Todo: Find client in hash
-	BUG_ON((fd < 2) || (n != sizeof(*m)) || (offset != 0) || !buf);
+	BUG_ON((fd < 2) || (n < sizeof(*m)) || (offset != 0) || !buf || !m->handle || !((m->handle >> 32)));
 	N_SANDBOX(__AUTOID__, "SRVR_SIMU->Got: 2_reg_clnt @ZU[b] via_netlink=@INT", n, flags);
 	me->n_msgs_to_registrants++;
-	if (!m->handle) { errno = ENXIO;	return -1; }
-	if (!cid)		{ errno = EINVAL;	return -1; }
-	if (0)			{ errno = ENXIO;	return -1; }	// Send fail to client
-	return n;
+	clnt_simu_receive_msg_from_toma(m, n);
+	return (ssize_t)n;
 }
 
 void nvmeibs_simu_subscribe_client(u64 handle, const char *host_name, const struct sb_disk_conf *disk, bool is_subscribe) {

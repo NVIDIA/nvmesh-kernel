@@ -22,6 +22,12 @@ struct TSB_server_toma_status_req_simu {			// Mechanism for server to request To
 		enum nvmeibs_toma_server_msg_type   q[8];	// Message type
 		struct nvmeibs_toma_server_proc_buf p[8];	// buffer to send
 	} msgs;
+	struct clinets_msg_type_ring_buf_t {			// Ring buffer: Msgs from Registrant client to Toma (arrives via the Server)
+		pthread_mutex_t lock;						// Unitest env Schedule messages from clients, And clients auto respond to Toma messages (Nack/Registrable/SwitchTopo/...)
+		int n_sent, n_total;
+		u64 handles[8];								// Unique Client_messaging_handle, allocated by TRansport layer when Client connects to Server (before any communication with Toma)
+		struct nvmeibt_client_msg *q[8];			// Allocated and inserted by the client
+	} clnt_msgs;
 	struct TSB_os_mmap_impl toma_to_fill_buf;		// mmap between kernel server and toma
 };
 
@@ -53,5 +59,6 @@ void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type);
 
 struct sb_disk_conf;
 void nvmeibs_simu_subscribe_client(u64 handle, const char *host_name, const struct sb_disk_conf *disk, bool is_subscribe);
+void nvmeibs_simu_send_clnts_msg(  u64 handle, struct nvmeibt_client_msg *m);
 struct TSB_os_mmap_impl* nvmeibs_simu_get_mem_for_status_file_by_name(const char*file_path);
 struct TSB_os_mmap_impl* nvmeibs_simu_get_mem_for_status_file_by_ptr( void* ptr);

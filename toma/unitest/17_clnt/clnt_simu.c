@@ -107,3 +107,7 @@ void clnt_simu_vol_lock_blockset_d(struct sb_cluster_conf *cfg, int node_idx, in
 	struct sandbox_nvme_device *disk = cfg->live->disks[disk_idx].local_nvme;
 	__simulate_io_to_disk(C, disk, dlba_blockset);
 }
+
+void clnt_simu_receive_msg_from_toma(const struct nvmeibs_toma_client_proc_buf *msg, int len) {
+	(void)msg; (void)len;
+}
