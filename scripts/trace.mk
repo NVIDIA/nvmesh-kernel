@@ -51,7 +51,7 @@ $(foreach fl,$(TRACE_MODULE_OBJ),$(eval $(call set_per_file_cflags2,$(fl),$(fl))
 
 PP_OUTDIR := $(shell realpath $(obj))/.trace_pp_dir
 
-TRACE_SOURCE_HEADERS := $(shell find $(src) -name '*.h' \
+TRACE_SOURCE_HEADERS := $(shell find $(src) $(src)/../common $(src)/../common_public $(src)/../autogen -name '*.h' \
     -not -path '*/.trace_pp_dir/*' \
     -not -name 'gen_events.h' \
     2>/dev/null)
