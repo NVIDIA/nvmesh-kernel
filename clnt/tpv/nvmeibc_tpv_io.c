@@ -174,14 +174,21 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		}
 	}
 
-	/* -- DISCARD - may span multiple extents ---------------------------- */
+	/* -- DISCARD - may span multiple extents ----------------------------
+	 *
+	 * Delegated to nvmeibc_tpv_discard_range, which handles alignment
+	 * (partial-overlap extents at head/tail are skipped), per-bio stats
+	 * (stat_discard_ok, stat_discard_misaligned_skipped), and the
+	 * internal free loop.  See design/TPV_Trimming.md Step 1.
+	 *
+	 * DISCARD is advisory at the block layer, so we always complete the
+	 * bio with success - the guest's view of "range is now free" is
+	 * independent of whether we reclaimed any physical capacity.
+	 */
 	if (tpv_bio_is_discard(bio)) {
 		u64 discard_bytes = (u64)bio_sectors(bio) << KERNEL_SECTOR_SHIFT;
-		u64 end_byte      = virt_offset + discard_bytes;
-		u64 idx;
 
-		for (idx = virt_idx; idx * extent_bytes < end_byte; idx++)
-			nvmeibc_tpv_free_extent(tpv, idx);
+		nvmeibc_tpv_discard_range(tpv, virt_offset, discard_bytes);
 		bio_endio(bio, 0);
 		return 0;
 	}

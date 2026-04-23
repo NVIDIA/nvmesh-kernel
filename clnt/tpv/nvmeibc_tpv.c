@@ -544,6 +544,38 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 #endif
 
 	/*
+	 * Advertise DISCARD support (Step 1 of design/TPV_Trimming.md).
+	 * Reclamation granularity is one TPV_extent; discards smaller than
+	 * that, or not aligned to extent boundaries, are acknowledged but
+	 * have no physical effect (tracked via stat_discard_misaligned_skipped).
+	 *
+	 * max_discard_sectors is deliberately set to a large value so a
+	 * single fstrim can cover wide ranges in one bio; the kernel splits
+	 * at this boundary.
+	 */
+#if KS_BLK_ALLOC_DISK_2PARAMS
+	queue->limits.max_discard_sectors       = UINT_MAX >> KERNEL_SECTOR_SHIFT;
+	queue->limits.max_hw_discard_sectors    = UINT_MAX >> KERNEL_SECTOR_SHIFT;
+	queue->limits.discard_granularity       =
+		(unsigned int)tpv->allocator.tpv_extent_size_kb << 10;
+	queue->limits.discard_alignment         = 0;
+#else
+	blk_queue_max_discard_sectors(queue, UINT_MAX >> KERNEL_SECTOR_SHIFT);
+	queue->limits.discard_granularity       =
+		(unsigned int)tpv->allocator.tpv_extent_size_kb << 10;
+	queue->limits.discard_alignment         = 0;
+	/*
+	 * QUEUE_FLAG_DISCARD was removed upstream in 5.19 (torvalds/linux
+	 * 70200574cc2); on newer kernels, setting max_discard_sectors > 0
+	 * is sufficient to advertise discard. Same guard pattern used in
+	 * nvmeibc_block_api_os.c and srv/nvmeibs_nvme.c.
+	 */
+#ifdef QUEUE_FLAG_DISCARD
+	blk_queue_flag_set(QUEUE_FLAG_DISCARD, queue);
+#endif
+#endif
+
+	/*
 	 * Add with zero capacity first to avoid deadlock (see comment in
 	 * __add_disk_io_starts_b4_func_ends in nvmeibc_block_api_os.c).
 	 */

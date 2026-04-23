@@ -1605,6 +1605,159 @@ done:
 	tpv_ktest_destroy(tpv);
 }
 
+/*
+ * tpv_ktest_discard_whole_extent - Step 1 of TPV_Trimming.md.
+ *
+ * Allocate virt_idx=0, then invoke nvmeibc_tpv_discard_range with an
+ * extent-aligned byte range covering exactly that virt_idx.  Verify
+ * the slot is unmapped, the free pool grew, and stat_discard_ok ticked
+ * exactly once with no misaligned-skipped ticks.
+ */
+static void tpv_ktest_discard_whole_extent(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv              *tpv;
+	struct nvmeibc_tpv_allocator    *alloc;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	u64 extent_bytes;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) {
+		KTO_FAIL(kto, "discard_whole", "create failed");
+		return;
+	}
+	alloc        = &tpv->allocator;
+	extent_bytes = (u64)alloc->tpv_extent_size_kb << 10;
+
+	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
+		KTO_FAIL(kto, "discard_whole", "seed_pool failed");
+		goto done;
+	}
+	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	if (rc != 0) {
+		KTO_FAIL(kto, "discard_whole", "alloc_extent rc=%d", rc);
+		goto done;
+	}
+	if (xa_load(&alloc->extent_map, 0) == NULL) {
+		KTO_FAIL(kto, "discard_whole", "xa_load(0) NULL after alloc");
+		goto done;
+	}
+
+	/* The first data slot sits one T beyond slot 0 (L1 header). */
+	(void)nvmeibc_tpv_discard_range(tpv, 1ULL * extent_bytes,
+					extent_bytes);
+
+	if (xa_load(&alloc->extent_map, 1) != NULL) {
+		/* We allocated virt_idx=0, not 1; virt_idx=1 was never mapped. */
+		KTO_FAIL(kto, "discard_whole", "xa_load(1) non-NULL (unexpected)");
+		goto done;
+	}
+	/*
+	 * Now discard the virt_idx=0 we actually allocated: start byte 0,
+	 * length T.
+	 */
+	(void)nvmeibc_tpv_discard_range(tpv, 0, extent_bytes);
+
+	if (xa_load(&alloc->extent_map, 0) != NULL) {
+		KTO_FAIL(kto, "discard_whole", "xa_load(0) non-NULL after discard");
+		goto done;
+	}
+	if (atomic64_read(&alloc->stat_discard_ok) != 1) {
+		KTO_FAIL(kto, "discard_whole",
+			 "stat_discard_ok=%lld, want 1",
+			 (long long)atomic64_read(&alloc->stat_discard_ok));
+		goto done;
+	}
+	if (atomic64_read(&alloc->stat_discard_misaligned_skipped) != 0) {
+		KTO_FAIL(kto, "discard_whole",
+			 "stat_discard_misaligned_skipped=%lld, want 0",
+			 (long long)atomic64_read(
+			     &alloc->stat_discard_misaligned_skipped));
+		goto done;
+	}
+
+	KTO_PASS(kto, "discard_whole");
+done:
+	tpv_ktest_destroy(tpv);
+}
+
+/*
+ * tpv_ktest_discard_misaligned - Step 1 of TPV_Trimming.md.
+ *
+ * Allocate virt_idx=0, then issue a sub-extent discard (T/2 bytes at
+ * offset 0).  The allocator must leave the slot mapped, tick
+ * stat_discard_misaligned_skipped exactly once, and leave stat_discard_ok
+ * at zero.
+ */
+static void tpv_ktest_discard_misaligned(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv              *tpv;
+	struct nvmeibc_tpv_allocator    *alloc;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	u64 extent_bytes;
+	int rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) {
+		KTO_FAIL(kto, "discard_misaligned", "create failed");
+		return;
+	}
+	alloc        = &tpv->allocator;
+	extent_bytes = (u64)alloc->tpv_extent_size_kb << 10;
+
+	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
+		KTO_FAIL(kto, "discard_misaligned", "seed_pool failed");
+		goto done;
+	}
+	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	if (rc != 0) {
+		KTO_FAIL(kto, "discard_misaligned", "alloc_extent rc=%d", rc);
+		goto done;
+	}
+
+	/* Half an extent starting at 0 - tail is not extent-aligned. */
+	(void)nvmeibc_tpv_discard_range(tpv, 0, extent_bytes / 2);
+
+	if (xa_load(&alloc->extent_map, 0) == NULL) {
+		KTO_FAIL(kto, "discard_misaligned",
+			 "xa_load(0) NULL; slot was freed by partial discard");
+		goto done;
+	}
+	if (atomic64_read(&alloc->stat_discard_ok) != 0) {
+		KTO_FAIL(kto, "discard_misaligned",
+			 "stat_discard_ok=%lld, want 0",
+			 (long long)atomic64_read(&alloc->stat_discard_ok));
+		goto done;
+	}
+	if (atomic64_read(&alloc->stat_discard_misaligned_skipped) != 1) {
+		KTO_FAIL(kto, "discard_misaligned",
+			 "stat_discard_misaligned_skipped=%lld, want 1",
+			 (long long)atomic64_read(
+			     &alloc->stat_discard_misaligned_skipped));
+		goto done;
+	}
+
+	/*
+	 * Head-misaligned case: start T/2, length T.  Head extent 0 is only
+	 * partially covered (skip), tail extent 1 is also only partially
+	 * covered (skip) - zero frees, one misaligned tick.
+	 */
+	atomic64_set(&alloc->stat_discard_misaligned_skipped, 0);
+	(void)nvmeibc_tpv_discard_range(tpv, extent_bytes / 2, extent_bytes);
+
+	if (atomic64_read(&alloc->stat_discard_misaligned_skipped) != 1) {
+		KTO_FAIL(kto, "discard_misaligned",
+			 "head-misaligned tick=%lld, want 1",
+			 (long long)atomic64_read(
+			     &alloc->stat_discard_misaligned_skipped));
+		goto done;
+	}
+
+	KTO_PASS(kto, "discard_misaligned");
+done:
+	tpv_ktest_destroy(tpv);
+}
+
 /* -- Proc fill function --------------------------------------------------- */
 
 /*
@@ -1673,8 +1826,10 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg __maybe_unused, char *buf, size_t le
 	tpv_ktest_split_pool_exhaustion(&kto);
 	tpv_ktest_split_double_free(&kto);
 	tpv_ktest_split_recovery(&kto);
+	tpv_ktest_discard_whole_extent(&kto);
+	tpv_ktest_discard_misaligned(&kto);
 
-#define TPV_KTEST_N_TESTS	11
+#define TPV_KTEST_N_TESTS	13
 	KTO_ADD(&kto, "\n");
 	if (kto.failures == 0)
 		KTO_ADD(&kto, "all %d tests passed\n", TPV_KTEST_N_TESTS);

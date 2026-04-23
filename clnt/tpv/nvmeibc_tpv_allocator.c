@@ -273,7 +273,8 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	spin_unlock(&tpv->persist_lock);
 
 	atomic64_inc(&alloc->stat_tpv_alloc_ok);
-	*out = entry;
+	if (out)
+		*out = entry;
 	return 0;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_alloc_extent);
@@ -476,6 +477,63 @@ out_unlock:
 	return 0;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_free_extent);
+
+/* -- nvmeibc_tpv_discard_range ---------------------------------------------
+ *
+ * Guest-issued DISCARD dispatch.  Releases every TPV_extent fully covered
+ * by [start_byte, start_byte + len_bytes); skips any extent that the
+ * range only partially overlaps at the head or tail.  See
+ * design/TPV_Trimming.md Step 1 item 2 ("Reject / split misaligned
+ * discards").
+ *
+ * Per-bio counting:
+ *   stat_discard_ok: incremented per successful full-extent free.
+ *   stat_discard_misaligned_skipped: incremented once if either endpoint
+ *     is not extent-aligned, regardless of how many extents were dropped.
+ *
+ * Returns 0 unconditionally; individual free failures surface through
+ * stat_tpv_free_ok (unchanged) but do not fail the caller.  The caller
+ * completes the DISCARD bio with success either way - discard is
+ * advisory at the block layer.
+ */
+int nvmeibc_tpv_discard_range(struct nvmeibc_tpv *tpv,
+			      u64 start_byte, u64 len_bytes)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	u64 extent_bytes = (u64)alloc->tpv_extent_size_kb << 10;
+	u64 end_byte    = start_byte + len_bytes;
+	u64 head_idx    = start_byte / extent_bytes;
+	u64 end_idx     = end_byte   / extent_bytes;
+	bool head_partial = (start_byte % extent_bytes) != 0;
+	bool tail_partial = (end_byte   % extent_bytes) != 0;
+	u64 first_full  = head_partial ? (head_idx + 1) : head_idx;
+	u64 stop_full   = end_idx;  /* integer floor: partial tail already excluded */
+	u64 idx;
+	u64 freed = 0;
+
+	if (len_bytes == 0)
+		return 0;
+
+	if (head_partial || tail_partial)
+		atomic64_inc(&alloc->stat_discard_misaligned_skipped);
+
+	for (idx = first_full; idx < stop_full; idx++) {
+		if (nvmeibc_tpv_free_extent(tpv, idx) == 0) {
+			atomic64_inc(&alloc->stat_discard_ok);
+			freed++;
+		}
+		/* -ENOENT (already unmapped) is common and silent. */
+	}
+
+	_ND(tpv_discard_range,
+	    "TPV: @STR: DISCARD start=@LLU len=@LLU freed=@LLU partial=@INT",
+	    tpv->tpv_name, (unsigned long long)start_byte,
+	    (unsigned long long)len_bytes, (unsigned long long)freed,
+	    (head_partial || tail_partial) ? 1 : 0);
+
+	return 0;
+}
+EXPORT_SYMBOL(nvmeibc_tpv_discard_range);
 
 /* -- tpv_drain_pending_returns ----------------------------------------------
  *

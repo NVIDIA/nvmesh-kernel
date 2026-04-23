@@ -157,6 +157,11 @@ struct nvmeibc_tpv_allocator {
 	atomic64_t       stat_cdv_free_ok;	/* CDV_FREE_EXTENT sends (successful) */
 	atomic64_t       stat_cdv_alloc_ns;	/* cumulative CDV alloc round-trip time (ns) */
 
+	/* DISCARD path (Step 1 of TPV_Trimming.md). */
+	atomic64_t       stat_discard_ok;	/* extents freed via guest DISCARD */
+	atomic64_t       stat_discard_misaligned_skipped;
+						/* DISCARD ranges with non-extent-aligned ends; counted per bio */
+
 	/*
 	 * Per-TPV L1/L2 tree metadata (dynamic L2 placement).
 	 *
@@ -596,6 +601,20 @@ int  nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 			      struct nvmeibc_tpv_extent_entry **out);
 
 int  nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx);
+
+/*
+ * Release every TPV_extent fully covered by the byte range
+ * [start_byte, start_byte + len_bytes).  Partial-overlap extents at the
+ * head or tail (range endpoints not aligned to the TPV extent size) are
+ * silently skipped; stat_discard_misaligned_skipped is incremented once
+ * per call that has any partial overlap.
+ *
+ * Used by the DISCARD dispatch path and by the kernel self-tests.
+ * Always returns 0; individual free failures are counted via existing
+ * allocator stats but do not propagate.
+ */
+int  nvmeibc_tpv_discard_range(struct nvmeibc_tpv *tpv,
+			       u64 start_byte, u64 len_bytes);
 
 /* Free all nvmeibc_tpv_free_slot entries on a list. Called at detach. */
 void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);

@@ -384,6 +384,12 @@ static ssize_t tpv_proc_stats_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("cdv_free_ok:         %lld\n", (s64)atomic64_read(&alloc->stat_cdv_free_ok));
 	BUF_ADD("cdv_alloc_total_us:  %lld\n", cdv_alloc_ns / 1000);
 	BUF_ADD("cdv_alloc_avg_us:    %lld\n", cdv_avg_us);
+	BUF_ADD("\n");
+	BUF_ADD("# DISCARD path\n");
+	BUF_ADD("discard_ok:                  %lld\n",
+		(s64)atomic64_read(&alloc->stat_discard_ok));
+	BUF_ADD("discard_misaligned_skipped:  %lld\n",
+		(s64)atomic64_read(&alloc->stat_discard_misaligned_skipped));
 
 #undef BUF_ADD
 	return count;
@@ -408,6 +414,8 @@ static ssize_t tpv_proc_stats_reset(void *arg, char *buf, size_t len)
 	atomic64_set(&alloc->stat_cdv_alloc_err,    0);
 	atomic64_set(&alloc->stat_cdv_free_ok,      0);
 	atomic64_set(&alloc->stat_cdv_alloc_ns,     0);
+	atomic64_set(&alloc->stat_discard_ok,                0);
+	atomic64_set(&alloc->stat_discard_misaligned_skipped, 0);
 
 	_NI(tpv_proc_stats_reset_done, "TPV: @STR: proc stats reset", tpv->tpv_name);
 	return (ssize_t)len;
