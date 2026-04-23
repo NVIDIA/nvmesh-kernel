@@ -3,6 +3,7 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
+#include "nvmeib_build_info.h"	/* COMMIT_ID (generated; see Makefile GEN_BUILD_INFO) */
 #include "nvmeibc_block_dp_dbgdi.h"
 #ifdef DBGDI_REMOVED_IN_PRODUCTION
 	int dp_dbgdi_get_sizeof_injected_data(void){ return 0; }

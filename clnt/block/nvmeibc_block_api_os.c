@@ -3,6 +3,7 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
+#include "nvmeib_build_info.h"	/* NVMESH_VERSION/RELEASE used by .inc.c (generated) */
 #include "nvmeib_error_report.h"
 #include "nvmeibc_block_common.h"
 #include "nvmeibc_block.h"		/* external API of the block */

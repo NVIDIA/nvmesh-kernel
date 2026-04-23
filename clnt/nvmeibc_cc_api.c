@@ -12,6 +12,7 @@
  structures */
 
 #include "nvmeib_event.h"
+#include "nvmeib_build_info.h"	/* NVMESH_VERSION/RELEASE (generated; see Makefile GEN_BUILD_INFO) */
 #include "nvmeibc_block.h"					// Must be first for simulator
 #include "nvmeibc_cc_api.h"
 #include "main/nvmeibc_main_common.h"

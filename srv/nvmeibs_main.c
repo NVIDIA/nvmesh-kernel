@@ -3,6 +3,7 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 
+#include "nvmeib_build_info.h"	/* COMMIT_ID, NVMESH_* (generated; see Makefile GEN_BUILD_INFO) */
 #include "nvmeibs_main.h"
 #include "nvmeibs_defs.h"
 #include "nvmeibs_ib_port.h"

@@ -5,6 +5,7 @@
 
 /* nvmeibc_main.c - NVMe IB attached block driver */
 #include "nvmeibc_block.h"					// Must be first for simulator
+#include "nvmeib_build_info.h"	/* COMMIT_ID, NVMESH_* (generated; see Makefile GEN_BUILD_INFO) */
 #include "nvmeib_public.h"
 #include "nvmeibc_main.h"
 #include "nvmeibc_defs.h"

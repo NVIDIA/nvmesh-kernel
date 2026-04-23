@@ -4,6 +4,7 @@
 */
 
 #include "linux/mm_types.h"
+#include "nvmeib_build_info.h"	/* COMMIT_ID (generated; see Makefile GEN_BUILD_INFO) */
 #include "nvmeib.h"
 #include <linux/kallsyms.h>
 #include <linux/random.h>
