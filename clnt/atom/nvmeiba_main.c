@@ -411,8 +411,34 @@ void nvmeiba_os_apis_set_detaching_pops(const struct block_device_operations **f
 }
 #endif
 
+static u64 nvmeiba_module_get_commit_id(void)
+{
+	return (u64)COMMIT_ID;
+}
+
+static size_t nvmeiba_module_get_nvmesh_version(char *buf, size_t len)
+{
+	if (!buf || !len)
+		return 0;
+	return (size_t)scnprintf(buf, len, "%s", __stringify(NVMESH_VERSION));
+}
+
+static size_t nvmeiba_module_get_nvmesh_release(char *buf, size_t len)
+{
+	if (!buf || !len)
+		return 0;
+	return (size_t)scnprintf(buf, len, "%s", __stringify(NVMESH_RELEASE));
+}
+
+static size_t nvmeiba_module_get_build_number(char *buf, size_t len)
+{
+	if (!buf || !len)
+		return 0;
+	return (size_t)scnprintf(buf, len, "%s", __stringify(BUILD_NUMBER));
+}
+
 static const struct nvmeiba_atom_ops nvmeiba_atom_ops_publish = {
-	.version = NVMEIBA_ATOM_OPS_VERSION_1,
+	.version = NVMEIBA_ATOM_OPS_VERSION_2,
 	.size = sizeof(struct nvmeiba_atom_ops),
 	.v1 = {
 		.os_api_constructor = nvmeiba_os_api_constructor,
@@ -430,7 +456,12 @@ static const struct nvmeiba_atom_ops nvmeiba_atom_ops_publish = {
 		.os_do_on_nvmeibc_up = nvmeiba_os_do_on_nvmeibc_up,
 		.os_do_on_nvmeibc_down = nvmeiba_os_do_on_nvmeibc_down,
 	},
-	/* .v2 — extend nvmeiba_atom_ops_v2 when adding VERSION_2 fields */
+	.v2 = {
+		.module_get_commit_id = nvmeiba_module_get_commit_id,
+		.module_get_nvmesh_version = nvmeiba_module_get_nvmesh_version,
+		.module_get_nvmesh_release = nvmeiba_module_get_nvmesh_release,
+		.module_get_build_number = nvmeiba_module_get_build_number,
+	},
 };
 
 const struct nvmeiba_atom_ops *nvmeiba_atom_attach(void)

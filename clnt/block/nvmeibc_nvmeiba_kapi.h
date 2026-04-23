@@ -16,8 +16,11 @@
  * Fallback:  per-symbol __symbol_get() for legacy nvmeiba without attach().
  *
  * Global function table (layout matches struct nvmeiba_atom_ops_v1 / attach .v1).
+ * Populated from attach .v2 when nvmeiba advertises version 2 and all v2 pointers
+ * are non-null; otherwise v2 stays zeroed (see nvmeibc_nvmeiba_kapi.c).
  */
 extern struct nvmeiba_atom_ops_v1 nvmeiba_kapi;
+extern struct nvmeiba_atom_ops_v2 nvmeiba_kapi_v2;
 
 enum nvmeiba_kapi_iface_mode {
 	NVMEIBA_KAPI_IFACE_NONE = 0,

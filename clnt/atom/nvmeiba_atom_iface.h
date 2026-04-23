@@ -19,17 +19,20 @@
  * 3. Update nvmeiba_atom_ops_layout_ok() in nvmeibc_nvmeiba_kapi.c: each
  *    version has its own minimum ops->size (see switch there).
  * 4. In nvmeibc, copy/use new fields after the v1 memcpy as needed.
- * 5. In nvmeiba, extend the static const struct nvmeiba_atom_ops initializer.
+ * 5. In nvmeiba, extend the static const struct nvmeiba_atom_ops initializer
+ *    (bump .version / .v2 when extending the ops table).
  *
  * ops->version — layout revision implemented by this nvmeiba binary.
  * ops->size    — sizeof(struct nvmeiba_atom_ops) from the nvmeiba build.
- * nvmeibc checks (version, size) before reading v1 / v2.
+ * nvmeibc checks (version, size) before reading v1 / v2. nvmeibc rejects
+ * attach if any v1 function pointer is NULL. If nvmeiba advertises version 2
+ * but any v2 pointer is NULL, nvmeibc uses only v1 (does not populate v2 kapi).
  * ---------------------------------------------------------------------------
  */
 
 #define NVMEIBA_ATOM_OPS_VERSION_1		1u
 #define NVMEIBA_ATOM_OPS_VERSION_2		2u
-#define NVMEIBA_ATOM_OPS_VERSION_CURRENT	NVMEIBA_ATOM_OPS_VERSION_1
+#define NVMEIBA_ATOM_OPS_VERSION_CURRENT	NVMEIBA_ATOM_OPS_VERSION_2
 
 /* Highest ops version this nvmeibc build knows how to interpret (bump with v2+ logic). */
 #define NVMEIBA_ATOM_OPS_VERSION_MAX_SUPPORTED	NVMEIBA_ATOM_OPS_VERSION_2
@@ -58,11 +61,16 @@ struct nvmeiba_atom_ops_v1 {
 };
 
 /*
- * V2: add new function pointers (or data) here when implementing VERSION_2.
- * Empty placeholder — documents where the next extension lands.
+ * V2: build identity of the loaded nvmeiba module (for nvmeibc attach logging
+ * and diagnostics). String getters use scnprintf semantics: NUL-terminated
+ * when len > 0; return value is the number of characters that would have been
+ * written (excluding trailing NUL), capped at len - 1.
  */
 struct nvmeiba_atom_ops_v2 {
-	/* Example: void (*new_hook)(struct nvmeiba_atom_os_api *atom); */
+	u64 (*module_get_commit_id)(void);
+	size_t (*module_get_nvmesh_version)(char *buf, size_t len);
+	size_t (*module_get_nvmesh_release)(char *buf, size_t len);
+	size_t (*module_get_build_number)(char *buf, size_t len);
 };
 
 struct nvmeiba_atom_ops {

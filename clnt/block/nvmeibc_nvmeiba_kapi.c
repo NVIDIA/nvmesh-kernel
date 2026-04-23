@@ -21,17 +21,59 @@
 #include "nvmeibc_trace.h"
 
 struct nvmeiba_atom_ops_v1 nvmeiba_kapi;
+struct nvmeiba_atom_ops_v2 nvmeiba_kapi_v2;
 
-#define NVMEIBA_SYM_MAX DIV_ROUND_UP(sizeof(struct nvmeiba_atom_ops_v1), sizeof(void *))
+/* Will overestimate due to non function members in the ops struct, but don't care. */
+#define NVMEIBA_SYM_MAX DIV_ROUND_UP(sizeof(struct nvmeiba_atom_ops), sizeof(void *))
 
 static void *nvmeiba_sym_refs[NVMEIBA_SYM_MAX];
 static unsigned int nvmeiba_sym_nrefs;
 
 static enum nvmeiba_kapi_iface_mode kapi_iface_mode = NVMEIBA_KAPI_IFACE_NONE;
 
+/* Effective ops version after attach (1 = v1-only, 2 = v1+v2). Set for OPS attach only. */
+static u32 nvmeiba_kapi_attach_effective_version;
+
 enum nvmeiba_kapi_iface_mode nvmeiba_kapi_iface_mode(void)
 {
 	return kapi_iface_mode;
+}
+
+static bool nvmeiba_atom_ops_v1_complete(const struct nvmeiba_atom_ops_v1 *v)
+{
+	return v->os_api_constructor && v->os_api_destructor && v->os_api_orphan_abandon &&
+	       v->os_api_is_queue_orphan && v->os_api_set_detaching && v->os_api_exec_for_each_atom &&
+	       v->os_api_orphan_adopt && v->atom_users_to_string && v->atom_open && v->atom_close &&
+	       v->atom_part_add && v->atom_part_del && v->os_do_on_nvmeibc_up && v->os_do_on_nvmeibc_down;
+}
+
+static bool nvmeiba_atom_ops_v2_complete(const struct nvmeiba_atom_ops_v2 *v)
+{
+	return v->module_get_commit_id && v->module_get_nvmesh_version &&
+	       v->module_get_nvmesh_release && v->module_get_build_number;
+}
+
+static void nvmeiba_kapi_trace_nvmeiba_build_on_attach(void)
+{
+	char ver[96];
+	char rel[96];
+	char bn[96];
+	u64 cid;
+
+	if (nvmeiba_kapi_attach_effective_version < NVMEIBA_ATOM_OPS_VERSION_2)
+		return;
+
+	cid = nvmeiba_kapi_v2.module_get_commit_id();
+	nvmeiba_kapi_v2.module_get_nvmesh_version(ver, sizeof(ver));
+	nvmeiba_kapi_v2.module_get_nvmesh_release(rel, sizeof(rel));
+	nvmeiba_kapi_v2.module_get_build_number(bn, sizeof(bn));
+	ver[sizeof(ver) - 1] = '\0';
+	rel[sizeof(rel) - 1] = '\0';
+	bn[sizeof(bn) - 1] = '\0';
+
+	_NT(trace_nvmeiba_kapi_init_nvmeiba_module_build_ids,
+	    "nvmeiba (atom_attach v2): commit_id=@COMMIT_ID_LONG NVMESH_VERSION=@STR NVMESH_RELEASE=@STR BUILD_NUMBER=@STR",
+	    (ulong)cid, ver, rel, bn);
 }
 
 static void nvmeiba_release_symbols(void)
@@ -101,7 +143,22 @@ static int nvmeiba_try_attach_ops(void)
 		return -EINVAL;
 	}
 
+	if (!nvmeiba_atom_ops_v1_complete(&ops->v1)) {
+		symbol_put_addr(attach_sym);
+		_NE_dmesg(err_nvmeiba_kapi_atom_attach_v1_incomplete,
+			"nvmeiba_atom_attach: v1 ops table has null function pointer(s)");
+		return -EINVAL;
+	}
+
+	nvmeiba_kapi_attach_effective_version = ops->version;
+	if (nvmeiba_kapi_attach_effective_version >= NVMEIBA_ATOM_OPS_VERSION_2 &&
+	    !nvmeiba_atom_ops_v2_complete(&ops->v2))
+		nvmeiba_kapi_attach_effective_version = NVMEIBA_ATOM_OPS_VERSION_1;
+
 	memcpy(&nvmeiba_kapi, &ops->v1, sizeof(nvmeiba_kapi));
+	memset(&nvmeiba_kapi_v2, 0, sizeof(nvmeiba_kapi_v2));
+	if (nvmeiba_kapi_attach_effective_version >= NVMEIBA_ATOM_OPS_VERSION_2)
+		memcpy(&nvmeiba_kapi_v2, &ops->v2, sizeof(nvmeiba_kapi_v2));
 	if (nvmeiba_sym_nrefs >= NVMEIBA_SYM_MAX) {
 		symbol_put_addr(attach_sym);
 		return -EINVAL;
@@ -110,6 +167,7 @@ static int nvmeiba_try_attach_ops(void)
 	kapi_iface_mode = NVMEIBA_KAPI_IFACE_OPS;
 	_NT(trace_nvmeiba_kapi_init_via_atom_attach,
 	    "Successfully resolved nvmeiba via atom_attach. Fn table: @PTR", &nvmeiba_kapi);
+	nvmeiba_kapi_trace_nvmeiba_build_on_attach();
 	return 0;
 }
 
@@ -153,6 +211,8 @@ int nvmeibc_nvmeiba_kapi_init(void)
 	int rv;
 
 	memset(&nvmeiba_kapi, 0, sizeof(nvmeiba_kapi));
+	memset(&nvmeiba_kapi_v2, 0, sizeof(nvmeiba_kapi_v2));
+	nvmeiba_kapi_attach_effective_version = 0;
 	kapi_iface_mode = NVMEIBA_KAPI_IFACE_NONE;
 	request_module("nvmeiba");
 
@@ -166,6 +226,8 @@ int nvmeibc_nvmeiba_kapi_init(void)
 
 	nvmeiba_release_symbols();
 	memset(&nvmeiba_kapi, 0, sizeof(nvmeiba_kapi));
+	memset(&nvmeiba_kapi_v2, 0, sizeof(nvmeiba_kapi_v2));
+	nvmeiba_kapi_attach_effective_version = 0;
 	kapi_iface_mode = NVMEIBA_KAPI_IFACE_NONE;
 	return rv;
 }
@@ -177,4 +239,6 @@ void nvmeibc_nvmeiba_kapi_fini(void)
 	    "Successfully released all nvmeiba symbols. nvmeiba can now be unloaded.");
 	kapi_iface_mode = NVMEIBA_KAPI_IFACE_NONE;
 	memset(&nvmeiba_kapi, 0, sizeof(nvmeiba_kapi));
+	memset(&nvmeiba_kapi_v2, 0, sizeof(nvmeiba_kapi_v2));
+	nvmeiba_kapi_attach_effective_version = 0;
 }
