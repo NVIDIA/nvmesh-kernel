@@ -1086,9 +1086,9 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 					// Total body = ACT_TOPO only. persist_and_wire_buf_validate_len (nvmeibt_raft.c:362) asserts total == sizeof(buf) + sum(tlv_lens).
 					out_r_msg->persist_and_wire_buf.persist_and_wire_total_len = LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf) + act_topo_len);
 					msg->data_len = req->msg_len + act_topo_len;
+					peer->running_local_serialization_version++;	// Applying new BIN_TOPO is a local state change; real followers bump running_ser_ver via nvmeibt_topology.c:1179 when the serializer produces different output after processing the committed topo.
 				}
-				peer->append_entries_rep_ser_ver++;
-				out_r_msg->local_serialization_version = LE_SWAP64(peer->append_entries_rep_ser_ver);	// Much like in raft_send_msg_to_peer()
+				out_r_msg->local_serialization_version = LE_SWAP64(peer->running_local_serialization_version);	// Stamp running ser_ver (matches real raft_send_msg_to_peer's "follower's msg" branch at nvmeibt_raft.c:2797). The real leader's APPEND_ENTRIES_REP handler stores this in raft_member::last_local_serialization_version (nvmeibt_raft.c:3825) and echoes it on the next outgoing AE to us (nvmeibt_raft.c:2790) -- closing the per-peer ser_ver handshake loop.
 				ln->n_total_msmgs_sent.append_ent_rep++;
 				break;
 			}

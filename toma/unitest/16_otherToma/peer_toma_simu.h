@@ -13,8 +13,8 @@ struct peer_toma_simu {
 	bool does_support_incremental_topo;					// Todo: Extend this mechanism to test toma software upgrade
 	bool ignore_append_entries;							// Emulates infinitely slow local disk response time, does not commit raft leaders topo, Much like real Toma 'enum raft_pause_mode_enm'
 	bool ignore_segs_initialization;					// Emulates as if Toma cannot initialize any local segment
-	unsigned long long ser_ver_per_seg_counter;			// Incrementing ACT_TOPO serialization version
-	unsigned long long append_entries_rep_ser_ver;		// Monotonic counter for raft-follower-msg.local_serialization_version on each APPEND_ENTRIES_REP. Increased so leader will take this reply
+	unsigned long long ser_ver_per_seg_counter;			// Incrementing ACT_TOPO serialization version (per-seg wire field)
+	unsigned long long running_local_serialization_version;	// Mirrors real nvmeibt_topology::running_local_serialization_version. Bumps when simulated follower state changes (seg inject or BIN_TOPO receipt). Compared against the leader's echoed "known_to_leader" (read from incoming AE's local_serialization_version) to gate ACT_TOPO attachment on REPs -- is_applied_topo_ready_and_different, nvmeibt_raft.c:2864.
 	struct toma_simu_inject_seg_state_t {				// Specific actions to apply to the segment according to unitest scenario
 		uint32_t uuid;
 		uint32_t dbits_state;

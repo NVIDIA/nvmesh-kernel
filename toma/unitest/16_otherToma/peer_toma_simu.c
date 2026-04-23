@@ -91,10 +91,12 @@ void peer_toma_simu_set_seg_inject(struct peer_toma_simu *T, const struct toma_s
 		BUG_ON(T->n_seg_overrides > PEER_TOMA_SIMU_MAX_DIRTY_BITS_OVERRIDES);
 	}
 	*dst = *inj;
+	T->running_local_serialization_version++;	// Local follower state changed; next AE handler's "is_applied_topo_ready_and_different" gate sees running != leader_echoed and attaches ACT_TOPO to the REP. Mirrors the serializer bump at nvmeibt_topology.c:1179.
 }
 
 void peer_toma_simu_clear_seg_injects(struct peer_toma_simu *T) {
 	T->n_seg_overrides = 0;
+	T->running_local_serialization_version++;
 }
 
 int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *T, const struct nvmeibt_topology_serialized_topo_header *leader_topo_data, int leader_topo_len, char *out_buf, int out_buf_size) {
