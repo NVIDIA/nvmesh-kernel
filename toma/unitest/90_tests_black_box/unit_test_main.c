@@ -148,28 +148,38 @@ void scenario_nvmeibs_messages(void) {
 	SCENARIO_PRINT(__AUTOID__, "sent");										yield();
 }
 
-void scenario_attach_good_path_io_detach_on_volume(int v) {
+void scenario_attach_good_path_io_on_volume(int v) {
 	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
 	const struct sb_volume_conf *vol = &cfg->vols[v];
 	const struct sb_praid_conf *pr_c = &vol->chunks[0].raids[0];
 	const struct sb_praid_topo *pr_t = &vol->topo_chunks[0].raids[0];
-	SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME {@INT+@INT} to be ioable", vol->name, pr_c->D, pr_c->P);
+	SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME {@INT+@INT} to be registrable", vol->name, pr_c->D, pr_c->P);
 	WAIT_UNTIL(sb_cluster_topo_prd_is_ioable(pr_t));
 	if (sb_cluster_vol_has_any_live_toma_local_segs(cfg, v)) {		// Otherwise no work will be done by the real toma.
 		int n_clnts = 2;											// 1 local, 1 remote
-		SCENARIO_PRINT(__AUTOID__, "Attaching @INT clients, to vol[@INT]", n_clnts, v);
+		SCENARIO_PRINT(__AUTOID__, "Attaching @INT clients, to @DEV_NAME", n_clnts, vol->name);
 		for (int c = 0; c < n_clnts; c++) {
-			clnt_simu_vol_attach(cfg, c, v);
-			yield();
+			clnt_simu_vol_attach(cfg, c, v);				yield();
+		}
+		for (int c = 0; c < n_clnts; c++) {
+			clnt_simu_vol_register(cfg, c, v, true);		yield();
 		}
 		SCENARIO_PRINT(__AUTOID__, "Waiting for volume @DEV_NAME io_enabled on all clients", vol->name);
-		yield();	// Let Toma process subscriber change
-		// Todo.... register segments and Do IO here
+		WAIT_UNTIL(clnt_simu_vol_is_ioable(0, v));
+		WAIT_UNTIL(clnt_simu_vol_is_ioable(1, v));
+
+		SCENARIO_PRINT(__AUTOID__, "Doing IO on @DEV_NAME from all clients", vol->name);
+		yield();		// Todo: Init encryption here, roll keys, do IO, etc....
+
+		SCENARIO_PRINT(__AUTOID__, "Unregistering @INT clients, from vol[@INT]", n_clnts, v);
+		for (int c = 0; c < n_clnts; c++) {
+			clnt_simu_vol_register(cfg, c, v, false);		yield();
+		}
 		SCENARIO_PRINT(__AUTOID__, "Detaching @INT clients, to vol[@INT]", n_clnts, v);
 		for (int c = 0; c < n_clnts; c++) {
-			clnt_simu_vol_detach(cfg, c, v);
-			yield();
+			clnt_simu_vol_detach(cfg, c, v);				yield();
 		}
+		yield();	// Let Toma process clients unsubscribe change, what to wait for?
 	}
 }
 
@@ -418,8 +428,8 @@ static void scenario_create_remove_r1(void) {
 
 	scenario_user_rpcs_generic();
 	scenario_user_rpcs_praid();
-	scenario_attach_good_path_io_detach_on_volume(0);
-	scenario_attach_good_path_io_detach_on_volume(1);
+	scenario_attach_good_path_io_on_volume(0);
+	scenario_attach_good_path_io_on_volume(1);
 
 	scenario_evict_rebuild_r1();
 

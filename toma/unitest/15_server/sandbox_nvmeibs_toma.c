@@ -48,6 +48,7 @@ static void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_statu
 	if (do_veridy_used) {
 		BUG_ON(s->n_toma_replies_received <= 0);			// Coverage tests did not receive any reply from Toma
 		BUG_ON(s->msgs.n_sent <= 0);						// Coverage tests did not invoke any server action
+		BUG_ON(s->clnt_msgs.n_sent <= 0);					// Coverage tests did not run any IO (client registration)
 	}
 }
 
