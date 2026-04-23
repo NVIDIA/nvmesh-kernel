@@ -11,17 +11,18 @@
 #include "common/nvmeib_shared.h"
 #include "../11_os/os_internal.h"					// Other side of netlink and file descriptors
 
-struct TSB_server_toma_status_req_simu {		// Mechanism for server to request Toma to fill status proc files
+struct TSB_server_toma_status_req_simu {			// Mechanism for server to request Toma to fill status proc files
 	int n_toma_replies_received;
-	int expecting_reply_cookie;					// If sent a message to toma and expecting a reply, store it
+	int expecting_reply_cookie;						// If sent a message to toma and expecting a reply, store it
 	int max_reply_length_bytes;
 	int n_msgs_to_registrants;
-	struct server_msg_type_ring_buf_t {			// Msgs originated from the server
+	struct server_msg_type_ring_buf_t {				// Ring buffer: Msgs originated from the server
+		// pthread_mutex_t lock;					// Currently lock is not needed because as Server never responds to Toma, only initiates conversation.
 		int n_sent, n_total;
-		enum nvmeibs_toma_server_msg_type q[8];	// Message type
-		struct nvmeibs_toma_server_proc_buf p[8];// buffer to send
+		enum nvmeibs_toma_server_msg_type   q[8];	// Message type
+		struct nvmeibs_toma_server_proc_buf p[8];	// buffer to send
 	} msgs;
-	struct TSB_os_mmap_impl toma_to_fill_buf;	// mmap between kernel server and toma
+	struct TSB_os_mmap_impl toma_to_fill_buf;		// mmap between kernel server and toma
 };
 
 struct pending_zero_op {	// Deferred async zero operation, simulating real kernel's async NVMe zeroing

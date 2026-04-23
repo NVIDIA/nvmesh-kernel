@@ -6,19 +6,21 @@
 #include "nvmeibt_debug.h"				// Binary traces
 #include "sandbox_nvmeibs_toma.h"
 #include "../10_local_hw/nvme_disk_simu.h"
+#include "clnt/nvmeibt_client_protocol.h"
 #include "../13_mgmt/mongodb_simu.h"
 
 static struct nvmeibs_simulator *g_srvr_simu = NULL;
 
-static void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu *me) {
-	me->max_reply_length_bytes = 64;				// Ask to fill at most 64[b] of reply, currently not verifying the reply itself
+static void TSB_server_toma_status_req_simu_init(struct TSB_server_toma_status_req_simu *s) {
+	s->max_reply_length_bytes = 64;				// Ask to fill at most 64[b] of reply, currently not verifying the reply itself
 }
 
 void nvmeibs_simu_send_msg(enum nvmeibs_toma_server_msg_type msg_type) {
 	struct TSB_server_toma_status_req_simu *s = &g_srvr_simu->s_req_simu;
-	N_Tf(__AUTOID__, "Schedule: srvr_q[@INT]<=msg[@INT] ", s->msgs.n_total, msg_type);
-	s->msgs.q[s->msgs.n_total % (int)ARRAY_SIZE(s->msgs.q)] = msg_type;
-	s->msgs.n_total++;
+	struct server_msg_type_ring_buf_t *R = &s->msgs;
+	N_Tf(__AUTOID__, "Schedule: srvr_q[@INT]<=msg[@INT] ", R->n_total, msg_type);
+	R->q[R->n_total % (int)ARRAY_SIZE(R->q)] = msg_type;
+	R->n_total++;
 }
 
 static bool server_simu_has_next_msg_for_toma(void) {
@@ -27,11 +29,11 @@ static bool server_simu_has_next_msg_for_toma(void) {
 }
 
 static void TSB_server_toma_status_req_simu_destroy(struct TSB_server_toma_status_req_simu *s, bool do_veridy_used) {
-	BUG_ON(s->expecting_reply_cookie);				// Did not get a reply from Toma
-	BUG_ON(s->msgs.n_sent != s->msgs.n_total);
+	BUG_ON(s->expecting_reply_cookie);						// Did not get a reply from Toma
+	BUG_ON(s->msgs.n_sent != s->msgs.n_total);				// Remaining stuff in ring buffers
 	if (do_veridy_used) {
-		BUG_ON(s->n_toma_replies_received <= 0);	// Coverage tests did not receive any reply from Toma
-		BUG_ON(s->msgs.n_sent <= 0);
+		BUG_ON(s->n_toma_replies_received <= 0);			// Coverage tests did not receive any reply from Toma
+		BUG_ON(s->msgs.n_sent <= 0);						// Coverage tests did not invoke any server action
 	}
 }
 
@@ -51,7 +53,7 @@ static ssize_t server_simu_get_next_msg_for_toma(int fd, void *buf, size_t n, of
 	(void)fd; (void)flags;
 	BUG_ON(offset != OFFSET_NONE);
 	BUG_ON(n <= sizeof(*msg_buf));
-	BUG_ON(me->msgs.n_sent >= me->msgs.n_total);				// Why did epoll wake Toma if there is no message ready. Bug in epoll/select simulator implementation! Toma is trying to read a non existing message
+	BUG_ON(!server_simu_has_next_msg_for_toma());	// Toma is trying to read a non-existing message; bug in epoll/select simulator
 	memset(msg_buf, 0, sizeof(*msg_buf));
 	if (1) {
 		const int ring_size = (int)ARRAY_SIZE(me->msgs.q); // Dispatch the next server event message
