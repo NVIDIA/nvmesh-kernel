@@ -253,6 +253,15 @@ struct nvmeibt_cdv_alloc {
 	uint32_t allocator_size_gib;	/* size of on-CDV allocator region in GiB */
 	uint32_t cdv_extent_size_mib;	/* size of each data CDV extent in MiB */
 	uint64_t n_pending_zeroing;	/* extents with needs_zeroing=true (not yet re-usable) */
+	/*
+	 * Observability counter for TPV trim correlation.  Incremented on every
+	 * successful CDV_FREE_EXTENT handler path (ownership-validated, in-memory
+	 * entry removed).  Paired against the per-client stat_cdv_free_ok counters
+	 * reported by /proc/nvmeibc/tpv/<name>/stats: Sigma(client.cdv_free_ok) for
+	 * this CDV must equal n_free_returns_received on the elected allocator.
+	 * See tools/tpv_alloc_audit.py.
+	 */
+	uint64_t n_free_returns_received;
 	int      cdv_fd;		/* cached fd; opened/used ONLY from io_wq worker thread.
 					 * Currently still used by cdv_zero_execute (data-extent
 					 * zeroing on free) - that path requires the CDV itself to

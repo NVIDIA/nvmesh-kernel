@@ -112,6 +112,7 @@ static ssize_t tpv_proc_status_fill(void *arg, char *buf, size_t len)
 
 	BUF_ADD("name:                %s\n",  tpv->tpv_name);
 	BUF_ADD("uuid:                %s\n",  tpv->tpv_uuid);
+	BUF_ADD("cdv_uuid:            %s\n",  tpv->cdv_vol ? tpv->cdv_vol->hdr.uuid : "(none)");
 	BUF_ADD("state:               %s\n",  tpv_state_str(atomic_read(&tpv->state)));
 	BUF_ADD("state_loaded:        %s\n",  READ_ONCE(tpv->state_loaded) ? "yes" : "no");
 	BUF_ADD("sync_flush:          %s\n",  tpv->sync_flush ? "yes" : "no");

@@ -2998,7 +2998,7 @@ void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const c
 						  / alloc->total_data_extents);
 
 		(*printf_fn)(printf_ctx,
-			     "\tcdv=%-20s [%s]  allocator=%s  gen=%llu  allocated=%llu/%llu (%u%%)  ondisk_loaded=%s\n",
+			     "\tcdv=%-20s [%s]  allocator=%s  gen=%llu  allocated=%llu/%llu (%u%%)  ondisk_loaded=%s  free_returns=%llu\n",
 			     cdv_name,
 			     alloc->cdv_uuid,
 			     alloc->allocator_toma_id[0] ? alloc->allocator_toma_id : "(unelected)",
@@ -3006,7 +3006,8 @@ void nvmeibt_cdv_alloc_print_status_detailed(int (*printf_fn)(void *ctx, const c
 			     alloc->n_allocated,
 			     alloc->total_data_extents,
 			     used_pct,
-			     alloc->ondisk_loaded ? "yes" : "no");
+			     alloc->ondisk_loaded ? "yes" : "no",
+			     alloc->n_free_returns_received);
 
 		if (!XDLIST_EMPTY(&alloc->extents)) {
 			(*printf_fn)(printf_ctx,
@@ -3497,10 +3498,12 @@ static int handle_cdv_free_extent(struct nvmeibt_register_msg *msg)
 
 		XDLIST_ELEM_DEL(&alloc->extents, entry);
 		alloc->n_allocated--;
+		alloc->n_free_returns_received++;
 
 		N_If(cdv_free_ok,
-		     "CDV: FREE OK cdv=@STR idx=@LLU tpv=@STR remaining=@LLU",
-		     cdv_uuid, req->extent_index, tpv_uuid, alloc->n_allocated);
+		     "CDV: FREE OK cdv=@STR idx=@LLU tpv=@STR remaining=@LLU n_returns=@LLU",
+		     cdv_uuid, req->extent_index, tpv_uuid, alloc->n_allocated,
+		     alloc->n_free_returns_received);
 
 		NNVMEIBT_BM_FREE(cdv_free_entry, entry);
 
