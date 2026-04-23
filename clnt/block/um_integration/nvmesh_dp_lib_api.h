@@ -27,6 +27,7 @@ struct stale_lock_resolver_t;
 struct nvmeibc_disk_jmdc_read_comp;
 struct nvmeibt_client_recovery_status_pl;
 struct lib_call_api_recov;
+struct dp_io_stats;
 
 /* Below is virtual table of transport layer functions
 	Markers:
@@ -100,6 +101,7 @@ struct lib_call_api_params_generic {				// Parameters to launch sync/io operatio
 struct lib_op_stats_t {							// Various statistics structs which can be updated by Sync / IO
 	struct nvmeibc_sync_stats*    sync;			// If not NULL, sync will update this struct (increase relevant counters)
 	struct nvmeibc_flow_counters* fctr;			// If not NULL, sync will update this struct (increase relevant counters)
+	struct dp_io_stats*           dp_io;		// If not NULL, library copies dp_io_stats here at op finish
 };												// Note: IO op may encounter a problem and launch sync which may update the counters
 
 // Generic output result. Represents a sync op, because IO op can call a sync op as well. In case of IO that called a sync, the final result will be represented here

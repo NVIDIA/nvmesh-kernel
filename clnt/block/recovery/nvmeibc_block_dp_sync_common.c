@@ -357,6 +357,7 @@ static void __syncs_list_op(const int action, struct recovery_sync_op *so)
 		}
 		if (so->error == 0) {
 			const u32 msecs_comp = ((u64)(jiffies - so->o->jiffies1) * 1000)/HZ;
+			IO_STATS_INCR(&so->o->nd->dp.io_stats, DP_IO_STATS_SYNC_SUCCESS_COUNT);
 			if (ss->longest_sync_time < msecs_comp)
 				ss->longest_sync_time = msecs_comp;
 			if (so->n_slices == LOCKSET_SLICES)
@@ -1387,6 +1388,8 @@ static int __convert_stale_special_2_dirty_bit(struct nvmeibc_cmd_lock *lock, nv
 		struct recovery_sync_op *so = __create_autonomous_sync(NVMEIB_BLOCK_IO_OP_REC_R1_CONV_STALE2DB, lock, done_cb, ctx);
 		if (so) {
 			struct nvmeibc_d_rdma_comp *dc = &so->locks[0].comp;
+			struct nvmeibc_cmd_lock *locksets = dp_locks_get_locks_header(lock);
+			IO_STATS_INCR(&locksets->cmds->o->nd->dp.io_stats, DP_IO_STATS_SYNC_STALE_TO_DIRTY_COUNT);
 			dc->lock.id = lock->comp.lock.id;	// Propegate the original holder lock id for handling later
 			set_callback_as_locks_state_machine(dc ,&__convert_stale_special_2_dirty_o);
 			__convert_stale_special_2_dirty_o(dc, nvmeibc_d_rdma_comp_tag_make());

@@ -774,6 +774,9 @@ static void __update_stats_on_finish(struct dplib_caller *sw) {
 	struct lib_op_stats_t *stats = _get_stt_struct(sw);
 	if (stats->sync)
 		*stats->sync = dsr->stats;
+	if (stats->dp_io) {
+		*stats->dp_io = sw->nd.dp.io_stats;
+	}
 	out->err_info.binfo_corrupted = (ifm->n_binfo_errors > 0);
 	out->err_info.htr_null_uuid =   (ifm->n_htr_null_uuids > 0);
 

@@ -68,6 +68,8 @@ enum dp_iostats_names {
 	DP_IO_STATS_LOCK_CONTENDED_COUNT,
 	DP_IO_STATS_LOCK_STALE_COUNT,
 	DP_IO_STATS_WAIT_FOR_LOCKSET_CANCELED_COUNT,
+	DP_IO_STATS_SYNC_STALE_TO_DIRTY_COUNT,
+	DP_IO_STATS_SYNC_SUCCESS_COUNT,
 	DP_IO_STATS_OTHER				// 'o' Other Failed io not following within any of the above groups
 };
 
@@ -129,5 +131,4 @@ void dp_io_stats_add(struct dp_io_stats *t, u64 *counter, int count);
 #define IO_STATS_SYNC_DEC(t, sync_type) IO_STATS_SYNC_ADD((t), (sync_type), -1)
 
 #endif  // ifdef NVMEIBC_B_DP_IOSTATS_H
-
 

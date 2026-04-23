@@ -167,6 +167,8 @@ static const char *__dp_io_stats_names(enum dp_iostats_names name)
 	case DP_IO_STATS_LOCK_CONTENDED_COUNT: return "lock_contended_count";
 	case DP_IO_STATS_LOCK_STALE_COUNT: return "lock_stale_count";
 	case DP_IO_STATS_WAIT_FOR_LOCKSET_CANCELED_COUNT: return "wait_for_lockset_canceled_count";
+	case DP_IO_STATS_SYNC_STALE_TO_DIRTY_COUNT: return "sync_stale_to_dirty_count";
+	case DP_IO_STATS_SYNC_SUCCESS_COUNT: return "sync_success_count";
 	case DP_IO_STATS_OTHER: return "other";
 	default:
 		return "???";
