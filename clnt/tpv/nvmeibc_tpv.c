@@ -341,6 +341,15 @@ static void nvmeibc_tpv_allocator_init(struct nvmeibc_tpv_allocator *alloc,
 						virtual_size_bytes,
 						is_meta_side,
 						data_tpv_extent_size_kb);
+	/*
+	 * high_watermark is the hysteresis band above low_watermark for
+	 * the CDV_FREE_EXTENT return path (Step 2 Commit 2 of
+	 * TPV_Trimming.md).  A return is refused if the pool would drop
+	 * below high_watermark post-return; slots stay allocatable until
+	 * the pool is deep enough to tolerate the drop without immediately
+	 * triggering a replacement CDV_ALLOC_EXTENT.
+	 */
+	alloc->high_watermark          = 2 * alloc->low_watermark;
 
 	/* Per-TPV L1/L2 tree tracking - populated by load_state or tpv_on_cdv_alloc_ok. */
 	alloc->l1_extent_index         = 0;

@@ -390,6 +390,16 @@ static ssize_t tpv_proc_stats_fill(void *arg, char *buf, size_t len)
 		(s64)atomic64_read(&alloc->stat_discard_ok));
 	BUF_ADD("discard_misaligned_skipped:  %lld\n",
 		(s64)atomic64_read(&alloc->stat_discard_misaligned_skipped));
+	BUF_ADD("\n");
+	BUF_ADD("# CDV_FREE_EXTENT return pipeline\n");
+	BUF_ADD("cdv_returns_queued:          %lld\n",
+		(s64)atomic64_read(&alloc->stat_cdv_returns_queued));
+	BUF_ADD("cdv_returns_cancelled:       %lld\n",
+		(s64)atomic64_read(&alloc->stat_cdv_returns_cancelled));
+	BUF_ADD("cdv_returns_parked:          %lld\n",
+		(s64)atomic64_read(&alloc->stat_cdv_returns_parked));
+	BUF_ADD("# (cdv_free_ok above = successful CDV_FREE_EXTENT sends;\n");
+	BUF_ADD("# queued - cancelled - cdv_free_ok = currently parked / in-flight.)\n");
 
 #undef BUF_ADD
 	return count;
@@ -416,6 +426,9 @@ static ssize_t tpv_proc_stats_reset(void *arg, char *buf, size_t len)
 	atomic64_set(&alloc->stat_cdv_alloc_ns,     0);
 	atomic64_set(&alloc->stat_discard_ok,                0);
 	atomic64_set(&alloc->stat_discard_misaligned_skipped, 0);
+	atomic64_set(&alloc->stat_cdv_returns_queued,    0);
+	atomic64_set(&alloc->stat_cdv_returns_cancelled, 0);
+	atomic64_set(&alloc->stat_cdv_returns_parked,    0);
 
 	_NI(tpv_proc_stats_reset_done, "TPV: @STR: proc stats reset", tpv->tpv_name);
 	return (ssize_t)len;

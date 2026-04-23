@@ -194,12 +194,46 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	list_del(&slot->node);
 	alloc->free_tpv_extent_count--;
 
-	/* Increment allocated_count in the owning CDV_extent_ref. */
-	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
-		if (ref->extent_index == slot->cdv_extent_index) {
-			ref->allocated_count++;
-			break;
+	/*
+	 * Find the owning CDV_extent_ref.  It may live on either
+	 * cdv_extent_list (the common case) or pending_return_list (if a
+	 * prior promote moved it there because its allocated_count hit
+	 * zero).  In the latter case, this new allocation "cancels" the
+	 * pending return: flip the ref back to cdv_extent_list so the
+	 * drain skips it.  Without this, the drain would send
+	 * CDV_FREE_EXTENT and TOMA could reassign the extent to another
+	 * TPV while a slot inside it is now live-mapped for this TPV --
+	 * a cross-TPV data-corruption bug.
+	 */
+	{
+		struct nvmeibc_cdv_extent_ref *r;
+		bool found = false;
+
+		list_for_each_entry(r, &alloc->cdv_extent_list, node) {
+			if (r->extent_index == slot->cdv_extent_index) {
+				r->allocated_count++;
+				found = true;
+				break;
+			}
 		}
+		if (!found) {
+			list_for_each_entry(r, &alloc->pending_return_list,
+					    node) {
+				if (r->extent_index !=
+				    slot->cdv_extent_index)
+					continue;
+				/* Cancel the pending return. */
+				list_move_tail(&r->node,
+					       &alloc->cdv_extent_list);
+				alloc->cdv_extents_count++;
+				r->on_pending_return_list = false;
+				r->allocated_count++;
+				atomic64_inc(&alloc->stat_cdv_returns_cancelled);
+				found = true;
+				break;
+			}
+		}
+		WARN_ON(!found);
 	}
 
 	/* Allocate the xarray value (GFP_ATOMIC; called from IO context). */
@@ -534,56 +568,37 @@ static void tpv_revert_flushing_frees_locked(struct nvmeibc_tpv_allocator *alloc
 static u32 tpv_promote_flushing_frees_locked(struct nvmeibc_tpv_allocator *alloc)
 {
 	struct nvmeibc_cdv_extent_ref *ref, *rtmp;
-	struct nvmeibc_tpv_free_slot  *s, *stmp;
 	u32 refs_returnable = 0;
 
 	list_for_each_entry_safe(ref, rtmp, &alloc->cdv_extent_list, node) {
 		if (ref->flushing_free_count == 0)
 			continue;
 
-		ref->allocated_count -= ref->flushing_free_count;
+		/*
+		 * Splice snapshotted slots into the TPV-wide free pool
+		 * unconditionally.  Even if this ref is about to be moved
+		 * to pending_return_list (allocated_count about to hit 0),
+		 * we leave its slots in the pool so they stay allocatable
+		 * until the drain runs.  This gives the high_watermark
+		 * gate something to work with (Step 2 Commit 2), and lets
+		 * the alloc-cancels-return path reclaim the extent for a
+		 * concurrent write without needing to re-allocate a whole
+		 * CDV_extent from TOMA.  The drain path purges the slots
+		 * at the moment CDV_FREE_EXTENT is actually about to be
+		 * sent.
+		 */
+		list_splice_tail_init(&ref->flushing_free_slots,
+				      &alloc->free_tpv_extents);
+		alloc->free_tpv_extent_count += ref->flushing_free_count;
+		ref->allocated_count         -= ref->flushing_free_count;
+		ref->flushing_free_count      = 0;
 
 		if (ref->allocated_count == 0 && !ref->is_l1_extent) {
-			/*
-			 * Extent is fully empty and returnable.  Don't
-			 * splice its slots into the pool - they'd be
-			 * purged out again when we return the extent.
-			 * Free them directly.  Also purge any slots for
-			 * this extent that already landed in the free
-			 * pool from an earlier promote cycle.
-			 */
-			list_for_each_entry_safe(s, stmp,
-						 &ref->flushing_free_slots,
-						 node) {
-				list_del(&s->node);
-				kfree(s);
-			}
-			ref->flushing_free_count = 0;
-
-			list_for_each_entry_safe(s, stmp,
-						 &alloc->free_tpv_extents,
-						 node) {
-				if (s->cdv_extent_index ==
-				    ref->extent_index) {
-					list_del(&s->node);
-					alloc->free_tpv_extent_count--;
-					kfree(s);
-				}
-			}
-
 			list_move_tail(&ref->node, &alloc->pending_return_list);
 			alloc->cdv_extents_count--;
+			ref->on_pending_return_list = true;
+			atomic64_inc(&alloc->stat_cdv_returns_queued);
 			refs_returnable++;
-		} else {
-			/*
-			 * Extent stays allocated; promote its parked
-			 * slots to the TPV-wide free pool.
-			 */
-			list_splice_tail_init(&ref->flushing_free_slots,
-					      &alloc->free_tpv_extents);
-			alloc->free_tpv_extent_count +=
-				ref->flushing_free_count;
-			ref->flushing_free_count = 0;
 		}
 	}
 
@@ -603,10 +618,22 @@ int nvmeibc_tpv_flush_and_promote(struct nvmeibc_tpv *tpv)
 	rv = nvmeibc_tpv_flush_state(tpv);
 
 	spin_lock(&alloc->lock);
-	if (rv == 0)
+	if (rv == 0) {
 		refs_returnable = tpv_promote_flushing_frees_locked(alloc);
-	else
+		/*
+		 * Also wake cdv_alloc_work if pending_return_list is
+		 * non-empty, even when we didn't queue a new ref this
+		 * cycle.  A previous drain may have parked refs at the
+		 * high_watermark; this promotion grew the pool, so the
+		 * gate may now be satisfied.  Without this re-arm, parked
+		 * refs can sit indefinitely while activity flows through
+		 * the free pool around them.
+		 */
+		if (!list_empty(&alloc->pending_return_list))
+			refs_returnable = refs_returnable ? refs_returnable : 1;
+	} else {
 		tpv_revert_flushing_frees_locked(alloc);
+	}
 	spin_unlock(&alloc->lock);
 
 	if (refs_returnable > 0 &&
@@ -686,13 +713,70 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
 {
 	struct nvmeibc_tpv_allocator  *alloc = &tpv->allocator;
 	struct nvmeibc_cdv_extent_ref *ref, *tmp;
+	struct nvmeibc_tpv_free_slot  *s, *stmp;
 	struct nvmeibc_cdv_free_req    freq;
+	u64 n_slots = tpv_slots_per_cdv_extent(alloc);
 	LIST_HEAD(to_send);
 	int rv;
 
-	/* Snapshot the list under lock; process outside. */
+	/*
+	 * Under alloc->lock, walk pending_return_list head-to-tail.  For
+	 * each ref, apply the Step 2 Commit 2 gates and prep:
+	 *
+	 *   1. Watermark gate.  Returning an extent drops the free pool by
+	 *      its n_slots.  Refuse the return if the post-return pool
+	 *      would fall below high_watermark.  All refs on this list own
+	 *      the same-sized extents, so once one is refused the rest
+	 *      are too - break.
+	 *   2. Slot purge.  Until now the ref's slots have been sitting
+	 *      in alloc->free_tpv_extents (kept there by
+	 *      tpv_promote_flushing_frees_locked so the alloc-cancels-
+	 *      return path could reclaim them).  Remove them now so that
+	 *      once CDV_FREE_EXTENT lands and TOMA reassigns the extent,
+	 *      we never hand one of those slots to a new guest write.
+	 *      Also defensively drain ref->pending_free_slots (should be
+	 *      empty since allocated_count is 0, but free-memory cost is
+	 *      trivial and the invariant is clearer).
+	 *   3. Clear on_pending_return_list and transfer to a local
+	 *      to_send list.  Lock released, IB admin sends below.
+	 */
 	spin_lock(&alloc->lock);
-	list_splice_init(&alloc->pending_return_list, &to_send);
+	list_for_each_entry_safe(ref, tmp, &alloc->pending_return_list, node) {
+		if (alloc->free_tpv_extent_count <
+		    n_slots + alloc->high_watermark) {
+			/*
+			 * Watermark gate.  Leave this (and all subsequent)
+			 * refs parked.  Re-examination is driven by the next
+			 * flush_and_promote that grows the pool past the
+			 * gate; no explicit re-schedule here (that would
+			 * infinite-loop cdv_alloc_work since nothing has
+			 * changed between this drain and the next one we'd
+			 * trigger).
+			 */
+			atomic64_inc(&alloc->stat_cdv_returns_parked);
+			break;
+		}
+
+		/* Purge this extent's slots from the TPV-wide free pool. */
+		list_for_each_entry_safe(s, stmp,
+					 &alloc->free_tpv_extents, node) {
+			if (s->cdv_extent_index != ref->extent_index)
+				continue;
+			list_del(&s->node);
+			alloc->free_tpv_extent_count--;
+			kfree(s);
+		}
+		/* Defensive: drain pending_free_slots on the ref. */
+		list_for_each_entry_safe(s, stmp,
+					 &ref->pending_free_slots, node) {
+			list_del(&s->node);
+			kfree(s);
+		}
+		ref->pending_free_count = 0;
+
+		ref->on_pending_return_list = false;
+		list_move_tail(&ref->node, &to_send);
+	}
 	spin_unlock(&alloc->lock);
 
 	list_for_each_entry_safe(ref, tmp, &to_send, node) {
@@ -706,21 +790,26 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
 						      &freq);
 		if (rv) {
 			/*
-			 * Send failed: put back in pending_return_list for retry.
-			 * The extent is already not in the active cdv_extent_list
-			 * and its slots are removed from free_tpv_extents, so it
-			 * is effectively dead until it is successfully returned.
+			 * Send failed.  The extent's slots have already been
+			 * purged from alloc->free_tpv_extents above (so no
+			 * stale slot can be re-allocated), which makes this
+			 * extent effectively "owned by TOMA but invisible to
+			 * the allocator" until the retry succeeds.  Put the
+			 * ref back on pending_return_list (flag set again) so
+			 * the next drain picks it up.
 			 */
 			_NW(tpv_cdv_free_fail,
 			    "TPV: @STR: CDV_FREE_EXTENT extent=@LLU failed rv=@INT; will retry",
 			    tpv->tpv_name, ref->extent_index, rv);
 			spin_lock(&alloc->lock);
+			ref->on_pending_return_list = true;
 			list_add_tail(&ref->node, &alloc->pending_return_list);
 			spin_unlock(&alloc->lock);
 		} else {
-			_ND(tpv_cdv_ext_returned, "TPV: @STR: CDV_extent[@LLU] returned to TOMA",
+			_ND(tpv_cdv_ext_returned,
+			    "TPV: @STR: CDV_extent[@LLU] returned to TOMA",
 			    tpv->tpv_name, ref->extent_index);
-			atomic64_inc(&tpv->allocator.stat_cdv_free_ok);
+			atomic64_inc(&alloc->stat_cdv_free_ok);
 			list_del(&ref->node);
 			kfree(ref);
 		}

@@ -140,6 +140,16 @@ struct nvmeibc_cdv_extent_ref {
 	struct list_head flushing_free_slots;
 	u32              pending_free_count;
 	u32              flushing_free_count;
+
+	/*
+	 * true iff this ref is currently on alloc->pending_return_list.
+	 * Used by the alloc-cancels-return path in nvmeibc_tpv_alloc_extent:
+	 * if a concurrent write reclaims a slot whose owning extent is
+	 * already queued for CDV_FREE_EXTENT, we flip the ref back onto
+	 * cdv_extent_list.  A bool is used instead of list-pointer
+	 * introspection so the test is a single load with no walking.
+	 */
+	bool             on_pending_return_list;
 };
 
 /*
@@ -153,6 +163,7 @@ static inline void nvmeibc_cdv_extent_ref_init_lists(
 	INIT_LIST_HEAD(&ref->node);
 	INIT_LIST_HEAD(&ref->pending_free_slots);
 	INIT_LIST_HEAD(&ref->flushing_free_slots);
+	ref->on_pending_return_list = false;
 }
 
 /*
@@ -190,6 +201,12 @@ struct nvmeibc_tpv_allocator {
 
 	u64              low_watermark;		/* schedule CDV alloc when count drops below */
 						/* default: 50 MB / tpv_extent_size */
+	u64              high_watermark;	/* refuse CDV_FREE_EXTENT if the pool */
+						/* would drop below this post-return. */
+						/* default: 2 x low_watermark.  Hysteresis */
+						/* against the pre-fetch floor so we don't */
+						/* return an extent only to re-alloc it */
+						/* moments later. */
 
 	/*
 	 * Per-allocator statistics - updated via atomic ops (no lock required).
@@ -210,6 +227,14 @@ struct nvmeibc_tpv_allocator {
 	atomic64_t       stat_discard_ok;	/* extents freed via guest DISCARD */
 	atomic64_t       stat_discard_misaligned_skipped;
 						/* DISCARD ranges with non-extent-aligned ends; counted per bio */
+
+	/* Return-to-CDV path (Step 2 Commit 2 of TPV_Trimming.md).  cdv_free_ok
+	 * (above) already counts successful CDV_FREE_EXTENT IB sends; these
+	 * additional counters surface the interior of the return pipeline
+	 * so operators can diagnose "why didn't this extent return yet?". */
+	atomic64_t       stat_cdv_returns_queued;     /* refs moved to pending_return_list */
+	atomic64_t       stat_cdv_returns_cancelled;  /* returns undone by concurrent alloc */
+	atomic64_t       stat_cdv_returns_parked;     /* drain attempts gated by high_watermark */
 
 	/*
 	 * Per-TPV L1/L2 tree metadata (dynamic L2 placement).

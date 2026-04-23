@@ -224,6 +224,28 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
 	list_splice_tail(&batch, &alloc->free_tpv_extents);
 	alloc->free_tpv_extent_count += (n_slots - first_s);
 
+	/*
+	 * Step 2 Commit 2 extension: if this adopted orphan has no data
+	 * or L2 slots (allocated_count == 0) and is not the L1 extent,
+	 * it is immediately returnable.  Move it onto pending_return_list
+	 * so the next cdv_alloc_work drains it.  Without this, an
+	 * adopted-but-empty extent would sit on cdv_extent_list
+	 * indefinitely because nothing else triggers flush_and_promote's
+	 * pending_return_list transition -- the extent has no parked
+	 * frees to process.
+	 *
+	 * The extent's slots stay in alloc->free_tpv_extents (we just
+	 * spliced them).  The drain's watermark gate may or may not let
+	 * them go right away; if not, they remain allocatable until the
+	 * pool is deep enough to allow the return.
+	 */
+	if (ref->allocated_count == 0 && !ref->is_l1_extent) {
+		list_move_tail(&ref->node, &alloc->pending_return_list);
+		alloc->cdv_extents_count--;
+		ref->on_pending_return_list = true;
+		atomic64_inc(&alloc->stat_cdv_returns_queued);
+	}
+
 	return 0;
 }
 
