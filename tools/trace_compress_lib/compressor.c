@@ -345,12 +345,3 @@ struct decompress_file_result decompress_file_if_needed(struct fspath const* com
 	}
 	return (struct decompress_file_result){.fpath = decompressed_fpath};
 }
-
-size_t iovecs_total_size(struct iovec *iovecs, size_t n_iovecs)
-{
-	size_t tot_size = 0;
-	for (struct iovec *curr = iovecs; curr != iovecs + n_iovecs; ++curr) {
-		tot_size += curr->iov_len;
-	}
-	return tot_size;
-}
