@@ -349,6 +349,19 @@ void block_api_os_put(struct nvmeibc_os_api *os)
 }
 
 #define get_os_api_cints(p) __get_from_params_blok_globals_container(p)->osc
+
+void nvmeibc_os_api_assign_disk_id(const struct nvmeibc_cinst_params_blk *p, struct gendisk *disk, const char *vol_name)
+{
+	struct nvmeibc_os_apis_container *c = get_os_api_cints(p);
+	disk->major = nvmeibc_use_block_external_major ? 0 : c->drv_ver.nvmeibc_major;
+	disk_id_allocator_alloc(&c->dia, disk, vol_name);
+}
+
+void nvmeibc_os_api_release_disk_id(const struct nvmeibc_cinst_params_blk *p, struct gendisk *disk)
+{
+	struct nvmeibc_os_apis_container *c = get_os_api_cints(p);
+	disk_id_allocator_free(&c->dia, disk);
+}
 /********************** Partitions revalidation mechanism *********************/
 /* Disk revalidation is a relatively short task which is shceduled on the main
    wq. However, it invokes a reread partition task which is a blocking IO and

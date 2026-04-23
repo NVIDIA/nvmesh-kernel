@@ -39,6 +39,8 @@
 #include "clnt/nvmeibc_volume.h"		/* nvmeibc_volume, cdv_allocator_toma_id */
 #include "common/nvmeib_common_os_block_api.h"	/* REQ_RET, REQ_RET_ZERO */
 #include "clnt/nvmeibc_block.h"			/* KERNEL_SECTOR_SHIFT */
+#include "clnt/block/os_api/nvmeibc_block_api_os_common.h"	/* nvmeibc_os_api_assign_disk_id */
+#include "clnt/main/utils/nvmeibc_main_block_gen_work_sched.h"	/* nvmeibc_isnt_params_main2blk */
 
 /*
  * IO_TIME_OUT_ATTACH / IO_TIME_OUT_NORMAL are local to nvmeibc_block.c;
@@ -524,10 +526,14 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 #endif
 
 	/* -- 3. Configure disk ------------------------------------------- */
-	disk->major       = 0;
-	disk->first_minor = 0;
-	disk->minors      = 0;
-	disk->flags      |= GENHD_FL_EXT_DEVT;
+	/*
+	 * Reserve a unique minor from the client-instance DIA. Mirrors the
+	 * regular block path (nvmeibc_block_api_os.c:__prepare_atom_for_io);
+	 * hardcoding first_minor=0 here collides with other TPVs on hot
+	 * upgrade probe (disk_id_allocator_mark) and trips a WARN.
+	 */
+	nvmeibc_os_api_assign_disk_id(nvmeibc_isnt_params_main2blk(tpv->cdv_vol->p),
+				      disk, tpv->tpv_name);
 	disk->fops        = &tpv->tpv_live_fops;
 	disk->private_data = tpv;
 	queue->queuedata   = tpv;
@@ -628,6 +634,7 @@ static int nvmeibc_tpv_blkdev_register(struct nvmeibc_tpv *tpv)
 
 #if KS_ADD_DISK_INT_RV
 err_put_disk:
+	nvmeibc_os_api_release_disk_id(nvmeibc_isnt_params_main2blk(tpv->cdv_vol->p), disk);
 #endif
 #if KS_HAS_BLK_CLEANUP_DISK
 	blk_cleanup_disk(disk);
@@ -652,6 +659,8 @@ static void nvmeibc_tpv_blkdev_unregister(struct nvmeibc_tpv *tpv)
 	 * references.  On kernels >=5.15 it also drains in-flight IO.
 	 */
 	del_gendisk(tpv_disk(tpv));
+	nvmeibc_os_api_release_disk_id(nvmeibc_isnt_params_main2blk(tpv->cdv_vol->p),
+				       tpv_disk(tpv));
 
 #if KS_HAS_BLK_CLEANUP_DISK
 	/* blk_cleanup_disk does put_disk + queue cleanup */

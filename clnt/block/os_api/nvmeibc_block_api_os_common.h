@@ -29,6 +29,15 @@ void disk_id_allocator_alloc(struct disk_id_allocator_t* al, struct gendisk *dis
 void disk_id_allocator_free( struct disk_id_allocator_t* al, struct gendisk *disk);				// Deallocate minor
 void disk_id_allocator_mark( struct disk_id_allocator_t* al, struct gendisk *disk);	// Mark that minor is allocated after hot upgrade
 
+struct nvmeibc_cinst_params_blk;
+// Assign disk->major and reserve a unique minor from the client-instance DIA.
+// Handles both external-major and internal-major modes (sets GENHD_FL_EXT_DEVT
+// for external). Callers that register a gendisk outside the regular atom
+// path (e.g. TPV) must use this to stay consistent with the DIA bitmap and
+// avoid minor-collision WARNs on hot upgrade.
+void nvmeibc_os_api_assign_disk_id(const struct nvmeibc_cinst_params_blk *p, struct gendisk *disk, const char *vol_name);
+void nvmeibc_os_api_release_disk_id(const struct nvmeibc_cinst_params_blk *p, struct gendisk *disk);
+
 struct nvmeibc_os_apis_container {
 	struct block_device_operations bdev_fops_io;// nvmeibc our block device methods with OS with IO enabled (submit_bio)
 	#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING && !KS_REQUEST_QUEUE_HAS_REQUEST_FN
