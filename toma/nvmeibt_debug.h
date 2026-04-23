@@ -191,16 +191,22 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 	#define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...) syslog(SYSLOG_LOG_LVL, __FMT, ## __VA_ARGS__)
 #endif
 
+static inline bool is_replace_syslog_with_printf(void)
+{
+	bool nvmeibt_toma_is_running_as_a_utility(void);
+	return nvmeibt_toma_is_running_as_a_utility();
+}
+
 #define get_my_tid() (unsigned long)pthread_self()	//syscall(__NR_gettid)
 int trace_to_printf_fmt(char* printf_fmt, int printf_fmt_len, const char* trace_fmt, const char *filename, int line, const char *func_name);
-#define SEND_TO_SYSLOG(_syslog_lvl, auto_generated_printf_fmt, ...) ({							\
-	const int __errno_save = errno;																	\
-	static char printf_fmt[2000];																\
-	if (!printf_fmt[0]) {																		\
-		trace_to_printf_fmt(printf_fmt, sizeof(printf_fmt), auto_generated_printf_fmt, kbasename(__FILE__), __LINE__, __FUNCTION__); \
-	}																							\
-	NVMEIBT_THROTTLED_SYSLOG(_syslog_lvl, printf_fmt, ## __VA_ARGS__);							\
-	errno = __errno_save;																		\
+#define SEND_TO_SYSLOG(_syslog_lvl, auto_generated_printf_fmt, ...) ({															\
+	const int __errno_save = errno;																										\
+	if (is_replace_syslog_with_printf()) {																								\
+		fprintf(stderr, "%s[%d]:%s:" auto_generated_printf_fmt "\n", kbasename(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);		\
+	} else {																															\
+		NVMEIBT_THROTTLED_SYSLOG(_syslog_lvl, "%s[%d]:%s:" auto_generated_printf_fmt, kbasename(__FILE__), __LINE__, __FUNCTION__, ##__VA_ARGS__);	\
+	}																																	\
+	errno = __errno_save;																												\
 })
 
 #define LOG_TO_TRACE(LVL, name, ch, toma_lvl_str, fmt, ...) ({																		\
