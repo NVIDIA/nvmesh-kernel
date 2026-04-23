@@ -37,6 +37,9 @@
 		clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
 		return ((((unsigned long long)ts.tv_sec)*1000000000ULL) + (((unsigned long long)(ts.tv_nsec))));	// Nano seconds
 	}
+	static inline unsigned int nvmeib_public_tsc_khz(void) {
+		return 1000000;	/* We used clock_gettime in ns, same as kernel's ktime_get_raw */
+	}
 #elif __has_include("rte_cycles.h")
 	#include "rte_cycles.h" // use Nvidia user space DPDK functionality
 	#define nvmeib_public_rdtsc() rte_rdtsc()
