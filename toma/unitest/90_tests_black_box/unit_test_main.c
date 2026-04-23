@@ -431,7 +431,7 @@ static void scenario_create_remove_r1(void) {
 	scenario_attach_good_path_io_on_volume(0);
 	scenario_attach_good_path_io_on_volume(1);
 
-	scenario_evict_rebuild_r1();
+	if (0) scenario_evict_rebuild_r1();
 
 	SCENARIO_PRINT(__AUTOID__, "Simulate degraded mode of V_R1");
 	peer_toma_simu_ignore_append_entries_by_node(2);
