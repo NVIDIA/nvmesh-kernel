@@ -545,7 +545,7 @@
                 "attachmentsVersion" : "i",
                 "volumeVersionsSum" : "I",
                 "timestamp" : "__codec SecsSinceEpoch()",
-                "nHiddenVolumes " : "I"
+                "nHiddenVolumes" : "I"
         },
         "kafka_header_s": {
                 "__type" : "used",
