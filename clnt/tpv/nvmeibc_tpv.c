@@ -152,6 +152,65 @@ struct nvmeibc_tpv *nvmeibc_tpv_find_by_uuid(const char *uuid)
 }
 
 /*
+ * nvmeibc_tpv_snapshot_compaction_progress - fill a caller-provided buffer
+ * with per-TPV compaction progress for every attached TPV whose job is not
+ * IDLE.  Used by the client keepalive builder (TPV_Trimming.md Step 4)
+ * to piggyback progress on every keepalive tick; management's
+ * handleTPVCompactionStats fans each entry out to the compactionJob doc
+ * keyed by tpv_uuid.
+ *
+ * Returns the total number of eligible TPVs (may exceed @cap).  The
+ * first min(count, cap) entries are written to @entries.
+ */
+u32 nvmeibc_tpv_snapshot_compaction_progress(
+	struct nvmeibc_tpv_compaction_snapshot *entries, u32 cap)
+{
+	struct nvmeibc_tpv *tpv;
+	unsigned long flags;
+	u32 total = 0;
+
+	spin_lock_irqsave(&nvmeibc_tpv_list_lock, flags);
+	list_for_each_entry(tpv, &nvmeibc_tpv_active_list, list_node) {
+		int s = atomic_read(&tpv->compaction_job.state);
+		const char *state_str;
+
+		if (s == TPV_COMPACTION_IDLE)
+			continue;
+		switch (s) {
+		case TPV_COMPACTION_RUNNING:  state_str = "running";  break;
+		case TPV_COMPACTION_STOPPING: state_str = "aborting"; break;
+		case TPV_COMPACTION_DONE:
+			/*
+			 * Kernel's terminal is "done"; management maps to
+			 * "completed".  handleTPVCompactionStats does this
+			 * translation, so send the kernel-native word.
+			 */
+			state_str = "done";
+			break;
+		default:
+			state_str = "unknown";
+			break;
+		}
+
+		if (total < cap) {
+			struct nvmeibc_tpv_compaction_snapshot *e = &entries[total];
+			strncpy(e->tpv_uuid, tpv->tpv_uuid, sizeof(e->tpv_uuid) - 1);
+			e->tpv_uuid[sizeof(e->tpv_uuid) - 1] = '\0';
+			strncpy(e->state, state_str, sizeof(e->state) - 1);
+			e->state[sizeof(e->state) - 1] = '\0';
+			e->relocated           = atomic64_read(&tpv->compaction_job.relocated);
+			e->planned_relocations = atomic64_read(&tpv->compaction_job.planned_relocations);
+			e->reclaimed           = atomic64_read(&tpv->compaction_job.reclaimed_extents);
+			e->l2_relocated        = atomic64_read(&tpv->compaction_job.l2_relocated);
+		}
+		total++;
+	}
+	spin_unlock_irqrestore(&nvmeibc_tpv_list_lock, flags);
+	return total;
+}
+EXPORT_SYMBOL(nvmeibc_tpv_snapshot_compaction_progress);
+
+/*
  * nvmeibc_tpv_detach_all_for_inst - detach every active TPV that belongs to
  * client instance @cinst (identified by tpv->cdv_vol->p).
  *
@@ -1062,6 +1121,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 	atomic_set(&tpv->meta_cdv_alloc_pending, 0);
 	atomic_set(&tpv->io_inflight, 0);
+	tpv_compaction_init(tpv);	/* TPV_Trimming.md Step 4 */
 
 	/*
 	 * Start with the attach timeout.  When io_max_retry_secs is 0
@@ -1190,6 +1250,14 @@ err_free_alloc:
 	cancel_delayed_work_sync(&tpv->timeout_work);
 	/* Unregister the block device if blkdev_register already succeeded. */
 	nvmeibc_tpv_blkdev_unregister(tpv);
+	/*
+	 * Tear down the compaction job BEFORE freeing the allocator.
+	 * tpv_compaction_destroy sets the shutdown flag, drains any
+	 * /proc-queued start-works, and waits for any in-flight
+	 * compaction workers to exit.  Only once workers are gone is
+	 * it safe to release the allocator state they read.
+	 */
+	tpv_compaction_destroy(tpv);	/* TPV_Trimming.md Step 4 */
 	if (tpv->meta_allocator) {
 		nvmeibc_tpv_allocator_free(tpv->meta_allocator);
 		kfree(tpv->meta_allocator);
@@ -1211,6 +1279,12 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 		return;
 
 	atomic_set(&tpv->state, TPV_DETACHING);
+
+	/* Cancel any in-flight offline compaction (TPV_Trimming.md Step 4).
+	 * Sets the abort flag; tpv_compaction_destroy below waits for the
+	 * worker/L2-writer threads to exit before freeing compaction state. */
+	nvmeibc_tpv_abort_any_compaction_for(tpv);
+
 	nvmeibc_tpv_list_remove(tpv);
 
 	/*
@@ -1266,8 +1340,18 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 			bio_endio(bio, -EIO);
 	}
 
-	/* -- 4. Deregister proc entries and free allocator state ---------- */
+	/* -- 4. Deregister proc entries, tear down compaction, free allocator -- */
 	nvmeibc_tpv_proc_deregister(tpv);
+	/*
+	 * tpv_compaction_destroy MUST run before allocator_free: it sets
+	 * shutdown, drains any /proc-triggered start-works, and waits for
+	 * in-flight compaction workers to exit.  Workers read allocator
+	 * state, so we must not free it until they are gone.  After proc
+	 * deregistration no new /proc writes can come in, so the only
+	 * remaining source of compaction activity is whatever was in
+	 * flight before this point.
+	 */
+	tpv_compaction_destroy(tpv);	/* TPV_Trimming.md Step 4 */
 	if (tpv->meta_allocator) {
 		nvmeibc_tpv_allocator_free(tpv->meta_allocator);
 		kfree(tpv->meta_allocator);

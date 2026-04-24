@@ -118,7 +118,7 @@ defined at length in the main doc
 | **pending_return_list** | Per-TPV list of refs whose `allocated_count` hit zero and are awaiting `CDV_FREE_EXTENT`. |
 | **persist_work / flush_state** | Client-kernel work item that flushes dirty L1/L2 pages to CDV. |
 | **compaction attach** | Weak-reservation TPV attach issued by management to a target-hosted compaction client for the duration of an offline-compaction job; preemptible by any regular guest attach without a preempt flag. Display name `<tpv-name>-compaction`. |
-| **compactionJob** | Mongo-side job-state record on the volume doc: `{state, tomaId, clientId, startedAt, progress, lastError}`. |
+| **compactionJob** | Mongo-side job-state record on the volume doc: `{state, clientId, startedAt, progress, progressUpdatedAt, lastError}`. |
 
 ### Non-goals
 
@@ -193,13 +193,14 @@ point at the new physical location; data is unchanged.
 Two flavors:
 
 - **Offline compaction** runs while the TPV has no guest client
-  attached. A management-orchestrated job attaches the TPV to a
-  target-hosted compaction client, which plans and executes the
-  relocations using the same L1/L2 + allocator + CDV bio path it
-  uses for normal service. Driven by TOMA's recovery-task state
-  machine (a new `TPV_COMPACTION` recovery type). Best for TPVs
-  that are idle for long windows and can be compacted without
-  affecting any attached workload.
+  attached.  A management-orchestrated job attaches the TPV to a
+  target-hosted compaction client with `isCompaction=true` on
+  the attach record; the client kernel does the work, the
+  client's management agent reports progress to management via
+  Kafka, and detach terminates the job.  **TOMA is not in the
+  loop** - the attach control plane IS the compaction control
+  plane.  Best for TPVs that are idle for long windows and can
+  be compacted without affecting any attached workload.
 - **Online compaction** runs while the TPV is attached, from
   inside the client kernel. The client already owns the
   authoritative mapping (xarray, L1/L2, allocator), so it
@@ -282,21 +283,21 @@ without a journal (§ Core crash-safety invariants).*
   when an extent returns to the CDV-wide free pool and at least
   one client had bios parked on `CDV_ALLOC_CDV_FULL`. Receivers
   re-arm `cdv_alloc_work` on matching TPVs.
-- `startTPVCompaction` - management-to-TOMA Kafka,
-  `{cdvUUID, tpvUUID, compactionClientID}`.
-  Allocator TOMA instantiates a `recovery_task` of type
-  `TPV_COMPACTION` against the named registrant and sends
-  `RECOVER_START` over the existing IB admin channel.
-- `abortTPVCompaction` - management-to-TOMA Kafka,
-  `{cdvUUID, tpvUUID}`. Allocator TOMA sends `RECOVER_ABORT` to
-  the registrant; the worker exits at its next batch boundary.
+(no new TOMA-bound messages for compaction - TOMA is not in
+the loop)
 
-**New Kafka messages:** none for trim (reuses `CDVAllocatorStats`
-/ `TPVStats`); none for online compaction. Offline compaction
-adds `startTPVCompaction` / `abortTPVCompaction` on the
-management-to-TOMA channel, with progress + completion riding
-the existing rebuild-progress Kafka path from
-`toma/nvmeibt_recovery.c`.
+**New Kafka messages:** none for trim (reuses
+`CDVAllocatorStats` / `TPVStats`); none for online compaction.
+Offline compaction adds a single client-agent-to-management
+Kafka message:
+
+- `tpvCompactionStats` - client-agent -> management, published
+  at ~5 s cadence while a compaction attach is live.  Payload:
+  `{tpvUUID, clientId, state, relocated, plannedRelocations,
+  reclaimed}`.  Terminal values of `state` are `done`,
+  `failed`, `aborted`.  Management's `handleTPVCompactionStats`
+  updates `compactionJob.progress`; on terminal state, mgmt
+  detaches the compaction attach and flips `compactionJob.state`.
 
 **New attachments:** a **compaction attach** of the TPV to a
 target-hosted compaction client for the job's duration. It is a
@@ -377,11 +378,10 @@ change that released it is durable.**
 
 **Emergency controls:**
 
-- Global off-switch for offline compaction at two levels
-  (management: `settings.tpvOfflineCompactionEnabled`; TOMA
-  runtime: `offline_compaction_enabled` in `oper_params[]`). Both
-  default on; either one flipping off blocks new jobs without
-  touching in-flight.
+- Global off-switch for offline compaction: cluster setting
+  `settings.tpvOfflineCompactionEnabled` (default `true`).
+  When flipped off, new jobs are rejected without touching
+  in-flight jobs.
 - Per-TPV abort (`DELETE /compaction`) terminates an in-flight
   job within one slot relocation (typically single-digit ms).
 
@@ -524,11 +524,13 @@ enhancement in *Notes / TO-Dos*.
 4. **Offline client-driven compaction.** A target-hosted client reads
    live slots out of half-full extents and rewrites them into denser
    extents the same TPV already owns; an emptied source extent returns
-   to the CDV via the existing Step 2 drain. Driven by TOMA's
-   recovery-task state machine (a new `TPV_COMPACTION` recovery type).
-   Gated on a cost/benefit check to avoid write amplification on CDVs
-   that don't need it. Interruptible: any regular guest attach preempts
-   the weak compaction attach without a preempt flag.
+   to the CDV via the existing Step 2 drain.  Triggered entirely
+   through the attach control plane: `isCompaction=true` on the attach
+   record routes the client into the compaction worker; removing the
+   attach stops it.  Management observes progress via a periodic
+   `TPVCompactionStats` Kafka message from the client agent.  TOMA is
+   not in the loop.  Interruptible: any regular guest attach preempts
+   the compaction attach via the management-layer asymmetric rule.
 5. **Online compaction.** Client-driven, per-L2-entry locking. Relocates
    one virtual extent at a time while the TPV stays attached; serializes
    only against concurrent IO to the *same* virt_idx, not the whole
@@ -895,19 +897,20 @@ into dense ones, then returning the emptied extents.
     client unifies the two features; shipping it in TOMA would
     mean writing the same code twice in two languages.
   - **CDV-offline blast radius stays contained.** A hang in the
-    compaction path stays in the compaction TOMA's local client;
-    other CDVs on the node, the CDV's elected allocator TOMA, and
-    the allocators of other TPVs on this CDV all remain
-    responsive.
-  - **Why target-only:** the compaction client needs CDV (and, in
-    split mode, meta-CDV) access across *every* chunk of the
+    compaction path stays in the compaction client's kernel on
+    the target node; other CDVs on the node, the CDV's elected
+    allocator TOMA, and the allocators of other TPVs on this
+    CDV all remain responsive.
+  - **Why target-only:** the compaction client needs CDV (and,
+    in split mode, meta-CDV) access across *every* chunk of the
     volume, which is the reachability profile of a target node
-    attach. Management picks the compaction TOMA either by
-    operator specification (`POST` body `toma`) or at random from
-    currently-up TOMAs - no candidacy set, no headroom gating.
-    Since the CDV is already reachable on the compaction host for
-    target-side I/O, operator-level access to `/dev/nvmesh/<cdv>`
-    already exists there; compaction adds no new blast radius.
+    attach.  Management picks the compaction client either by
+    operator specification (`POST` body `client`) or at random
+    from currently-up target nodes - no candidacy set, no
+    headroom gating.  Since the CDV is already reachable on the
+    compaction host for target-side I/O, operator-level access
+    to `/dev/nvmesh/<cdv>` already exists there; compaction
+    adds no new blast radius.
 
 ### Why standard attach (not hidden attach)
 An earlier draft proposed attaching the TPV in a "hidden" mode that
@@ -942,139 +945,147 @@ attachment record (`isCompaction=true`), not a kernel reservation
 mode. The kernel sees two ordinary attach / detach operations.
 
 ### End-to-end flow
-Compaction is a manually-triggered management job, orchestrated
-via the same recovery-task state machine in
-`toma/nvmeibt_recovery.c` that drives dirty / stale rebuilds,
-EC-cold recovery, and scrubbing. A new recovery type
-`NVMEIBT_RECOVERY_TYPE_TPV_COMPACTION` joins the existing enum;
-no new orchestration framework.
+Compaction is a manually-triggered management job driven
+entirely through the attach control plane.  **TOMA is not in
+the loop** - it does no compaction work, holds no compaction
+state, and exchanges no compaction-specific messages.  The
+attach record is the job controller: its presence means the
+job exists, its progress counters track it, and removing the
+attach stops the job.
 
 1. Operator (or automation) calls
    `POST /thinProvisioning/tpv/:id/compaction` with an optional
-   `{ toma, aggressiveness }` body.
-2. Management picks a **compaction TOMA** (any target node):
-   either the hostname supplied in the `toma` field (for
-   operators dedicating a node to compaction), or a random
-   currently-up TOMA if the field is absent. Management holds a
-   cluster setting `settings.tpvOfflineCompactionMaxJobsPerTOMA`
-   (default 4) and enforces it by counting rows in the
-   `compactionJob` collection whose `state` is in the non-
-   terminal set `{pending, attaching, running, aborting}` per
-   TOMA:
-   - **Explicit `toma`:** if that TOMA is down, return
-     `503 toma-not-available`; if it is up but already at the
-     max, return `503 toma-busy`.
-   - **Random:** take the set of currently-up TOMAs whose
-     in-flight count is strictly below the max. Pick one at
-     random. If the set is empty (all down or all at max),
-     return `503 no-toma-available`.
+   `{ client, aggressiveness }` body.
+2. Management picks a **compaction client** (any target node -
+   the compaction work runs in the target-hosted NVMesh client
+   kernel): either the hostname supplied in the `client` field,
+   or a random currently-up target node if the field is absent.
+   Management enforces the per-client cap
+   `settings.tpvOfflineCompactionMaxJobsPerClient` (default 4)
+   by counting `compactionJob` rows whose `state` is in the
+   non-terminal set `{pending, attaching, running, aborting}`
+   per `clientId`:
+   - **Explicit `client`:** if that node is down, return
+     `503 client-not-available`; if it is up but already at the
+     max, return `503 client-busy`.
+   - **Random:** take the set of currently-up target nodes
+     whose in-flight count is strictly below the max; pick one
+     at random.  If empty, return `503 no-client-available`.
 
-   No TOMA-side concurrency state, no queue: jobs are either
-   admitted immediately or rejected. The operator retries later.
-3. Management attaches the TPV to the compaction TOMA's local
-   client via a standard `attachVolume` / `attachTPV` path. The
-   attachment record carries:
+   No transport-side concurrency state, no queue.
+3. Management attaches the TPV to the compaction client via a
+   standard `attachVolume` / `attachTPV` path.  The Kafka
+   attach payload that reaches the client's management agent
+   carries two new fields:
    - `isCompaction=true` (flags the attachment for the
-     management-layer asymmetric-preempt rule - never preempts,
-     always auto-detached by an incoming regular attach);
-   - `compactionJobId` = the `compactionJob._id` (ties the
-     attachment back to its job so cleanup on terminal state
-     unambiguously targets the right attachment);
-   - **display name** `<tpv-name>-compaction`, rendered in the
-     GUI under the Targets page's Compaction Attachments column.
+     management-layer asymmetric-preempt rule; also routes the
+     client-side post-attach handler into the compaction
+     trigger);
+   - `aggressiveness` (the parallelism cap for the worker).
 
-   The standard `attachTPV` path auto-attaches the parent CDV
-   (and meta-CDV in split mode) to the compaction TOMA via the
-   usual `tpv:<tpvUUID>` reference on the CDV's attachment
-   record. No new CDV reference is introduced - the CDV detaches
-   naturally when the TPV detaches on job completion.
-4. Management sends `ManagementToTOMA.startTPVCompaction` Kafka
-   to the compaction TOMA with
-   `{cdvUUID, tpvUUID, aggressiveness}`.
-5. The compaction TOMA instantiates a `recovery_task` of type
-   `TPV_COMPACTION` against its local client's registrant for
-   this TPV, driving the existing rebuild state machine
-   `INIT -> WAIT_CLIENT -> IN_PROGRESS -> terminal`. TOMA does
-   not enforce its own concurrency cap - management already did
-   the admission check in step 2.
-6. TOMA sends `NVMEIBT_CLIENT_MSG_TR_RECOVER_START` to the
-   local registrant with a compaction payload
-   `{tpv_uuid, aggressiveness}`. The client
-   kernel routes by recovery type to `tpv_compaction_run`.
-7. The compaction worker loops: assess -> pick sparsest
+   The attachment record on the client doc also stores
+   `compactionJobId` for cleanup.  Display name
+   `<tpv-name>-compaction` renders on the Targets page's
+   Compaction Attachments column.  The standard `attachTPV`
+   path auto-attaches the parent CDV (and meta-CDV in split
+   mode) via the usual `tpv:<tpvUUID>` reference; no new CDV
+   reference is introduced.
+4. The compaction client's userspace management agent sees the
+   attach instruction with `isCompaction=true`, drives the
+   normal kernel attach, waits for `state_loaded`, then writes
+   `aggressiveness=N` to
+   `/proc/nvmeibc/tpv/<tpv-name>/compaction`.  The kernel picks
+   up that write and schedules `tpv_compaction_run` on a work
+   queue.
+5. The compaction worker loops: assess -> pick sparsest
    `cdv_extent_ref` as source and a dense-but-not-full
    `cdv_extent_ref` as dest (both already allocated to this
    TPV, so no per-slot allocator round-trip) -> relocate slots
    one at a time by reading source, writing dest, and rewriting
-   the single L2 leaf. When a source extent's `allocated_count`
-   reaches zero, the existing Step 2 drain (`pending_return_list`
-   -> `cdv_alloc_work` -> `CDV_FREE_EXTENT`) returns it to the
-   CDV - the same path everyday discards use, which the TOMA
+   the single L2 leaf.  When a source extent's
+   `allocated_count` reaches zero, the existing Step 2 drain
+   (`pending_return_list` -> `cdv_alloc_work` ->
+   `CDV_FREE_EXTENT`) returns it to the CDV - the same path
+   everyday discards use, which the TOMA
    `n_free_returns_received` counter already observes.
-8. Progress reports travel back via
-   `NVMEIBT_CLIENT_MSG_RT_RECOVER_PROGRESS` -> TOMA -> management
-   Kafka, throttled to ~5 s by the existing rebuild-progress rate
-   limiter in `nvmeibt_recovery.c`. Each report carries
-   `{relocated, plannedRelocations, reclaimed}` so operators
-   see "M of N" slot-relocation progress.
-9. **Termination** can come from any of three paths:
-   - `RECOVER_FINISH` on benefit exhaustion (happy path);
-   - `RECOVER_ABORT` from TOMA (operator `DELETE`, management
-     timeout);
-   - Registrant detach caused by the management-layer
-     asymmetric-preempt rule: a regular guest attach arrives at
-     management, which silently detaches the compaction attach
-     before honouring the guest attach. The compaction TOMA
-     observes the lost registrant and terminates the task
-     naturally. No RECOVER_ABORT Kafka is needed on this path.
-10. On any terminal state, management clears `compactionJob`,
-    detaches the TPV from the compaction TOMA's client (if not
-    already detached by the asymmetric-preempt rule), and
-    publishes a completion event. The compaction attach is the
-    only resource the job holds; once it clears, nothing
-    compaction-specific remains.
+6. The agent polls `/proc/nvmeibc/tpv/<n>/compaction` at ~5 s
+   cadence while the attach is in place, and publishes a
+   `TPVCompactionStats` Kafka message (client agent ->
+   management) carrying `{tpvUUID, clientId, state,
+   relocated, plannedRelocations, reclaimed}`.  Terminal
+   states are `done`, `failed`, `aborted`.
+7. Management's `handleTPVCompactionStats` updates
+   `compactionJob.progress` on every tick.  When `state` is
+   terminal, it marks `compactionJob.state` accordingly and
+   issues a detach for the compaction attach.
+8. **Termination** can come from any of three paths, all of
+   which resolve through detach:
+   - Watermark met (or planner exhausted) -> worker exits ->
+     agent publishes `state=done` -> mgmt detaches.
+   - Operator `DELETE /compaction` -> mgmt issues detach ->
+     kernel's detach path calls
+     `nvmeibc_tpv_abort_any_compaction_for()` -> worker exits
+     -> agent publishes `state=aborted`.
+   - Guest attach arrives for a TPV with a live compaction
+     attach -> management's attach handler auto-detaches the
+     compaction attach (asymmetric-preempt rule) -> same exit
+     as above.
+9. Crash recovery: if the compaction client or its agent dies
+   mid-job, no further `TPVCompactionStats` Kafka arrives.
+   Mgmt's reconciliation task marks jobs whose
+   `progressUpdatedAt` is older than a deadline as `failed`
+   and force-detaches the compaction attach.
 
 ```mermaid
 sequenceDiagram
     participant Op as Operator
     participant Mgmt as Management
-    participant CTOMA as Compaction TOMA<br/>(+ local client)
-    participant AllocTOMA as Allocator TOMA<br/>(for this CDV)
+    participant Agent as Compaction Client Agent<br/>(userspace, target-hosted)
+    participant Kernel as Compaction Client Kernel
     participant CDV as CDV storage
+    participant AllocTOMA as Allocator TOMA<br/>(for this CDV)
 
-    Op->>Mgmt: POST /tpv/:id/compaction<br/>{toma?, aggressiveness?}
-    Mgmt->>Mgmt: pick TOMA (specified or random);<br/>compactionJob.state=attaching
-    Mgmt->>CTOMA: attachTPV {isCompaction=true,<br/>displayName=<tpv>-compaction}
-    CTOMA->>CDV: CDV access via standard attach
-    Mgmt->>CTOMA: startTPVCompaction Kafka
-    CTOMA->>CTOMA: recovery_task(TPV_COMPACTION)
-    CTOMA->>CTOMA: RECOVER_START {tpv_uuid, aggressiveness}
+    Op->>Mgmt: POST /tpv/:id/compaction<br/>{client?, aggressiveness?}
+    Mgmt->>Mgmt: pick client (specified or random);<br/>compactionJob.state=attaching
+    Mgmt->>Agent: attachTPV {isCompaction=true,<br/>aggressiveness, displayName=<tpv>-compaction}
+    Agent->>Kernel: standard attach; wait for state_loaded
+    Kernel->>CDV: standard CDV attach
+    Agent->>Kernel: write 'aggressiveness=N' to<br/>/proc/nvmeibc/tpv/<name>/compaction
+    Kernel->>Kernel: schedule tpv_compaction_run on WQ
     loop relocation batches (up to aggressiveness in parallel)
-        CTOMA->>CDV: read source slot, write dest slot, rewrite L2 leaf
-        CTOMA->>CTOMA: in-memory: return source slot to source_ref
-        CTOMA->>AllocTOMA: CDV_FREE_EXTENT (only when source extent empties)
-        CTOMA->>Mgmt: RECOVER_PROGRESS via rebuild-progress Kafka (throttled)
+        Kernel->>CDV: read source slot, write dest slot, rewrite L2 leaf
+        Kernel->>Kernel: in-memory: return source slot to source_ref
+        Kernel->>AllocTOMA: CDV_FREE_EXTENT (only when source extent empties)
     end
-    alt operator DELETE
-        Mgmt->>CTOMA: abortTPVCompaction Kafka
-        CTOMA->>CTOMA: RECOVER_ABORT
-    else preempt by guest attach
+    loop every ~5s while attach is live
+        Agent->>Kernel: read /proc/.../compaction (state + counters)
+        Agent->>Mgmt: TPVCompactionStats Kafka<br/>(state, relocated, planned, reclaimed)
+        Mgmt->>Mgmt: update compactionJob.progress
+    end
+    alt watermark met or no-more-moves
+        Kernel->>Kernel: worker exits (state=done)
+        Agent->>Mgmt: TPVCompactionStats state=done
+    else operator DELETE
+        Mgmt->>Agent: detachTPV (compaction attach)
+        Agent->>Kernel: detach; abort flag set; worker exits
+        Agent->>Mgmt: TPVCompactionStats state=aborted
+    else guest attach preempts
         Mgmt->>Mgmt: isCompaction=true -> auto-detach first
-        Mgmt->>CTOMA: detachTPV (compaction attach)
-        Note over CTOMA: registrant lost;<br/>task terminates
-        Mgmt->>Mgmt: then honor guest attach
+        Mgmt->>Agent: detachTPV (compaction attach)
+        Agent->>Kernel: detach; worker exits
+        Agent->>Mgmt: TPVCompactionStats state=aborted
+        Mgmt->>Mgmt: then honour guest attach
     end
-    CTOMA->>Mgmt: completion Kafka
-    Mgmt->>CTOMA: detachTPV (if still attached)
-    Mgmt->>Mgmt: compactionJob.state=completed
+    Mgmt->>Agent: detachTPV (if not already)
+    Mgmt->>Mgmt: compactionJob.state=completed/aborted/failed
 ```
 
-*Figure 2: Offline compaction job lifecycle. The compaction TOMA
-hosts both the recovery-task owner and the local client that
-performs the block work - identical to how dirty-rebuild tasks
-run on the segment-owning TOMA today. Preemption is a
-management-layer rule on attachment records, not a kernel
-reservation mode.*
+*Figure 2: Offline compaction job lifecycle.  The attach record
+is the control plane: `isCompaction=true` triggers the work on
+attach; removing the attach stops the work.  TOMA is not
+involved - the only TOMA traffic is the pre-existing
+`CDV_FREE_EXTENT` tail from the client when a source extent
+empties, identical to discard-driven return.*
 
 ### Management REST surface
 A new volume-scoped resource (Mongo volume doc gains):
@@ -1083,27 +1094,29 @@ A new volume-scoped resource (Mongo volume doc gains):
 compactionJob: {
     state,         // pending | attaching | running | aborting |
                    // completed | failed | aborted
-    tomaId,        // compaction TOMA (hosts both recovery task
-                   //                   and local client)
+    clientId,      // target node hosting the compaction client
     startedAt,
     progress: {
         relocated,          // slot relocations completed so far
         plannedRelocations, // slots the planner expects to
                             //   relocate to cross the
                             //   high_watermark, computed at
-                            //   RECOVER_START and fixed for
+                            //   first /proc read and fixed for
                             //   the run
         reclaimed,          // CDV extents returned so far
     },
+    progressUpdatedAt,      // timestamp of last stats tick;
+                            //   used by startup reconciliation
     lastError,
 }
 ```
 
 - `POST /thinProvisioning/tpv/:id/compaction` - start a job.
   Body (all optional):
-    - `toma` - hostname of a specific TOMA to run on. If
-      omitted, management picks a random currently-up TOMA.
-      Lets an operator dedicate a node to compaction work.
+    - `client` - hostname of a specific target node to run on.
+      If omitted, management picks a random currently-up
+      target node.  Lets an operator dedicate a node to
+      compaction work.
     - `aggressiveness` - max number of slot relocations to
       run in parallel within this job. Default 4.
 
@@ -1114,26 +1127,29 @@ compactionJob: {
     - `409 { error: "tpv-in-offline-compaction" }` if
       `compactionJob.state` is anything but null / completed /
       failed / aborted.
-    - `503 { error: "toma-not-available" }` if the `toma` field
-      named a host that is currently down.
-    - `503 { error: "toma-busy" }` if the `toma` field named an
-      up host whose in-flight compaction count already equals
-      `settings.tpvOfflineCompactionMaxJobsPerTOMA`. Operator
-      retries later or picks a different TOMA.
-    - `503 { error: "no-toma-available" }` if the `toma` field
-      is absent and every currently-up TOMA is already at
-      max jobs (or none is up at all).
+    - `503 { error: "client-not-available" }` if the `client`
+      field named a host that is currently down.
+    - `503 { error: "client-busy" }` if the `client` field
+      named an up host whose in-flight compaction count
+      already equals
+      `settings.tpvOfflineCompactionMaxJobsPerClient`.
+      Operator retries later or picks a different node.
+    - `503 { error: "no-client-available" }` if the `client`
+      field is absent and every currently-up target node is
+      already at max jobs (or none is up at all).
     - `503 { error: "tpv-offline-compaction-disabled" }` if the
       global off-switch is engaged (see below).
 - `GET /thinProvisioning/tpv/:id/compaction` - current state and
   progress (bytes relocated / total, extents freed, ETA).
-- `DELETE /thinProvisioning/tpv/:id/compaction` - abort. Sends
-  `abortTPVCompaction` to the compaction TOMA and polls for the
-  task to reach a terminal state. Idempotent.
+- `DELETE /thinProvisioning/tpv/:id/compaction` - abort.  Issues
+  a detach for the compaction attach; the client's detach path
+  aborts the in-kernel worker, the agent publishes a final
+  `TPVCompactionStats` with `state=aborted`, and management
+  flips `compactionJob.state` accordingly.  Idempotent.
 - `GET /thinProvisioning/compaction/jobs?state=running` - list for
   dashboards and scheduler automation.
 
-CLI (`nvmesh tpv compact <name> [--toma HOST] [--aggressiveness N]
+CLI (`nvmesh tpv compact <name> [--client HOST] [--aggressiveness N]
 [--abort]`) wraps the REST surface; no kernel changes.
 
 **Asymmetric-preempt rule (recap).** Compaction never preempts:
@@ -1144,24 +1160,49 @@ compaction attach first (flagged by `isCompaction=true` on the
 attachment record) and then proceeding with the guest attach.
 The compaction job lands in state `aborted`.
 
-### GUI placement: Targets page columns
-CDV-mgmt satellite attachments and TPV-compaction attachments are
-both target-fabric-only resources, and they belong on the Targets
-page, not the Clients page:
+### GUI placement
+With TOMA out of the loop, a compaction attach is just another
+client attach - the compaction client happens to run on a target
+node, but from the control-plane perspective nothing differs from a
+regular attach.  Render everything in the existing **Clients** page
+(CDV-Mgmt Attachments column stays there, unchanged from today; no
+new Targets-page columns).
 
-- **CDV-Mgmt Attachments** column - **moved here from the Clients
-  page**. Satellite volumes (`<CDV>-mgmt`) only ever attach to
-  target nodes; listing them under Clients was historically
-  misleading.
-- **Compaction Attachments** column - **new**. Lists every
-  compaction attachment on this target (attachments with
-  `isCompaction=true`), rendered with the display name
-  `<tpv-name>-compaction`. Empty on most targets most of the
-  time; active during compaction jobs only.
+**Compaction attachments on the Clients page.**  When a TPV is
+attached with `isCompaction=true`, render its entry in the Attached
+Volumes list as:
 
-These attachments do *not* appear in the Clients page's Recovery
-Attachments panel (which stays scoped to dirty / stale / scrubbing
-rebuilds on compute-side clients).
+```
+<tpv-name>(<pct>%) <spinner-icon>
+```
+
+where:
+
+- `<pct>` is `floor((compactionJob.progress.relocated /
+  compactionJob.progress.plannedRelocations) * 100)`, clamped to
+  `[0, 100]`.  If `plannedRelocations == 0` (pre-flight still
+  running), show `0%`.
+- `<spinner-icon>` is a small compaction-in-progress glyph
+  (existing icon set; any "work-in-progress" style will do).
+  Removed when the compaction attach terminates and becomes a
+  regular attach (which never happens in this design - terminal
+  state always produces a detach - but the render rule is
+  conditional on `isCompaction=true` so it degrades gracefully if
+  a future change keeps the attach alive after terminal).
+
+Example: `tpv_test1(73%) *`.
+
+The same progress must be available via:
+
+- REST `GET /thinProvisioning/tpv/:id/compaction` - the returned
+  `compactionJob` carries a `percent` field derived as above.
+- REST `GET /thinProvisioning/compaction/jobs` - each job entry
+  carries `percent`.
+- CLI `nvmesh tpv compact show <name>` - prints the `percent`
+  field alongside `state` and raw counters.
+
+`percent` is computed on the management side so callers don't have
+to replicate the floor/clamp logic.
 
 ### Benefit assessment and planner
 Both live in the compaction client at `RECOVER_START` time. No
@@ -1224,48 +1265,41 @@ each worker thread and advances its source/dest cursors under a
 per-TPV planner lock.
 
 ### Global settings and off-switch
-All compaction admission state lives in management so operators
-have a single place to tune back-pressure:
+All compaction admission state lives in management:
 
 - **`settings.tpvOfflineCompactionEnabled`** - cluster-wide
-  enable, default `true`. When `false`, `POST` returns
-  `503 tpv-offline-compaction-disabled`. In-flight jobs are
-  unaffected; to halt them, the operator uses `DELETE`. REST:
+  enable, default `true`.  When `false`, `POST` returns
+  `503 tpv-offline-compaction-disabled`.  In-flight jobs are
+  unaffected; to halt them, the operator uses `DELETE`.  REST:
   `GET / PUT /settings/tpvOfflineCompaction` (admin-only).
-- **`settings.tpvOfflineCompactionMaxJobsPerTOMA`** - cap on
-  simultaneous non-terminal compaction jobs per TOMA, default
-  4. Counted by scanning the `compactionJob` collection. Used
-  by the admission check at `POST` time (see End-to-end flow
-  step 2). Raising / lowering it does not affect running jobs,
-  only future admissions.
+- **`settings.tpvOfflineCompactionMaxJobsPerClient`** - cap on
+  simultaneous non-terminal compaction jobs per target node,
+  default 4.  Counted by scanning the `compactionJob`
+  collection.  Used by the admission check at `POST` time (see
+  End-to-end flow step 2).  Raising / lowering it does not
+  affect running jobs, only future admissions.
 
-**TOMA-side belt-and-suspenders.** A single `oper_params[]`
-entry registered alongside `cdv_extent_zero_on_free`:
-
-- `offline_compaction_enabled`, default `1`. When `0`, the
-  compaction TOMA rejects `startTPVCompaction` Kafka messages
-  with an explicit error; in-flight tasks continue until their
-  next batch-boundary abort check. Exists for emergency
-  cluster-wide halt when management itself is unreachable.
-
-No TOMA-side concurrency cap: management is authoritative, so
-there is nothing for the TOMA to enforce or queue.
+There is no kernel-side or TOMA-side cap: management is the
+single source of truth.
 
 ### Durable job state
 `compactionJob` in the Mongo volume doc is the single durable
-record of in-flight compaction. On management restart, jobs in
-state `attaching`, `running`, or `aborting` are
-reconciled by polling the compaction TOMA (`compactionJob.tomaId`)
-for the task's state; if the TOMA is down or does not know the
-task, management marks the job `failed` and detaches the TPV
-from the compaction TOMA's client if the attachment still
-exists. No on-CDV journal extension is needed - the crash-
-recovery story below shows why.
+record of in-flight compaction.  On management restart, jobs in
+state `attaching`, `running`, or `aborting` are reconciled by
+checking `progressUpdatedAt`: if the timestamp is older than a
+deadline (default 30 s), the client-side agent has stopped
+reporting and the job is presumed dead; management marks it
+`failed` and force-detaches the compaction attach on
+`compactionJob.clientId`.  No on-CDV journal extension is
+needed - the crash-recovery story below shows why.
 
 ### Protocol sketch (client worker)
-Runs in the compaction TOMA's local client kernel after the
-TOMA has sent `RECOVER_START`. The `compactionJob` in Mongo is
-in state `running` at this point.
+Runs in the compaction client kernel after the userspace
+management agent writes `aggressiveness=N` to
+`/proc/nvmeibc/tpv/<name>/compaction` (which happens on a
+standard TPV attach when the attach record carries
+`isCompaction=true`).  The `compactionJob` in Mongo is in state
+`running` at this point.
 **No journal. No orphan sweep.** The L2 leaf write is the sole
 commit point per relocation: a crash or preempt before it leaves
 the CDV exactly as it was before the relocation started; a crash
@@ -1279,11 +1313,11 @@ committed. No intermediate states need to be reconciled.
    thread** with a per-L2-page serialization queue (see step
    3c). Compute `plannedRelocations` (the number of slot moves
    the planner projects will be needed to cross
-   `high_watermark`) so `RECOVER_PROGRESS` can report
-   `M of N`.
+   `high_watermark`) and publish via the proc file so the agent
+   can report `M of N`.
 2. **Pre-flight check.** If `free_tpv_extent_count <=
-   high_watermark`, there is nothing to do: send
-   `RECOVER_FINISH(no-op)` immediately.
+   high_watermark`, there is nothing to do: publish
+   `state=done` in the proc file and exit.
 3. **Plan and relocate.** Driven by the planner (see Benefit
    assessment and planner). For each `(virt_idx, source_ref,
    dest_ref)` triple - sparsest-first source, densest-but-not-
@@ -1310,63 +1344,62 @@ committed. No intermediate states need to be reconciled.
       `CDV_FREE_EXTENT` in the usual way.
 
    No per-slot allocator traffic: compaction stays within CDV
-   extents the TPV already owns. The only allocator admin
+   extents the TPV already owns.  The only allocator admin
    traffic is the tail `CDV_FREE_EXTENT` fired by the Step 2
-   drain when a source extent happens to empty (which goes to
-   the CDV's elected allocator TOMA via the existing IB admin
-   path, not to the compaction TOMA).
+   drain when a source extent happens to empty (sent via the
+   existing IB admin path from the client to the CDV's elected
+   allocator TOMA - identical to discard-driven returns).
 
    After each freed source extent, re-check the termination
-   condition: `free_tpv_extent_count <= high_watermark` -> emit
-   `RECOVER_FINISH` and stop.
-4. **Batch boundaries.** Relocations are grouped for abort checks
-   and `RECOVER_PROGRESS` reports (~1 MB live-data per batch).
-   Batches are not atomic on disk; each relocation's durability
-   contract stands alone. Up to `aggressiveness` relocations
-   proceed concurrently.
-5. **Complete.** `RECOVER_FINISH` when either the termination
+   condition: `free_tpv_extent_count <= high_watermark` ->
+   publish `state=done` in the proc file and exit.
+4. **Batch boundaries.** Relocations are grouped for abort
+   checks and proc-file counter updates (~1 MB live-data per
+   batch).  Batches are not atomic on disk; each relocation's
+   durability contract stands alone.  Up to `aggressiveness`
+   relocations proceed concurrently.  The userspace agent reads
+   the proc file at ~5 s cadence and publishes
+   `TPVCompactionStats` Kafka; management applies to
+   `compactionJob.progress`.
+5. **Complete.** Worker exits when either the termination
    condition is met or no dense-but-not-full ref remains to
-   receive slots. The compaction TOMA moves the task to
-   terminal, publishes the completion Kafka, management detaches
-   the TPV and marks `compactionJob.state = completed`.
+   receive slots.  The proc file reflects `state=done`; the
+   agent's next tick publishes that terminal state; management
+   detaches the TPV and marks `compactionJob.state = completed`.
 
 ### Interruptibility
-Three paths, all bounded:
+All three paths resolve through detach.  The client kernel's
+detach path already calls
+`nvmeibc_tpv_abort_any_compaction_for(tpv)`; the worker flips
+its abort flag on the next batch boundary and exits.  No
+abort-specific Kafka, no RECOVER_ABORT, no TOMA round-trip.
 
 1. **Operator abort.** `DELETE /thinProvisioning/tpv/:id/compaction`
-   -> management sends `abortTPVCompaction` Kafka to the
-   compaction TOMA -> TOMA sends `RECOVER_ABORT` to its local
-   registrant -> the worker checks the flag at the next batch
-   boundary (a few ms at T=64 KB on RDMA-backed CDV) and exits
-   cleanly. Hard ceiling: one batch, typically < 100 ms.
+   -> management issues a detach for the compaction attach ->
+   client's detach path aborts the worker -> worker exits at
+   the next batch boundary (a few ms at T=64 KB on RDMA-backed
+   CDV) -> agent publishes `TPVCompactionStats state=aborted`.
+   Hard ceiling: one batch, typically < 100 ms.
 2. **Preempt by regular guest attach (asymmetric rule).** A
    regular `attachVolume` / `attachTPV` arriving at management
    for a TPV with a live compaction attach (attachment record
    has `isCompaction=true`) triggers the management-layer
-   auto-detach:
-   - Management issues a detach for the compaction attach and
-     waits for ack (bounded by normal detach latency);
-   - the compaction TOMA observes the registrant loss and moves
-     the recovery task to a terminal state;
-   - management marks `compactionJob.state = aborted`,
-     then honours the guest attach as if no compaction had ever
-     been in flight.
-
-   No `RECOVER_ABORT` Kafka is needed on this path - the detach
-   alone is sufficient, and the worker sees registrant loss
-   first.
-3. **Eviction / force-evict.** If the compaction TOMA is
-   unresponsive beyond a management timeout (suggested 2 s after
-   an abort request, 30 s for a heartbeat-based liveness fail),
-   management uses its **existing force-detach primitive** -
-   the same path that cleans up after a dead client today -
-   which clears the attachment record and any CDV-side `tpv:`
-   reference without requiring the dead TOMA to acknowledge.
-   The job is marked `failed`. Any relocation in flight when
+   auto-detach of the compaction attach first; everything
+   after that is identical to path 1.  Management marks
+   `compactionJob.state = aborted` and honours the guest
+   attach as if no compaction had ever been in flight.
+3. **Eviction / force-evict.** If the compaction client or its
+   agent is unresponsive beyond the reconciliation deadline
+   (no `progressUpdatedAt` update within 30 s), management
+   uses its **existing force-detach primitive** - the same
+   path that cleans up after a dead client today - which
+   clears the attachment record and any CDV-side `tpv:`
+   reference without requiring the dead node to acknowledge.
+   The job is marked `failed`.  Any relocation in flight when
    the eviction lands is discarded: the L2 leaf was either
-   durable (relocation committed, visible to the next attacher)
-   or not (relocation never happened, source still
-   authoritative). No residue on the CDV either way.
+   durable (relocation committed, visible to the next
+   attacher) or not (relocation never happened, source still
+   authoritative).  No residue on the CDV either way.
 
 Each individual slot relocation is the atomic unit of progress.
 The aborted state is "some slots relocated, some not",
@@ -1397,12 +1430,12 @@ relocation is the sole durability commit:
   pool).
 
 Management restart: scan volumes with `compactionJob.state in
-{attaching, running, aborting}`, poll the compaction TOMA
-(`compactionJob.tomaId`) for the named task. If the TOMA is down
-or does not know the task, mark the job `failed` and force-detach
-the TPV from that TOMA's client if still attached. Operator
-re-runs compaction when convenient; the fresh job re-assesses
-from current on-disk state with no knowledge of the prior run.
+{attaching, running, aborting}`; for each, check whether
+`progressUpdatedAt` has advanced within the last 30 s.  If
+not, mark the job `failed` and force-detach the TPV from
+`compactionJob.clientId`.  Operator re-runs compaction when
+convenient; the fresh job re-assesses from current on-disk
+state with no knowledge of the prior run.
 
 ### Tests
 - Populate a TPV with a known-sparse pattern, detach, run
@@ -1424,25 +1457,28 @@ from current on-disk state with no knowledge of the prior run.
 - Re-run after a crashed prior run: verify benefit assessment
   succeeds on fresh on-disk state and additional relocations
   proceed with no knowledge of the prior run.
-- TOMA selection: `POST` with an explicit `toma` field lands on
-  that host; `POST` without it lands on a random up, not-at-max
-  TOMA; `POST` naming a down TOMA returns `503 toma-not-available`;
-  `POST` naming a busy TOMA returns `503 toma-busy`; `POST`
-  without `toma` when every up TOMA is at max returns
-  `503 no-toma-available`.
+- Client selection: `POST` with an explicit `client` field
+  lands on that host; `POST` without it lands on a random up,
+  not-at-max target node; `POST` naming a down host returns
+  `503 client-not-available`; `POST` naming a busy host
+  returns `503 client-busy`; `POST` without `client` when
+  every up target node is at max returns
+  `503 no-client-available`.
 - Pre-flight no-op: populate a TPV already under
-  `high_watermark`, run compaction, verify `RECOVER_FINISH(no-op)`
-  fires immediately and no relocations occur.
-- Planner ordering: inject a TPV with a mixed-density ref list
-  including full refs; verify full refs never act as source or
-  dest and relocation always flows least-used -> most-used.
-- Aggressiveness: run with `aggressiveness=1` and `=8`, verify
-  in-flight relocation count stays within the cap.
-- Per-TOMA admission cap: fire `tpvOfflineCompactionMaxJobsPerTOMA
-  + 2` jobs at one explicitly-named TOMA; verify exactly the cap
-  admits and the remainder return `503 toma-busy`. Same workload
-  with random TOMA selection and only one up TOMA verifies
-  `no-toma-available` once the cap is hit.
+  `high_watermark`, run compaction, verify the worker exits
+  immediately with `state=done` and no relocations occur.
+- Planner ordering: inject a TPV with a mixed-density ref
+  list including full refs; verify full refs never act as
+  source or dest and relocation always flows least-used ->
+  most-used.
+- Aggressiveness: run with `aggressiveness=1` and `=8`,
+  verify in-flight relocation count stays within the cap.
+- Per-client admission cap: fire
+  `tpvOfflineCompactionMaxJobsPerClient + 2` jobs at one
+  explicitly-named target node; verify exactly the cap admits
+  and the remainder return `503 client-busy`.  Same workload
+  with random selection and only one up target verifies
+  `no-client-available` once the cap is hit.
 - Asymmetric preempt: attempt `POST /compaction` on an
   already-attached TPV, verify `409 tpv-attached`. Then start
   compaction on a detached TPV, issue a regular attach, verify
@@ -1450,23 +1486,24 @@ from current on-disk state with no knowledge of the prior run.
   `compactionJob.state = aborted`.
 
 ### Mini-steps
-Nine committable units, ordered by dependency (see earlier
-planning thread for discussion):
+Seven committable units.  TOMA is not in the loop, so the
+original 4.3-4.5 (client IB admin dispatcher, TOMA
+recovery-type, mgmt<->TOMA Kafka) are retired; two
+attach-plane trigger steps replace them.
 
 | # | Scope |
 |---|---|
-| 4.1 | Client: relocation primitive (`clnt/tpv/nvmeibc_tpv_compaction.c`). `tpv_reloc_one(tpv, virt_idx, dest_ref)` reusing the Step 2 deferred-visibility plumbing. Selftest in the existing sandbox. Shared verbatim with Step 5. |
-| 4.2 | Client: assessment + job loop (`tpv_compaction_run`). Triggerable via `/proc/nvmeibc/tpv/<n>/compaction` for standalone test. |
-| 4.3 | Client: IB admin `RECOVER_START(TPV_COMPACTION)` dispatcher; `RECOVER_PROGRESS` payload extension; `RECOVER_ABORT` flag. |
-| 4.4 | TOMA: `NVMEIBT_RECOVERY_TYPE_TPV_COMPACTION` case in the recovery state machine; kick-off `nvmeibt_recovery_start_tpv_compaction`. |
-| 4.5 | Mgmt <-> TOMA Kafka glue: `startTPVCompaction` / `abortTPVCompaction` + TOMA handlers. |
-| 4.6 | Mgmt: `compactionJob` schema, REST endpoints (`toma`, `aggressiveness` body params), TOMA selection (explicit or random-up), `isCompaction=true` attach with `<tpv>-compaction` display name, asymmetric-preempt rule (auto-detach compaction attach on any new regular attach), progress ingestion, auto-detach on terminal, `tpvOfflineCompactionEnabled` / `tpvOfflineCompactionMaxJobsPerTOMA` settings. |
-| 4.7 | Crash / restart reconciliation; preempt-by-attach terminal state. |
-| 4.8 | GUI: move **CDV-Mgmt Attachments** column from Clients to Targets page; add **Compaction Attachments** column on Targets; add progress column + "Compact" action on the TPV page. |
-| 4.9 | CLI (`nvmesh tpv compact <name> [--abort]`) + `tests/compaction_smoke_test.sh` end-to-end. |
+| 4.1 | Client: relocation primitive (`clnt/tpv/nvmeibc_tpv_compaction.c`). `tpv_reloc_one(tpv, virt_idx, dest_ref)` + per-TPV L2 writer thread with per-page serialization.  Selftest in the existing sandbox.  Shared verbatim with Step 5. |
+| 4.2 | Client: assessment + job loop (`tpv_compaction_run`).  Watermark-based termination; planner sorts sparsest-first, skips L1 and full refs. |
+| 4.3 | Client: `/proc/nvmeibc/tpv/<n>/compaction` trigger.  Write `aggressiveness=N` kicks `tpv_compaction_run` on a work queue; write `abort` sets the abort flag; read returns state + progress counters + plannedRelocations.  Detach path already calls `nvmeibc_tpv_abort_any_compaction_for`. |
+| 4.4 | Client agent (userspace): on attach with `isCompaction=true`, wait for `state_loaded`, write `aggressiveness=N` to `/proc/.../compaction`; while attach remains, poll the proc file every ~5 s and publish `TPVCompactionStats` Kafka; on terminal state, publish one final tick and stop. |
+| 4.5 | Mgmt: `compactionJob` schema, REST endpoints (`client`, `aggressiveness` body params), target-node selection (explicit or random-up), `isCompaction=true` attach with `<tpv>-compaction` display name, asymmetric-preempt rule (auto-detach compaction attach on any new regular attach), `handleTPVCompactionStats` progress ingestion + auto-detach on terminal, `tpvOfflineCompactionEnabled` + `tpvOfflineCompactionMaxJobsPerClient` settings. |
+| 4.6 | Crash / restart reconciliation using `progressUpdatedAt` freshness; preempt-by-attach terminal state. |
+| 4.7 | GUI: render compaction attachments on the Clients page as `<tpv>(<pct>%) <icon>`.  Add a **Compact** action on the TPV page that opens a modal (target-client picker, aggressiveness input).  No Targets-page changes - CDV-Mgmt column stays where it is today. |
+| 4.8 | CLI (`nvmesh tpv compact <name> [--client HOST] [--aggressiveness N] [--abort]`) + `tests/compaction_smoke_test.sh` end-to-end, `compaction_same_node_attach_test.sh`, `compaction_chaos_test.sh`. |
 
-Critical path: 4.1 -> 4.2 -> 4.3 -> 4.4 -> 4.5 -> 4.6 -> 4.9.
-Parallel: 4.7 and 4.8 once 4.6 lands.
+Critical path: 4.1 -> 4.2 -> 4.3 -> 4.4 -> 4.5 -> 4.8.
+Parallel: 4.6 and 4.7 once 4.5 lands.
 
 ---
 
@@ -1934,12 +1971,15 @@ TPV at the same time* - the guard falls out of the TPV's
 attachment state, which management already sequences:
 
 - **Step 4 (offline):** runs only while no *guest* client is
-  attached. The TPV is attached to the compaction TOMA's local
+  attached.  The TPV is attached to a target-hosted compaction
   client with `isCompaction=true` (§ End-to-end flow); any
   regular guest attach triggers the management-layer
-  asymmetric-preempt rule (auto-detach compaction attach first).
-  Best for rarely-attached TPVs an operator can schedule
-  around and for post-workload bulk reclamation.
+  asymmetric-preempt rule (auto-detach compaction attach
+  first).  Best for rarely-attached TPVs an operator can
+  schedule around and for post-workload bulk reclamation.
+  Both Step 4 and Step 5 use the same relocation primitive
+  (`tpv_reloc_one` + L2 writer thread); Step 5 adds a per-entry
+  lock for guest-I/O coexistence.
 - **Step 5 (online):** runs only while the TPV is attached to a
   guest client. The relocation worker is a per-TPV resource
   whose lifecycle is bounded by `nvmeibc_tpv_attach` /
@@ -1952,18 +1992,15 @@ attachment state, which management already sequences:
 The transition between regimes falls out of the attach subsystem:
 
 - **Guest attach arrives during in-flight offline job.** The
-  regular attach always wins over the weak compaction attach;
-  the compaction client loses its registrant for the TPV, the
-  recovery task in TOMA terminates, management observes the
-  terminal state and marks
-  `compactionJob.state = aborted`. The guest's online
-  worker spins up after attach completes. No overlap, no
+  management-layer asymmetric-preempt rule auto-detaches the
+  compaction attach first.  The client kernel's detach path
+  aborts the worker; the agent publishes a final
+  `TPVCompactionStats` with `state=aborted`; management marks
+  `compactionJob.state = aborted`.  The guest's online worker
+  spins up after the guest attach completes.  No overlap, no
   explicit abort coordination needed.
-- **Offline job request on a guest-attached TPV.** REST accepts
-  `POST` but the weak compaction attach will be preempted by the
-  existing guest attach; in practice the job reaches `running`
-  briefly (if at all) and then lands in `aborted`. The
-  operator-facing shape is "a guest attach always wins."
+- **Offline job request on a guest-attached TPV.** REST returns
+  `409 tpv-attached`.  The operator detaches first.
 
 An always-attached TPV gets Step 5 exclusively. A
 rarely-attached TPV gets Step 4 scheduled by Step 6's idleness
@@ -2282,11 +2319,12 @@ rollback. For each crash-point scenario:
    views agree, data integrity for every written virt_idx).
 6. Revert snapshot for the next scenario.
 
-For cluster-level crash testing (e.g., compaction-client death in
-Step 4), reuse `nvmesh-cluster-sim` - kill the target-hosted
-compaction client between steps, verify the recovery task
-terminates, management marks the job `failed`, and the weak
-compaction attach clears.
+For cluster-level crash testing (e.g., compaction-client death
+in Step 4), reuse `nvmesh-cluster-sim` - kill the target-hosted
+compaction client between steps, verify that no further
+`TPVCompactionStats` Kafka arrives, management's reconciliation
+marks the job `failed` after the staleness deadline, and the
+compaction attach is force-detached.
 
 **Long-soak.** Run `tpv_fuzz` for 24 h against nvmesh-cluster-sim.
 Required invariants at quiescence every 1 min:
@@ -2478,7 +2516,7 @@ defining section.
 | `/sys/module/nvmeibc/parameters/tpv_reloc_outstanding` | sysfs (module param) | read/write | Step 5 Policy |
 | `CDVAllocatorStats` Kafka → `volume.runtimeStats.allocatedExtents / totalDataExtents` | Kafka → Mongo | existing | reused (Step 3 item 2 audit) |
 | `TPVStats` Kafka → `volume.runtimeStats.cdvExtents / tpvExtentsInUse / tpvExtentsTotal` | Kafka → Mongo | existing | reused (Step 3 item 2 audit) |
-| `volume.compactionJob :: {state, tomaId, startedAt, progress, lastError}` | Mongo | read (via REST) | Step 4 Durable job state |
+| `volume.compactionJob :: {state, clientId, startedAt, progress, progressUpdatedAt, lastError}` | Mongo | read (via REST) | Step 4 Durable job state |
 | `volume.lastAttachedAt / lastDetachedAt / totalAttachSeconds` | Mongo | read (via REST) | Step 6 |
 | `settings.tpvOfflineCompactionEnabled` | Mongo | read/write (via REST) | Step 4 Global off-switch |
 | `POST /thinProvisioning/tpv/:id/compaction` | REST | call | Step 4 Management REST surface |
@@ -2493,9 +2531,8 @@ defining section.
 | Name | Scope | Default | Range | Set via | Defined in |
 |---|---|---|---|---|---|
 | `tpv_reloc_outstanding` | module-scope (global across all TPVs on the client); single shared semaphore | 4 (suggested) | 0..64 (0 disables) | `/sys/module/nvmeibc/parameters/tpv_reloc_outstanding` | Step 5 Policy |
-| `offline_compaction_enabled` | per-TOMA runtime | 1 (enabled) | 0 or 1 | `toma_rpc config set offline_compaction_enabled 0` | Step 4 Global settings and off-switch |
 | `settings.tpvOfflineCompactionEnabled` | cluster-wide | `true` | bool | `PUT /settings/tpvOfflineCompaction` | Step 4 Global settings and off-switch |
-| `settings.tpvOfflineCompactionMaxJobsPerTOMA` | cluster-wide | 4 | >= 1 | admin REST setting | Step 4 Global settings and off-switch |
+| `settings.tpvOfflineCompactionMaxJobsPerClient` | cluster-wide | 4 | >= 1 | admin REST setting | Step 4 Global settings and off-switch |
 | `aggressiveness` (offline job) | per-job | 4 | >= 1 | `POST /compaction` body | Step 4 End-to-end flow |
 | `cdv_extent_zero_on_free` | per-TOMA runtime | 0 (off) | 0 or 1 | `toma_rpc config set cdv_extent_zero_on_free N` | main doc §3.9 (inherited) |
 | `high_watermark` (Step 2 return threshold) | per-TPV | `2 * low_watermark` (suggested) | >= `low_watermark` | compile-time / future `/proc` knob | Step 2 item 2 |
@@ -2570,8 +2607,9 @@ enough that rewriting amplification would dominate).
 Implementation-wise, copy fits naturally into the Step 4
 management-driven job framework - the REST endpoint's `strategy`
 parameter selects between `in-place` and `copy`, and the same
-`compactionJob` state machine (attach CDV -> compact TOMA -> detach
-CDV) drives both. The only extra piece for copy is the rename-swap
+`compactionJob` state machine (attach TPV on compaction client ->
+run worker -> detach TPV) drives both. The only extra piece for
+copy is the rename-swap
 at job end: atomically redirect the source TPV's `_id` / UUID (and
 any external bindings) to the newly-populated destination, then
 delete the source's now-empty shell. Management's volume-rename

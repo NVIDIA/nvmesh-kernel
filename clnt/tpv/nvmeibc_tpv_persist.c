@@ -880,7 +880,7 @@ static int load_state_populate_data_side(struct nvmeibc_tpv *tpv,
 			ref->l2_slots        = 0;		/* no L2 on data side */
 			ref->is_l1_extent    = false;	/* no L1 on data side */
 			nvmeibc_cdv_extent_ref_init_lists(ref);
-			list_add_tail(&ref->node, &data_alloc->cdv_extent_list);
+			nvmeibc_tpv_insert_ref_sorted_locked(data_alloc, ref);
 			data_alloc->cdv_extents_count++;
 
 			for (s = 0; s < le->n_slots; s++) {
@@ -950,6 +950,90 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 
 	if (tpv_is_detaching(tpv))
 		return -ECANCELED;
+
+	/*
+	 * -- 0. Reset partial allocator state from any prior failed load_state.
+	 *
+	 * load_state is idempotent-by-reset: on retry (tpv_cdv_retry_msecs
+	 * re-schedule after a failed attempt) we must NOT append to the
+	 * allocator's xarrays and lists, because that leaks every struct
+	 * installed by the prior run (xa_store returns the old entry but
+	 * callers of xa_store here don't kfree it; list_add_tail has no
+	 * dedup against existing entries).  Wipe the lot so this run starts
+	 * from a clean slate, matching the fresh-attach invariant.
+	 *
+	 * Safe here because: (a) IO gates aren't open (state_loaded is still
+	 * false on retry), (b) no worker consults the allocator until
+	 * state_loaded flips true at the end of load_state_work_fn,
+	 * (c) cdv_alloc_work is scheduled only after state_loaded is set.
+	 */
+	{
+		struct nvmeibc_cdv_extent_ref *ref, *tmp;
+		struct tpv_l2_ctx             *ctx;
+		struct nvmeibc_tpv_extent_entry *ee;
+		unsigned long                  idx;
+
+		xa_for_each(&alloc->l1_to_l2_ctx, idx, ctx) {
+			if (ctx) {
+				bitmap_free(ctx->dirty_snapshot);
+				bitmap_free(ctx->dirty_pages);
+				kfree(ctx);
+			}
+		}
+		xa_destroy(&alloc->l1_to_l2_ctx);
+
+		xa_for_each(&data_alloc->extent_map, idx, ee)
+			kfree(ee);
+		xa_destroy(&data_alloc->extent_map);
+
+		list_for_each_entry_safe(ref, tmp, &alloc->cdv_extent_list, node) {
+			nvmeibc_tpv_free_slots_list(&ref->pending_free_slots);
+			nvmeibc_tpv_free_slots_list(&ref->flushing_free_slots);
+			list_del(&ref->node);
+			kfree(ref);
+		}
+		list_for_each_entry_safe(ref, tmp, &alloc->pending_return_list, node) {
+			nvmeibc_tpv_free_slots_list(&ref->pending_free_slots);
+			nvmeibc_tpv_free_slots_list(&ref->flushing_free_slots);
+			list_del(&ref->node);
+			kfree(ref);
+		}
+		nvmeibc_tpv_free_slots_list(&alloc->free_tpv_extents);
+		alloc->cdv_extents_count     = 0;
+		alloc->free_tpv_extent_count = 0;
+		alloc->l1_extent_index       = 0;
+		alloc->n_l2_tables_used      = 0;
+
+		/* Split mode: data-side has its own lists and xarray. */
+		if (data_alloc != alloc) {
+			list_for_each_entry_safe(ref, tmp,
+						 &data_alloc->cdv_extent_list, node) {
+				nvmeibc_tpv_free_slots_list(&ref->pending_free_slots);
+				nvmeibc_tpv_free_slots_list(&ref->flushing_free_slots);
+				list_del(&ref->node);
+				kfree(ref);
+			}
+			list_for_each_entry_safe(ref, tmp,
+						 &data_alloc->pending_return_list, node) {
+				nvmeibc_tpv_free_slots_list(&ref->pending_free_slots);
+				nvmeibc_tpv_free_slots_list(&ref->flushing_free_slots);
+				list_del(&ref->node);
+				kfree(ref);
+			}
+			nvmeibc_tpv_free_slots_list(&data_alloc->free_tpv_extents);
+			data_alloc->cdv_extents_count     = 0;
+			data_alloc->free_tpv_extent_count = 0;
+		}
+
+		kvfree(alloc->toma_extent_list);
+		alloc->toma_extent_list  = NULL;
+		alloc->toma_extent_count = 0;
+		if (data_alloc != alloc) {
+			kvfree(data_alloc->toma_extent_list);
+			data_alloc->toma_extent_list  = NULL;
+			data_alloc->toma_extent_count = 0;
+		}
+	}
 
 	/* -- 1. Snapshot TOMA identity for the tree-owning side -------- */
 	rv = load_state_snapshot_toma_id(tpv, nvmeibc_tpv_is_split(tpv), toma_id);
@@ -1357,7 +1441,7 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			ref->l2_slots        = l2_cnt;
 			ref->is_l1_extent    = is_l1;
 			nvmeibc_cdv_extent_ref_init_lists(ref);
-			list_add_tail(&ref->node, &alloc->cdv_extent_list);
+			nvmeibc_tpv_insert_ref_sorted_locked(alloc, ref);
 			alloc->cdv_extents_count++;
 
 			_NT(tpv_load_cdv_ext,
@@ -1601,6 +1685,45 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 		    tpv->tpv_name);
 		if (!atomic_xchg(&tpv->meta_cdv_alloc_pending, 1))
 			schedule_work(&tpv->meta_cdv_alloc_work);
+	}
+
+	/*
+	 * Offline-compaction kick deferred from __setup_tpv (management
+	 * carried isCompaction=1 on the attach payload).  Safe to fire
+	 * here: cdv_extent_list is fully populated by load_state, the IO
+	 * gates are open (state_loaded=true above), and the CDV
+	 * synchronous path is usable.  One-shot per attach - clear the
+	 * flag so re-entry by retry or meta-side callbacks never
+	 * double-schedules.
+	 */
+	{
+		bool kick_now = false;
+		u32  kick_aggr = 4;
+		unsigned long flags2;
+
+		spin_lock_irqsave(&tpv->pending_bio_lock, flags2);
+		if (tpv->compaction_kick_on_load) {
+			kick_now = true;
+			kick_aggr = tpv->compaction_kick_aggressiveness ? : 4;
+			tpv->compaction_kick_on_load = false;
+		}
+		spin_unlock_irqrestore(&tpv->pending_bio_lock, flags2);
+
+		if (kick_now) {
+			struct tpv_compaction_params p = {
+				.aggressiveness = kick_aggr
+			};
+			int kick_rv;
+
+			_NI(tpv_load_state_compaction_kick,
+			    "TPV: @STR: state_loaded; kicking deferred compaction aggressiveness=@UINT",
+			    tpv->tpv_name, kick_aggr);
+			kick_rv = tpv_compaction_kick(tpv, &p);
+			if (kick_rv)
+				_NW(tpv_load_state_compaction_kick_fail,
+				    "TPV: @STR: deferred tpv_compaction_kick rv=@INT",
+				    tpv->tpv_name, kick_rv);
+		}
 	}
 }
 EXPORT_SYMBOL(nvmeibc_tpv_load_state_work_fn);

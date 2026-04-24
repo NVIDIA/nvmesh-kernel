@@ -221,6 +221,8 @@
                 "metaCdvExtentSizeMib" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
                 "metaTpvExtentSizeKb" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
                 "enableLocalReadOptimization" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "isCompaction" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
+                "compactionAggressiveness" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
                 "chunks" : {
                         "__type" : "array",
                         "__typename" : "nvmeibc_chunk_conf",
@@ -545,7 +547,23 @@
                 "attachmentsVersion" : "i",
                 "volumeVersionsSum" : "I",
                 "timestamp" : "__codec SecsSinceEpoch()",
-                "nHiddenVolumes" : "I"
+                "nHiddenVolumes" : "I",
+                "compactionProgress" : {
+                        "__type": "array",
+                        "__typename" : "nvmeibc_tpv_compaction_progress",
+                        "__counter" : "n_compaction_progress",
+                        "__offset" : "compactionProgress"
+                }
+        },
+        "nvmeibc_tpv_compaction_progress" : {
+                "//" : "One TPV's compaction progress snapshot (Step 4).",
+                "__type" : "used",
+                "tpvUUID" : "__codec WithDefaultCodec(PodCodec('64s'), '')",
+                "state" : "__codec WithDefaultCodec(PodCodec('16s'), 'idle')",
+                "relocated" : "__codec WithDefaultCodec(PodCodec('Q'), 0)",
+                "plannedRelocations" : "__codec WithDefaultCodec(PodCodec('Q'), 0)",
+                "reclaimed" : "__codec WithDefaultCodec(PodCodec('Q'), 0)",
+                "l2Relocated" : "__codec WithDefaultCodec(PodCodec('Q'), 0)"
         },
         "kafka_header_s": {
                 "__type" : "used",

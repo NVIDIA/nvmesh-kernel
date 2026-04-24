@@ -22,6 +22,7 @@
 #include "common/nvmeib.h"		/* NVMEIBC_BD_UUID_LEN, NVMEIB_HOST_NAME_LEN */
 #include "common_public/nvmeib_public_procfs.h"	/* nvmeib_public_procfs_ent, proc_fill_t */
 #include "clnt/atom/nvmeiba_nvmesh_api.h"	/* nvmeiba_atom_os_api, nvmeiba_status_* */
+#include "nvmeibc_tpv_compaction.h"	/* struct tpv_compaction_job */
 
 /* Forward declarations - full definitions live outside this header. */
 struct nvmeibc_volume;
@@ -399,6 +400,7 @@ struct nvmeibc_tpv {
 	struct nvmeib_public_procfs_ent      *proc_cdv_extent_map;
 	struct nvmeib_public_procfs_ent      *proc_stats;
 	struct nvmeib_public_procfs_ent      *proc_selftest;
+	struct nvmeib_public_procfs_ent      *proc_compaction;	/* TPV_Trimming.md Step 4 */
 
 	/*
 	 * Per-TPV copy of fops, kept in kzalloc'd memory so it survives NDU.
@@ -413,6 +415,25 @@ struct nvmeibc_tpv {
 	 * Abandon waits for this to reach zero before orphaning the atom.
 	 */
 	atomic_t                      io_inflight;
+
+	/*
+	 * Offline compaction job (TPV_Trimming.md Step 4).  Embedded to
+	 * avoid a second allocation; initialized at attach via
+	 * tpv_compaction_init, torn down at detach via
+	 * tpv_compaction_destroy.  See nvmeibc_tpv_compaction.h.
+	 */
+	struct tpv_compaction_job     compaction_job;
+
+	/*
+	 * Deferred compaction-on-attach: __setup_tpv sets these when the
+	 * attach payload carries isCompaction=1 so the allocator-populated
+	 * kick happens from load_state_work_fn (after state_loaded=true),
+	 * not synchronously in the attach path where the allocator is
+	 * still empty.  Guarded by pending_bio_lock, the same lock that
+	 * publishes state_loaded.
+	 */
+	bool                          compaction_kick_on_load;
+	u32                           compaction_kick_aggressiveness;
 };
 
 /* -- ATOM disk/queue accessors ------------------------------------------- */
@@ -583,6 +604,31 @@ void nvmeibc_tpv_grow(struct nvmeibc_tpv *tpv, u64 new_virtual_size_bytes);
 struct nvmeibc_tpv *nvmeibc_tpv_find_by_uuid(const char *uuid);
 
 /*
+ * Per-TPV compaction-progress snapshot for TPV_Trimming.md Step 4.
+ * Filled by nvmeibc_tpv_snapshot_compaction_progress() and copied into
+ * the client keepalive's compactionProgress array by the keepalive
+ * builder in nvmeibc_cc_api.c.  The struct is a stable ABI between the
+ * TPV module and the keepalive builder; the CM codec's generated
+ * struct is what actually goes on the wire.
+ */
+struct nvmeibc_tpv_compaction_snapshot {
+	char tpv_uuid[64];
+	char state[16];
+	u64  relocated;
+	u64  planned_relocations;
+	u64  reclaimed;
+	u64  l2_relocated;
+};
+
+/*
+ * Snapshot all active-compaction TPVs into a caller-provided buffer.
+ * Returns the total count of eligible TPVs; at most min(count, @cap)
+ * entries are written.  Call with cap=0 to count without writing.
+ */
+u32 nvmeibc_tpv_snapshot_compaction_progress(
+	struct nvmeibc_tpv_compaction_snapshot *entries, u32 cap);
+
+/*
  * Detach every active TPV whose parent CDV belongs to @cinst.
  * Must be called BEFORE the CDVs of the same instance are detached.
  */
@@ -720,6 +766,19 @@ int  nvmeibc_tpv_flush_and_promote(struct nvmeibc_tpv *tpv);
 
 /* Free all nvmeibc_tpv_free_slot entries on a list. Called at detach. */
 void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents);
+
+/*
+ * Sorted-cdv_extent_list maintenance (density-aware allocator).
+ * Callers hold alloc->lock.  Reposition runs in O(1) for the common
+ * +/- 1 mutation; insert-sorted is O(N) over cdv_extent_list.
+ * See nvmeibc_tpv_allocator.c for the full design.
+ */
+void nvmeibc_tpv_reposition_ref_locked(
+	struct nvmeibc_tpv_allocator *alloc,
+	struct nvmeibc_cdv_extent_ref *ref);
+void nvmeibc_tpv_insert_ref_sorted_locked(
+	struct nvmeibc_tpv_allocator *alloc,
+	struct nvmeibc_cdv_extent_ref *ref);
 
 /*
  * Background work handlers: return empty CDV_extents, then request new ones.

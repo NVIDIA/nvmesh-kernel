@@ -1208,7 +1208,7 @@ def create_h_struct(scheme, file_obj, vartype, varname, obj, inline, opcodes):
                 continue
             create_h_struct(scheme, file_obj, "", attr, that, True, opcodes)
             continue
-        if attr == "//":
+        if attr.startswith("//"):
             continue
         if attr == "__opcode" and varname != "header":
             ret = True
@@ -1278,7 +1278,7 @@ def is_reserved_var_name(varname):
     """
     return true if varname is reserved
     """
-    return varname[0:2] == "__" or varname == "//"
+    return varname[0:2] == "__" or varname.startswith("//")
 
 def create_incarnation_ptrs(scheme, msg, msgid, offs, vars_to_indx, incr_ptrs_):
     """
@@ -1504,7 +1504,7 @@ def do_get_pack_instr(msg_scheme: Json, global_scheme: Json, ignore_opcode: int)
     res = ""
     for (var, frmt) in msg_scheme.items():
         is_opcode = var == "__opcode"
-        if (ignore_opcode and is_opcode) or (not is_opcode and var[0:2] == '__') or var == "//":
+        if (ignore_opcode and is_opcode) or (not is_opcode and var[0:2] == '__') or var.startswith("//"):
             continue
         if isinstance(frmt, dict):
             if is_array(frmt):

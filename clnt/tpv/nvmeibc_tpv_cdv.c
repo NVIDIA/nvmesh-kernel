@@ -42,6 +42,10 @@ int  nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 				u64 cdv_offset, void *buf, u64 len);
 int  nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 				 u64 cdv_offset, const void *buf, u64 len);
+int  nvmeibc_tpv_cdv_sync_read_data(struct nvmeibc_tpv *tpv,
+				     u64 cdv_offset, void *buf, u64 len);
+int  nvmeibc_tpv_cdv_sync_write_data(struct nvmeibc_tpv *tpv,
+				      u64 cdv_offset, const void *buf, u64 len);
 void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 				 struct bio *bio, u64 cdv_phys_offset);
 
@@ -111,16 +115,11 @@ static void tpv_cdv_bio_end(struct bio *bio, int error_arg)
  *
  * Called only from process context (work queue or attach path).
  */
-static int tpv_cdv_sync_io(struct nvmeibc_tpv *tpv, u64 cdv_off,
-			    void *buf, u64 len, bool is_write)
+static int tpv_cdv_sync_io_on(struct nvmeibc_tpv *tpv,
+			       struct nvmeibc_volume *cdv_vol,
+			       u64 cdv_off,
+			       void *buf, u64 len, bool is_write)
 {
-	/*
-	 * Synchronous I/O on the TPV is exclusively for the L1/L2 tree
-	 * (persist.c). In split mode that tree lives on the metadata CDV;
-	 * nvmeibc_tpv_meta_cdv() returns tpv->cdv_vol in single-CDV mode so
-	 * the existing path is unchanged. See TPV_MetadataCDV.md S.6.3.
-	 */
-	struct nvmeibc_volume  *cdv_vol = nvmeibc_tpv_meta_cdv(tpv);
 	struct nvmeibc_os_api  *os   = nvmeibc_block_get_os_api(cdv_vol->block_dev);
 	struct gendisk         *disk = os->atom.disk;
 	u8                     *ptr  = (u8 *)buf;
@@ -225,9 +224,32 @@ int nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 	if (unlikely(!tpv->cdv_vol))
 		return -ENODEV;
 
-	return tpv_cdv_sync_io(tpv, cdv_offset, buf, len, false);
+	/*
+	 * Metadata (L1/L2) path: route to the meta CDV, which is
+	 * tpv->cdv_vol in single-CDV mode.  See TPV_MetadataCDV.md S.6.3.
+	 */
+	return tpv_cdv_sync_io_on(tpv, nvmeibc_tpv_meta_cdv(tpv),
+				  cdv_offset, buf, len, false);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_read);
+
+/*
+ * nvmeibc_tpv_cdv_sync_read_data - sibling of nvmeibc_tpv_cdv_sync_read
+ * targeting the DATA CDV explicitly.  Used by offline compaction
+ * (TPV_Trimming.md Step 4) to read source-slot data during relocation.
+ */
+int nvmeibc_tpv_cdv_sync_read_data(struct nvmeibc_tpv *tpv,
+				    u64 cdv_offset, void *buf, u64 len)
+{
+	if (unlikely(nvmeibc_tpv_cdv_test_sync_read_fn))
+		return nvmeibc_tpv_cdv_test_sync_read_fn(tpv, cdv_offset,
+							  buf, len);
+	if (unlikely(!tpv->cdv_vol))
+		return -ENODEV;
+	return tpv_cdv_sync_io_on(tpv, nvmeibc_tpv_data_cdv(tpv),
+				  cdv_offset, buf, len, false);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_read_data);
 
 /*
  * nvmeibc_tpv_cdv_sync_write - synchronous write of @len bytes to the CDV
@@ -245,9 +267,28 @@ int nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 	if (unlikely(!tpv->cdv_vol))
 		return -ENODEV;
 
-	return tpv_cdv_sync_io(tpv, cdv_offset, (void *)buf, len, true);
+	return tpv_cdv_sync_io_on(tpv, nvmeibc_tpv_meta_cdv(tpv),
+				  cdv_offset, (void *)buf, len, true);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_write);
+
+/*
+ * nvmeibc_tpv_cdv_sync_write_data - sibling of nvmeibc_tpv_cdv_sync_write
+ * targeting the DATA CDV explicitly.  Used by offline compaction
+ * (TPV_Trimming.md Step 4) to write relocated data into the dest slot.
+ */
+int nvmeibc_tpv_cdv_sync_write_data(struct nvmeibc_tpv *tpv,
+				     u64 cdv_offset, const void *buf, u64 len)
+{
+	if (unlikely(nvmeibc_tpv_cdv_test_sync_write_fn))
+		return nvmeibc_tpv_cdv_test_sync_write_fn(tpv, cdv_offset,
+							   buf, len);
+	if (unlikely(!tpv->cdv_vol))
+		return -ENODEV;
+	return tpv_cdv_sync_io_on(tpv, nvmeibc_tpv_data_cdv(tpv),
+				  cdv_offset, (void *)buf, len, true);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_cdv_sync_write_data);
 
 /*
  * nvmeibc_tpv_cdv_submit_bio - forward a user bio to the CDV at the given

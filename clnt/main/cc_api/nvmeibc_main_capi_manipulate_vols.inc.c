@@ -156,6 +156,33 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	_NI(tpv_setup_ok,
 	    "TPV @STR: attached; CDV allocator will arrive via topology push",
 	    conf->name);
+
+	/*
+	 * Offline compaction (TPV_Trimming.md Step 4): management carries
+	 * isCompaction + compactionAggressiveness on the attach payload so
+	 * we can kick the kernel worker without any userspace agent poking
+	 * /proc.  We cannot kick synchronously here: load_state runs on a
+	 * kworker and populates the allocator asynchronously, so a kick
+	 * scheduled now would see an empty cdv_extent_list and exit with
+	 * planned=0.  Stash the request on the tpv; load_state_work_fn
+	 * kicks after state_loaded=true, when the allocator is fully
+	 * populated and the CDV synchronous I/O path is unblocked.
+	 */
+	if (conf->isCompaction) {
+		unsigned long flags;
+		u32 aggr = conf->compactionAggressiveness ?
+			   (u32)conf->compactionAggressiveness : 4;
+
+		spin_lock_irqsave(&tpv->pending_bio_lock, flags);
+		tpv->compaction_kick_aggressiveness = aggr;
+		tpv->compaction_kick_on_load        = true;
+		spin_unlock_irqrestore(&tpv->pending_bio_lock, flags);
+
+		_NI(tpv_setup_compaction_kick,
+		    "TPV @STR: isCompaction=1 aggressiveness=@UINT; deferred until state_loaded",
+		    conf->name, aggr);
+	}
+
 	return 0;
 }
 

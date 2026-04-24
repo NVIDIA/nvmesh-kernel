@@ -237,9 +237,11 @@ static int tpv_recovery_adopt_orphan(struct nvmeibc_tpv *tpv, u64 extent_index,
 
 	/*
 	 * Append without lock: single-threaded at attach time.  IO gates
-	 * are not yet open; no work struct is running.
+	 * are not yet open; no work struct is running.  Use sorted insert
+	 * so the cdv_extent_list invariant (ascending allocated_count) is
+	 * maintained from the moment the ref is visible.
 	 */
-	list_add_tail(&ref->node, &alloc->cdv_extent_list);
+	nvmeibc_tpv_insert_ref_sorted_locked(alloc, ref);
 	alloc->cdv_extents_count++;
 	list_splice_tail(&batch, &alloc->free_tpv_extents);
 	alloc->free_tpv_extent_count += (n_slots - first_s);

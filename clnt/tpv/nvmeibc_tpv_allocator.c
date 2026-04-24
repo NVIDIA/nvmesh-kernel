@@ -132,6 +132,78 @@ void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents)
 }
 EXPORT_SYMBOL(nvmeibc_tpv_free_slots_list);
 
+/* -- sorted cdv_extent_list invariant --------------------------------------
+ *
+ * Density-aware allocator (TPV_Trimming.md follow-up).  cdv_extent_list is
+ * maintained in ASCENDING order of allocated_count: head = sparsest, tail =
+ * densest.  The allocator picks slots from the densest non-full extent so
+ * writes pack tightly; sparse extents drain naturally to pending_return
+ * and get reclaimed without a compaction pass.  Compaction itself also
+ * walks this list directly, skipping its own sort.
+ *
+ * Maintenance is O(1) per ref->allocated_count +/-1 change: after the
+ * mutation, call tpv_reposition_ref_locked(alloc, ref) while still
+ * holding alloc->lock.  The ref swaps at most once per direction in
+ * practice (the count changed by +/- 1, so at most one neighbor can be
+ * out of order), but the helper loops defensively to tolerate callers
+ * that batch multiple mutations before repositioning (e.g., the
+ * flush-and-promote decrement by flushing_free_count).
+ *
+ * Refs that sit on pending_return_list are exempt (not in
+ * cdv_extent_list); the caller should skip reposition in that case, or
+ * set on_pending_return_list=true before the mutation.
+ */
+void nvmeibc_tpv_reposition_ref_locked(
+	struct nvmeibc_tpv_allocator *alloc,
+	struct nvmeibc_cdv_extent_ref *ref)
+{
+	if (ref->on_pending_return_list)
+		return;
+
+	/* Bubble forward (toward tail) while the next entry is LESS dense. */
+	while (ref->node.next != &alloc->cdv_extent_list) {
+		struct nvmeibc_cdv_extent_ref *next = list_entry(
+			ref->node.next, struct nvmeibc_cdv_extent_ref, node);
+		if (next->allocated_count >= ref->allocated_count)
+			break;
+		list_move(&ref->node, &next->node);
+	}
+	/* Bubble backward (toward head) while the prev entry is MORE dense. */
+	while (ref->node.prev != &alloc->cdv_extent_list) {
+		struct nvmeibc_cdv_extent_ref *prev = list_entry(
+			ref->node.prev, struct nvmeibc_cdv_extent_ref, node);
+		if (prev->allocated_count <= ref->allocated_count)
+			break;
+		list_move_tail(&ref->node, &prev->node);
+	}
+}
+EXPORT_SYMBOL(nvmeibc_tpv_reposition_ref_locked);
+
+/*
+ * Insert a newly-created ref into cdv_extent_list at the position that
+ * preserves the ascending-by-allocated_count invariant.  Used by
+ * load_state / recovery / cdv_alloc_ok which build fresh refs with a
+ * specific initial count.  For the count=0 (common) case, insertion
+ * lands at the head.  For load_state's count=data_cnt[+l2_cnt], we
+ * scan to find the right slot.  O(N) worst case; N = CDV extents held,
+ * typically a handful.
+ */
+void nvmeibc_tpv_insert_ref_sorted_locked(
+	struct nvmeibc_tpv_allocator *alloc,
+	struct nvmeibc_cdv_extent_ref *ref)
+{
+	struct nvmeibc_cdv_extent_ref *cur;
+
+	list_for_each_entry(cur, &alloc->cdv_extent_list, node) {
+		if (cur->allocated_count > ref->allocated_count) {
+			list_add_tail(&ref->node, &cur->node);
+			return;
+		}
+	}
+	list_add_tail(&ref->node, &alloc->cdv_extent_list);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_insert_ref_sorted_locked);
+
 /* -- nvmeibc_tpv_alloc_extent -----------------------------------------------
  *
  * Pop one physical TPV_extent slot from free_tpv_extents, install an
@@ -188,22 +260,59 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 		return -EAGAIN;
 	}
 
-	/* Pop the first available physical slot. */
-	slot = list_first_entry(&alloc->free_tpv_extents,
-				struct nvmeibc_tpv_free_slot, node);
-	list_del(&slot->node);
-	alloc->free_tpv_extent_count--;
+	/*
+	 * Density-aware pick (TPV_Trimming.md follow-up).  Walk
+	 * cdv_extent_list from tail (densest first); pick the first
+	 * non-full ref that has a free slot in alloc->free_tpv_extents.
+	 * This packs writes tightly so sparse extents drain naturally.
+	 *
+	 * Fallback (when no cdv_extent_list entry matches, e.g., the only
+	 * free slots belong to a ref on pending_return_list whose return
+	 * we're about to cancel): pop head of free_tpv_extents.  The
+	 * ref-finding dance below handles both paths.
+	 */
+	slot = NULL;
+	{
+		struct nvmeibc_cdv_extent_ref *r;
+		const u64 n_slots = tpv_slots_per_cdv_extent(alloc);
+
+		list_for_each_entry_reverse(r, &alloc->cdv_extent_list, node) {
+			struct nvmeibc_tpv_free_slot *s, *tmp;
+
+			if (r->allocated_count >= n_slots)
+				continue;
+			list_for_each_entry_safe(s, tmp,
+						 &alloc->free_tpv_extents, node) {
+				if (s->cdv_extent_index != r->extent_index)
+					continue;
+				list_del(&s->node);
+				alloc->free_tpv_extent_count--;
+				slot = s;
+				break;
+			}
+			if (slot)
+				break;
+		}
+	}
+	if (!slot) {
+		/* Fallback: first slot in pool, regardless of density. */
+		slot = list_first_entry(&alloc->free_tpv_extents,
+					struct nvmeibc_tpv_free_slot, node);
+		list_del(&slot->node);
+		alloc->free_tpv_extent_count--;
+	}
 
 	/*
 	 * Find the owning CDV_extent_ref.  It may live on either
-	 * cdv_extent_list (the common case) or pending_return_list (if a
-	 * prior promote moved it there because its allocated_count hit
-	 * zero).  In the latter case, this new allocation "cancels" the
-	 * pending return: flip the ref back to cdv_extent_list so the
-	 * drain skips it.  Without this, the drain would send
-	 * CDV_FREE_EXTENT and TOMA could reassign the extent to another
-	 * TPV while a slot inside it is now live-mapped for this TPV --
-	 * a cross-TPV data-corruption bug.
+	 * cdv_extent_list (the common case, including the one the
+	 * density walk just picked) or pending_return_list (if a prior
+	 * promote moved it there because its allocated_count hit zero).
+	 * In the latter case, this new allocation "cancels" the pending
+	 * return: flip the ref back to cdv_extent_list so the drain
+	 * skips it.  Without this, the drain would send CDV_FREE_EXTENT
+	 * and TOMA could reassign the extent to another TPV while a
+	 * slot inside it is now live-mapped for this TPV --- a cross-TPV
+	 * data-corruption bug.
 	 */
 	{
 		struct nvmeibc_cdv_extent_ref *r;
@@ -212,6 +321,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 		list_for_each_entry(r, &alloc->cdv_extent_list, node) {
 			if (r->extent_index == slot->cdv_extent_index) {
 				r->allocated_count++;
+				nvmeibc_tpv_reposition_ref_locked(alloc, r);
 				found = true;
 				break;
 			}
@@ -233,10 +343,15 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 				 * in tpv_drain_pending_returns after a
 				 * successful CDV_FREE_EXTENT send.
 				 */
-				list_move_tail(&r->node,
-					       &alloc->cdv_extent_list);
 				r->on_pending_return_list = false;
 				r->allocated_count++;
+				/*
+				 * Insert in sorted position - ref is fresh to
+				 * cdv_extent_list; list_move_tail to end
+				 * would break the density invariant.
+				 */
+				list_del(&r->node);
+				nvmeibc_tpv_insert_ref_sorted_locked(alloc, r);
 				atomic64_inc(&alloc->stat_cdv_returns_cancelled);
 				found = true;
 				break;
@@ -254,6 +369,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 		list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
 			if (ref->extent_index == slot->cdv_extent_index) {
 				ref->allocated_count--;
+				nvmeibc_tpv_reposition_ref_locked(alloc, ref);
 				break;
 			}
 		}
@@ -279,6 +395,7 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 		list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
 			if (ref->extent_index == slot->cdv_extent_index) {
 				ref->allocated_count--;
+				nvmeibc_tpv_reposition_ref_locked(alloc, ref);
 				break;
 			}
 		}
@@ -363,15 +480,74 @@ int nvmeibc_tpv_alloc_l2_slot(struct nvmeibc_tpv *tpv, u64 *phys_offset_out)
 		return -EAGAIN;
 	}
 
-	slot = list_first_entry(&alloc->free_tpv_extents,
-				struct nvmeibc_tpv_free_slot, node);
-	list_del(&slot->node);
-	alloc->free_tpv_extent_count--;
+	/*
+	 * L2-slot density-aware pick (TPV_Trimming.md follow-up).  Prefer
+	 * the L1 extent when it still has room: co-locating L2 tables with
+	 * the L1 table keeps metadata in one CDV_extent as long as possible,
+	 * which in turn means fewer extents have l2_slots > 0 and more
+	 * extents become reclaimable after data compaction.  If L1 is full
+	 * (or in split mode, not applicable here), fall back to the densest
+	 * non-full extent, same walk as nvmeibc_tpv_alloc_extent.
+	 */
+	slot = NULL;
+	{
+		struct nvmeibc_cdv_extent_ref *r;
+		const u64 n_slots = (u64)((u64)alloc->cdv_extent_size_mib << 20) /
+				    ((u64)alloc->tpv_extent_size_kb << 10);
+		struct nvmeibc_tpv_free_slot *s, *tmp;
+
+		/* Pass 1: L1 extent.  Only one per allocator (if any). */
+		list_for_each_entry(r, &alloc->cdv_extent_list, node) {
+			if (!r->is_l1_extent)
+				continue;
+			if (r->allocated_count >= n_slots)
+				break;
+			list_for_each_entry_safe(s, tmp,
+						 &alloc->free_tpv_extents, node) {
+				if (s->cdv_extent_index != r->extent_index)
+					continue;
+				list_del(&s->node);
+				alloc->free_tpv_extent_count--;
+				slot = s;
+				break;
+			}
+			break;
+		}
+		/* Pass 2: densest non-full, any extent.  Same walk as
+		 * alloc_extent. */
+		if (!slot) {
+			list_for_each_entry_reverse(r, &alloc->cdv_extent_list,
+						    node) {
+				if (r->allocated_count >= n_slots)
+					continue;
+				list_for_each_entry_safe(s, tmp,
+							 &alloc->free_tpv_extents,
+							 node) {
+					if (s->cdv_extent_index != r->extent_index)
+						continue;
+					list_del(&s->node);
+					alloc->free_tpv_extent_count--;
+					slot = s;
+					break;
+				}
+				if (slot)
+					break;
+			}
+		}
+	}
+	if (!slot) {
+		/* Fallback: first slot in pool. */
+		slot = list_first_entry(&alloc->free_tpv_extents,
+					struct nvmeibc_tpv_free_slot, node);
+		list_del(&slot->node);
+		alloc->free_tpv_extent_count--;
+	}
 
 	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
 		if (ref->extent_index == slot->cdv_extent_index) {
 			ref->allocated_count++;
 			ref->l2_slots++;
+			nvmeibc_tpv_reposition_ref_locked(alloc, ref);
 			break;
 		}
 	}
@@ -430,6 +606,7 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 		list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
 			if (ref->extent_index == lost_idx) {
 				ref->allocated_count--;
+				nvmeibc_tpv_reposition_ref_locked(alloc, ref);
 				break;
 			}
 		}
@@ -618,6 +795,15 @@ static u32 tpv_promote_flushing_frees_locked(struct nvmeibc_tpv_allocator *alloc
 			ref->on_pending_return_list = true;
 			atomic64_inc(&alloc->stat_cdv_returns_queued);
 			refs_returnable++;
+		} else {
+			/*
+			 * Ref stays on cdv_extent_list; its allocated_count
+			 * dropped by flushing_free_count, so its sort
+			 * position almost certainly moved backward (toward
+			 * sparser).  Reposition maintains the density-aware
+			 * invariant.
+			 */
+			nvmeibc_tpv_reposition_ref_locked(alloc, ref);
 		}
 	}
 
@@ -972,7 +1158,7 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 		}
 
 		spin_lock(&alloc->lock);
-		list_add_tail(&ref->node, &alloc->cdv_extent_list);
+		nvmeibc_tpv_insert_ref_sorted_locked(alloc, ref);
 		alloc->cdv_extents_count++;
 		list_splice_tail(&batch, &alloc->free_tpv_extents);
 		alloc->free_tpv_extent_count += (n_slots - first_free_slot);
@@ -1058,7 +1244,7 @@ static int tpv_on_cdv_alloc_ok_for_side(struct nvmeibc_tpv *tpv, u64 extent_inde
 
 	/* Splice everything into the allocator under the lock. */
 	spin_lock(&alloc->lock);
-	list_add_tail(&ref->node, &alloc->cdv_extent_list);
+	nvmeibc_tpv_insert_ref_sorted_locked(alloc, ref);
 	alloc->cdv_extents_count++;
 	list_splice_tail(&batch, &alloc->free_tpv_extents);
 	alloc->free_tpv_extent_count += n_slots;
@@ -1155,7 +1341,17 @@ static void nvmeibc_tpv_cdv_alloc_work_run(struct nvmeibc_tpv *tpv,
 		goto out_clear_pending;
 	}
 
-	if (!list_empty(&alloc->pending_return_list))
+	/*
+	 * Skip the drain while a compaction run is in flight.  Compaction's
+	 * planner (plan_sources in nvmeibc_tpv_compaction.c) caches raw
+	 * nvmeibc_cdv_extent_ref pointers; tpv_drain_pending_returns kfrees
+	 * refs after a successful CDV_FREE_EXTENT, which would turn those
+	 * cached pointers into UAFs.  Compaction re-schedules this work
+	 * once when it clears defer_drain, so the accumulated returns get
+	 * processed promptly.
+	 */
+	if (!list_empty(&alloc->pending_return_list) &&
+	    !tpv_compaction_drain_deferred(tpv))
 		tpv_drain_pending_returns(tpv, is_meta_side, toma_id);
 
 	if (alloc->free_tpv_extent_count >= alloc->low_watermark)

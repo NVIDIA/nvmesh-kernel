@@ -435,6 +435,175 @@ static ssize_t tpv_proc_stats_reset(void *arg, char *buf, size_t len)
 	return (ssize_t)len;
 }
 
+/* -- /proc/nvmeibc/tpv/<n>/compaction (TPV_Trimming.md Step 4) ----------- */
+
+/*
+ * Read: emit the current compaction job state + progress counters in
+ * a key:value form that the userspace management agent can parse and
+ * forward to management as a TPVCompactionStats Kafka message.
+ */
+static ssize_t tpv_proc_compaction_fill(void *arg, char *buf, size_t len)
+{
+	struct nvmeibc_tpv            *tpv = arg;
+	struct tpv_compaction_job     *job = &tpv->compaction_job;
+	struct tpv_compaction_progress p;
+	const char                    *state_str;
+	ssize_t count = 0;
+	int s;
+
+#define BUF_ADD(...) count += scnprintf(buf + count, len - count, __VA_ARGS__)
+
+	s = atomic_read(&job->state);
+	switch (s) {
+	case TPV_COMPACTION_IDLE:     state_str = "idle"; break;
+	case TPV_COMPACTION_RUNNING:  state_str = "running"; break;
+	case TPV_COMPACTION_STOPPING: state_str = "aborting"; break;
+	case TPV_COMPACTION_DONE:     state_str = "done"; break;
+	default:                      state_str = "unknown"; break;
+	}
+	tpv_compaction_get_progress(tpv, &p);
+
+	BUF_ADD("state:               %s\n", state_str);
+	BUF_ADD("abort_requested:     %s\n",
+		atomic_read(&job->abort_flag) ? "yes" : "no");
+	BUF_ADD("relocated:           %llu\n",
+		(unsigned long long)p.relocated);
+	BUF_ADD("plannedRelocations:  %llu\n",
+		(unsigned long long)p.planned_relocations);
+	BUF_ADD("reclaimed:           %llu\n",
+		(unsigned long long)p.reclaimed_extents);
+	BUF_ADD("l2Relocated:         %llu\n",
+		(unsigned long long)p.l2_relocated);
+
+#undef BUF_ADD
+	return count;
+}
+
+/*
+ * Write: parse a command.
+ *   "aggressiveness=<N>"  - kick tpv_compaction_run with aggressiveness N
+ *                           on a work queue; returns immediately.
+ *   "abort"               - set the abort flag; worker exits at the next
+ *                           batch boundary.
+ */
+struct tpv_compaction_start_work {
+	struct work_struct w;
+	struct nvmeibc_tpv *tpv;
+	u32 aggressiveness;
+};
+
+/*
+ * Runs asynchronously after a /proc write.  Checks tpv->state and the
+ * compaction shutdown flag; bails without touching allocator state if
+ * the TPV is being torn down.  Decrements pending_starts in all paths
+ * so tpv_compaction_destroy's wait_event can drain.
+ */
+static void tpv_compaction_start_work_fn(struct work_struct *w)
+{
+	struct tpv_compaction_start_work *cw =
+		container_of(w, struct tpv_compaction_start_work, w);
+	struct nvmeibc_tpv        *tpv = cw->tpv;
+	struct tpv_compaction_job *job = &tpv->compaction_job;
+
+	if (atomic_read(&tpv->state) == TPV_ATTACHED &&
+	    !READ_ONCE(job->shutdown)) {
+		struct tpv_compaction_params p = {
+			.aggressiveness = cw->aggressiveness
+		};
+		(void)tpv_compaction_run(tpv, &p);
+	}
+	kfree(cw);
+	if (atomic_dec_and_test(&job->pending_starts))
+		wake_up_all(&job->pending_starts_wq);
+}
+
+static ssize_t tpv_proc_compaction_write(void *arg, char *buf, size_t len)
+{
+	struct nvmeibc_tpv *tpv = arg;
+	char cmd[64];
+	size_t n = len < sizeof(cmd) - 1 ? len : sizeof(cmd) - 1;
+	u32 aggressiveness = 0;
+
+	if (!buf || n == 0)
+		return (ssize_t)len;
+	memcpy(cmd, buf, n);
+	cmd[n] = '\0';
+	/* Strip trailing whitespace. */
+	while (n > 0 && (cmd[n - 1] == '\n' || cmd[n - 1] == '\r' ||
+			 cmd[n - 1] == ' '  || cmd[n - 1] == '\t')) {
+		cmd[--n] = '\0';
+	}
+
+	if (strncmp(cmd, "abort", 5) == 0) {
+		tpv_compaction_abort(tpv);
+		_NI(tpv_proc_compaction_abort,
+		    "TPV: @STR: compaction abort requested via /proc",
+		    tpv->tpv_name);
+		return (ssize_t)len;
+	}
+
+	if (sscanf(cmd, "aggressiveness=%u", &aggressiveness) == 1) {
+		struct tpv_compaction_start_work *cw;
+		struct tpv_compaction_job *job = &tpv->compaction_job;
+
+		if (aggressiveness == 0)
+			aggressiveness = 4;
+
+		/*
+		 * Guard against scheduling work onto a TPV that's being torn
+		 * down.  Classic Dekker-style store/load handshake with
+		 * tpv_compaction_destroy:
+		 *
+		 *   proc-write (this path):  INC pending_starts;  LOAD shutdown
+		 *   destroy:                 STORE shutdown = 1;  LOAD pending_starts
+		 *
+		 * Both sides need a full StoreLoad barrier between the store and
+		 * the subsequent load.  Plain atomic_inc() is relaxed on Linux
+		 * (see Documentation/atomic_t.txt) - no implicit barrier - so we
+		 * add smp_mb__after_atomic() explicitly.  The destroy side gets
+		 * its barrier for free from wait_event()'s prepare_to_wait(),
+		 * which calls set_current_state() (a full barrier) before the
+		 * condition re-check.
+		 *
+		 * Sequence:
+		 *   1. Check shutdown; if set, refuse early (fast path).
+		 *   2. Increment pending_starts, then smp_mb__after_atomic().
+		 *   3. Re-check shutdown; if it just landed, decrement and
+		 *      refuse (possibly waking the destroy waiter).
+		 *   4. schedule_work.
+		 * The start-work-fn decrements pending_starts on exit; the
+		 * destroy path waits for pending_starts to reach zero before
+		 * freeing allocator state.
+		 */
+		if (READ_ONCE(job->shutdown))
+			return -ESHUTDOWN;
+		cw = kzalloc(sizeof(*cw), GFP_KERNEL);
+		if (!cw)
+			return -ENOMEM;
+		atomic_inc(&job->pending_starts);
+		smp_mb__after_atomic();
+		if (READ_ONCE(job->shutdown)) {
+			if (atomic_dec_and_test(&job->pending_starts))
+				wake_up_all(&job->pending_starts_wq);
+			kfree(cw);
+			return -ESHUTDOWN;
+		}
+		INIT_WORK(&cw->w, tpv_compaction_start_work_fn);
+		cw->tpv = tpv;
+		cw->aggressiveness = aggressiveness;
+		schedule_work(&cw->w);
+		_NI(tpv_proc_compaction_start,
+		    "TPV: @STR: compaction start requested via /proc aggressiveness=@UINT",
+		    tpv->tpv_name, aggressiveness);
+		return (ssize_t)len;
+	}
+
+	_NW(tpv_proc_compaction_bad_cmd,
+	    "TPV: @STR: unrecognized compaction command '@STR'",
+	    tpv->tpv_name, cmd);
+	return -EINVAL;
+}
+
 /* -- Public registration / deregistration --------------------------------- */
 
 /* Defined in nvmeibc_tpv_test.c (kernel build) or nvmeibc_tpv_simu.c (simulator).
@@ -471,6 +640,9 @@ void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv)
 		"stats", tpv->proc_dir, tpv_proc_stats_fill, tpv_proc_stats_reset, tpv);
 	tpv->proc_selftest = nvmeib_public_proc_create(
 		"selftest", tpv->proc_dir, nvmeibc_tpv_run_selftests, NULL, tpv);
+	tpv->proc_compaction = nvmeib_public_proc_create(
+		"compaction", tpv->proc_dir,
+		tpv_proc_compaction_fill, tpv_proc_compaction_write, tpv);
 
 	_ND(tpv_proc_registered, "TPV: @STR: proc entries registered", tpv->tpv_name);
 }
@@ -481,6 +653,7 @@ void nvmeibc_tpv_proc_deregister(struct nvmeibc_tpv *tpv)
 	if (!tpv->proc_dir)
 		return;
 
+	nvmeib_public_proc_remove(tpv->proc_compaction);
 	nvmeib_public_proc_remove(tpv->proc_selftest);
 	nvmeib_public_proc_remove(tpv->proc_stats);
 	nvmeib_public_proc_remove(tpv->proc_cdv_extent_map);

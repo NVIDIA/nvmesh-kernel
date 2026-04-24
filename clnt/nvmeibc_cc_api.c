@@ -2071,7 +2071,18 @@ static int __heartbeat_to_mcs(struct nvmeibc_control_api* cc_api)
 	const int n_vols_under_recovery = nvmeibc_get_masked_volumes_num(cinst, RECOVERER_VOLUME);
 	const int n_shadow_vols = nvmeibc_get_masked_volumes_num(cinst, SHADOW_VOLUME);
 	const size_t attch_uuid_size = n_vols * sizeof(msg->attachmentsUUIDHash[0]);
-	const size_t msg_size = sizeof(*msg) + attch_uuid_size;
+	/*
+	 * TPV_Trimming.md Step 4: piggyback per-TPV compaction progress on
+	 * every keepalive.  Count first, alloc tail buffer, then fill after
+	 * the main msg is allocated.  The count is taken with a stable
+	 * snapshot; TPVs whose compaction finishes between the count and
+	 * the fill pass just get skipped (not written) and the generated
+	 * struct's n_compaction_progress counter follows the fill count.
+	 */
+	const u32 n_compact = nvmeibc_tpv_snapshot_compaction_progress(NULL, 0);
+	const size_t compact_size =
+		n_compact * sizeof(msg->compactionProgress[0]);
+	const size_t msg_size = sizeof(*msg) + attch_uuid_size + compact_size;
 	struct nvmeibc_volume *curr_volume = NULL;
 
 	__verify_on_main_wq_ccapi(cc_api);
@@ -2084,6 +2095,12 @@ static int __heartbeat_to_mcs(struct nvmeibc_control_api* cc_api)
 
 	msg->configProfile = cinst->cfg_profile;
 	msg->attachmentsUUIDHash = (void*)(&msg[1]);
+	/*
+	 * compactionProgress lives right after attachmentsUUIDHash in the
+	 * tail buffer.  Both offsets are captured at alloc time and must
+	 * match msg_size, above.
+	 */
+	msg->compactionProgress = (void*)((char*)(&msg[1]) + attch_uuid_size);
 	msg->attachmentsVersion = cc_api->latest_attachment_version;
 	msg->hasWIPOperations = (cc_api->processing_multi_vol_cmd ||
 				 !cc_api->is_mcs_cache_replayed_completed) ? 1 : 0;
@@ -2112,6 +2129,38 @@ static int __heartbeat_to_mcs(struct nvmeibc_control_api* cc_api)
 		}
 		BUG_ON(vol_idx != n_vols);
 		msg->n_vols_id = n_vols;
+	}
+
+	/*
+	 * Fill compactionProgress (TPV_Trimming.md Step 4).  Snapshot up to
+	 * the capacity we reserved at msg alloc time; if a new compaction
+	 * started between the count and the fill, it rides the NEXT
+	 * keepalive tick - no data loss, just one-tick delay.
+	 */
+	if (n_compact) {
+		struct nvmeibc_tpv_compaction_snapshot *snap;
+		u32 n_filled;
+
+		snap = kvmalloc_array(n_compact, sizeof(*snap), GFP_KERNEL);
+		if (snap) {
+			u32 total = nvmeibc_tpv_snapshot_compaction_progress(snap, n_compact);
+			u32 i;
+			n_filled = total < n_compact ? total : n_compact;
+			for (i = 0; i < n_filled; i++) {
+				strlcpy(msg->compactionProgress[i].tpvUUID,
+					snap[i].tpv_uuid,
+					sizeof(msg->compactionProgress[i].tpvUUID));
+				strlcpy(msg->compactionProgress[i].state,
+					snap[i].state,
+					sizeof(msg->compactionProgress[i].state));
+				msg->compactionProgress[i].relocated          = snap[i].relocated;
+				msg->compactionProgress[i].plannedRelocations = snap[i].planned_relocations;
+				msg->compactionProgress[i].reclaimed          = snap[i].reclaimed;
+				msg->compactionProgress[i].l2Relocated        = snap[i].l2_relocated;
+			}
+			msg->n_compaction_progress = n_filled;
+			kvfree(snap);
+		}
 	}
 
 	_NT(t_1___heartbeat_to_mcs, "Sending a keepalive msg with: messageSequence=@COUNTS, clientToken=@COUNTS, keepaliveInterval=@UINT, attachmentsVersion=@INT. Current client reportID=@COUNTS",
