@@ -2310,16 +2310,27 @@ int process_jmd_free_abnd_decoded(struct nvmeibc_disk *disk,
 		goto out;
 	}
 
-	if (decode_ctx->rng_gen_id != disk->jour.rng_gen_id) {
+	if (decode_ctx->rng_gen_id < disk->jour.rng_gen_id) {
+		/* Stale abnd2free: gen_id already advanced (e.g. by a
+		 * concurrent discover or out-of-order eCPU delivery).
+		 * Skip the gen_id update but still free the entries. */
+		_NT(trace_jam_process_jmd_free_abandoned_gen_id_stale_1,
+			"GenID @JRNL_RNG_GEN_ID stale (current @JRNL_RNG_GEN_ID) for range @JRNL_RNG_IDX",
+			decode_ctx->rng_gen_id, disk->jour.rng_gen_id, disk->jour.rng_id);
+	} else if (decode_ctx->rng_gen_id > disk->jour.rng_gen_id) {
 		struct nvmeibc_jam_disk *jam_disk = disk->jam_disk;
 		ulong flags = 0;
-		/* Should only increase */
-		BUG_ON(decode_ctx->rng_gen_id < disk->jour.rng_gen_id);
 		jam_disk_spin_lock_irqsave(jam_disk, &flags);
-		_NT(trace_jam_process_jmd_free_abandoned_gen_id_inc,
-			"GenID @JRNL_RNG_GEN_ID increased for range @JRNL_RNG_IDX",
-			decode_ctx->rng_gen_id, disk->jour.rng_id);
-		disk->jour.rng_gen_id = decode_ctx->rng_gen_id;
+		if (decode_ctx->rng_gen_id > disk->jour.rng_gen_id) {
+			_NT(trace_jam_process_jmd_free_abandoned_gen_id_inc,
+				"GenID @JRNL_RNG_GEN_ID increased for range @JRNL_RNG_IDX",
+				decode_ctx->rng_gen_id, disk->jour.rng_id);
+			disk->jour.rng_gen_id = decode_ctx->rng_gen_id;
+		} else {
+			_NT(trace_jam_process_jmd_free_abandoned_gen_id_stale_2,
+				"GenID @JRNL_RNG_GEN_ID stale (current @JRNL_RNG_GEN_ID) for range @JRNL_RNG_IDX",
+				decode_ctx->rng_gen_id, disk->jour.rng_gen_id, disk->jour.rng_id);
+		}
 		jam_disk_spin_unlock_irqrestore(jam_disk, flags);
 	}
 
