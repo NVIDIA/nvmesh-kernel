@@ -2162,6 +2162,53 @@ per-TPV config toggle or a write to `/proc/.../compaction`
 worker never fires regardless of wastage; offline (Step 4) is
 still available.
 
+**No backflow to management.** Online-compaction state - wastage
+ratio, armed/idle/disabled flag, per-attach counters - is
+deliberately **not** pushed back to the management server via
+Kafka, not reflected in the volume document, and not surfaced in
+the CLI or GUI as a live readout. Three reasons:
+
+1. *Ephemeral per attach.* When a TPV detaches and re-attaches
+   (including to a different client), every field listed above
+   resets: `live_slots` is rebuilt from `load_state`,
+   `online_armed` starts false, all counters start at zero. A
+   mirror in MongoDB would be stale the moment the next attach
+   lands.
+2. *No management-side decisions depend on it.* Offline
+   compaction has a `compactionJob` state machine (pending /
+   running / aborted / ...) because management drives the
+   lifecycle - start, poll, preempt, abort, reconcile. Online
+   compaction has no lifecycle: the kernel arms and disarms on
+   its own signal, never asks management for anything, and has
+   nothing to report that would change a management decision.
+   Any mirror would be decorative.
+3. *Keepalive cost.* Adding online fields to the
+   `TPVCompactionStats` keepalive would pay per-TPV, per-tick
+   serialization / Kafka / handler cost on every attached TPV
+   forever - even when wastage is pinned at zero and nothing is
+   happening - solely to drive a display. The hot path stays
+   leaner without it.
+
+Observability therefore flows one direction only: the kernel
+exposes state via `/proc/nvmeibc/tpv/<name>/compaction`; a
+scraping layer (NVMesh monitor / exporter) harvests those files
+on whatever cadence it chooses. The exporter roadmap - covering
+CDV / TPV / trimming / online-compaction signals collectively -
+is scoped in `TPV_ThinProvisioningImplementation.md` § 6.4
+"Monitor / Exporter Integration"; when it ships, the online-
+compaction counters land alongside the wastage, `pending_return_list`
+depth, allocator watermarks, and the rest of the per-TPV / per-CDV
+signals already exposed via `/proc`.
+
+Configuration is one-direction in the opposite sense: the
+management server stores the per-TPV thresholds and enable flag
+(`tpvConfig.onlineCompactionEnabled`,
+`tpvConfig.onlineCompactionArmHighPct`,
+`tpvConfig.onlineCompactionArmLowPct`) and delivers them to the
+kernel on the attach payload. Persistent durable state lives
+where it has always lived; ephemeral runtime state lives in
+`/proc`.
+
 ### Policy and throttling
 Online compaction competes with the workload for CDV bandwidth
 and for the free-slot pool. The wastage-ratio arm/disarm handles

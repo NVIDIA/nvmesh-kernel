@@ -2040,6 +2040,91 @@ extent_index  tpv_uuid                              flags
 - **`tools/tpv_inspect.py`**: Reads `/proc/nvmesh/volumes/*/tpv/tpv_alloc.json` from a node and produces a summary of all TPV allocator states.
 - **`tools/cdv_inspect.py`**: Reads `/proc/nvmesh/toma/cdv/*/alloc_state.json` from a TOMA node and cross-checks: `allocated_extents` vs. actual non-free row count, `tpv_uuid` values vs. management REST API, orphaned extents.
 
+### 6.4 Monitor / Exporter Integration — *planned*
+
+**What this section is.** A statement of scope for where CDV, TPV,
+trimming, and compaction telemetry will eventually surface outside
+`/proc`. The integration itself is a future work item tracked under
+post-MVP.
+
+**Scope of the signals.** All of the following are exposed today via
+`/proc` and will need to be harvested by the NVMesh monitor / exporter
+for operator-visible metrics, alerting, and capacity planning:
+
+- **CDV-level**, from `/proc/nvmesh/toma/cdv/<cdv_name>/alloc_state*`:
+  `total_extents`, `allocated_extents`, `free_extents`,
+  `needs_zeroing`, `generation`, `is_local_allocator`,
+  `allocator_toma_id` (§ 6.2).
+- **TPV allocator state**, from `/proc/nvmesh/volumes/<tpv>/tpv/tpv_alloc*`:
+  `cdv_extents_count`, `free_tpv_extents`, `mapped_extents`,
+  `cdv_alloc_pending`, `allocator_toma_id`, `allocator_generation`,
+  `low_watermark`, `dirty` (§ 6.1).
+- **Trimming (Step 1 / Step 2) counters**, from
+  `/proc/nvmeibc/tpv/<name>/stats`:
+  `stat_discard_ok`, `stat_discard_misaligned_skipped`,
+  `cdv_extents_returned`, `cdv_free_sent`, `pending_return_list`
+  depth (see `TPV_Trimming.md` § Reference: Observability inventory).
+- **Offline compaction** (Step 4): progress and terminal state are
+  already mirrored into MongoDB via the `compactionJob` document and
+  are queryable via the management REST API. No exporter change needed
+  for these — they are surfaced through the existing management
+  channel.
+- **Online compaction** (Step 5): lifetime counters (`online.state`,
+  `online.wastage_pct`, `online.arm_high_pct`, `online.arm_low_pct`,
+  `online.relocations_ok`, `online.aborts_by_write_conflict`,
+  `online.aborts_by_other`) from
+  `/proc/nvmeibc/tpv/<name>/compaction`. These are **not** mirrored
+  into MongoDB — see `TPV_Trimming.md` § 1510 "Step 5 — Online
+  compaction" / `/proc` surface for the rationale (ephemeral per
+  attach, no management-side decisions depend on them, adding
+  keepalive fanout would pay forever-per-TPV cost to drive a
+  display). The exporter is the intended consumer.
+
+**Why the exporter instead of Kafka → MongoDB.** The standing NVMesh
+pattern for durable state a user can query through the REST API is
+Kafka → MongoDB (used today for `CDVAllocatorStats`, `TPVStats`,
+`compactionJob`). That pattern is appropriate when:
+- the value is a **decision input** for management (e.g., offline
+  compaction scheduler reads `progressUpdatedAt`), or
+- the value is **durable and slow-changing** (e.g., CDV capacity,
+  last-attach time).
+
+Telemetry that is neither (high cardinality, high update rate, no
+management-side consumer) belongs on a scraping path. A typical
+Prometheus-style exporter running on each node reads the local
+`/proc` files and exposes the values on an HTTP endpoint; the
+operator's monitoring stack aggregates. No per-sample Kafka message,
+no MongoDB write pressure, and the monitor can be evolved
+independently of management.
+
+**What to build.** A single NVMesh exporter (process or systemd
+service) running on each target and client node that:
+1. Walks `/proc/nvmesh/**` and `/proc/nvmeibc/**` on a configurable
+   interval.
+2. Parses the `.json` form where available (`tpv_alloc.json`,
+   `alloc_state.json`) and the text form where JSON is not yet
+   emitted (wastage, online-compaction section).
+3. Emits OpenMetrics / Prometheus-format labels keyed by TPV name,
+   CDV name, and node.
+4. Ships the generic Grafana dashboards shared across NVMesh
+   deployments.
+
+**Deliverables required before this is live.**
+- Supplement every `/proc` text fill callback listed above with a
+  `.json` sibling to give the exporter a stable parse surface. Some
+  are already there (`tpv_alloc.json`, `alloc_state.json`); the
+  Step 1/2/5 counters currently live inside the text `stats` /
+  `compaction` files and need JSON siblings.
+- Document the full label set in a single place (this section, when
+  the exporter lands).
+- Ship an exporter package that installs alongside the
+  `nvmesh-client` / `nvmesh-target` packages.
+
+Until the exporter exists, the `/proc` files remain the interface
+for operators (viewable via `cat` on the node, or collected with
+`tpv_inspect.py` / `cdv_inspect.py` § 6.3). No signal listed above
+is lost in the meantime — they are just not centrally aggregated.
+
 ---
 
 ## Part 7 — Simulator Updates
