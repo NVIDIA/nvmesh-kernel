@@ -1515,15 +1515,30 @@ a detach / attach cycle. Targets the long-running-VM case that
 Step 4 cannot reach: TPVs whose client has held the volume open
 for months and cannot tolerate any service blip.
 
+### Relationship to the density-aware allocator (baseline)
+Fresh writes never cause fragmentation. The density-aware
+allocator maintains `cdv_extent_list` sorted ascending by
+`allocated_count` and picks from the densest non-full extent on
+every fresh `alloc_extent`, so guest writes after a DISCARD/TRIM
+land back on the sparsest extents and naturally reconsolidate.
+Online compaction is therefore a *reactive* layer: it runs only
+when the accumulated effect of free_extent (DISCARD) plus the
+client's virtual-address pattern leaves the live slots scattered
+across more CDV extents than the live-slot count warrants.
+In particular, a TPV that has never been trimmed, or that was
+trimmed and then rewritten in the same virtual range, does not
+need online compaction at all.
+
 ### Why this does not need detach / attach
 The coherence problem is narrower than it looks. We do not need to
 quiesce the whole client - we only need to serialize *one virtual
 extent at a time* against concurrent IO to that same virtual
 extent. A virtual extent's mapping lives in exactly one place
 (the xarray entry at `virt_idx`, mirrored on disk in one L2 leaf),
-so a per-entry lock is sufficient to make relocation atomic from
-the guest's perspective. Guest IO to *other* virtual extents is
-unaffected.
+so a per-entry abort protocol is sufficient to make relocation
+atomic from the guest's perspective. Guest IO to *other* virtual
+extents is unaffected, and guest IO to the same virt_idx is never
+blocked: the worker yields and the guest proceeds in-place.
 
 This is also why online compaction is naturally client-driven, not
 TOMA-driven: the client already owns the xarray, the allocator
@@ -1531,55 +1546,122 @@ free pool, the L1/L2 tree, and the bios flowing to the CDV. TOMA
 adds nothing and would just need a side channel for every lock
 and mapping update. Keep it all in the client.
 
-### Design: per-L2-entry lock on the xarray value
+### Guest writes always win - abort on conflict
+A guest write to a virt_idx that is being relocated must never
+wait. Blocking a guest write behind a maintenance operation is
+unacceptable for the always-attached workloads Step 5 targets.
+Instead, the worker is *optionally* opportunistic: it announces
+intent, does the copy, then at commit time verifies that no guest
+write landed concurrently. On conflict the worker aborts - frees
+the destination slot, returns the entry to `NORMAL`, and leaves
+the guest write to proceed in place against the original slot.
+The guest write adds a single atomic cmpxchg to its hot path; it
+never spins, waits, or retries. The worker retries the same
+virt_idx later when guest traffic eases, or moves on to another
+one.
+
+This inverts the role of the per-entry lock versus the
+"park and wait" design considered in earlier drafts of Step 5.
+The outcome is a strictly better latency model for the guest and
+a slightly higher retry rate for the worker under contention,
+which is the right trade-off for a maintenance background job.
+
+### Design: abort-on-conflict state machine
 Extend `nvmeibc_tpv_extent_entry` (the xarray value type defined
-in main doc §3.3) with two fields:
+in main doc §3.3) with two new fields: a state and an inflight
+counter.
 
 ```c
 struct nvmeibc_tpv_extent_entry {
     u64 phys_offset;
     u32 cdv_extent_index;
-    u8  state;           // NEW: NORMAL, RELOCATING
-    atomic_t inflight;   // NEW: count of in-flight bios on this entry
+    u8  state;          // NEW: NORMAL | RELOCATING | RELOC_CANCELLED | COMMITTED
+    atomic_t inflight;  // NEW: bios currently dispatched against phys_offset
     struct rcu_head rcu;
 };
 ```
 
-Plus two per-TPV waitqueues:
+`inflight` lets the worker drain in-flight guest bios against the
+*old* entry before the source slot is parked for reclaim; without
+it a guest read dispatched during RELOCATING could still be in
+flight when a later L2 flush promotes the source slot back to the
+free pool and another allocation reuses it, corrupting the
+reader. The drain happens **after** commit (not before the copy,
+as in earlier drafts) - see the Relocation protocol below.
 
-- `reloc_wq` - parked guest bios sleep here waiting for a
-  relocation to finish (state back to NORMAL / entry swapped).
-  Woken by the worker at step 10.
-- `inflight_drain_wq` - the relocation worker sleeps here
-  waiting for an entry's `inflight` to hit zero. Woken by bio
-  completion when the decrement takes the count to zero.
+State transitions (all via cmpxchg):
 
-IO path changes (inside `nvmeibc_tpv_make_request`, after the
-existing `xa_load`):
+| From            | To               | Who          | When                                                    |
+|-----------------|------------------|--------------|---------------------------------------------------------|
+| NORMAL          | RELOCATING       | worker       | start of a reloc attempt                                |
+| RELOCATING      | RELOC_CANCELLED  | guest write  | guest write arrives mid-reloc (cancels commit)          |
+| RELOCATING      | COMMITTED        | worker       | commit point, immediately before `xa_store(new_entry)`  |
+| RELOC_CANCELLED | NORMAL           | worker       | abort path, dest slot freed                             |
+| RELOCATING      | NORMAL           | worker       | abort from CDV read/write error                         |
+| COMMITTED       | *freed via rcu*  | worker       | old entry unreachable from xarray; `kfree_rcu` after    |
+
+`COMMITTED` is a *latch* that becomes visible before the
+corresponding `xa_store` and therefore blocks any post-commit
+cancellation: once the worker's `cmpxchg(RELOCATING, COMMITTED)`
+has succeeded, a guest's `cmpxchg(RELOCATING, RELOC_CANCELLED)`
+cannot succeed (state is no longer RELOCATING), so the guest
+cannot dispatch a write to a source slot that is about to be
+parked. Guests observing `COMMITTED` re-`xa_load` until the new
+entry is visible (a bounded-cycles spin; `xa_store` follows the
+worker's cmpxchg within a handful of instructions and is made
+globally visible by the xarray's internal locking).
+
+IO path (inside `nvmeibc_tpv_make_request`, after the existing
+`xa_load`):
 
 ```
-entry = rcu_dereference(xa_load(extent_map, virt_idx));
-if (!entry)                        /* existing unmapped path */ ...;
+retry:
+  rcu_read_lock();
+  entry = rcu_dereference(xa_load(extent_map, virt_idx));
+  if (!entry) { rcu_read_unlock(); ...unmapped path... }
 
-rcu_read_lock();
-if (READ_ONCE(entry->state) == RELOCATING) {
-    rcu_read_unlock();
-    wait_event(tpv->reloc_wq,
-               READ_ONCE(entry->state) == NORMAL || xa_load(...) != entry);
-    goto retry;   /* xa_load again; entry may have been swapped */
-}
-atomic_inc(&entry->inflight);
-rcu_read_unlock();
-/* dispatch bio to entry->phys_offset */
-/* on completion:
- *   if (atomic_dec_and_test(&entry->inflight))
- *       wake_up(&tpv->inflight_drain_wq);
- * Note: do NOT wake reloc_wq here - guest bios parked on
- * reloc_wq are waiting on a state transition, not an inflight
- * decrement. Waking them on every bio completion would be a
- * thundering-herd pessimization.
- */
+  state = READ_ONCE(entry->state);
+
+  if (state == COMMITTED) {
+      /* Old entry latched; new entry is or will very shortly
+       * be the live mapping. Spin-retry xa_load until visible. */
+      rcu_read_unlock();
+      cpu_relax();
+      goto retry;
+  }
+
+  if (is_write_bio && state == RELOCATING) {
+      /* Cancel the in-flight reloc. If the cmpxchg succeeds,
+       * the worker's step-8 commit cmpxchg will fail and the
+       * worker will abort (source stays live). If the cmpxchg
+       * fails, the state has already moved to COMMITTED (worker
+       * beat us) - loop and find the new entry. */
+      if (cmpxchg(&entry->state, RELOCATING, RELOC_CANCELLED)
+          != RELOCATING) {
+          rcu_read_unlock();
+          goto retry;
+      }
+      /* fall through: dispatch to source (entry->phys_offset) */
+  }
+
+  /* Reads during RELOCATING / RELOC_CANCELLED are safe: the
+   * source slot holds the current durable data (worker has only
+   * copied it, not committed). The inflight bump + worker drain
+   * at step 10 ensures the source slot is not promoted to the
+   * free pool until this bio has completed.                   */
+
+  atomic_inc(&entry->inflight);
+  rcu_read_unlock();
+  submit_bio(...phys_offset = entry->phys_offset...);
+  /* end_io:
+   *     if (atomic_dec_and_test(&entry->inflight))
+   *         wake_up(&tpv->inflight_drain_wq);
+   */
 ```
+
+Fast path: one `READ_ONCE`, one `atomic_inc`. Contention path
+(guest write + `RELOCATING`): one `cmpxchg` and a re-`xa_load`
+on failure. No guest I/O ever blocks.
 
 ### Relocation protocol (per slot)
 Multiple relocations can run concurrently - on the same TPV
@@ -1601,44 +1683,78 @@ relocate(virt_idx, dest_ref):
          free dest slot; return (nothing to relocate).
   3. cmpxchg(entry->state, NORMAL, RELOCATING).
      On failure (another worker got here first, or the entry was
-     freed by a concurrent DISCARD), free dest slot; return.
-  4. Drain in-flight bios on the old entry:
-         wait_event(tpv->inflight_drain_wq,
-                    atomic_read(&entry->inflight) == 0);
-     The worker sleeps off-CPU until the last bio dispatched
-     against the old phys_offset completes and its end_io decrements
-     inflight to zero (waking the queue). Bounded: an in-flight
-     bio to the CDV is bounded by CDV latency. No new bios can
-     increment inflight because the IO path reads
-     `entry->state == RELOCATING` (set in step 3) and parks on
-     reloc_wq instead.
-  5. Submit an async CDV read of T bytes from entry->phys_offset
+     freed by a concurrent DISCARD, or a guest write is already
+     modifying it), free dest slot; return ABORTED.
+  4. Submit an async CDV read of T bytes from entry->phys_offset
      into a worker-owned buffer (reuse the existing async
      tpv<->CDV bio path in nvmeibc_tpv_cdv.c). Wait on a
      `struct completion` in the read bio's end_io callback.
      The worker sleeps here - no spinning - and stays off-CPU
      for the duration of the CDV round trip.
-  6. Submit an async CDV write of T bytes to the dest phys
+  5. Submit an async CDV write of T bytes to the dest phys
      offset, same end_io + completion wait. On write-error,
-     release dest slot and new_entry, clear RELOCATING on old
-     entry via xchg, wake reloc_wq, return. (A subsequent
-     relocation attempt on this virt_idx will retry.)
+     goto abort.
+  6. if (READ_ONCE(entry->state) == RELOC_CANCELLED)
+         goto abort;
+     A guest write arrived during steps 4-5 and modified the
+     source slot concurrently; our buffer may be stale. The
+     guest write is already durable at source; we discard the
+     work.
   7. Allocate a fresh nvmeibc_tpv_extent_entry with new phys_offset
      / cdv_extent_index / state == NORMAL / inflight == 0.
-  8. old = xa_store(extent_map, virt_idx, new_entry);
-     // old == entry; entry is now unreachable via xa_load.
+  8. Commit (the critical step; see Bug 1 analysis in design
+     history):
+         if (cmpxchg(&entry->state, RELOCATING, COMMITTED) !=
+             RELOCATING) goto abort;
+         old = xa_store(extent_map, virt_idx, new_entry);
+     The cmpxchg is a full memory barrier; once it succeeds, any
+     subsequent guest cmpxchg(RELOCATING, RELOC_CANCELLED) will
+     fail, so no guest write can be dispatched to the source slot
+     after this point. old == entry; entry is now unreachable
+     via future xa_load (readers that already loaded old will
+     observe state == COMMITTED and spin-retry).
   9. Mark the owning L2 page dirty (leaf at virt_idx % N_L2 now
      holds the new cdv_offset).
- 10. wake_up(&tpv->reloc_wq) - any IO that parked on step "wait
-     for state == NORMAL" now rereads xa_load and finds new_entry.
- 11. Under allocator lock: park the *source* slot on
+ 10. Drain guest bios against the old entry, then park the
+     source slot:
+         synchronize_rcu();     /* no new xa_load returns old */
+         wait_event(tpv->inflight_drain_wq,
+                    atomic_read(&entry->inflight) == 0);
+     Under allocator lock, park the *source* slot on
      source_ref->pending_free_slots (NOT free_tpv_extents yet -
      see "Deferred slot visibility" below). Do not decrement
      allocated_count yet; the slot is still logically allocated
      from the CDV's perspective because the on-disk L2 still
-     points at it.
- 12. kfree_rcu(old, rcu).
+     points at it.  The synchronize_rcu + wait_event pair is what
+     makes in-flight reads safe across slot reuse: it guarantees
+     every bio dispatched against entry->phys_offset has
+     completed before the slot can be promoted to the free pool
+     by the L2-flush promotion callback.
+ 11. kfree_rcu(old, rcu).
+     return COMMITTED.
+
+abort:
+  - xchg(&entry->state, NORMAL) - restores the original entry.
+    The pre-xchg value is RELOCATING (step-5 CDV-write error
+    with state still RELOCATING) or RELOC_CANCELLED (guest write
+    cancelled us). Never COMMITTED - a successful commit does
+    not take the abort path.
+  - Free the T-byte CDV-read buffer allocated at step 4.
+  - Free the fresh new_entry if allocated (step 7).
+  - Return the dest slot to the free pool (decrement
+    dest_ref->allocated_count under allocator lock).
+  - wake_up(&tpv->inflight_drain_wq) defensively in case a
+    concurrent worker is also draining. (No-op when nothing
+    waits.)
+  - return ABORTED.
 ```
+
+The worker treats `ABORTED` as a soft failure: it counts the
+event in `/proc/.../compaction` (see `aborts_by_write_conflict`
+below) and moves on to the next candidate. The same virt_idx
+becomes a candidate again if guest traffic stays quiet long
+enough and the TPV's wastage ratio is still above the arm
+threshold.
 
 ```mermaid
 sequenceDiagram
@@ -1647,41 +1763,54 @@ sequenceDiagram
     participant Entry as xarray entry
     participant Flush as persist_work
 
-    Note over Entry: state=NORMAL<br/>phys=source
-
-    Guest->>Entry: xa_load, inflight++
-    Guest->>Guest: dispatch bio to source
-    Entry->>Guest: bio completes, inflight--
+    Note over Entry: state=NORMAL<br/>phys=source<br/>inflight=0
 
     Worker->>Worker: alloc dest slot
-    Worker->>Entry: cmpxchg state NORMAL->RELOCATING
-    Worker->>Worker: wait_event inflight_drain_wq<br/>until inflight==0
+    Worker->>Entry: cmpxchg NORMAL->RELOCATING
+    Worker->>Worker: async CDV read source (sleeps)
 
-    par Guest IO during RELOCATING
+    opt Guest WRITE arrives during RELOCATING
         Guest->>Entry: xa_load -> sees RELOCATING
-        Guest->>Guest: park on reloc_wq
+        Guest->>Entry: cmpxchg RELOCATING->RELOC_CANCELLED (succeeds)
+        Guest->>Entry: inflight++
+        Guest->>Guest: dispatch bio to source (in-place, no wait)
+        Entry->>Guest: bio completes, inflight--
     end
 
-    Worker->>Worker: read source (async bio)
-    Worker->>Worker: write dest (async bio)
-    Worker->>Entry: xa_store new_entry<br/>phys=dest, state=NORMAL
-    Worker->>Worker: mark L2 page dirty
-    Worker->>Guest: wake reloc_wq
-    Guest->>Entry: re-xa_load -> new_entry, dispatch to dest
-    Worker->>Worker: park source slot on<br/>pending_free_slots
-    Worker->>Worker: kfree_rcu(old)
+    Worker->>Worker: async CDV write dest (sleeps)
 
-    Flush->>Flush: flush_state writes dirty L2 page
-    Flush->>Worker: promotion callback:<br/>move source slot<br/>pending_free_slots -> free_tpv_extents<br/>decrement allocated_count
+    alt no cancellation observed
+        Worker->>Entry: cmpxchg RELOCATING->COMMITTED (succeeds)
+        Worker->>Entry: xa_store new_entry (phys=dest, state=NORMAL)
+        Worker->>Worker: mark L2 page dirty
+        Worker->>Worker: synchronize_rcu() + wait inflight==0
+        Worker->>Worker: park source slot on pending_free_slots
+        Worker->>Worker: kfree_rcu(old)
+        Flush->>Flush: flush_state writes dirty L2 page
+        Flush->>Worker: promote source slot<br/>pending_free_slots -> free_tpv_extents<br/>decrement allocated_count
+    else cancellation observed (step 6 READ_ONCE or step 8 cmpxchg)
+        Worker->>Entry: READ_ONCE or cmpxchg sees RELOC_CANCELLED
+        Worker->>Worker: ABORT: free CDV buffer, dest slot, new_entry<br/>xchg state->NORMAL
+    end
+
+    Note over Guest: Guest READ during RELOCATING/RELOC_CANCELLED<br/>inflight++, dispatch to source (source data is valid)<br/>no cmpxchg, no wait, inflight-- at end_io
 ```
 
-*Figure 3: Single-slot online relocation. The worker never holds
-a TPV-wide lock; the per-entry `cmpxchg` + two waitqueues
-(`reloc_wq` for guest bios, `inflight_drain_wq` for the worker)
-provide the serialization. The source slot is invisible to the
-allocator until the L2 flush lands - that is what makes this
-crash-safe (see § Correctness for the analysis, and § Deferred
-slot visibility below for why parking is mandatory).*
+*Figure 3: Single-slot online relocation with abort-on-conflict.
+A guest WRITE that arrives during RELOCATING flips state to
+RELOC_CANCELLED via a single cmpxchg and proceeds in-place
+against the source slot; it never waits. The worker's step-8
+commit cmpxchg(RELOCATING, COMMITTED) then fails and the worker
+aborts: destination slot returned to the free pool, no xa_store.
+Once COMMITTED, no subsequent guest can reach RELOC_CANCELLED,
+so post-commit the source slot cannot be the target of a new
+guest write.  Guest READs ignore state entirely (the source
+slot holds valid data through the copy); they bump `inflight`
+so the worker's step-10 drain knows when it is safe to park the
+source slot.  Crash-safety is provided by the parked-slot
+invisibility gate - source stays allocated from the CDV's
+perspective until the L2 flush commits the redirect (see §
+Correctness and § Deferred slot visibility below).*
 
 ### Deferred slot visibility — why step 11 does not free directly
 
@@ -1775,27 +1904,47 @@ and trim throughput, not guest-visible latency.
 
 ### Correctness
 
-**Guest-visible atomicity.** Any bio the guest submits to
-`virt_idx` either (a) arrives before step 3's cmpxchg and completes
-against the old `phys_offset` (we waited for it in step 4), or
-(b) arrives after step 3 and parks on `reloc_wq` until step 10, at
-which point it retries and dispatches against the new
-`phys_offset`. The guest never sees a torn read or a write to a
-stale offset.
+**Guest-visible atomicity (writes).** A guest write to `virt_idx`
+observes one of three states on the `xa_load`ed entry:
+- `NORMAL`: dispatch to `entry->phys_offset`; no interaction
+  with any worker.
+- `RELOCATING`: cmpxchg to `RELOC_CANCELLED`. On success, the
+  worker's step-8 commit cmpxchg will fail and the worker will
+  abort without swapping the xarray entry; the guest write lands
+  at the source slot which remains the durable home. On failure
+  (worker beat us to `COMMITTED`), re-`xa_load` - now visible
+  new entry - and dispatch to its phys_offset (dest).
+- `COMMITTED`: re-`xa_load` (bounded spin) until the new entry
+  is visible.
+The guest never waits on a worker. Between "worker commits" and
+"guest bio dispatched to dest", the `xa_store` becomes globally
+visible via the xarray's internal locking - a handful of CPU
+cycles.
+
+**Guest-visible atomicity (reads).** Reads dispatch to
+`entry->phys_offset` regardless of state and bump `inflight`
+inside `rcu_read_lock`. The source slot's *data* is valid for
+the full RELOCATING/COMMITTED window (the copy in step 5
+captured it; no guest write can modify source after commit
+because RELOC_CANCELLED can no longer be reached), so a read
+in flight sees a consistent snapshot. The source *slot* stays
+allocated (not reusable) until the worker's step-10 drain
+releases it, so the bio cannot be misdirected by a subsequent
+reallocation.
 
 **Concurrent DISCARD.** A DISCARD on `virt_idx` arriving during
-`RELOCATING` parks identically - it is just another bio waiting
-for state == NORMAL. When it retries, it finds `new_entry`, and
-the unified `free_extent` path (post-deferred-visibility change)
-parks the destination slot on its owning ref's
-`pending_free_slots`, marking the L2 leaf for this `virt_idx`
-dirty-to-null. The source slot, already parked by step 11, is
-unaffected. When `persist_work` flushes the L2 page, both slots
-become visible in `free_tpv_extents` in the same cycle - net
-result: two slots freed (one from relocation, one from discard),
-matching the two physical allocations that existed at the moment
-of the DISCARD. `allocated_count` on both extents is balanced
-once the flush callback runs.
+`RELOCATING` behaves like a guest write for cancellation
+purposes: it cmpxchgs `RELOCATING` -> `RELOC_CANCELLED` (the
+worker will abort at its step 8) and proceeds to `xa_erase` the
+entry, pushing the source slot onto `pending_free_slots` via the
+unified `free_extent` path (Step 2 / Step 5 deferred visibility).
+If the cmpxchg fails because the worker already committed, the
+DISCARD re-`xa_load`s and erases `new_entry` instead, parking the
+dest slot on its owning ref's `pending_free_slots`; the source
+slot is already parked by the worker's step 10. In both cases
+one flush cycle promotes exactly one slot to `free_tpv_extents`
+and balances `allocated_count` against the matching L2 leaf
+update.
 
 **Concurrent WRITE to unmapped virt_idx.** Cannot happen: the
 entry exists (we xa_load'd it in step 2), so the virt_idx is
@@ -1861,82 +2010,173 @@ persists before un-parking bios. No change needed.
 **CDV preempt mid-relocation.** `nvmeibc_tpv_handle_cdv_preempted`
 tears the TPV down (main doc §3.8 last paragraph). The relocation
 worker must observe `tpv->state != TPV_ATTACHED` at each loop
-iteration and bail out; the per-virt IO parking on `reloc_wq` is
-flushed by `nvmeibc_tpv_detach` failing all parked bios with
--EIO (§3.8 step 5). A dest slot allocated but not yet used leaks
-into the extent_map - except that the TPV is about to be torn
-down entirely, so it does not matter. On re-attach, `load_state`
-will reconcile.
+iteration and bail out. No guest bios are parked waiting for the
+worker (abort-on-conflict guarantees never-block semantics), so
+no bio drain is required on the preempt path. Any half-completed
+relocation - dest slot allocated, CDV I/O in progress, xarray
+not swapped - simply never commits; `nvmeibc_tpv_detach` tears
+down the entire TPV including the xarray and allocator state.
+On re-attach, `load_state` reconstructs from the on-disk L2
+tree, which still points at the source slot (the uncommitted
+relocation was never reflected in L2), and the dest slot - which
+was never recorded on disk - falls into `free_tpv_extents` via
+the "any slot not marked L1/L2/data" branch of `load_state`.
 
-### Trigger and planner - detailed design pending
+### Trigger and planner
 
-Step 5 specifies the relocation primitive (protocol, locking,
-crash consistency). The surrounding policy - *when* to relocate
-and *which slot to move where* - needs a separate detailed-design
-pass before implementation. The high-level shape:
+**Fragmentation signal (wastage ratio).** Every TPV maintains
+two cheap counters in its allocator that are already needed for
+the density-aware sort:
 
-**Trigger.** Compaction work kicks off when the TPV's
-`free_tpv_extent_count` falls below a dedicated "compaction
-watermark" following discard-driven activity. This ties
-reclamation to observable pressure: we only move data when
-emptying an extent would actually help the free pool. The
-watermark sits above Step 2's `high_watermark` so that compaction
-runs while Step 2's return drain is also active; both cooperate
-to grow the free pool rather than compete. Open questions for
-the detailed design: exact watermark value, hysteresis against
-Step 2, and whether to gate additionally on a sparseness ratio
-(to avoid pointless work on a uniformly-full TPV whose physical
-footprint cannot shrink).
+- `cdv_extents_count`      - number of CDV extents owned.
+- `live_slots`             - sum of `allocated_count` across
+                             all refs on `cdv_extent_list`.
 
-**Planner.** The heuristic is "move a TPV_extent from the most
-empty CDV_extent to the fullest CDV_extent that still has room"
-- source sparse to keep emptying it, destination dense to avoid
-spreading live data further. The existing
-`cdv_extent_ref.allocated_count` (main doc S3.3) already tracks
-per-extent occupancy, so the raw data is present; what is open
-is the query mechanism:
+The wastage ratio is
 
-- **Linear scan** of `cdv_extent_list` on each compaction tick:
-  O(N) where N is the number of CDV extents owned by this TPV.
-  Zero maintenance cost. Fine for small N (tens to low hundreds,
-  the realistic case for most deployments).
-- **Auxiliary sorted index** (heap or RB-tree keyed by
-  `allocated_count`): O(log N) maintenance per alloc / free
-  update, O(1) or O(log N) source / destination pick. Non-zero
-  per-IO cost paid on every guest write and every DISCARD -
-  worth it only if profiling shows the scan is noticeable against
-  real workload churn.
+```
+wastage = 1 - live_slots / (cdv_extents_count * n_slots_per_cdv_extent)
+```
 
-Linear scan is the reasonable starting point. The detailed-design
-pass should measure expected N on real deployments before
-committing to the auxiliary structure.
+`wastage == 0` means every CDV extent is full; `wastage >> 0`
+means the TPV is holding more extents than its live slots warrant.
+Compaction can only reduce `cdv_extents_count` - it cannot increase
+`live_slots` - so wastage is exactly the fraction of work
+compaction could eliminate if it ran to completion.
 
-**Other items for the detailed design:**
+**Arm / disarm with hysteresis.** Two tunables, exposed per-TPV
+via `tpvConfig` (settable on update) and as global defaults:
 
-- Ownership of the compaction worker: per-TPV kthread vs. a
-  shared workqueue. Concurrent workers are safe without a
-  per-TPV mutex because the per-entry cmpxchg handles mutual
-  exclusion (see Relocation protocol below); the
-  module-scope `tpv_reloc_outstanding` semaphore caps total
-  parallelism across all attached TPVs.
-- `/proc` surface for manual trigger, abort, and status.
-- Observability split between "triggered by watermark", "running",
-  "idle above watermark".
+- `compaction_arm_high_pct`  (default 30): arm the background
+                              worker when wastage climbs above
+                              this value.
+- `compaction_arm_low_pct`   (default 15): disarm when wastage
+                              falls below. The disarm threshold
+                              must be strictly less than the arm
+                              threshold; validation refuses an
+                              inverted pair.
+
+Why hysteresis: without a gap, the background worker would
+oscillate between armed and disarmed every few slot moves, as
+each reclaimed extent transiently rebalances the ratio. A low/high
+split of 15/30 gives the worker room to finish a useful batch of
+reclamations before the signal drops it back to idle.
+
+**Re-check trigger.** The worker does not poll wastage on a
+timer; it reevaluates on meaningful events:
+
+- Every Nth `free_extent` call (N=1024 by default), to detect
+  a DISCARD burst that just pushed wastage above arm.
+- On the `pending_return_list` drain completion, because that is
+  where Step 2 itself reduces `cdv_extents_count`; after a
+  successful drain wastage may have fallen below disarm.
+- A module-scope periodic ticker (default every 5 min) as a belt-
+  and-braces check; wastage rarely changes without one of the
+  two event triggers above, but a drifting workload that writes
+  slowly and trims rarely might otherwise miss a disarm.
+
+None of these block guest I/O; all are O(1) computations against
+the in-memory counters.
+
+**Planner.** The density-aware allocator already keeps
+`cdv_extent_list` sorted ascending by `allocated_count`. The
+online planner reads the same list:
+
+- **Source (sparse):** head of `cdv_extent_list` (smallest
+  `allocated_count > 0`, `!is_l1_extent`, `!on_pending_return_list`).
+  Draining this ref first maximises the chance it transitions to
+  empty-returnable and frees a whole CDV extent.
+- **Destination (dense):** tail of `cdv_extent_list` among refs
+  with `allocated_count < n_slots`. Packing into an
+  already-dense extent keeps the invariant tight and avoids
+  spreading live data across new extents.
+
+Picking by walking the list is O(N) per candidate; N is the
+number of CDV extents owned by this TPV (tens to low hundreds in
+practice). Zero maintenance cost - the sort invariant is
+already maintained by the allocator. No auxiliary structure is
+needed.
+
+**Worker ownership.** Per-TPV `struct delayed_work`,
+`online_compaction_work`, first armed from
+`nvmeibc_tpv_load_state_work_fn` *after* `state_loaded = true`
+(not from raw attach), and cancelled at detach alongside the
+existing `persist_work` / `cdv_alloc_work`. Arming before
+`state_loaded` would read a zero or half-populated
+`cdv_extent_list` and miscompute wastage.
+
+Each invocation of the work function attempts **at most one
+relocation** and then re-queues itself with a short delay
+(tunable, default 10 ms) while armed and wastage is still above
+disarm; it exits the function entirely when the TPV disarms,
+and is re-armed by the event triggers above. The per-invocation
+bound is important for fairness: with the client-wide
+`tpv_reloc_outstanding` semaphore shared across all attached
+TPVs, a work function that grabbed multiple semaphore slots in
+one invocation would monopolise the client's reloc budget and
+starve peers. One-reloc-per-invocation gives implicit round
+robin via the semaphore's FIFO wait queue. This also avoids a
+dedicated kthread per TPV while giving the background worker
+its own backoff cadence independent of other per-TPV work.
+
+**Aggressiveness.** Background online compaction runs at
+aggressiveness 1 (fully serial) by default, which maps to a
+single `delayed_work` item per TPV that does one relocation per
+invocation. Operators who want faster convergence on a specific
+TPV can raise its per-TPV aggressiveness to N, which queues N
+concurrent `delayed_work` items for that TPV (each still doing
+one relocation per invocation). All online workers across all
+attached TPVs share the client-wide `tpv_reloc_outstanding`
+semaphore, so the global cap applies regardless of per-TPV
+aggressiveness.
+
+**Split-mode scope.** In split-mode TPVs online compaction runs
+**only on the data allocator side**. The metadata allocator
+carries a small, latency-sensitive L2-table footprint whose
+fragmentation savings do not justify even the low-aggressiveness
+cost of moving slots during guest I/O. Metadata-side reclaim
+remains offline (Step 4) and event-driven; the online path
+treats the metadata allocator's wastage signal as "always below
+arm" so the worker never fires against it. The wastage
+computation and the planner both scope strictly to the data
+allocator.
+
+**`/proc` surface.** Per-TPV `/proc/nvmeibc/tpv/<name>/compaction`
+gains an `online:` section:
+
+- `online.state` - one of
+  `idle_below_arm` (wastage below arm_low_pct; worker idle),
+  `armed_running` (wastage at or above arm_low_pct and worker is
+   eligible to run; concurrent reloc ops are gated by
+   `tpv_reloc_outstanding`),
+  `idle_disabled` (operator turned it off; see below).
+- `online.wastage_pct` - current value of the signal.
+- `online.arm_high_pct` / `online.arm_low_pct` - effective
+  thresholds (per-TPV override or global default).
+- `online.relocations_ok` / `online.aborts_by_write_conflict` /
+  `online.aborts_by_other` - lifetime counters since attach.
+
+Operators can disable online compaction on a TPV via either the
+per-TPV config toggle or a write to `/proc/.../compaction`
+(`online=disable` / `online=enable`). In the disabled state the
+worker never fires regardless of wastage; offline (Step 4) is
+still available.
 
 ### Policy and throttling
 Online compaction competes with the workload for CDV bandwidth
-and for the free-slot pool. Guardrails:
+and for the free-slot pool. The wastage-ratio arm/disarm handles
+*whether* to run; the following additional guardrails tune *how
+hard* while armed:
 
 - **Concurrency cap (primary throttle).** A module parameter
-  `tpv_reloc_outstanding` (default TBD, suggested 4; range
-  0..64, where 0 disables online compaction entirely) sets the
-  maximum number of relocation operations in flight **across
-  all TPVs attached to this client** at any one time. The
-  value is a single global upper bound on the client's
-  relocation concurrency; it does NOT multiply by the number of
-  attached TPVs. Implemented as a module-scope counting
-  semaphore (`struct semaphore` with value =
-  `tpv_reloc_outstanding`) that every would-be worker - on any
+  `tpv_reloc_outstanding` (default 4; range 0..64, where 0
+  disables online compaction entirely) sets the maximum number
+  of relocation operations in flight **across all TPVs attached
+  to this client** at any one time. The value is a single global
+  upper bound on the client's relocation concurrency; it does
+  NOT multiply by the number of attached TPVs. Implemented as a
+  module-scope counting semaphore (`struct semaphore` with value
+  = `tpv_reloc_outstanding`) that every would-be worker - on any
   TPV - must `down()` before starting a relocation and `up()`
   after completion (or abort). A client with 50 attached TPVs
   and the default value still issues at most 4 relocation ops
@@ -1950,20 +2190,27 @@ and for the free-slot pool. Guardrails:
   latency is the regulator. Exposed via
   `/sys/module/nvmeibc/parameters/tpv_reloc_outstanding`; writes
   take effect for new ops (existing in-flight ops unaffected).
+- **Abort-on-conflict is the latency throttle.** Guest writes
+  that collide with an in-flight relocation cancel the worker,
+  not the other way around (§ Guest writes always win). Under a
+  bursty guest write workload the worker naturally backs off to
+  near-zero effective throughput because most of its attempts
+  abort; under a read-heavy or idle workload it proceeds at full
+  cap. No explicit rate-limiter is needed for guest-latency
+  protection beyond the cmpxchg.
 - **Back-pressure on free-pool depth.** If
   `free_tpv_extent_count <= high_watermark + n_slots`, pause -
   a guest-driven allocation is more important than a relocation.
   Pause here means the worker refuses to `down()` the semaphore
   until the pool recovers.
-- **Benefit recheck.** Step 4's `reclaimable` formula runs
-  periodically against the in-memory state (cheap - no metadata
-  read needed, everything is in the allocator). If below
-  threshold, the worker idles. Triggered on `pending_return_list`
-  transitions so we notice progress cheaply.
-- **Attachment age gate.** Only run online compaction when the
-  TPV has been attached for at least N hours (default 24). Avoids
-  compacting a volume that is about to detach anyway, where
-  Step 4 is strictly cheaper.
+
+Note: earlier drafts of this section specified an "attachment
+age gate" (only run after 24h of continuous attachment). That
+gate is dropped. The wastage signal already gates on a signal
+that is zero for a freshly-attached TPV that has not accumulated
+trim-driven fragmentation; waiting an additional 24h gains
+nothing and denies reclamation to workloads that fragment
+quickly after attach.
 
 ### Coexistence with offline compaction (Step 4)
 Both address different regimes and are *never active on the same
@@ -1977,9 +2224,13 @@ attachment state, which management already sequences:
   asymmetric-preempt rule (auto-detach compaction attach
   first).  Best for rarely-attached TPVs an operator can
   schedule around and for post-workload bulk reclamation.
-  Both Step 4 and Step 5 use the same relocation primitive
-  (`tpv_reloc_one` + L2 writer thread); Step 5 adds a per-entry
-  lock for guest-I/O coexistence.
+  Step 5 is a superset of Step 4's relocation primitive: they
+  share the CDV read/write + L2-dirty-mark + parked-slot
+  plumbing; Step 5 adds the per-entry state field, the abort-
+  on-conflict cmpxchg dance, and the post-commit
+  `synchronize_rcu()` + inflight drain needed for guest-I/O
+  coexistence. Step 4 can ignore all three because no guest I/O
+  is in flight during an offline run.
 - **Step 5 (online):** runs only while the TPV is attached to a
   guest client. The relocation worker is a per-TPV resource
   whose lifecycle is bounded by `nvmeibc_tpv_attach` /
@@ -2436,17 +2687,26 @@ cross-referencing, not claimed as part of this file's 24):
     (`tpv_simu_read_cdv_slot`).
 16. `test_reloc_concurrent_read` - spawn simu "reader" issuing
     bios to the virt_idx under relocation; assert every read
-    returns the correct data (no zeros, no garbage); reads park
-    on `reloc_wq` as expected.
+    returns the correct data (no zeros, no garbage); reads
+    dispatch without blocking (abort-on-conflict: reads never
+    park) and the worker's step-10 drain waits for inflight
+    to reach zero before parking the source slot.
 17. `test_reloc_concurrent_write` - as (16), but write +
     read-back; assert writes land at whichever phys_offset is
     current at bio dispatch time, and post-relocation reads see
     the written value.
 18. `test_reloc_concurrent_discard` - spawn DISCARD during
-    RELOCATING; assert DISCARD parks, completes after
-    relocation, both source and destination slots end up parked
-    on `pending_free_slots`, then both promoted after flush;
-    `allocated_count` on both extents balanced.
+    RELOCATING; assert DISCARD cmpxchgs state to
+    `RELOC_CANCELLED` and proceeds immediately with
+    `xa_erase`; the worker observes cancellation at step 8 and
+    aborts; the DISCARDed source slot lands on
+    `pending_free_slots`, destination slot returned to free
+    pool; after flush the source is promoted to
+    `free_tpv_extents` and `allocated_count` is balanced.
+    (Mirror test for the race where worker commits before
+    DISCARD's cmpxchg: DISCARD re-`xa_load`s, finds new entry,
+    erases it; dest slot lands on `pending_free_slots`;
+    source slot parked by worker step 10; same net result.)
 19. `test_reloc_crash_before_xa_store` - crash after dest
     write, before `xa_store`; re-init; assert source still owns
     virt_idx, destination slot reclaimed as free by
