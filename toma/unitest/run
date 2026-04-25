@@ -115,6 +115,12 @@ function T_SANDBOX_wire_buf_test() {
 	__abort_ci_on_failure;
 }
 
+function T_SANDBOX_status_report_test() {
+	__build_if_needed;
+	./${EXE_NAME} status_report_test ${@};
+	__abort_ci_on_failure;
+}
+
 function T_SANDBOX_trace_compress_test() {
 	__build_if_needed;
 	./${EXE_NAME} trace_compress_test ${@};
@@ -316,6 +322,7 @@ function __run_ci_suite() {
 	T_SANDBOX_gpt_util_self_unit_test;
 	T_SANDBOX_test_framework;
 	T_SANDBOX_wire_buf_test;
+	T_SANDBOX_status_report_test;
 	T_SANDBOX_trace_compress_test;
 	T_SANDBOX_trace_compress_comparison;
 }
@@ -325,6 +332,7 @@ case "$1" in
   rebuild*)		__force_rebuild;;
   framework*)	T_SANDBOX_test_framework ${@:2};;
   wire*)		T_SANDBOX_wire_buf_test ${@:2};;
+  status*)	T_SANDBOX_status_report_test ${@:2};;
   trace_comp*)	T_SANDBOX_trace_compress_test ${@:2};;
   trace_cmp*)	T_SANDBOX_trace_compress_comparison ${@:2};;
   main*)		T_SANDBOX_main_self_unit_test ${@:2};;
@@ -350,6 +358,7 @@ case "$1" in
 	echo "    persistency       - Self test of Toma persistency utility";
 	echo "    framework         - Test framework smoke test";
 	echo "    wire_buf          - Wire buffer unit tests";
+	echo "    status_report     - Status report and RPC error visibility tests";
 	echo "    trace_compress    - Trace LZ4 compression unit tests";
 	echo "    trace_cmp         - Compare plain vs compressed binlog size and pager output";
 	echo_yellow "  ------------ Debug, development tests:";

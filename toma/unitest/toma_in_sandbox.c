@@ -900,6 +900,13 @@ struct nvmeibt_nm_local_node { 					// Network module simulator. For Toma to com
 	union nvmeib_uuid	last_logged_remote_not_found;
 };
 
+static bool TEST_nm_remote_nodes_connected = true;
+
+void TEST_set_nm_remote_nodes_connected(bool is_connected)
+{
+	TEST_nm_remote_nodes_connected = is_connected;
+}
+
 void *nvmeibt_nm_tracer_init(const char *lib_path) { return (void *)lib_path; }
 
 struct nvmeibt_nm_local_node * nvmeibt_nm_init(void *handle) {
@@ -971,7 +978,7 @@ int nvmeibt_nm_cancel_req_node(struct nvmeibt_nm_local_node *ln, struct nvmeibt_
 bool nvmeibt_nm_is_remote_node_connected(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node) {
 	N_Tf(__AUTOID__, "node: @STR, Check connection", node->from_config.name);
 	(void)ln;
-	return true;
+	return TEST_nm_remote_nodes_connected;
 }
 
 void nvmeibt_nm_done(struct nvmeibt_nm_local_node *ln) {

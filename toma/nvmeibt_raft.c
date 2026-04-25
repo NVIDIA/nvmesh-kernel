@@ -1443,6 +1443,14 @@ void TEST_add_raft_member_to_hash(const union nvmeib_uuid *uuid, const char *hos
 	nvmeib_hash_add_uuid(my_raft_global.raft_members_hash_by_uuid, uuid, member);
 }
 
+void TEST_remove_raft_member_from_hash(const union nvmeib_uuid *uuid)
+{
+	struct nvmeibt_raft_member		*member;
+
+	member = nvmeib_hash_delete_uuid(my_raft_global.raft_members_hash_by_uuid, uuid);
+	free(member);
+}
+
 int TEST_compute_is_configs_incremental(
 	int64_t peer_topo_idx, int64_t peer_topo_config_idx,
 	int64_t peer_kafka_mgmt_config_offset, int64_t peer_raft_members_seq_no,
@@ -5062,4 +5070,3 @@ int nvmeibt_leader_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...
 	NFOUT;
 	return 0;
 }
-

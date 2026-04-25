@@ -3200,3 +3200,44 @@ out:
 	return rv;
 }
 
+/******************** TEST helpers ****************************************/
+#if defined(TOMA_SIMULATOR_SANDBOX)
+
+void TEST_add_local_disk_to_hash(const char *ldisk_id_str, bool is_excluded, bool is_drive_write_error)
+{
+	struct nvmeibt_local_disk	*ld = calloc(1, sizeof(*ld));
+
+	snprintf(ld->from_config.ldisk_id.str, sizeof(ld->from_config.ldisk_id.str), "%s", ldisk_id_str);
+	ld->is_excluded = is_excluded;
+	ld->is_drive_write_error = is_drive_write_error;
+	ld->config_tag = 1;
+	nvmeib_hash_add_ascii_str(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str,
+							  ld->from_config.ldisk_id.str, ld);
+}
+
+void TEST_add_not_ready_local_disk_to_hash(const char *ldisk_id_str, int n_segments)
+{
+	struct nvmeibt_local_disk	*ld = calloc(1, sizeof(*ld));
+	struct nvmeibt_disk			*disk = calloc(1, sizeof(*disk));
+
+	snprintf(ld->from_config.ldisk_id.str, sizeof(ld->from_config.ldisk_id.str), "%s", ldisk_id_str);
+	ld->config_tag = 1;
+	// Not ready: metadata_gpt.is_valid defaults to 0 from calloc
+	disk->n_segments = n_segments;
+	ld->its_disk = disk;
+	nvmeib_hash_add_ascii_str(nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str,
+							  ld->from_config.ldisk_id.str, ld);
+}
+
+void TEST_remove_local_disk_from_hash(const char *ldisk_id_str)
+{
+	struct nvmeibt_local_disk	*ld = nvmeib_hash_delete_ascii_str(
+			nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str, ldisk_id_str);
+
+	if (ld) {
+		free(ld->its_disk);
+		free(ld);
+	}
+}
+#endif // #if defined(TOMA_SIMULATOR_SANDBOX)
+

@@ -819,6 +819,13 @@ static int nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out)
 	return rc;
 }
 
+#if defined(TOMA_SIMULATOR_SANDBOX)
+int TEST_nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out)
+{
+	return nvmeibt_rpc_handle_command(in, out);
+}
+#endif
+
 void nvmeibt_rpc_run(void)
 {
 	struct sockaddr_un sun;

@@ -16,15 +16,24 @@
 /* Test environment init — 00_framework/toma_test_helpers.c */
 extern void TEST_init(void);
 
+/* Sandbox controls — unitest/toma_in_sandbox.c and unitest/kafka/sandbox_kafka.c */
+extern void TEST_set_nm_remote_nodes_connected(bool is_connected);
+extern void TEST_set_rd_kafka_version(int version, const char *version_str);
+
+/* RPC command dispatch — nvmeibt_rpc.c */
+extern int TEST_nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out);
+
 /* Praid hash — nvmeibt_praid.c */
 extern void TEST_init_praids_hash(void);
 extern void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_updated,
 								   int praid_version_major, int praid_version_minor);
+extern void TEST_set_praid_conf_corrupted(const union nvmeib_uuid *uuid);
 
 /* Raft members hash — nvmeibt_raft.c */
 extern void TEST_init_raft_members_hash(void);
 extern void TEST_add_raft_member_to_hash(const union nvmeib_uuid *uuid, const char *hostname,
 										 int64_t seq_no_updated, int64_t kafka_offset);
+extern void TEST_remove_raft_member_from_hash(const union nvmeib_uuid *uuid);
 
 /* Blkdev hash — nvmeibt_global.c */
 extern void TEST_init_blkdevs_hash(void);
@@ -36,6 +45,15 @@ extern void TEST_add_blkdev_to_hash(const union nvmeib_uuid *uuid, int version,
 extern void TEST_init_chunks_hash(void);
 extern void TEST_add_chunk_to_hash(const union nvmeib_uuid *chunk_uuid,
 	int n_praid_uuids, const union nvmeib_uuid *praid_uuids);
+
+/* Disk hash — nvmeibt_disk.c */
+extern void TEST_add_disk_to_hash(const union nvmeib_uuid *uuid, bool is_drive_write_error);
+extern void TEST_remove_disk_from_hash(const union nvmeib_uuid *uuid);
+
+/* Local disk hash — nvmeibt_local_disk.c */
+extern void TEST_add_local_disk_to_hash(const char *ldisk_id_str, bool is_excluded, bool is_drive_write_error);
+extern void TEST_add_not_ready_local_disk_to_hash(const char *ldisk_id_str, int n_segments);
+extern void TEST_remove_local_disk_from_hash(const char *ldisk_id_str);
 
 /* Incremental selection — nvmeibt_raft.c */
 extern int TEST_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver);

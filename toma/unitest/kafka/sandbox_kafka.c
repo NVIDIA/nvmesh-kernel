@@ -8,6 +8,15 @@
 #include "sandbox_kafka_public.h"
 #include "nvmeibt_debug.h"
 
+int TEST_sandbox_rd_kafka_version = 0x020501ff;
+const char *TEST_sandbox_rd_kafka_version_str = "2.5.1";
+
+void TEST_set_rd_kafka_version(int version, const char *version_str)
+{
+	TEST_sandbox_rd_kafka_version = version;
+	TEST_sandbox_rd_kafka_version_str = version_str;
+}
+
 /************************************* Internal struct definitions ********************************/
 struct sim_broker_topic {		// Kafka Broker topic implementation = append-only log of messages
 	pthread_mutex_t lock;		// Toma sends sends/consume messages only from kafka thread. Simulated management may send/consume in other thread

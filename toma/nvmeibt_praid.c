@@ -3167,6 +3167,15 @@ void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_upda
 	nvmeib_hash_add_uuid(nvmeibt_global_get_global()->praids_hash_by_uuid, uuid, praid);
 }
 
+void TEST_set_praid_conf_corrupted(const union nvmeib_uuid *uuid)
+{
+	struct nvmeibt_praid	*praid = nvmeib_hash_search_uuid(nvmeibt_global_get_global()->praids_hash_by_uuid, uuid);
+
+	if (praid) {
+		praid->praid_mgmt.is_conf_corrupted = 1;
+	}
+}
+
 void TEST_init_chunks_hash(void)
 {
 	struct nvmeib_hash_table		*hash_tbl;

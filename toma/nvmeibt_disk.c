@@ -343,3 +343,24 @@ int nvmeibt_disk_print_disks_status(int (*printf_fn)(void *ctx, const char *fmt,
 	return 0;
 }
 
+/******************** TEST helpers ****************************************/
+#if defined(TOMA_SIMULATOR_SANDBOX)
+
+void TEST_add_disk_to_hash(const union nvmeib_uuid *uuid, bool is_drive_write_error)
+{
+	struct nvmeibt_disk		*disk = calloc(1, sizeof(*disk));
+
+	disk->from_config.id = *uuid;
+	disk->is_drive_write_error = is_drive_write_error;
+	disk->config_tag = 1;
+	nvmeib_hash_add_uuid(nvmeibt_global_get_global()->disks_hash_by_uuid, uuid, disk);
+}
+
+void TEST_remove_disk_from_hash(const union nvmeib_uuid *uuid)
+{
+	struct nvmeibt_disk		*disk = nvmeib_hash_delete_uuid(nvmeibt_global_get_global()->disks_hash_by_uuid, uuid);
+
+	free(disk);
+}
+#endif // #if defined(TOMA_SIMULATOR_SANDBOX)
+

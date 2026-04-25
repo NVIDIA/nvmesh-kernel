@@ -2658,6 +2658,7 @@ extern int gpt_util_main(int argc, char *argv[]);
 extern int test_framework_smoke_main(int argc, char *argv[]);
 extern int wire_buf_test_main(int argc, char *argv[]);
 extern int trace_compress_test_main(int argc, char *argv[]);
+extern int status_report_test_main(int argc, char *argv[]);
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 
 static int run_dummy_empty(int argc, char *argv[])
@@ -2677,6 +2678,7 @@ struct {
 		{ "test_framework", test_framework_smoke_main },
 		{ "wire_buf_test", wire_buf_test_main },
 		{ "trace_compress_test", trace_compress_test_main },
+		{ "status_report_test", status_report_test_main },
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 		{ "dummy", run_dummy_empty },
 };

@@ -123,7 +123,7 @@ SOURCES += 15_server/sandbox_nvmeibs_toma.c
 SOURCES += 16_otherToma/peer_toma_simu.c
 SOURCES += toma_in_sandbox.c
 SOURCES += 17_clnt/clnt_simu.c
-SOURCES += 91_tests_components/wire_buf_test.c 91_tests_components/toma_test_framework_smoke.c 91_tests_components/trace_compress_test.c
+SOURCES += 91_tests_components/wire_buf_test.c 91_tests_components/toma_test_framework_smoke.c 91_tests_components/trace_compress_test.c 91_tests_components/status_report_test.c
 SOURCES += 90_tests_black_box/unit_test_main.c
 
 TDIR=./..
