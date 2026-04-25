@@ -1282,9 +1282,14 @@ export AUTOGEN_SUBDIRS_TOMA = common toma
 # Use a sentinel file (.lz4_built) that rsync never touches (excluded in the
 # excludes file) and that is only updated after a successful lz4 build, so
 # the staleness check is decoupled from lz4's own clean/archive timestamps.
+# CRITICAL: also require the archive itself to exist - the sentinel can
+# survive a "make -C lz4 clean" that removes liblz4.a, and downstream
+# consumers (pager linking against -llz4) would then fail with undefined
+# references.  Both the sentinel and the archive must be present, otherwise
+# rebuild lz4 unconditionally.
 LZ4_LIB := $(TOOLS_DIR)/lz4/lib/liblz4.a
 LZ4_SENTINEL := $(TOOLS_DIR)/lz4/.lz4_built
-LZ4_NEED_BUILD := $(shell [ ! -f $(LZ4_SENTINEL) ] && echo yes || find $(TOOLS_DIR)/lz4/lib \( -name '*.c' -o -name '*.h' \) -newer $(LZ4_SENTINEL) -print -quit 2>/dev/null)
+LZ4_NEED_BUILD := $(shell [ ! -f $(LZ4_SENTINEL) ] || [ ! -f $(LZ4_LIB) ] && echo yes || find $(TOOLS_DIR)/lz4/lib \( -name '*.c' -o -name '*.h' \) -newer $(LZ4_SENTINEL) -print -quit 2>/dev/null)
 ifneq ($(LZ4_NEED_BUILD),)
 COMPILE_LZ4 = +$(MAKE) -C $(TOOLS_DIR)/lz4 BUILD_SHARED=no BUILD_STATIC=yes lib-release && touch $(LZ4_SENTINEL)
 else
