@@ -66,6 +66,31 @@
 		else
 			kfree(addr);
 	}
+	/*
+	 * kvmalloc / kvmalloc_array / kmalloc_array - userspace shims.
+	 *
+	 * Kernel kvmalloc tries kmalloc first then falls back to vmalloc on big
+	 * allocations; the simulator's kmalloc has no contiguity constraint, so
+	 * we can collapse to kmalloc directly.  TPV (online compaction's plan
+	 * scratch buffers) and the heartbeat snapshot path call these.
+	 *
+	 * The _array variants do an overflow check (n * size) before allocating;
+	 * kept as a static inline rather than a macro so callers get the type of
+	 * the resulting void* preserved through assignment.
+	 */
+	static inline void *kvmalloc(size_t size, gfp_t flags) {
+		return kmalloc(size, flags);
+	}
+	static inline void *kvmalloc_array(size_t n, size_t size, gfp_t flags) {
+		if (size != 0 && n > (size_t)-1 / size)
+			return NULL;	/* overflow */
+		return kmalloc(n * size, flags);
+	}
+	static inline void *kmalloc_array(size_t n, size_t size, gfp_t flags) {
+		if (size != 0 && n > (size_t)-1 / size)
+			return NULL;	/* overflow */
+		return kmalloc(n * size, flags);
+	}
 	size_t ksize(const void *addr);
 
 	#define __get_free_page(flags) __get_free_pages(flags, 0)

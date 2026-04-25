@@ -37,6 +37,10 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/wait.h>
+#include <linux/workqueue.h>	/* INIT_WORK, schedule_work, system_wq - used to live in
+				 * nvmeibc_tpv_compaction.h but moved here so the
+				 * userspace block-unitest simulator can build files
+				 * that transitively include nvmeibc_tpv.h. */
 #include <linux/completion.h>
 #include <linux/xarray.h>
 
@@ -318,14 +322,18 @@ static int reloc_take_dest_slot(struct nvmeibc_tpv *tpv,
 				u64 *out_phys);
 
 /*
- * Return the source slot to source_ref.  Decrements source_ref's
- * allocated_count and appends a free-slot entry for source_phys.
+ * Return a slot to its owning ref's free pool.  Decrements ref's
+ * allocated_count and appends a free-slot entry for slot_phys.
  * If allocated_count hits zero, the Step 2 machinery (existing
  * promote-to-pending_return_list path) picks it up.
+ *
+ * Used both for returning source slots after a successful relocation
+ * and for undoing a reloc_take_dest_slot reservation on the abort
+ * path (where the "source" of this return is actually the dest_ref).
  */
-static void reloc_return_source_slot(struct nvmeibc_tpv *tpv,
-				     struct nvmeibc_cdv_extent_ref *source_ref,
-				     u64 source_phys);
+static void reloc_return_slot(struct nvmeibc_tpv *tpv,
+			      struct nvmeibc_cdv_extent_ref *ref,
+			      u64 slot_phys);
 
 /*
  * Find the xarray entry and source phys offset for virt_idx.  Returns
@@ -346,7 +354,7 @@ static int reloc_swap_xarray_entry(struct nvmeibc_tpv *tpv,
 				   u64 dest_phys,
 				   u64 dest_cdv_extent_index);
 
-int tpv_reloc_one(struct nvmeibc_tpv *tpv,
+int tpv_reloc_one_offline(struct nvmeibc_tpv *tpv,
 		  u64 virt_idx,
 		  struct nvmeibc_cdv_extent_ref *source_ref,
 		  struct nvmeibc_cdv_extent_ref *dest_ref)
@@ -370,7 +378,7 @@ int tpv_reloc_one(struct nvmeibc_tpv *tpv,
 	if (!entry) {
 		rcu_read_unlock();
 		/* Race with concurrent discard - return dest slot untouched. */
-		reloc_return_source_slot(tpv, dest_ref, dest_phys);
+		reloc_return_slot(tpv, dest_ref, dest_phys);
 		return -EAGAIN;
 	}
 	source_phys = entry->phys_offset;
@@ -379,7 +387,7 @@ int tpv_reloc_one(struct nvmeibc_tpv *tpv,
 	/* -- 3. Copy data source -> dest -- */
 	buf = kvmalloc(tpv_extent_bytes, GFP_KERNEL);
 	if (!buf) {
-		reloc_return_source_slot(tpv, dest_ref, dest_phys);
+		reloc_return_slot(tpv, dest_ref, dest_phys);
 		return -ENOMEM;
 	}
 	rv = nvmeibc_tpv_cdv_sync_read_data(tpv, source_phys, buf, tpv_extent_bytes);
@@ -409,17 +417,17 @@ int tpv_reloc_one(struct nvmeibc_tpv *tpv,
 	}
 
 	/* -- 6. Return source slot to source_ref's free pool -- */
-	reloc_return_source_slot(tpv, source_ref, source_phys);
+	reloc_return_slot(tpv, source_ref, source_phys);
 
 	kvfree(buf);
 	return 0;
 
 out_err:
-	reloc_return_source_slot(tpv, dest_ref, dest_phys);
+	reloc_return_slot(tpv, dest_ref, dest_phys);
 	kvfree(buf);
 	return rv;
 }
-EXPORT_SYMBOL(tpv_reloc_one);
+EXPORT_SYMBOL(tpv_reloc_one_offline);
 
 /* ==========================================================================
  * init / destroy
@@ -455,6 +463,23 @@ void tpv_compaction_init(struct nvmeibc_tpv *tpv)
 	init_waitqueue_head(&job->l2_req_wq);
 	job->l2_writer_should_stop = false;
 	INIT_LIST_HEAD(&job->l2_inflight_pages);
+
+	/*
+	 * Spawn the L2 writer thread for the lifetime of the TPV.  Online
+	 * compaction needs it to perform synchronous L2 leaf writes before
+	 * publishing the new mapping to the xarray (durability invariant
+	 * matching offline reloc - see tpv_reloc_one_offline).  Offline
+	 * compaction uses the same writer; tpv_compaction_run no longer
+	 * spawns its own, since one is already running.
+	 */
+	job->l2_writer = kthread_run(l2_writer_thread_fn, tpv,
+				     "tpv_l2w/%s", tpv->tpv_name);
+	if (IS_ERR(job->l2_writer)) {
+		_NE(tpv_l2w_spawn_fail,
+		    "TPV @STR: l2_writer kthread_run failed rv=@INT - online compaction L2 sync writes will return -ENOTSUPP and online compaction will refuse to run",
+		    tpv->tpv_name, (int)PTR_ERR(job->l2_writer));
+		job->l2_writer = NULL;
+	}
 }
 
 void tpv_compaction_destroy(struct nvmeibc_tpv *tpv)
@@ -535,7 +560,8 @@ EXPORT_SYMBOL(nvmeibc_tpv_abort_any_compaction_for);
 
 bool tpv_compaction_drain_deferred(struct nvmeibc_tpv *tpv)
 {
-	return READ_ONCE(tpv->compaction_job.defer_drain);
+	return READ_ONCE(tpv->compaction_job.defer_drain) ||
+	       READ_ONCE(tpv->online_defer_drain);
 }
 EXPORT_SYMBOL(tpv_compaction_drain_deferred);
 
@@ -721,20 +747,18 @@ int tpv_compaction_run(struct nvmeibc_tpv *tpv,
 		goto out_done;
 	}
 
-	/* -- Spawn L2 writer thread -- */
-	WRITE_ONCE(job->l2_writer_should_stop, false);
-	job->l2_writer = kthread_run(l2_writer_thread_fn, tpv,
-				     "tpv_l2w/%s", tpv->tpv_name);
-	if (IS_ERR(job->l2_writer)) {
-		rv = PTR_ERR(job->l2_writer);
-		job->l2_writer = NULL;
+	/* -- L2 writer thread is started in tpv_compaction_init for the
+	 * lifetime of the TPV (shared with online compaction).  If init
+	 * failed to spawn it, this run cannot proceed. -- */
+	if (!job->l2_writer) {
+		rv = -ENOTSUPP;
 		goto out_done;
 	}
 
 	/* -- Build planner -- */
 	rv = plan_build(tpv);
 	if (rv)
-		goto out_stop_l2;
+		goto out_done;
 
 	/*
 	 * Spawn workers.  n_workers_running is pre-incremented to the
@@ -795,13 +819,11 @@ int tpv_compaction_run(struct nvmeibc_tpv *tpv,
 
 	plan_free(tpv);
 
-out_stop_l2:
-	WRITE_ONCE(job->l2_writer_should_stop, true);
-	wake_up_all(&job->l2_req_wq);
-	if (job->l2_writer) {
-		kthread_stop(job->l2_writer);
-		job->l2_writer = NULL;
-	}
+	/*
+	 * The L2 writer thread is owned by tpv_compaction_init / _destroy
+	 * and stays alive across runs; it is NOT torn down here so online
+	 * compaction can keep submitting after this run completes.
+	 */
 
 out_done:
 	/*
@@ -876,7 +898,7 @@ static int worker_thread_fn(void *arg)
 		    tpv->tpv_name, virt_idx,
 		    src->extent_index, dst->extent_index);
 
-		rv = tpv_reloc_one(tpv, virt_idx, src, dst);
+		rv = tpv_reloc_one_offline(tpv, virt_idx, src, dst);
 		if (rv == 0) {
 			atomic64_inc(&job->relocated);
 			_ND(tpv_compact_reloc_ok,
@@ -944,18 +966,22 @@ static int reloc_take_dest_slot(struct nvmeibc_tpv *tpv,
 }
 
 /*
- * Return the source slot to the TPV-wide free pool and decrement
- * source_ref->allocated_count.  If the ref transitions to empty (and
- * isn't the L1 extent), move it to pending_return_list and kick
+ * Return a slot to its owning ref's free pool and decrement
+ * ref->allocated_count.  If the ref transitions to empty (and isn't
+ * the L1 extent), move it to pending_return_list and kick
  * cdv_alloc_work to send CDV_FREE_EXTENT.  Bumps the job's
  * reclaimed_extents counter on empty-transition.
+ *
+ * Used both for returning source slots after a successful relocation
+ * and for undoing a reloc_take_dest_slot reservation on the abort
+ * path (in which case `ref` is the dest_ref).
  *
  * Must be called only after the L2 leaf write has committed (the
  * durability invariant in TPV_Trimming.md Step 4).
  */
-static void reloc_return_source_slot(struct nvmeibc_tpv *tpv,
-				     struct nvmeibc_cdv_extent_ref *source_ref,
-				     u64 source_phys)
+static void reloc_return_slot(struct nvmeibc_tpv *tpv,
+			      struct nvmeibc_cdv_extent_ref *ref,
+			      u64 slot_phys)
 {
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
 	struct nvmeibc_tpv_free_slot *slot;
@@ -966,35 +992,39 @@ static void reloc_return_source_slot(struct nvmeibc_tpv *tpv,
 		/* Memory pressure: dark slot, same handling as
 		 * nvmeibc_tpv_free_extent.  Still account allocated_count
 		 * so the ref can eventually be returned. */
+		_NI(tpv_reloc_return_kzalloc_fail,
+		    "TPV: @STR: TPV-KZALLOC-FAIL reloc_return_slot dark-slot phys=@LLU ext_idx=@LLU is_l1=@INT",
+		    tpv->tpv_name, slot_phys, ref->extent_index,
+		    (int)ref->is_l1_extent);
 		spin_lock(&alloc->lock);
-		source_ref->allocated_count--;
-		if (source_ref->allocated_count == 0 && !source_ref->is_l1_extent) {
-			list_move_tail(&source_ref->node, &alloc->pending_return_list);
-			source_ref->on_pending_return_list = true;
+		ref->allocated_count--;
+		if (ref->allocated_count == 0 && !ref->is_l1_extent) {
+			list_move_tail(&ref->node, &alloc->pending_return_list);
+			ref->on_pending_return_list = true;
 			schedule_drain = true;
 			atomic64_inc(&tpv->compaction_job.reclaimed_extents);
 		} else {
-			nvmeibc_tpv_reposition_ref_locked(alloc, source_ref);
+			nvmeibc_tpv_reposition_ref_locked(alloc, ref);
 		}
 		spin_unlock(&alloc->lock);
 		goto out;
 	}
-	slot->phys_offset      = source_phys;
-	slot->cdv_extent_index = source_ref->extent_index;
+	slot->phys_offset      = slot_phys;
+	slot->cdv_extent_index = ref->extent_index;
 	INIT_LIST_HEAD(&slot->node);
 
 	spin_lock(&alloc->lock);
 	list_add(&slot->node, &alloc->free_tpv_extents);
 	alloc->free_tpv_extent_count++;
-	source_ref->allocated_count--;
-	if (source_ref->allocated_count == 0 && !source_ref->is_l1_extent) {
-		list_move_tail(&source_ref->node, &alloc->pending_return_list);
-		source_ref->on_pending_return_list = true;
+	ref->allocated_count--;
+	if (ref->allocated_count == 0 && !ref->is_l1_extent) {
+		list_move_tail(&ref->node, &alloc->pending_return_list);
+		ref->on_pending_return_list = true;
 		atomic64_inc(&alloc->stat_cdv_returns_queued);
 		schedule_drain = true;
 		atomic64_inc(&tpv->compaction_job.reclaimed_extents);
 	} else {
-		nvmeibc_tpv_reposition_ref_locked(alloc, source_ref);
+		nvmeibc_tpv_reposition_ref_locked(alloc, ref);
 	}
 	spin_unlock(&alloc->lock);
 
@@ -1043,11 +1073,19 @@ static int reloc_swap_xarray_entry(struct nvmeibc_tpv *tpv,
 	neu->phys_offset      = dest_phys;
 	neu->cdv_extent_index = dest_cdv_extent_index;
 	neu->persisted        = true;	/* L2 leaf already durable */
+	neu->state            = NVMEIBC_TPV_ENTRY_NORMAL;
+	/* inflight refcount pre-charged for the xarray link. */
+	atomic_set(&neu->inflight, 1);
 
 	/* xa_store returns the previous value (or an encoded error).
-	 * On success with a prior entry present, that entry is ours to
-	 * kfree_rcu.  Compaction is offline, so there is no concurrent
-	 * allocator racing on this virt_idx. */
+	 * On success with a prior entry present, that entry was referenced
+	 * only by the xarray: offline compaction runs with guest IO
+	 * quiesced (isCompaction attach, no make_request trampoline), and
+	 * CDV sync I/O bypasses the make_request path so it never touches
+	 * entry->inflight.  Release the xarray's refcount; the
+	 * atomic_dec_and_test therefore always fires the kfree_rcu in
+	 * steady state.  The branch is kept defensive in case a future
+	 * path grows a bio ref we haven't anticipated. */
 	old_void = xa_store(&alloc->extent_map, virt_idx, neu, GFP_KERNEL);
 	if (xa_is_err(old_void)) {
 		kfree(neu);
@@ -1055,7 +1093,10 @@ static int reloc_swap_xarray_entry(struct nvmeibc_tpv *tpv,
 	}
 	if (old_void) {
 		struct nvmeibc_tpv_extent_entry *old = old_void;
-		kfree_rcu(old, rcu);
+		if (atomic_dec_and_test(&old->inflight)) {
+			wake_up_all(&tpv->inflight_drain_wq);
+			kfree_rcu(old, rcu);
+		}
 	}
 	return 0;
 }
@@ -1245,7 +1286,7 @@ static void plan_free(struct nvmeibc_tpv *tpv)
  * entry whose cdv_extent_index matches source_ref->extent_index.
  *
  * Returns:
- *   0      - *out_* populated; caller proceeds to tpv_reloc_one.
+ *   0      - *out_* populated; caller proceeds to tpv_reloc_one_offline.
  *   -EAGAIN - source exhausted between lookups; caller retries.
  *   -ENOENT - no (src, dst) pair remains; caller emits RECOVER_FINISH.
  */
@@ -1760,3 +1801,675 @@ static u64 tpv_compact_l2_phase(struct nvmeibc_tpv *tpv)
 
 	return done;
 }
+
+/* ==========================================================================
+ * Online compaction (TPV_Trimming.md Step 5).
+ *
+ * Shares the CDV read/write and dest-slot-take helpers with the offline
+ * path above.  Diverges in:
+ *   - state machine (NORMAL -> RELOCATING -> COMMITTED, guest-write
+ *     abort-on-conflict via RELOC_CANCELLED)
+ *   - async L2 flush (mark dirty, let persist_work lift later)
+ *   - post-commit synchronize_rcu + inflight drain before parking source
+ *   - parks source on pending_free_slots (deferred visibility) rather
+ *     than free_tpv_extents directly
+ *
+ * Callers: per-TPV delayed_work worker
+ * nvmeibc_tpv_online_compact_work_fn.  Gate-kept by the wastage arm/
+ * disarm latch and the module-scope tpv_reloc_inflight cap.
+ * ==========================================================================
+ */
+
+/*
+ * online_park_source_slot was used by the previous online-relocation
+ * protocol that exposed new_entry to the xarray with persisted=false and
+ * relied on persist_work to async-flush the L2 leaf.  That ordering had
+ * a corruption window when a guest write hit the new mapping before L2
+ * was durable.  The current protocol synchronously writes the L2 leaf
+ * before xa_store (matching tpv_reloc_one_offline), so the source slot
+ * can be returned directly via reloc_return_slot.  The function
+ * is intentionally removed to prevent reintroducing the old ordering.
+ */
+
+/*
+ * Online relocation primitive (TPV_Trimming.md Step 5 S. Relocation
+ * protocol).  Called by nvmeibc_tpv_online_compact_work_fn with one
+ * (source_ref, dest_ref) pair selected by plan_pick_one_online.
+ *
+ * Returns:
+ *    0         committed; stat_online_reloc_ok++.
+ *   -EAGAIN    raced with DISCARD or another worker on this virt_idx;
+ *              caller moves on to the next candidate.
+ *   -ECANCELED guest write or DISCARD cancelled the commit at step 6
+ *              or step 8a; stat_online_aborts_write_conflict++.
+ *   other <0   CDV I/O error / ENOMEM; stat_online_aborts_other++.
+ */
+int tpv_reloc_one_online(struct nvmeibc_tpv *tpv, u64 virt_idx,
+			 struct nvmeibc_cdv_extent_ref *source_ref,
+			 struct nvmeibc_cdv_extent_ref *dest_ref)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	struct nvmeibc_tpv_extent_entry *new_entry = NULL;
+	u64 tpv_ext_bytes = (u64)alloc->tpv_extent_size_kb << 10;
+	u64 source_phys = 0;
+	u64 dest_phys   = 0;
+	u8 *buf = NULL;
+	bool have_worker_ref = false;
+	bool latched_relocating = false;
+	bool committed = false;
+	void *old_void;
+	int rv;
+
+	/* -- step 1: take a dest slot from dest_ref ---------------------- */
+	rv = reloc_take_dest_slot(tpv, dest_ref, &dest_phys);
+	if (rv) {
+		_NI(tpv_online_take_dst_fail,
+		    "TPV @STR: reloc_take_dest_slot failed dst_idx=@LLU dst_alloc=@LLU is_l1=@INT rv=@INT",
+		    tpv->tpv_name, dest_ref->extent_index,
+		    dest_ref->allocated_count,
+		    (int)dest_ref->is_l1_extent, rv);
+		return rv;
+	}
+
+	/* -- step 2: look up entry; take worker ref under RCU ------------ */
+	rcu_read_lock();
+	entry = xa_load(&alloc->extent_map, virt_idx);
+	if (!entry || entry->cdv_extent_index != source_ref->extent_index) {
+		rcu_read_unlock();
+		reloc_return_slot(tpv, dest_ref, dest_phys);
+		return -EAGAIN;
+	}
+	if (!atomic_add_unless(&entry->inflight, 1, 0)) {
+		/* Entry is being freed (xarray ref already dropped to 0). */
+		rcu_read_unlock();
+		reloc_return_slot(tpv, dest_ref, dest_phys);
+		return -EAGAIN;
+	}
+	have_worker_ref = true;
+	source_phys = entry->phys_offset;
+	rcu_read_unlock();
+
+	/* -- step 3: cmpxchg NORMAL -> RELOCATING ------------------------ */
+	if (cmpxchg(&entry->state,
+		    NVMEIBC_TPV_ENTRY_NORMAL,
+		    NVMEIBC_TPV_ENTRY_RELOCATING) !=
+	    NVMEIBC_TPV_ENTRY_NORMAL) {
+		/* Another worker raced us (shouldn't happen - we serialise
+		 * via the module semaphore for the same virt_idx) or the
+		 * entry is already mid-transition (e.g. RELOC_CANCELLED
+		 * from a past abort that hasn't been xchg'd back by its
+		 * worker yet).  Bail and try another virt_idx. */
+		rv = -EAGAIN;
+		goto abort;
+	}
+	latched_relocating = true;
+
+	/* -- steps 4-5: CDV read + CDV write ----------------------------- */
+	buf = kvmalloc(tpv_ext_bytes, GFP_KERNEL);
+	if (!buf) { rv = -ENOMEM; goto abort; }
+
+	rv = nvmeibc_tpv_cdv_sync_read_data(tpv, source_phys, buf, tpv_ext_bytes);
+	if (rv)
+		goto abort;
+	rv = nvmeibc_tpv_cdv_sync_write_data(tpv, dest_phys, buf, tpv_ext_bytes);
+	if (rv)
+		goto abort;
+
+	/* -- step 6: early cancellation check ---------------------------- */
+	if (READ_ONCE(entry->state) == NVMEIBC_TPV_ENTRY_RELOC_CANCELLED) {
+		rv = -ECANCELED;
+		goto abort;
+	}
+
+	/* -- step 7: allocate new_entry (xarray ref pre-charged) --------- */
+	new_entry = kzalloc(sizeof(*new_entry), GFP_KERNEL);
+	if (!new_entry) { rv = -ENOMEM; goto abort; }
+	new_entry->phys_offset      = dest_phys;
+	new_entry->cdv_extent_index = dest_ref->extent_index;
+	/*
+	 * persisted=true: by the time this entry reaches the xarray, the L2
+	 * leaf write below has completed durably.  Crash recovery reading L2
+	 * from disk will see virt_idx -> dst_phys, matching what the xarray
+	 * publishes to guest I/O.  No corruption window, and no dependency
+	 * on sync_flush mode (which only parks bios on !persisted entries).
+	 */
+	new_entry->persisted        = true;
+	new_entry->state            = NVMEIBC_TPV_ENTRY_NORMAL;
+	atomic_set(&new_entry->inflight, 1);	/* xarray ref */
+
+	/* -- step 8a: latch commit.  RELOC_CANCELLED loser path goes
+	 *    to abort.  Success blocks any future guest cancellation
+	 *    cmpxchg (state is no longer RELOCATING).  Guest IO that
+	 *    hits state==COMMITTED now spin-retries until step 8c
+	 *    publishes the new entry. --------------------------------- */
+	if (cmpxchg(&entry->state,
+		    NVMEIBC_TPV_ENTRY_RELOCATING,
+		    NVMEIBC_TPV_ENTRY_COMMITTED) !=
+	    NVMEIBC_TPV_ENTRY_RELOCATING) {
+		rv = -ECANCELED;
+		goto abort;
+	}
+	latched_relocating = false;	/* state is now COMMITTED */
+	committed = true;
+
+	/*
+	 * -- step 8b: synchronously rewrite the L2 leaf so on-disk L2
+	 *    points at dst_phys BEFORE we publish new_entry to the
+	 *    xarray.  This matches tpv_reloc_one_offline's ordering and
+	 *    eliminates the corruption window where guest writes to the
+	 *    new mapping could land on dst_phys without L2 reflecting it
+	 *    (a crash before the async persist_work would then strand
+	 *    those writes).  Costs one ~4 KiB L2 leaf write per relocation.
+	 */
+	rv = tpv_l2_writer_submit_and_wait(tpv, virt_idx, dest_phys);
+	if (rv) {
+		_NE(tpv_online_l2_write_fail,
+		    "TPV: @STR: L2 leaf sync write failed virt=@LLU dst_phys=@LLU rv=@INT",
+		    tpv->tpv_name, virt_idx, dest_phys, rv);
+		/* COMMITTED was latched; force back to NORMAL so readers
+		 * don't spin forever.  Source mapping in xarray is still the
+		 * old entry; on-disk L2 is unchanged.  Free new_entry; abort
+		 * path will return the dst slot. */
+		xchg(&entry->state, NVMEIBC_TPV_ENTRY_NORMAL);
+		kfree(new_entry);
+		new_entry = NULL;
+		committed = false;
+		goto abort;
+	}
+	/* L2 leaf is durably pointing at dst_phys.  Commit point crossed. */
+
+	/* -- step 8c: publish new_entry --------------------------------- */
+	old_void = xa_store(&alloc->extent_map, virt_idx, new_entry, GFP_KERNEL);
+	if (xa_is_err(old_void)) {
+		/* Catastrophic mid-commit failure.  We already latched
+		 * COMMITTED AND wrote L2 to disk; force state back to NORMAL
+		 * so readers don't spin on COMMITTED forever.  On-disk L2
+		 * now points at dst_phys but the xarray still has the old
+		 * entry pointing at src_phys: subsequent reads get src data,
+		 * which is identical to dst data (we just copied it).  The
+		 * mismatch is benign until next attach, where load_state will
+		 * rebuild xarray from L2 (authoritative) and pick up dst.
+		 * Source slot is leaked until that recovery.  Very rare path.
+		 */
+		_NE(tpv_online_xa_store_fail,
+		    "TPV: @STR: xa_store failed at online commit virt=@LLU rv=@INT",
+		    tpv->tpv_name, virt_idx, (int)xa_err(old_void));
+		xchg(&entry->state, NVMEIBC_TPV_ENTRY_NORMAL);
+		kfree(new_entry);
+		new_entry = NULL;
+		rv = xa_err(old_void);
+		committed = false;
+		goto abort;
+	}
+	/* old_void points to entry (cmpxchg guarantees it). */
+
+	/* -- step 9: drain old entry's bios, then return source slot ---- */
+
+	/* Transfer the xarray's ref from old->new (we pre-charged new's
+	 * inflight=1 for the xarray).  This brings old's inflight down by
+	 * one, leaving old->inflight = bios_in_flight + 1 (our worker ref).
+	 */
+	atomic_dec(&entry->inflight);
+
+	/* After synchronize_rcu(), no CPU that did xa_load while the xarray
+	 * slot still held old can still be in its rcu_read_lock section.
+	 * Any reader that got old is either done (inflight dec'd already)
+	 * or has its bio submitted (inflight still bumped; the bio's
+	 * end_io will dec). */
+	synchronize_rcu();
+
+	/* Wait for the bio refs to drain.  "== 1" is our worker ref. */
+	wait_event(tpv->inflight_drain_wq,
+		   atomic_read(&entry->inflight) == 1);
+
+	/*
+	 * Return source slot directly to the global free pool and decrement
+	 * source_ref->allocated_count.  Safe to do synchronously now: L2 is
+	 * already durable (step 8b), so src_phys is no longer needed for any
+	 * crash-recovery scenario.  This replaces online_park_source_slot,
+	 * whose deferred promotion (waiting on persist_work) was needed only
+	 * because L2 was async-flushed.
+	 */
+	reloc_return_slot(tpv, source_ref, source_phys);
+
+	/* -- step 11: release our worker ref on old.  Last ref -> kfree. */
+	tpv_inflight_release(tpv, entry);
+	have_worker_ref = false;
+
+	kvfree(buf);
+	atomic64_inc(&tpv->stat_online_reloc_ok);
+	return 0;
+
+abort:
+	/* Restore state to NORMAL if we latched RELOCATING but didn't commit.
+	 * Don't touch state if we never latched (step 3 failed). */
+	if (latched_relocating)
+		xchg(&entry->state, NVMEIBC_TPV_ENTRY_NORMAL);
+
+	if (buf)       kvfree(buf);
+	if (new_entry) kfree(new_entry);
+
+	/* Return the dest slot (we took one at step 1).  Even on commit-
+	 * partial failure the dest write landed but is unreferenced; future
+	 * alloc will overwrite. */
+	if (!committed)
+		reloc_return_slot(tpv, dest_ref, dest_phys);
+
+	if (have_worker_ref)
+		tpv_inflight_release(tpv, entry);
+
+	if (rv == -ECANCELED)
+		atomic64_inc(&tpv->stat_online_aborts_write_conflict);
+	else if (rv != -EAGAIN)
+		atomic64_inc(&tpv->stat_online_aborts_other);
+	return rv;
+}
+EXPORT_SYMBOL(tpv_reloc_one_online);
+
+/* ==========================================================================
+ * Online compaction planner, worker, and arm hook.
+ * ==========================================================================
+ */
+
+/*
+ * Pick one (virt_idx, source_ref, dest_ref) tuple for the next online
+ * relocation.  Walks the density-aware cdv_extent_list:
+ *   - source: head (sparsest) non-L1, non-pending-return ref with at
+ *     least one live slot (allocated_count > 0).
+ *   - dest: tail (densest) ref with room (allocated_count < n_slots)
+ *     and != source.
+ *   - virt_idx: any xarray entry whose cdv_extent_index matches source.
+ *
+ * Returns 0 on success with *out_* populated, -ENOENT when no viable
+ * work exists (worker should disarm).
+ */
+static int plan_pick_one_online(struct nvmeibc_tpv *tpv,
+				u64 *out_virt_idx,
+				struct nvmeibc_cdv_extent_ref **out_src,
+				struct nvmeibc_cdv_extent_ref **out_dst)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	struct nvmeibc_cdv_extent_ref *src = NULL, *dst = NULL, *r;
+	u64 n_slots;
+	unsigned long idx;
+	struct nvmeibc_tpv_extent_entry *entry;
+
+	spin_lock(&alloc->lock);
+	n_slots = n_slots_per_cdv_extent(alloc);
+
+	/* Sparsest source: first ref on the sorted list with live slots
+	 * that is not the L1 extent nor already on pending_return_list. */
+	list_for_each_entry(r, &alloc->cdv_extent_list, node) {
+		if (r->on_pending_return_list)
+			continue;
+		if (r->is_l1_extent)
+			continue;
+		if (r->allocated_count == 0)
+			continue;
+		/*
+		 * Data-only slots that are still mapped in the xarray.
+		 * Exclude L2 slots (offline planner's job) AND parked
+		 * pending_free slots (online_park_source_slot has already
+		 * removed them from the xarray; their backing data is
+		 * waiting on persist_work to flush L2 before being
+		 * promoted to alloc->free_tpv_extents).  Without the
+		 * pending_free_count term the picker keeps choosing a ref
+		 * whose only "live" slots have been parked and the xarray
+		 * walk below returns -EAGAIN every tick until persist_work
+		 * runs - the worker burns thousands of ticks per relocation.
+		 */
+		if (r->allocated_count <=
+		    r->l2_slots + r->pending_free_count)
+			continue;
+		src = r;
+		break;
+	}
+	if (!src) {
+		u64 cdv_extents_count = alloc->cdv_extents_count;
+		bool pending_return_empty = list_empty(&alloc->pending_return_list);
+
+		spin_unlock(&alloc->lock);
+		_NI(tpv_online_pick_no_src,
+		    "TPV @STR: plan_pick: no eligible source (cdv_extents=@LLU pending_return_empty=@INT)",
+		    tpv->tpv_name, cdv_extents_count, (int)pending_return_empty);
+		return -ENOENT;
+	}
+
+	/* Densest destination: walk the list backwards (sorted ascending
+	 * by allocated_count), first ref with room and != src.
+	 *
+	 * Exclude is_l1_extent: the L1 extent's free slots are reserved
+	 * for L1/L2 metadata and are NOT in alloc->free_tpv_extents, so
+	 * picking it as dst makes reloc_take_dest_slot fail with -ENOSPC
+	 * (silently, no counter bumps - the symptom is the worker firing
+	 * thousands of times with relocations_ok flat).
+	 */
+	list_for_each_entry_reverse(r, &alloc->cdv_extent_list, node) {
+		if (r == src)
+			continue;
+		if (r->on_pending_return_list)
+			continue;
+		if (r->is_l1_extent)
+			continue;
+		if (r->allocated_count >= n_slots)
+			continue;
+		dst = r;
+		break;
+	}
+	if (!dst) {
+		u64 src_extent_index = src->extent_index;
+		u64 src_alloc = src->allocated_count;
+
+		spin_unlock(&alloc->lock);
+		_NI(tpv_online_pick_no_dst,
+		    "TPV @STR: plan_pick: no eligible dest (src_idx=@LLU src_alloc=@LLU n_slots=@LLU)",
+		    tpv->tpv_name, src_extent_index, src_alloc, n_slots);
+		return -ENOENT;
+	}
+	spin_unlock(&alloc->lock);
+
+	/* Pick any virt_idx mapped to src.  Linear xarray walk; N bounded
+	 * by max slots per CDV extent for this TPV.  Early break on first
+	 * match. */
+	rcu_read_lock();
+	xa_for_each(&alloc->extent_map, idx, entry) {
+		if (entry && entry->cdv_extent_index == src->extent_index &&
+		    READ_ONCE(entry->state) == NVMEIBC_TPV_ENTRY_NORMAL) {
+			*out_virt_idx = idx;
+			*out_src = src;
+			*out_dst = dst;
+			rcu_read_unlock();
+			return 0;
+		}
+	}
+	rcu_read_unlock();
+
+	/* src has allocated_count > l2_slots but xarray walk found no data
+	 * entry - transient state (e.g. discard erased the entries just
+	 * before we looked).  Tell caller to re-pick. */
+	return -EAGAIN;
+}
+
+/*
+ * Online compaction worker.  One relocation per invocation; re-queues
+ * itself while armed and module cap not exhausted.
+ */
+static void nvmeibc_tpv_online_compact_work_fn(struct work_struct *w)
+{
+	struct delayed_work *dw = to_delayed_work(w);
+	struct nvmeibc_tpv *tpv =
+		container_of(dw, struct nvmeibc_tpv, online_compaction_work);
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	u64 virt_idx = 0;
+	struct nvmeibc_cdv_extent_ref *src = NULL, *dst = NULL;
+	u32 wastage, arm_low, arm_high, cap;
+	int rv;
+
+	_NI(tpv_online_worker_entry,
+	    "TPV @STR: online worker entry tpv_state=@INT loaded=@INT dis_op=@INT dis_mgmt=@INT armed=@INT",
+	    tpv->tpv_name,
+	    atomic_read(&tpv->state),
+	    (int)READ_ONCE(tpv->state_loaded),
+	    (int)READ_ONCE(tpv->online_disabled_by_op),
+	    (int)READ_ONCE(tpv->online_disabled_by_mgmt),
+	    (int)READ_ONCE(tpv->online_armed));
+
+	if (atomic_read(&tpv->state) != TPV_ATTACHED)
+		return;
+	if (!READ_ONCE(tpv->state_loaded))
+		goto requeue;
+	if (READ_ONCE(tpv->online_disabled_by_op))
+		return;
+	if (READ_ONCE(tpv->online_disabled_by_mgmt))
+		return;
+
+	arm_low  = nvmeibc_tpv_effective_arm_low_pct(tpv);
+	arm_high = nvmeibc_tpv_effective_arm_high_pct(tpv);
+	/* Defensive: inverted or non-sensical thresholds disable the
+	 * worker.  (The arm-low >= arm-high case cannot hysterese.) */
+	if (arm_high == 0 || arm_low >= arm_high) {
+		WRITE_ONCE(tpv->online_armed, false);
+		return;
+	}
+
+	wastage = nvmeibc_tpv_wastage_pct(tpv);
+	_NI(tpv_online_worker_tick,
+	    "TPV @STR: online worker tick wastage=@UINT armHigh=@UINT armLow=@UINT armed=@INT",
+	    tpv->tpv_name, wastage, arm_high, arm_low,
+	    (int)READ_ONCE(tpv->online_armed));
+	if (wastage < arm_low) {
+		WRITE_ONCE(tpv->online_armed, false);
+		return;
+	}
+
+	/* Module-scope outstanding cap (0 = disabled globally). */
+	cap = READ_ONCE(tpv_reloc_outstanding);
+	if (cap == 0)
+		return;
+	if (atomic_inc_return(&tpv_reloc_inflight) > (int)cap) {
+		atomic_dec(&tpv_reloc_inflight);
+		goto requeue;
+	}
+
+	/* Back-pressure: leave enough pool headroom for guest writes. */
+	if (alloc->free_tpv_extent_count <=
+	    alloc->low_watermark + n_slots_per_cdv_extent(alloc)) {
+		atomic_dec(&tpv_reloc_inflight);
+		goto requeue;
+	}
+
+	/*
+	 * Hold the drain-deferred flag across plan_pick + tpv_reloc_one_online.
+	 * This prevents cdv_alloc_work's tpv_drain_pending_returns from sending
+	 * CDV_FREE_EXTENT and kfree'ing a nvmeibc_cdv_extent_ref that we are
+	 * still using as source_ref or dest_ref.  The flag is symmetric with
+	 * the offline compaction's compaction_job.defer_drain;
+	 * tpv_compaction_drain_deferred ORs both.  Clearing the flag is done
+	 * even on -ENOENT / -EAGAIN paths.
+	 */
+	WRITE_ONCE(tpv->online_defer_drain, true);
+	/* smp_mb__after_atomic equivalent: WRITE_ONCE is not a barrier, but
+	 * the subsequent spin_lock inside plan_pick_one_online provides one. */
+
+	rv = plan_pick_one_online(tpv, &virt_idx, &src, &dst);
+	if (rv == -ENOENT) {
+		/*
+		 * Picker found no (src, dst) pair this tick.  Two possible
+		 * causes:
+		 *   1. Genuinely nothing to compact (all live refs dense).
+		 *      Wastage will be at-or-below arm_high in this case,
+		 *      so disarming is correct; online_maybe_arm() will
+		 *      pick us back up on the next free/allocate that
+		 *      pushes wastage back over the threshold.
+		 *   2. Picker transient (e.g. pending_return_count > 0
+		 *      currently inflating wastage above arm_high while no
+		 *      true source exists), or - if neither applies - a
+		 *      picker bug.  Disarming on a stale signal would mean
+		 *      online compaction silently stops with high wastage
+		 *      and 0 pending returns, which is the worst case.
+		 *
+		 * Distinguish: if wastage is still >= arm_high, stay armed
+		 * and requeue with a backoff so we re-evaluate after the
+		 * pending_return drains or the picker stops misreporting.
+		 * Otherwise disarm.
+		 */
+		WRITE_ONCE(tpv->online_defer_drain, false);
+		atomic_dec(&tpv_reloc_inflight);
+		if (wastage >= arm_high) {
+			schedule_delayed_work(&tpv->online_compaction_work,
+					      msecs_to_jiffies(
+						  READ_ONCE(tpv_online_reloc_requeue_ms) * 4));
+			return;
+		}
+		WRITE_ONCE(tpv->online_armed, false);
+		return;
+	}
+	if (rv) {
+		/* -EAGAIN (transient).  Retry. */
+		WRITE_ONCE(tpv->online_defer_drain, false);
+		atomic_dec(&tpv_reloc_inflight);
+		goto requeue;
+	}
+
+	(void)tpv_reloc_one_online(tpv, virt_idx, src, dst);
+	WRITE_ONCE(tpv->online_defer_drain, false);
+	atomic_dec(&tpv_reloc_inflight);
+
+requeue:
+	if (atomic_read(&tpv->state) == TPV_ATTACHED &&
+	    READ_ONCE(tpv->online_armed) &&
+	    !READ_ONCE(tpv->online_disabled_by_op) &&
+	    !READ_ONCE(tpv->online_disabled_by_mgmt)) {
+		schedule_delayed_work(&tpv->online_compaction_work,
+				      msecs_to_jiffies(
+					  READ_ONCE(tpv_online_reloc_requeue_ms)));
+	}
+}
+
+void nvmeibc_tpv_online_maybe_arm(struct nvmeibc_tpv *tpv)
+{
+	u32 wastage, arm_high;
+
+	if (!READ_ONCE(tpv->state_loaded))
+		return;
+	if (atomic_read(&tpv->state) != TPV_ATTACHED)
+		return;
+	if (READ_ONCE(tpv->online_disabled_by_op))
+		return;
+	if (READ_ONCE(tpv->online_disabled_by_mgmt))
+		return;
+	if (READ_ONCE(tpv->online_armed))
+		return;		/* already armed */
+
+	arm_high = nvmeibc_tpv_effective_arm_high_pct(tpv);
+	if (arm_high == 0 || arm_high > 100)
+		return;
+
+	wastage = nvmeibc_tpv_wastage_pct(tpv);
+	if (wastage < arm_high)
+		return;
+
+	WRITE_ONCE(tpv->online_armed, true);
+	schedule_delayed_work(&tpv->online_compaction_work, 0);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_online_maybe_arm);
+
+void nvmeibc_tpv_online_compaction_init(struct nvmeibc_tpv *tpv)
+{
+	INIT_DELAYED_WORK(&tpv->online_compaction_work,
+			  nvmeibc_tpv_online_compact_work_fn);
+	tpv->online_armed              = false;
+	tpv->online_disabled_by_op     = false;
+	/*
+	 * Initial value is "disabled" so that any race between load_state_work_fn
+	 * calling nvmeibc_tpv_online_maybe_arm() and the attach glue calling
+	 * nvmeibc_tpv_online_compaction_config() resolves in the safe direction:
+	 * no worker arming until management has explicitly said enabled=true.
+	 * nvmeibc_tpv_online_compaction_config() is called unconditionally by
+	 * the TPV attach path, so in normal operation this flag is cleared
+	 * shortly after init (before any guest I/O can trigger wastage).
+	 */
+	tpv->online_disabled_by_mgmt   = true;
+	tpv->online_arm_high_pct       = 0;	/* 0 = inherit module param */
+	tpv->online_arm_low_pct        = 0;	/* 0 = inherit module param */
+	tpv->online_defer_drain        = false;
+	tpv->online_wastage_recheck_counter = 0;
+	atomic64_set(&tpv->stat_online_reloc_ok, 0);
+	atomic64_set(&tpv->stat_online_aborts_write_conflict, 0);
+	atomic64_set(&tpv->stat_online_aborts_other, 0);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_online_compaction_init);
+
+/*
+ * Apply per-TPV online-compaction config from the CM attach payload.
+ * Called from the attach glue path.  Setting enabled=false disables the
+ * worker for this TPV regardless of the module param; arm_high_pct and
+ * arm_low_pct override the module params.  An explicit 0 in either
+ * percentage means "inherit module param".  Note that the CM codec
+ * defaults in clnt_scheme.json are 1 / 30 / 15 (not 0), so an older
+ * management that omits these fields on the wire still produces values
+ * matching the current kernel design targets; 0 is reserved for newer
+ * management that explicitly wants to defer to the cluster-wide module
+ * param tunables.
+ *
+ * Validation rule: arm_low_pct MUST be strictly less than arm_high_pct.
+ * Management enforces this at create / update; we reject silently here
+ * (fall back to inherit-module-param) if the invariant is broken on the
+ * wire, since failing the attach over a bad configuration would be worse
+ * than running with defaults.
+ */
+void nvmeibc_tpv_online_compaction_config(struct nvmeibc_tpv *tpv,
+					  bool enabled,
+					  u32 arm_high_pct,
+					  u32 arm_low_pct)
+{
+	bool ranges_ok = (arm_high_pct == 0 && arm_low_pct == 0) ||
+			 (arm_high_pct >= 1 && arm_high_pct <= 100 &&
+			  arm_low_pct < arm_high_pct);
+
+	WRITE_ONCE(tpv->online_disabled_by_mgmt, !enabled);
+	if (ranges_ok) {
+		WRITE_ONCE(tpv->online_arm_high_pct, arm_high_pct);
+		WRITE_ONCE(tpv->online_arm_low_pct,  arm_low_pct);
+	} else {
+		_NW(tpv_online_cfg_bad_range,
+		    "TPV @STR: ignoring bad online-compaction range high=@UINT low=@UINT; using module defaults",
+		    tpv->tpv_name, arm_high_pct, arm_low_pct);
+		WRITE_ONCE(tpv->online_arm_high_pct, 0);
+		WRITE_ONCE(tpv->online_arm_low_pct,  0);
+	}
+
+	_NI(tpv_online_cfg_applied,
+	    "TPV @STR: online-compaction cfg enabled=@UINT armHigh=@UINT armLow=@UINT",
+	    tpv->tpv_name, enabled ? 1u : 0u,
+	    (unsigned int)READ_ONCE(tpv->online_arm_high_pct),
+	    (unsigned int)READ_ONCE(tpv->online_arm_low_pct));
+
+	/*
+	 * Re-evaluate the arm condition with the just-applied thresholds.
+	 * Without this kick, a config change that re-enables the worker
+	 * (or lowers arm_high below current wastage) would not take effect
+	 * until the next free_extent() / persist_work() / proc-write call
+	 * that happens to invoke online_maybe_arm.  The arm hook is
+	 * cheap (one wastage read + one schedule_delayed_work if the
+	 * threshold is crossed) and a no-op when already armed.  Skip the
+	 * kick when management has just disabled the worker - online_armed
+	 * stays at whatever value it had; the early-return in the worker
+	 * (online_disabled_by_mgmt) is what gates execution.
+	 */
+	if (enabled)
+		nvmeibc_tpv_online_maybe_arm(tpv);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_online_compaction_config);
+
+u32 nvmeibc_tpv_effective_arm_high_pct(const struct nvmeibc_tpv *tpv)
+{
+	u32 v = READ_ONCE(tpv->online_arm_high_pct);
+
+	return v ? v : READ_ONCE(tpv_online_arm_high_pct);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_effective_arm_high_pct);
+
+u32 nvmeibc_tpv_effective_arm_low_pct(const struct nvmeibc_tpv *tpv)
+{
+	/*
+	 * arm_high_pct==0 is the "unset - inherit module params" sentinel
+	 * (set by online_compaction_config when both came in as 0, matching
+	 * a legacy management that didn't carry the fields).  arm_low_pct
+	 * is allowed to be 0 as an explicit "never disarm" value, so we
+	 * cannot use it as its own sentinel - inherit only when arm_high
+	 * is the unset sentinel.
+	 */
+	if (READ_ONCE(tpv->online_arm_high_pct) == 0)
+		return READ_ONCE(tpv_online_arm_low_pct);
+	return READ_ONCE(tpv->online_arm_low_pct);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_effective_arm_low_pct);
+
+void nvmeibc_tpv_online_compaction_destroy(struct nvmeibc_tpv *tpv)
+{
+	WRITE_ONCE(tpv->online_armed, false);
+	cancel_delayed_work_sync(&tpv->online_compaction_work);
+}
+EXPORT_SYMBOL(nvmeibc_tpv_online_compaction_destroy);

@@ -127,6 +127,17 @@ void nvmeibc_tpv_free_slots_list(struct list_head *free_tpv_extents)
 
 	list_for_each_entry_safe(slot, tmp, free_tpv_extents, node) {
 		list_del(&slot->node);
+		/*
+		 * Detach release: at this point IO is quiesced (called from
+		 * nvmeibc_tpv_allocator_free at detach), so the drain ref is
+		 * the only ref left on the entry.  Drop it directly rather
+		 * than going through tpv_inflight_release to avoid a tpv*
+		 * dependency in this list-only helper - no waiter is parked
+		 * on inflight_drain_wq once IO has quiesced.
+		 */
+		if (slot->draining_entry &&
+		    atomic_dec_and_test(&slot->draining_entry->inflight))
+			kfree_rcu(slot->draining_entry, rcu);
 		kfree(slot);
 	}
 }
@@ -203,6 +214,109 @@ void nvmeibc_tpv_insert_ref_sorted_locked(
 	list_add_tail(&ref->node, &alloc->cdv_extent_list);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_insert_ref_sorted_locked);
+
+/* -- nvmeibc_tpv_wastage_pct ------------------------------------------------
+ *
+ * Compute the online-compaction wastage signal for this TPV's data
+ * allocator (design: TPV_Trimming.md Step 5 / Trigger and planner).
+ *
+ *   wastage = 1 - live_slots / (cdv_extents_count * n_slots_per_cdv_extent)
+ *
+ * live_slots is the sum of allocated_count across every ref on
+ * cdv_extent_list.  Refs on pending_return_list are NOT counted on the
+ * live side (they have no live mappings) but their cdv_extents are
+ * also not counted in cdv_extents_count... wait, check:
+ * cdv_extents_count tracks "CDV extents owned by this TPV from TOMA's
+ * perspective" - incremented at CDV_ALLOC_OK, decremented only after a
+ * successful CDV_FREE_EXTENT.  That is the number of extents the TPV
+ * is paying the capacity cost for; compaction can reduce it by
+ * emptying sparse extents and letting the drain fire.  So
+ * cdv_extents_count is the right denominator.
+ *
+ * The metadata allocator (split-mode TPV) deliberately does not
+ * contribute - online compaction is data-side only per S. Split-mode
+ * scope.
+ *
+ * Walks cdv_extent_list under alloc->lock; N is small (tens to low
+ * hundreds per TPV in practice), so this is cheap enough to call from
+ * operator-driven /proc read paths and from the re-check trigger hooks
+ * in free_extent.
+ *
+ * Returns 0..100.  If the TPV has no CDV extents yet (fresh attach,
+ * no allocations), returns 0.
+ */
+u32 nvmeibc_tpv_wastage_pct(struct nvmeibc_tpv *tpv)
+{
+	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
+	struct nvmeibc_cdv_extent_ref *ref;
+	u64 data_total = 0;
+	u64 data_used  = 0;
+	u64 n_slots;
+	u32 pct;
+
+	/*
+	 * Wastage measures fragmentation that the *online compactor* can
+	 * act on - and only that.  The compactor's plan_pick scans
+	 * cdv_extent_list looking for:
+	 *
+	 *   SOURCE: a non-L1 ref whose data slots (allocated_count -
+	 *           l2_slots) exceed pending_free_count - that is, a ref
+	 *           that holds at least one live data slot the compactor
+	 *           could move.
+	 *   DEST:   a non-full ref that is not the L1 extent and has any
+	 *           data-side capacity.
+	 *
+	 * Refs the compactor cannot use - L1 (always pinned), pending-
+	 * return (already on their way back to TOMA), and refs whose
+	 * entire allocated_count is L2 metadata - contribute neither
+	 * to the unused-capacity numerator nor to the denominator.  This
+	 * gives operationally useful semantics:
+	 *
+	 *   - Freshly-emptied TPV (only L1 + L2 metadata slots remain):
+	 *     no data-bearing refs -> data_total == 0 -> wastage = 0.
+	 *     The worker stays disarmed; nothing for it to compact.
+	 *
+	 *   - Workload churns slots evenly across owned extents:
+	 *     wastage is the average per-extent slack, capturing the
+	 *     real fragmentation the compactor reduces by relocating
+	 *     sparse-extent slots onto denser extents.
+	 *
+	 *   - Drain-only steady state (e.g. post-blkdiscard):
+	 *     all refs migrated to pending_return, no data-bearing
+	 *     refs left -> wastage = 0.  Drain (separate from
+	 *     compaction) handles those refs.
+	 *
+	 * Pending_free_count is subtracted from data_used because those
+	 * slots have been logically freed (DISCARD path) but not yet
+	 * promoted; they no longer hold live data and the compactor
+	 * cannot move them either.
+	 */
+	spin_lock(&alloc->lock);
+	n_slots = tpv_slots_per_cdv_extent(alloc);
+	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
+		u64 ref_data_used;
+
+		if (ref->is_l1_extent)
+			continue;
+		if (ref->allocated_count <= ref->l2_slots + ref->pending_free_count)
+			continue;	/* no live data slots; not a compaction candidate */
+
+		ref_data_used = ref->allocated_count - ref->l2_slots
+			      - ref->pending_free_count;
+		data_total += n_slots - ref->l2_slots;
+		data_used  += ref_data_used;
+	}
+	spin_unlock(&alloc->lock);
+
+	if (data_total == 0 || data_used >= data_total)
+		return 0;
+
+	pct = (u32)((100ULL * (data_total - data_used)) / data_total);
+	if (pct > 100)
+		pct = 100;
+	return pct;
+}
+EXPORT_SYMBOL(nvmeibc_tpv_wastage_pct);
 
 /* -- nvmeibc_tpv_alloc_extent -----------------------------------------------
  *
@@ -380,6 +494,30 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 
 	entry->phys_offset      = slot->phys_offset;
 	entry->cdv_extent_index = slot->cdv_extent_index;
+	entry->state            = NVMEIBC_TPV_ENTRY_NORMAL;
+	/* inflight is a refcount.  Pre-charge 2:
+	 *   +1  xarray link (dropped by xa_erase / xa_swap sites)
+	 *   +1  caller's ref (the IO-path caller will either pass entry
+	 *       to tpv_inflight_submit_bio, which consumes the ref, or
+	 *       explicitly drop it via nvmeibc_tpv_drop_alloc_ref() on
+	 *       the sync_flush park path).
+	 *
+	 * Why the caller ref must be taken here, before dropping
+	 * alloc->lock: the alternative is to have the caller do
+	 * atomic_add_unless(entry->inflight, 1, 0) after return, but
+	 * that is a UAF.  Between our unlock and the caller's add_unless,
+	 * a concurrent DISCARD can xa_erase the fresh entry, drop the
+	 * xarray ref to 0, and kfree_rcu.  The caller is not under
+	 * rcu_read_lock at that point so the grace period can elapse
+	 * freely and the caller's add_unless dereferences freed memory.
+	 * Taking the caller ref here, while we still hold alloc->lock
+	 * (which any would-be xa_erase also needs), closes the window.
+	 *
+	 * If xa_store fails below we just kfree() - the two refs are
+	 * atomic fields on memory that nothing else holds a reference
+	 * to; no release cycle is needed.
+	 */
+	atomic_set(&entry->inflight, 2);
 
 	/*
 	 * xa_store before kfree(slot) so that on failure we can restore state.
@@ -433,6 +571,23 @@ int nvmeibc_tpv_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
 	spin_unlock(&tpv->persist_lock);
 
 	atomic64_inc(&alloc->stat_tpv_alloc_ok);
+
+	/*
+	 * Online-compaction arm re-check on the alloc path (TPV_Trimming.md
+	 * Step 5).  Wastage can rise across pure-write workloads (every alloc
+	 * adds capacity to the denominator without commensurate live slots),
+	 * so a TPV that disarmed at low wastage and then sees only writes
+	 * would never re-arm without this hook - free_extent's recheck only
+	 * fires on TRIMs and persist_work's recheck only fires when L1/L2
+	 * are dirtied.  Gated by the same ONLINE_RECHECK_STRIDE counter as
+	 * the free path so an alloc storm doesn't hammer maybe_arm's O(N)
+	 * wastage walk.
+	 */
+	if (++tpv->online_wastage_recheck_counter >= ONLINE_RECHECK_STRIDE) {
+		tpv->online_wastage_recheck_counter = 0;
+		nvmeibc_tpv_online_maybe_arm(tpv);
+	}
+
 	if (out)
 		*out = entry;
 	return 0;
@@ -581,6 +736,47 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 	struct nvmeibc_cdv_extent_ref   *ref;
 	struct nvmeibc_cdv_extent_ref   *found_ref;
 
+	/*
+	 * Online-compaction cancellation (TPV_Trimming.md Step 5 S. Correctness
+	 * "Concurrent DISCARD"):
+	 *
+	 * If a relocation is in flight on virt_idx, we must cancel it before
+	 * erasing the entry; otherwise the worker's post-CDV-write xa_store
+	 * would install new_entry on a virt_idx we are about to erase, and
+	 * the source slot's state would diverge.  cmpxchg the entry state
+	 * from RELOCATING to RELOC_CANCELLED; the worker's step-8 commit
+	 * cmpxchg will then fail and the worker will abort.  If the cmpxchg
+	 * loses (state raced to COMMITTED), re-xa_load and cancel the NEW
+	 * entry's relocation if any (there will not be one - the freshly
+	 * swapped entry starts at NORMAL).
+	 *
+	 * Guest writes cancel identically via the IO-path cmpxchg in
+	 * tpv_handle_one_bio; DISCARD here is the same mechanism on a
+	 * different entry point.
+	 */
+retry_cancel:
+	rcu_read_lock();
+	entry = xa_load(&alloc->extent_map, virt_idx);
+	if (entry) {
+		u8 state = READ_ONCE(entry->state);
+
+		if (state == NVMEIBC_TPV_ENTRY_COMMITTED) {
+			rcu_read_unlock();
+			cpu_relax();
+			goto retry_cancel;
+		}
+		if (state == NVMEIBC_TPV_ENTRY_RELOCATING) {
+			if (cmpxchg(&entry->state,
+				    NVMEIBC_TPV_ENTRY_RELOCATING,
+				    NVMEIBC_TPV_ENTRY_RELOC_CANCELLED) !=
+			    NVMEIBC_TPV_ENTRY_RELOCATING) {
+				rcu_read_unlock();
+				goto retry_cancel;
+			}
+		}
+	}
+	rcu_read_unlock();
+
 	entry = xa_erase(&alloc->extent_map, virt_idx);
 	if (!entry)
 		return -ENOENT;
@@ -599,7 +795,13 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 		_NW(tpv_free_ext_alloc_fail,
 		    "TPV: @STR: kzalloc failed in free_extent virt_idx=@LLU; slot lost until recovery",
 		    tpv->tpv_name, virt_idx);
-		kfree_rcu(entry, rcu);
+		/* Release the xarray's ref on entry.  If no bios are in flight
+		 * (common case), inflight drops from 1 to 0 and we kfree_rcu
+		 * now; otherwise the last in-flight bio's end_io will do it. */
+		if (atomic_dec_and_test(&entry->inflight)) {
+			wake_up_all(&tpv->inflight_drain_wq);
+			kfree_rcu(entry, rcu);
+		}
 
 		/* Still update allocated_count so the CDV_extent isn't leaked. */
 		spin_lock(&alloc->lock);
@@ -617,7 +819,17 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 	slot->phys_offset      = entry->phys_offset;
 	slot->cdv_extent_index = entry->cdv_extent_index;
 	INIT_LIST_HEAD(&slot->node);
-	kfree_rcu(entry, rcu);
+	/*
+	 * Transfer the xarray's inflight ref onto the parked slot as a "drain
+	 * ref".  tpv_drain_flushing_entries (run from flush_and_promote after
+	 * the L2 leaf is durable-null) waits for entry->inflight to reach
+	 * this single ref before releasing it - blocking promotion until any
+	 * guest bio that snapshotted entry->phys_offset before xa_erase has
+	 * completed.  Closes the cross-slot-return window where a slow
+	 * in-flight read could land on the slot's data after a concurrent
+	 * alloc had reused it for a different virt_idx.
+	 */
+	slot->draining_entry = entry;
 
 	spin_lock(&alloc->lock);
 
@@ -631,8 +843,13 @@ int nvmeibc_tpv_free_extent(struct nvmeibc_tpv *tpv, u64 virt_idx)
 	}
 
 	if (WARN_ON(!found_ref)) {
-		/* Orphan slot - shouldn't happen. Free directly. */
+		/* Orphan slot - shouldn't happen.  Release the drain ref we
+		 * just transferred onto it and free the slot. */
+		spin_unlock(&alloc->lock);
+		tpv_inflight_release(tpv, slot->draining_entry);
+		slot->draining_entry = NULL;
 		kfree(slot);
+		spin_lock(&alloc->lock);
 		goto out_unlock;
 	}
 
@@ -684,6 +901,18 @@ out_unlock:
 	spin_unlock(&tpv->persist_lock);
 
 	atomic64_inc(&alloc->stat_tpv_free_ok);
+
+	/*
+	 * Online-compaction arm re-check (TPV_Trimming.md Step 5).  Every
+	 * ONLINE_RECHECK_STRIDE free_extent calls, re-read wastage and arm
+	 * the worker if it crossed arm_high_pct.  Cheap O(N) walk inside
+	 * maybe_arm; gated on the counter so a DISCARD storm doesn't
+	 * hammer the allocator lock every 4 KB.
+	 */
+	if (++tpv->online_wastage_recheck_counter >= ONLINE_RECHECK_STRIDE) {
+		tpv->online_wastage_recheck_counter = 0;
+		nvmeibc_tpv_online_maybe_arm(tpv);
+	}
 	return 0;
 }
 EXPORT_SYMBOL(nvmeibc_tpv_free_extent);
@@ -810,6 +1039,81 @@ static u32 tpv_promote_flushing_frees_locked(struct nvmeibc_tpv_allocator *alloc
 	return refs_returnable;
 }
 
+/*
+ * Drain bios that still hold refs on entries unlinked by free_extent
+ * but whose slots are sitting on flushing_free_slots awaiting promotion.
+ *
+ * A guest read can hit tpv_handle_one_bio's mapped path, snapshot the
+ * entry's phys_offset under rcu_read_lock, take an inflight ref, and
+ * dispatch a bio to the CDV transport.  If the entry is then xa_erased
+ * by free_extent and the slot promoted to free_tpv_extents before that
+ * bio's CDV roundtrip completes, a concurrent alloc + write on a
+ * different virt_idx can land on the same physical offset before the
+ * read fires - producing a cross-slot data return.  See TPV_Trimming.md
+ * Step 2 "Per-slot in-flight drain".
+ *
+ * free_extent transfers the xarray's inflight ref onto the parked slot
+ * (slot->draining_entry).  This function waits for each such entry's
+ * inflight to reach 1 (the drain ref alone), then releases that ref.
+ * After return, every slot in any ref's flushing_free_slots has
+ * draining_entry == NULL and can be safely promoted.
+ *
+ * Sleeps in synchronize_rcu and wait_event; must be called with no
+ * locks held.
+ */
+static void tpv_drain_flushing_entries(struct nvmeibc_tpv *tpv)
+{
+	struct nvmeibc_tpv_allocator    *alloc = &tpv->allocator;
+	struct nvmeibc_cdv_extent_ref   *ref;
+	struct nvmeibc_tpv_free_slot    *slot;
+	struct nvmeibc_tpv_extent_entry *e;
+	bool found;
+
+	/*
+	 * Pair with the rcu_read_lock around xa_load + atomic_add_unless
+	 * in tpv_handle_one_bio.  After this returns, no CPU is still in an
+	 * rcu critical section that observed the entry through the xarray
+	 * (xa_erase happened in free_extent before the slot landed on the
+	 * pending list, which itself happened before this flush cycle's
+	 * snapshot).  Any reader that successfully bumped inflight has its
+	 * bio in flight; end_io will dec the ref.  No new bumps can occur.
+	 */
+	synchronize_rcu();
+
+	/*
+	 * Snapshot-and-restart over flushing_free_slots: spin_lock only
+	 * long enough to detach one (slot, entry) pair, drop the lock, wait
+	 * for the entry to drain, release its drain ref, repeat.  Restarting
+	 * from the head of cdv_extent_list each time keeps the iteration
+	 * trivially safe against concurrent list mutation; the lists are
+	 * short (a flush cycle covers slots for a handful of L2 pages) and
+	 * the wait dominates wall time anyway.
+	 */
+	do {
+		found = false;
+		spin_lock(&alloc->lock);
+		list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
+			list_for_each_entry(slot, &ref->flushing_free_slots, node) {
+				if (slot->draining_entry) {
+					e = slot->draining_entry;
+					slot->draining_entry = NULL;
+					found = true;
+					break;
+				}
+			}
+			if (found)
+				break;
+		}
+		spin_unlock(&alloc->lock);
+
+		if (found) {
+			wait_event(tpv->inflight_drain_wq,
+				   atomic_read(&e->inflight) == 1);
+			tpv_inflight_release(tpv, e);
+		}
+	} while (found);
+}
+
 int nvmeibc_tpv_flush_and_promote(struct nvmeibc_tpv *tpv)
 {
 	struct nvmeibc_tpv_allocator *alloc = &tpv->allocator;
@@ -821,6 +1125,15 @@ int nvmeibc_tpv_flush_and_promote(struct nvmeibc_tpv *tpv)
 	spin_unlock(&alloc->lock);
 
 	rv = nvmeibc_tpv_flush_state(tpv);
+
+	if (rv == 0) {
+		/*
+		 * Drain in-flight reads/writes against the entries unlinked
+		 * when these slots were freed.  Must run before promote to
+		 * prevent cross-slot returns; see tpv_drain_flushing_entries.
+		 */
+		tpv_drain_flushing_entries(tpv);
+	}
 
 	spin_lock(&alloc->lock);
 	if (rv == 0) {
@@ -844,6 +1157,26 @@ int nvmeibc_tpv_flush_and_promote(struct nvmeibc_tpv *tpv)
 	if (refs_returnable > 0 &&
 	    !atomic_xchg(&tpv->cdv_alloc_pending, 1))
 		schedule_work(&tpv->cdv_alloc_work);
+
+	/*
+	 * Re-evaluate the online-compaction arm condition.  This is the only
+	 * point in the allocator where wastage can rise without a corresponding
+	 * free_extent call: DISCARDs park slots on pending_free_slots without
+	 * decrementing allocated_count, so wastage stays flat through the
+	 * discard storm and the free_extent recheck counter never sees the
+	 * post-discard wastage.  flush_and_promote is what materializes the
+	 * change - promote moves slots to free_tpv_extents and drops
+	 * allocated_count, which is where wastage_pct actually rises.  Without
+	 * this maybe_arm here, a blkdiscard of a previously-full TPV leaves
+	 * wastage at ~99% but the worker stays disarmed (state idle_below_arm)
+	 * until something else - typically the next guest alloc_extent's own
+	 * recheck - happens to fire.
+	 *
+	 * Cheap call: maybe_arm reads wastage and either bails (already armed,
+	 * disabled, below threshold) or schedules a single delayed_work.
+	 */
+	if (rv == 0)
+		nvmeibc_tpv_online_maybe_arm(tpv);
 
 	return rv;
 }
@@ -894,6 +1227,19 @@ int nvmeibc_tpv_discard_range(struct nvmeibc_tpv *tpv,
 			freed++;
 		}
 		/* -ENOENT (already unmapped) is common and silent. */
+
+		/*
+		 * Yield every 256 iterations.  A whole-volume discard on a
+		 * large virtual size produces millions of iterations and
+		 * each free_extent takes alloc->lock + RCU work; without a
+		 * yield the bio-submission task hogs the CPU long enough to
+		 * trip the soft-lockup watchdog.  We are in process context
+		 * (block submit_bio path) holding no locks at this point, so
+		 * cond_resched() is safe here.  The 0xff mask amortises the
+		 * already-cheap TIF_NEED_RESCHED check across iterations.
+		 */
+		if ((idx & 0xff) == 0xff)
+			cond_resched();
 	}
 
 	_ND(tpv_discard_range,
@@ -963,15 +1309,32 @@ static void tpv_drain_pending_returns(struct nvmeibc_tpv *tpv,
 	spin_lock(&alloc->lock);
 	list_for_each_entry_safe(ref, tmp, &alloc->pending_return_list, node) {
 		if (alloc->free_tpv_extent_count <
-		    n_slots + alloc->high_watermark) {
+		    n_slots + alloc->low_watermark) {
 			/*
-			 * Watermark gate.  Leave this (and all subsequent)
-			 * refs parked.  Re-examination is driven by the next
-			 * flush_and_promote that grows the pool past the
-			 * gate; no explicit re-schedule here (that would
-			 * infinite-loop cdv_alloc_work since nothing has
-			 * changed between this drain and the next one we'd
-			 * trigger).
+			 * Watermark gate.  Stop returning when pool would fall
+			 * below low_watermark - that's the "trigger pre-fetch"
+			 * floor; subsequent guest writes that drain the pool
+			 * further will fire cdv_alloc_work which fetches a
+			 * fresh extent from TOMA on demand.
+			 *
+			 * The original design used high_watermark (2 *
+			 * low_watermark) here to preserve a comfortable buffer
+			 * for guest writes.  That floor is too conservative for
+			 * post-blkdiscard scenarios: every owned extent ends up
+			 * on pending_return_list, the first drain returns
+			 * extents until the pool drops to high_watermark +
+			 * n_slots, then breaks - and the remaining refs sit
+			 * forever because no further persist activity grows the
+			 * pool past the gate.  Using low_watermark lets drain
+			 * fully reclaim a discarded TPV in one or two persist
+			 * cycles; mixed workloads pay only an occasional extra
+			 * CDV_ALLOC_EXTENT round-trip when allocs immediately
+			 * follow a heavy free burst.
+			 *
+			 * No re-schedule here: same rationale as before - the
+			 * pool only changes via flush_and_promote, which already
+			 * schedules cdv_alloc_work when pending_return_list is
+			 * non-empty (see nvmeibc_tpv_flush_and_promote).
 			 */
 			atomic64_inc(&alloc->stat_cdv_returns_parked);
 			break;

@@ -62,6 +62,48 @@ MODULE_PARM_DESC(tpv_cdv_retry_msecs,
 		 "Retry delay in milliseconds for TPV CDV operations (load_state, etc.)");
 
 /*
+ * Online-compaction tunables (TPV_Trimming.md Step 5).
+ *
+ * The wastage signal and its thresholds are exposed via /proc so
+ * operators can watch sparseness accumulate on attached TPVs and tune
+ * the cluster-wide defaults at runtime via sysfs.
+ */
+unsigned int tpv_reloc_outstanding = 4;
+module_param(tpv_reloc_outstanding, uint, 0644);
+MODULE_PARM_DESC(tpv_reloc_outstanding,
+		 "Max online-compaction relocations in flight across all TPVs on this client "
+		 "(0 disables online compaction globally).");
+
+unsigned int tpv_online_arm_high_pct = 30;
+module_param(tpv_online_arm_high_pct, uint, 0644);
+MODULE_PARM_DESC(tpv_online_arm_high_pct,
+		 "Wastage percent at or above which the online-compaction worker arms for "
+		 "a TPV (default 30).  Must be greater than arm_low_pct; inverted pairs "
+		 "leave the worker disarmed.");
+
+unsigned int tpv_online_arm_low_pct = 15;
+module_param(tpv_online_arm_low_pct, uint, 0644);
+MODULE_PARM_DESC(tpv_online_arm_low_pct,
+		 "Wastage percent below which the armed online-compaction worker disarms "
+		 "for a TPV (default 15, must be strictly less than arm_high_pct).");
+
+unsigned int tpv_online_reloc_requeue_ms = 10;
+module_param(tpv_online_reloc_requeue_ms, uint, 0644);
+MODULE_PARM_DESC(tpv_online_reloc_requeue_ms,
+		 "Delay in milliseconds between online-compaction worker invocations "
+		 "while armed (default 10).");
+
+/*
+ * Module-scope count of online-compaction relocations currently in flight
+ * across all TPVs on this client.  The worker increments this before doing
+ * a CDV-write and decrements on completion / abort.  Enforces the
+ * tpv_reloc_outstanding cap without a dedicated semaphore so the cap can
+ * be changed at runtime (sysfs write) and take effect on the next
+ * worker invocation.
+ */
+atomic_t tpv_reloc_inflight = ATOMIC_INIT(0);
+
+/*
  * ATOM handover fops pointer - set by nvmeibc_os_api_layer_init() in
  * nvmeibc_block_api_os.c.  Contains nvmeiba's .owner, .open, .release
  * handlers.  Used to populate tpv_live_fops at fresh attach and NDU adopt.
@@ -442,9 +484,18 @@ static void nvmeibc_tpv_allocator_free(struct nvmeibc_tpv_allocator *alloc)
 	struct nvmeibc_tpv_extent_entry *entry;
 	unsigned long idx;
 
-	/* Free all extent_map entries. */
-	xa_for_each(&alloc->extent_map, idx, entry)
-		kfree(entry);
+	/*
+	 * Release each entry's xarray refcount.  If no bios are still in
+	 * flight against an entry (common - io_inflight drain happened
+	 * upstream in detach), the dec drops inflight to 0 and we
+	 * kfree_rcu now; otherwise the last in-flight bio's end_io will
+	 * be the final dec and will free.  Never use plain kfree here -
+	 * concurrent bios may still dereference the entry at end_io.
+	 */
+	xa_for_each(&alloc->extent_map, idx, entry) {
+		if (atomic_dec_and_test(&entry->inflight))
+			kfree_rcu(entry, rcu);
+	}
 	xa_destroy(&alloc->extent_map);
 	(void)idx;
 
@@ -1107,6 +1158,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 
 	spin_lock_init(&tpv->persist_lock);
 	tpv->dirty = false;
+	init_waitqueue_head(&tpv->inflight_drain_wq);
 
 	INIT_LIST_HEAD(&tpv->list_node);
 	INIT_WORK(&tpv->cdv_alloc_work, nvmeibc_tpv_cdv_alloc_work_fn);
@@ -1122,6 +1174,7 @@ struct nvmeibc_tpv *nvmeibc_tpv_attach(struct nvmeibc_volume *cdv,
 	atomic_set(&tpv->meta_cdv_alloc_pending, 0);
 	atomic_set(&tpv->io_inflight, 0);
 	tpv_compaction_init(tpv);	/* TPV_Trimming.md Step 4 */
+	nvmeibc_tpv_online_compaction_init(tpv);	/* Step 5 */
 
 	/*
 	 * Start with the attach timeout.  When io_max_retry_secs is 0
@@ -1257,6 +1310,7 @@ err_free_alloc:
 	 * compaction workers to exit.  Only once workers are gone is
 	 * it safe to release the allocator state they read.
 	 */
+	nvmeibc_tpv_online_compaction_destroy(tpv);	/* Step 5 */
 	tpv_compaction_destroy(tpv);	/* TPV_Trimming.md Step 4 */
 	if (tpv->meta_allocator) {
 		nvmeibc_tpv_allocator_free(tpv->meta_allocator);
@@ -1351,6 +1405,7 @@ void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 	 * remaining source of compaction activity is whatever was in
 	 * flight before this point.
 	 */
+	nvmeibc_tpv_online_compaction_destroy(tpv);	/* Step 5 */
 	tpv_compaction_destroy(tpv);	/* TPV_Trimming.md Step 4 */
 	if (tpv->meta_allocator) {
 		nvmeibc_tpv_allocator_free(tpv->meta_allocator);

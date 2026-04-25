@@ -68,6 +68,7 @@ static inline void list_move_tail( struct list_head *New, struct list_head *head
 #define list_next_entry(               pos, member) list_entry((pos)->member.next, typeof(*(pos)), member)
 #define list_prev_entry(               pos, member) list_entry((pos)->member.prev, typeof(*(pos)), member)
 #define list_for_each_entry(pos, head, member)	       for (pos = list_entry((head)->next, typeof(*pos), member);  														  &pos->member != (head); pos        = list_entry(pos->member.next, typeof(*pos), member))
+#define list_for_each_entry_reverse(pos, head, member) for (pos = list_entry((head)->prev, typeof(*pos), member);  														  &pos->member != (head); pos        = list_entry(pos->member.prev, typeof(*pos), member))
 #define list_for_each_entry_safe(pos, n, head, member) for (pos = list_entry((head)->next, typeof(*pos), member), n = list_entry(pos->member.next, typeof(*pos), member); &pos->member != (head); pos = n, n = list_entry(pos->member.next, typeof(*pos), member))
 #define list_for_each(pos, head) 					   for (pos = (head)->next; pos != (head); pos = pos->next)
 #define list_for_each_safe(pos, n, head) 			   for (pos = (head)->next, n = pos->next; pos != (head); pos = n, n = pos->next)

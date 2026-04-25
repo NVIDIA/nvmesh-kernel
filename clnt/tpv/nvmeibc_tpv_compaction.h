@@ -27,14 +27,22 @@
 #define NVMEIBC_TPV_COMPACTION_H
 
 #include <linux/types.h>
-#include <linux/workqueue.h>
 #include <linux/wait.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
-#include <linux/kthread.h>
 #include <linux/completion.h>
 #include <linux/atomic.h>
 
+/*
+ * Forward decls instead of pulling in <linux/kthread.h> / <linux/workqueue.h>:
+ * the struct below only stores a `struct task_struct *` (pointer), and the .c
+ * file is responsible for any header that defines kthread_run / INIT_WORK /
+ * etc.  Keeping kernel-only headers out of this widely-included header lets
+ * the userspace block-unitest simulator build files that transitively pull in
+ * nvmeibc_tpv.h (which #includes this header) without having to provide
+ * <linux/workqueue.h> / <linux/kthread.h> shims.
+ */
+struct task_struct;
 struct nvmeibc_tpv;
 struct nvmeibc_cdv_extent_ref;
 struct plan_node;		/* defined privately in nvmeibc_tpv_compaction.c */
@@ -227,10 +235,24 @@ bool tpv_compaction_drain_deferred(struct nvmeibc_tpv *tpv);
  *   - source_ref->allocated_count decremented; source slot back in
  *     source_ref's free pool.
  */
-int tpv_reloc_one(struct nvmeibc_tpv *tpv,
+int tpv_reloc_one_offline(struct nvmeibc_tpv *tpv,
 		  u64 virt_idx,
 		  struct nvmeibc_cdv_extent_ref *source_ref,
 		  struct nvmeibc_cdv_extent_ref *dest_ref);
+
+/*
+ * Online relocation primitive (TPV_Trimming.md Step 5).  Shares CDV
+ * I/O and reloc_take_dest_slot helpers with the offline path; adds the
+ * abort-on-conflict state machine and post-commit synchronize_rcu +
+ * inflight drain.
+ *
+ * Returns 0 on successful commit, -EAGAIN for transient races (caller
+ * retries), -ECANCELED when a guest write or DISCARD cancelled the
+ * commit, or <0 for CDV I/O / ENOMEM errors.
+ */
+int tpv_reloc_one_online(struct nvmeibc_tpv *tpv, u64 virt_idx,
+			 struct nvmeibc_cdv_extent_ref *source_ref,
+			 struct nvmeibc_cdv_extent_ref *dest_ref);
 
 /* -- L2 writer API (internal but declared for selftests) ----------------- */
 

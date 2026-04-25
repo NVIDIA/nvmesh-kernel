@@ -475,6 +475,50 @@ static ssize_t tpv_proc_compaction_fill(void *arg, char *buf, size_t len)
 	BUF_ADD("l2Relocated:         %llu\n",
 		(unsigned long long)p.l2_relocated);
 
+	/*
+	 * Online-compaction (TPV_Trimming.md Step 5) observability.
+	 * State reflects the worker latch; counters are live atomic64s
+	 * incremented by tpv_reloc_one_online.
+	 */
+	BUF_ADD("\n");
+	{
+		const char *online_state_str;
+
+		if (READ_ONCE(tpv->online_disabled_by_op))
+			online_state_str = "idle_disabled_by_op";
+		else if (READ_ONCE(tpv->online_disabled_by_mgmt))
+			online_state_str = "idle_disabled_by_mgmt";
+		else if (READ_ONCE(tpv->online_armed))
+			online_state_str = "armed_running";
+		else
+			online_state_str = "idle_below_arm";
+
+		BUF_ADD("online.state:                    %s\n",
+			online_state_str);
+	}
+	BUF_ADD("online.wastage_pct:              %u\n",
+		nvmeibc_tpv_wastage_pct(tpv));
+	BUF_ADD("online.arm_high_pct:             %u (tpv=%u mod=%u)\n",
+		nvmeibc_tpv_effective_arm_high_pct(tpv),
+		(unsigned int)READ_ONCE(tpv->online_arm_high_pct),
+		tpv_online_arm_high_pct);
+	BUF_ADD("online.arm_low_pct:              %u (tpv=%u mod=%u)\n",
+		nvmeibc_tpv_effective_arm_low_pct(tpv),
+		(unsigned int)READ_ONCE(tpv->online_arm_low_pct),
+		tpv_online_arm_low_pct);
+	BUF_ADD("online.reloc_outstanding_cap:    %u\n",
+		tpv_reloc_outstanding);
+	BUF_ADD("online.reloc_outstanding_now:    %d\n",
+		atomic_read(&tpv_reloc_inflight));
+	BUF_ADD("online.relocations_ok:           %llu\n",
+		(unsigned long long)atomic64_read(&tpv->stat_online_reloc_ok));
+	BUF_ADD("online.aborts_by_write_conflict: %llu\n",
+		(unsigned long long)atomic64_read(
+			&tpv->stat_online_aborts_write_conflict));
+	BUF_ADD("online.aborts_by_other:          %llu\n",
+		(unsigned long long)atomic64_read(
+			&tpv->stat_online_aborts_other));
+
 #undef BUF_ADD
 	return count;
 }
@@ -538,6 +582,32 @@ static ssize_t tpv_proc_compaction_write(void *arg, char *buf, size_t len)
 		tpv_compaction_abort(tpv);
 		_NI(tpv_proc_compaction_abort,
 		    "TPV: @STR: compaction abort requested via /proc",
+		    tpv->tpv_name);
+		return (ssize_t)len;
+	}
+
+	/*
+	 * Online-compaction operator override (TPV_Trimming.md Step 5).
+	 *   "online=disable"  - force the worker idle regardless of wastage.
+	 *   "online=enable"   - clear the override; wastage-driven arm resumes.
+	 * The current arm latch is unchanged here; if enabled and wastage is
+	 * above arm_high the next re-check hook will arm.
+	 */
+	if (strcmp(cmd, "online=disable") == 0) {
+		WRITE_ONCE(tpv->online_disabled_by_op, true);
+		WRITE_ONCE(tpv->online_armed, false);
+		/* cancel_delayed_work is racy w.r.t. a just-scheduled invocation;
+		 * rely on the worker's top-of-function checks to exit cleanly. */
+		_NI(tpv_proc_online_disable,
+		    "TPV: @STR: online compaction disabled via /proc",
+		    tpv->tpv_name);
+		return (ssize_t)len;
+	}
+	if (strcmp(cmd, "online=enable") == 0) {
+		WRITE_ONCE(tpv->online_disabled_by_op, false);
+		nvmeibc_tpv_online_maybe_arm(tpv);
+		_NI(tpv_proc_online_enable,
+		    "TPV: @STR: online compaction re-enabled via /proc",
 		    tpv->tpv_name);
 		return (ssize_t)len;
 	}
@@ -610,6 +680,7 @@ static ssize_t tpv_proc_compaction_write(void *arg, char *buf, size_t len)
  * nvmeibc_tpv_test.h guards the declaration under __KERNEL__, so declare here
  * unconditionally to cover both builds. */
 ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len);
+ssize_t nvmeibc_tpv_selftest_write(void *arg, char *buf, size_t len);
 
 void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv)
 {
@@ -639,7 +710,8 @@ void nvmeibc_tpv_proc_register(struct nvmeibc_tpv *tpv)
 	tpv->proc_stats = nvmeib_public_proc_create(
 		"stats", tpv->proc_dir, tpv_proc_stats_fill, tpv_proc_stats_reset, tpv);
 	tpv->proc_selftest = nvmeib_public_proc_create(
-		"selftest", tpv->proc_dir, nvmeibc_tpv_run_selftests, NULL, tpv);
+		"selftest", tpv->proc_dir, nvmeibc_tpv_run_selftests,
+		nvmeibc_tpv_selftest_write, tpv);
 	tpv->proc_compaction = nvmeib_public_proc_create(
 		"compaction", tpv->proc_dir,
 		tpv_proc_compaction_fill, tpv_proc_compaction_write, tpv);

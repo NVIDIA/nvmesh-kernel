@@ -34,6 +34,14 @@
  */
 ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len);
 
+/*
+ * nvmeibc_tpv_selftest_write - proc write handler for the "selftest" entry.
+ *
+ * Accepts "cross_slot_drain_loops=N" to configure the iteration count
+ * for tpv_ktest_cross_slot_drain (default 10000).
+ */
+ssize_t nvmeibc_tpv_selftest_write(void *arg, char *buf, size_t len);
+
 #endif /* __KERNEL__ */
 
 #endif /* NVMEIBC_TPV_TEST_H */

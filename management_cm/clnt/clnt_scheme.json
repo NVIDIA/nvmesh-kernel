@@ -223,6 +223,10 @@
                 "enableLocalReadOptimization" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
                 "isCompaction" : "__codec WithDefaultCodec(PodCodec('i'), 0)",
                 "compactionAggressiveness" : "__codec WithDefaultCodec(PodCodec('I'), 0)",
+                "//" : "TPV Phase D: per-TPV online compaction knobs. Ignored for non-TPV volumes. Defaults match kernel module params tpv_online_arm_high_pct / tpv_online_arm_low_pct so older management sends values producing current kernel behavior.",
+                "onlineCompactionEnabled" : "__codec WithDefaultCodec(PodCodec('i'), 1)",
+                "onlineCompactionArmHighPct" : "__codec WithDefaultCodec(PodCodec('I'), 30)",
+                "onlineCompactionArmLowPct" : "__codec WithDefaultCodec(PodCodec('I'), 15)",
                 "chunks" : {
                         "__type" : "array",
                         "__typename" : "nvmeibc_chunk_conf",

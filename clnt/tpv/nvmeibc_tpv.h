@@ -77,10 +77,41 @@ struct tpv_l2_ctx {
  * nvmeibc_tpv_free_extent() find the parent nvmeibc_cdv_extent_ref and
  * decrement its allocated_count without needing A and E from the CDV config.
  */
+/*
+ * Online-compaction state machine for the xarray entry
+ * (design: TPV_Trimming.md S. Step 5 / abort-on-conflict).
+ *
+ *   NORMAL           - guest IO dispatches directly; no reloc in flight.
+ *   RELOCATING       - an online reloc worker owns this entry and is copying
+ *                      source->dest.  Guest writes cmpxchg to RELOC_CANCELLED
+ *                      and proceed in-place to source; reads dispatch to
+ *                      source unchanged.
+ *   RELOC_CANCELLED  - a guest write has cancelled the in-flight reloc; the
+ *                      worker will observe this at its commit check and
+ *                      abort.  Source remains the live home.
+ *   COMMITTED        - the worker has latched the commit; xa_store of the
+ *                      new entry is imminent or just happened.  Readers
+ *                      observing this on the OLD entry must re-xa_load
+ *                      until the NEW entry is visible.
+ *
+ * Offline compaction (Step 4) does not use the state field - its
+ * relocation primitive quiesces guest IO via management-layer detach +
+ * exclusive compaction attach, so no concurrent IO state machine is
+ * needed.  Only the online worker drives transitions away from NORMAL.
+ */
+enum nvmeibc_tpv_entry_state {
+	NVMEIBC_TPV_ENTRY_NORMAL          = 0,
+	NVMEIBC_TPV_ENTRY_RELOCATING      = 1,
+	NVMEIBC_TPV_ENTRY_RELOC_CANCELLED = 2,
+	NVMEIBC_TPV_ENTRY_COMMITTED       = 3,
+};
+
 struct nvmeibc_tpv_extent_entry {
 	u64 phys_offset;
 	u64 cdv_extent_index;	/* data CDV_extent index; for ref-count bookkeeping on free */
 	bool persisted;		/* true once flush_state has written this mapping to CDV */
+	u8  state;		/* enum nvmeibc_tpv_entry_state; online-compaction */
+	atomic_t inflight;	/* bios currently dispatched against phys_offset */
 	struct rcu_head rcu;	/* deferred free via kfree_rcu after xa_erase */
 };
 
@@ -93,6 +124,21 @@ struct nvmeibc_tpv_free_slot {
 	u64              phys_offset;		/* CDV byte offset of this slot */
 	u64              cdv_extent_index;	/* CDV_extent containing this slot */
 	struct list_head node;
+	/*
+	 * Drain ref carried while the slot is parked on a ref's
+	 * pending_free_slots / flushing_free_slots after free_extent xa_erased
+	 * its owning entry.  free_extent transfers the xarray's inflight ref
+	 * onto this field so the entry stays alive (and uniquely identifies
+	 * the slot's previous occupant) until tpv_drain_flushing_entries can
+	 * wait for any in-flight bios that snapshotted entry->phys_offset
+	 * before the xa_erase to complete.  Without this, a guest read still
+	 * queued at the CDV transport against the old phys can land on the
+	 * slot's data after a concurrent alloc has reused it for a different
+	 * virt_idx (cross-slot return).  NULL on slots that were never
+	 * parked through free_extent (fresh CDV-extent fills, compaction-
+	 * abort returns).
+	 */
+	struct nvmeibc_tpv_extent_entry *draining_entry;
 };
 
 /*
@@ -371,6 +417,77 @@ struct nvmeibc_tpv {
 	struct work_struct            persist_work;
 	spinlock_t                    persist_lock;
 	bool                          dirty;
+
+	/*
+	 * Online-compaction drain waitqueue (design: TPV_Trimming.md Step 5).
+	 * Woken by bio end_io when atomic_dec_and_test on an entry's inflight
+	 * counter reaches zero.  The online reloc worker's step-10 drain sleeps
+	 * here after synchronize_rcu() until the target entry's inflight is
+	 * zero, then parks the source slot.
+	 */
+	wait_queue_head_t             inflight_drain_wq;
+
+	/*
+	 * Online-compaction worker (TPV_Trimming.md Step 5).
+	 *
+	 * online_compaction_work       per-TPV delayed_work, does one reloc
+	 *                              per invocation, re-queues itself while
+	 *                              armed.  Cancelled in detach.
+	 * online_armed                 hysteresis latch: true once wastage
+	 *                              has crossed arm_high_pct, cleared when
+	 *                              it drops below arm_low_pct or the
+	 *                              planner reports "no work possible".
+	 * online_disabled_by_op        operator /proc override; forces worker
+	 *                              idle regardless of wastage.
+	 * online_wastage_recheck_counter
+	 *                              bumped on every free_extent; every
+	 *                              ONLINE_RECHECK_STRIDE calls the
+	 *                              maybe-arm hook re-reads wastage.
+	 * stat_online_*                lifetime counters since attach.
+	 *
+	 * Per-TPV config fields, set by nvmeibc_tpv_online_compaction_config()
+	 * on attach from the CM payload and refreshed on the live grow/update
+	 * path.  Module params of the same name remain the cluster-wide
+	 * fallback; an explicit value of 0 in the per-TPV percentage fields
+	 * means "inherit module param" (the CM codec defaults are 1 / 30 / 15,
+	 * not 0, so this sentinel is reserved for newer management that wants
+	 * to defer to module params).
+	 *
+	 * online_disabled_by_mgmt      management-carried enable flag (true
+	 *                              = disabled). Honoured alongside
+	 *                              online_disabled_by_op; worker runs
+	 *                              only when both are false.  Initialized
+	 *                              to true by online_compaction_init()
+	 *                              and cleared by online_compaction_config()
+	 *                              when management signals enabled=true;
+	 *                              this closes the race where load_state
+	 *                              could call maybe_arm between attach and
+	 *                              the config call.
+	 * online_arm_high_pct          per-TPV arm threshold (0 = inherit
+	 *                              module param tpv_online_arm_high_pct).
+	 * online_arm_low_pct           per-TPV disarm threshold (0 = inherit
+	 *                              module param tpv_online_arm_low_pct).
+	 */
+	struct delayed_work           online_compaction_work;
+	bool                          online_armed;
+	bool                          online_disabled_by_op;
+	bool                          online_disabled_by_mgmt;
+	u32                           online_arm_high_pct;
+	u32                           online_arm_low_pct;
+	/*
+	 * Set true by the worker while it holds raw nvmeibc_cdv_extent_ref
+	 * pointers on its stack (from plan_pick through tpv_reloc_one_online's
+	 * CDV I/O).  cdv_alloc_work's tpv_drain_pending_returns skips CDV
+	 * returns while this flag is set, preventing a concurrent CDV_FREE_EXTENT
+	 * from kfree'ing a ref the worker is still holding.  The offline path
+	 * uses tpv->compaction_job.defer_drain symmetrically; the drain-deferred
+	 * helper ORs the two flags.
+	 */
+	bool                          online_defer_drain;
+	u64                           online_wastage_recheck_counter;
+	atomic64_t                    stat_online_reloc_ok;
+	atomic64_t                    stat_online_aborts_write_conflict;
+	atomic64_t                    stat_online_aborts_other;
 
 	/*
 	 * IO timeout for parked bios - mirrors regular volume max_retry_jiffies.
@@ -779,6 +896,76 @@ void nvmeibc_tpv_reposition_ref_locked(
 void nvmeibc_tpv_insert_ref_sorted_locked(
 	struct nvmeibc_tpv_allocator *alloc,
 	struct nvmeibc_cdv_extent_ref *ref);
+
+/*
+ * Online-compaction wastage signal (TPV_Trimming.md Step 5).
+ * Returns the percent (0..100) of owned CDV-extent slots that are not
+ * live-mapped.  Scoped to the data allocator only; metadata-side is
+ * excluded per S. Split-mode scope.
+ */
+u32 nvmeibc_tpv_wastage_pct(struct nvmeibc_tpv *tpv);
+
+/*
+ * Online-compaction tunables (TPV_Trimming.md Step 5).
+ * Defined as module params in nvmeibc_tpv.c; declared extern here so
+ * /proc and the worker can reference them without a header circular
+ * include.
+ */
+extern unsigned int tpv_reloc_outstanding;
+extern unsigned int tpv_online_arm_high_pct;
+extern unsigned int tpv_online_arm_low_pct;
+extern unsigned int tpv_online_reloc_requeue_ms;
+extern atomic_t     tpv_reloc_inflight;
+
+/*
+ * Online-compaction arm/disarm hooks (TPV_Trimming.md Step 5).
+ *
+ * nvmeibc_tpv_online_maybe_arm() is cheap - reads wastage via
+ * nvmeibc_tpv_wastage_pct() (O(N) walk of cdv_extent_list, N small)
+ * and arms the worker if wastage >= arm_high_pct.  Called from the
+ * re-check trigger points (every Nth free_extent, after
+ * pending_return_list drain completion, and from the worker's
+ * disarm-check path).
+ *
+ * The worker function itself is a delayed_work installed at attach
+ * via nvmeibc_tpv_online_compaction_init() and cancelled at detach
+ * via nvmeibc_tpv_online_compaction_destroy().
+ */
+void nvmeibc_tpv_online_maybe_arm(struct nvmeibc_tpv *tpv);
+void nvmeibc_tpv_online_compaction_init(struct nvmeibc_tpv *tpv);
+void nvmeibc_tpv_online_compaction_destroy(struct nvmeibc_tpv *tpv);
+
+/*
+ * Apply per-TPV online-compaction config from the management attach
+ * payload.  Called once by the attach glue (see
+ * nvmeibc_main_capi_manipulate_vols.inc.c) right after
+ * nvmeibc_tpv_attach() returns, and again on the live grow/update path.
+ * An explicit 0 in either percentage means "inherit the module param".
+ * The CM codec defaults are 1 / 30 / 15, so older management that does
+ * not send these fields produces the design-target values directly; 0
+ * is reserved for newer management that wants to defer to module params.
+ */
+void nvmeibc_tpv_online_compaction_config(struct nvmeibc_tpv *tpv,
+					  bool enabled,
+					  u32 arm_high_pct,
+					  u32 arm_low_pct);
+
+/*
+ * Effective-value accessors.  Return the per-TPV value when set (non-zero),
+ * otherwise the module param.  Callers use these instead of reading the
+ * module param directly.
+ */
+u32 nvmeibc_tpv_effective_arm_high_pct(const struct nvmeibc_tpv *tpv);
+u32 nvmeibc_tpv_effective_arm_low_pct(const struct nvmeibc_tpv *tpv);
+void tpv_inflight_release(struct nvmeibc_tpv *tpv,
+			  struct nvmeibc_tpv_extent_entry *entry);
+
+/*
+ * Every Nth free_extent call re-checks wastage.  1024 is cheap and
+ * responsive: 1024 x 64 KB (smallest TPV extent) = 64 MB discarded
+ * before we re-evaluate - reasonable granularity for fstrim bursts.
+ */
+#define ONLINE_RECHECK_STRIDE 1024
 
 /*
  * Background work handlers: return empty CDV_extents, then request new ones.

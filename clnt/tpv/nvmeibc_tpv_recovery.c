@@ -124,7 +124,15 @@ static inline u64 recov_slot_phys(const struct nvmeibc_tpv_allocator *a,
 
 /* -- tpv_recovery_is_known --------------------------------------------------
  *
- * Returns true if extent_index is already in the allocator's cdv_extent_list.
+ * Returns true if extent_index is already known to the allocator - either on
+ * cdv_extent_list (live) or on pending_return_list (queued for return to TOMA
+ * but not yet drained).  Both lists must be checked: a re-entry of recovery
+ * (e.g. load_state_work_fn's internal call followed by an explicit caller)
+ * would otherwise re-adopt an extent that is queued for return, producing
+ * duplicate cdv_extent_ref entries, double-counted slots in
+ * free_tpv_extents, and ultimately a list_del corruption when alloc_extent
+ * pops a slot whose ref has been freed.
+ *
  * Called from single-threaded recovery context; no lock held.
  */
 static bool tpv_recovery_is_known(const struct nvmeibc_tpv_allocator *alloc,
@@ -133,6 +141,10 @@ static bool tpv_recovery_is_known(const struct nvmeibc_tpv_allocator *alloc,
 	const struct nvmeibc_cdv_extent_ref *ref;
 
 	list_for_each_entry(ref, &alloc->cdv_extent_list, node) {
+		if (ref->extent_index == extent_index)
+			return true;
+	}
+	list_for_each_entry(ref, &alloc->pending_return_list, node) {
 		if (ref->extent_index == extent_index)
 			return true;
 	}

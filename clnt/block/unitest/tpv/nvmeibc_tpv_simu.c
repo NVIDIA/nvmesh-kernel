@@ -4,7 +4,7 @@
 */
 
 /*
- * nvmeibc_tpv_simu.c — CDV/TOMA simulator for TPV unit tests.
+ * nvmeibc_tpv_simu.c - CDV/TOMA simulator for TPV unit tests.
  *
  * Provides in-memory implementations of all extern functions declared in
  * the TPV production modules:
@@ -14,7 +14,7 @@
  *   nvmeibc_ib_admin_cdv_list_extents  (nvmeibc_tpv_recovery.c extern)
  *   nvmeibc_tpv_cdv_sync_read          (nvmeibc_tpv_persist.c extern)
  *   nvmeibc_tpv_cdv_sync_write         (nvmeibc_tpv_persist.c extern)
- *   nvmeibc_tpv_cdv_submit_bio         (nvmeibc_tpv_io.c extern — BUG stub)
+ *   nvmeibc_tpv_cdv_submit_bio         (nvmeibc_tpv_io.c extern - BUG stub)
  *
  * All state lives in the global g_tpv_cdv_sim, created / destroyed by the
  * test setup / teardown helpers defined at the bottom of this file.
@@ -24,22 +24,23 @@
 #include "clnt/nvmeibc_msgs_shared.h"
 #include "clnt/nvmeibc_volume.h"
 #include "clnt/block/nvmeibc_block_common.h"
+#include "clnt/module/instance/nvmeibc_cinst_params.h"	/* nvmeibc_cinst_get_by_name */
 #include "tpv/nvmeibc_tpv.h"
 #include "tpv/nvmeibc_tpv_simu.h"
 
-/* ── Global simulator instance ──────────────────────────────────────────── */
+/* -- Global simulator instance -------------------------------------------- */
 
 struct tpv_cdv_sim *g_tpv_cdv_sim;
 
-/* ── nvmeibc_ib_admin_cdv_alloc_extent ──────────────────────────────────── */
+/* -- nvmeibc_ib_admin_cdv_alloc_extent ------------------------------------ */
 
 /*
  * Allocate the next available data CDV extent.  Extents are allocated in
  * ascending index order starting from 1 (index 0 is the L1 tree root).
  *
  * Fault injection:
- *   inject_full     → return CDV_FULL (no new allocation performed)
- *   inject_wrong_gen → return WRONG_GEN (no new allocation performed)
+ *   inject_full     -> return CDV_FULL (no new allocation performed)
+ *   inject_wrong_gen -> return WRONG_GEN (no new allocation performed)
  */
 int nvmeibc_ib_admin_cdv_alloc_extent(
 	struct nvmeibc_volume                *cdv,
@@ -88,7 +89,7 @@ int nvmeibc_ib_admin_cdv_alloc_extent(
 	return 0;
 }
 
-/* ── nvmeibc_ib_admin_cdv_free_extent ───────────────────────────────────── */
+/* -- nvmeibc_ib_admin_cdv_free_extent ------------------------------------- */
 
 int nvmeibc_ib_admin_cdv_free_extent(
 	struct nvmeibc_volume                *cdv,
@@ -117,7 +118,7 @@ int nvmeibc_ib_admin_cdv_free_extent(
 	return 0;
 }
 
-/* ── nvmeibc_ib_admin_cdv_list_extents ──────────────────────────────────── */
+/* -- nvmeibc_ib_admin_cdv_list_extents ------------------------------------ */
 
 /*
  * Return a vmalloc'd array of extent indices owned by @tpv_uuid.
@@ -170,7 +171,7 @@ int nvmeibc_ib_admin_cdv_list_extents(
 	return 0;
 }
 
-/* ── nvmeibc_tpv_cdv_sync_read ──────────────────────────────────────────── */
+/* -- nvmeibc_tpv_cdv_sync_read -------------------------------------------- */
 
 int nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 			       u64 cdv_offset, void *buf, u64 len)
@@ -189,7 +190,7 @@ int nvmeibc_tpv_cdv_sync_read(struct nvmeibc_tpv *tpv,
 	return 0;
 }
 
-/* ── nvmeibc_tpv_cdv_sync_write ─────────────────────────────────────────── */
+/* -- nvmeibc_tpv_cdv_sync_write ------------------------------------------- */
 
 int nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 				u64 cdv_offset, const void *buf, u64 len)
@@ -208,11 +209,56 @@ int nvmeibc_tpv_cdv_sync_write(struct nvmeibc_tpv *tpv,
 	return 0;
 }
 
-/* ── nvmeibc_tpv_cdv_submit_bio ─────────────────────────────────────────── */
+/* -- nvmeibc_tpv_cdv_sync_read_data / write_data -------------------------- */
+
+/*
+ * Online-compaction write-conflict injection target.  When non-NULL, the
+ * data-CDV read stub flips this entry's state to RELOC_CANCELLED right after
+ * the read completes (mirroring a guest write that arrives between
+ * tpv_reloc_one_online's S.5 data write and S.6 cancellation check).  See
+ * the header for the contract.
+ */
+struct nvmeibc_tpv_extent_entry *g_tpv_simu_cancel_on_data_read;
+
+/*
+ * Both _data variants route to the same RAM buffer as the metadata helpers;
+ * online compaction has no semantic distinction between the two CDVs in this
+ * single-CDV simulator.  Production splits them via tpv_cdv_sync_io_on +
+ * nvmeibc_tpv_data_cdv() / nvmeibc_tpv_meta_cdv(); the simulator keeps one
+ * cdv_ram region and lets reads/writes share it.
+ */
+int nvmeibc_tpv_cdv_sync_read_data(struct nvmeibc_tpv *tpv,
+				    u64 cdv_offset, void *buf, u64 len)
+{
+	int rv = nvmeibc_tpv_cdv_sync_read(tpv, cdv_offset, buf, len);
+
+	if (rv == 0 && g_tpv_simu_cancel_on_data_read) {
+		/*
+		 * Inject the guest-write race deterministically: flip the
+		 * targeted entry's state to RELOC_CANCELLED so that S.6 of
+		 * tpv_reloc_one_online observes the cancel and aborts before
+		 * committing the L2 leaf write.  Only the first call after
+		 * arming the hook fires; clear the global to avoid affecting
+		 * subsequent reads in the same test run.
+		 */
+		WRITE_ONCE(g_tpv_simu_cancel_on_data_read->state,
+			   NVMEIBC_TPV_ENTRY_RELOC_CANCELLED);
+		g_tpv_simu_cancel_on_data_read = NULL;
+	}
+	return rv;
+}
+
+int nvmeibc_tpv_cdv_sync_write_data(struct nvmeibc_tpv *tpv,
+				     u64 cdv_offset, const void *buf, u64 len)
+{
+	return nvmeibc_tpv_cdv_sync_write(tpv, cdv_offset, buf, len);
+}
+
+/* -- nvmeibc_tpv_cdv_submit_bio ------------------------------------------- */
 
 /*
  * TPV unit tests exercise the allocator/persist/recovery path only.
- * The IO path (nvmeibc_tpv_make_request → nvmeibc_tpv_cdv_submit_bio) is
+ * The IO path (nvmeibc_tpv_make_request -> nvmeibc_tpv_cdv_submit_bio) is
  * not exercised; any accidental call is a test bug.
  */
 void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
@@ -225,7 +271,7 @@ void nvmeibc_tpv_cdv_submit_bio(struct nvmeibc_tpv *tpv,
 	BUG_ON(1);	/* should never be called in unit tests */
 }
 
-/* ── Simulator lifecycle ─────────────────────────────────────────────────── */
+/* -- Simulator lifecycle --------------------------------------------------- */
 
 struct tpv_cdv_sim *tpv_cdv_sim_create(void)
 {
@@ -257,12 +303,13 @@ void tpv_cdv_sim_destroy(void)
 	g_tpv_cdv_sim = NULL;
 }
 
-/* ── Mock CDV volume ─────────────────────────────────────────────────────── */
+/* -- Mock CDV volume ------------------------------------------------------- */
 
 struct nvmeibc_volume *tpv_cdv_vol_create(void)
 {
 	struct nvmeibc_volume       *cdv;
 	struct nvmeibc_block_device *bdev;
+	const struct nvmeibc_cinst_params *cinst;
 
 	cdv = kzalloc(sizeof(*cdv), GFP_KERNEL);
 	if (!cdv)
@@ -289,6 +336,21 @@ struct nvmeibc_volume *tpv_cdv_vol_create(void)
 	spin_lock_init(&cdv->hdr.ext_blob_modify_guard);
 	spin_lock_init(&cdv->spinlock);
 
+	/*
+	 * Wire cdv->p to the simulator's default client-instance params.  The
+	 * production attach path's nvmeibc_tpv_blkdev_register dereferences
+	 * cdv_vol->p via nvmeibc_isnt_params_main2blk() to reach the
+	 * client-instance disk-id allocator.  Without this, p is NULL and
+	 * nvmeibc_isnt_params_main2blk(NULL) computes a small bogus offset
+	 * (e.g. 0xf0) that segfaults on first deref.  The simulator framework
+	 * registers a default client named "nvmeibc" via clientSimulator_ismod
+	 * before any test runs, so by the time tpv_test_setup gets here the
+	 * lookup is non-NULL.
+	 */
+	cinst = nvmeibc_cinst_get_by_name("nvmeibc");
+	BUG_ON(!cinst);	/* simulator framework should have registered the default */
+	cdv->p = &cinst->main;
+
 	return cdv;
 }
 
@@ -300,7 +362,7 @@ void tpv_cdv_vol_destroy(struct nvmeibc_volume *cdv)
 	kfree(cdv);
 }
 
-/* ── Test helper functions ───────────────────────────────────────────────── */
+/* -- Test helper functions ------------------------------------------------- */
 
 void tpv_simu_set_toma_id(struct nvmeibc_tpv *tpv,
 			   const char *toma_id, u64 generation)
@@ -345,7 +407,7 @@ void tpv_simu_fill_pool(struct nvmeibc_tpv *tpv)
 	flush_workqueue(system_wq);
 }
 
-/* ── Exhaustion / capacity-return helpers ───────────────────────────────── */
+/* -- Exhaustion / capacity-return helpers --------------------------------- */
 
 void tpv_simu_exhaust_cdv(void)
 {
@@ -379,7 +441,7 @@ int tpv_simu_release_one_cdv_extent(u64 extent_index)
 	return 0;
 }
 
-/* ── Linker stubs for async IB-response paths ───────────────────────────────
+/* -- Linker stubs for async IB-response paths -------------------------------
  *
  * In the simulator, CDV alloc/list operations are synchronous (implemented
  * above).  The async response-dispatch functions called from nvmeibc_topology.c
@@ -401,10 +463,27 @@ void nvmeibc_cdv_dispatch_list_response(const struct nvmeibc_cdv_list_resp *rsp,
 	BUG_ON(1); /* should never be called in the simulator */
 }
 
-ssize_t nvmeibc_tpv_run_selftests(void *arg, char *buf, size_t len)
-{
-	(void)arg;
-	(void)buf;
-	(void)len;
-	return -ENOSYS; /* kernel self-tests (nvmeibc_tpv_test.c) not compiled in simulator */
-}
+/*
+ * Test hook function pointers — normally defined in nvmeibc_tpv_cdv.c and
+ * nvmeibc_tpv_ib_admin.c, which are not compiled in the simulator build.
+ * nvmeibc_tpv_test.c sets these to its in-memory stubs before each selftest
+ * run and restores them to NULL afterward.
+ */
+int (*nvmeibc_tpv_cdv_test_sync_read_fn)(struct nvmeibc_tpv *tpv,
+					  u64 cdv_offset, void *buf, u64 len);
+int (*nvmeibc_tpv_cdv_test_sync_write_fn)(struct nvmeibc_tpv *tpv,
+					   u64 cdv_offset, const void *buf,
+					   u64 len);
+
+int (*nvmeibc_tpv_test_cdv_alloc_fn)(
+	struct nvmeibc_volume *cdv, const char *toma_id,
+	const struct nvmeibc_cdv_alloc_req *req,
+	struct nvmeibc_cdv_alloc_resp *resp);
+
+int (*nvmeibc_tpv_test_cdv_free_fn)(
+	struct nvmeibc_volume *cdv, const char *toma_id,
+	const struct nvmeibc_cdv_free_req *req);
+
+int (*nvmeibc_tpv_test_cdv_list_fn)(
+	struct nvmeibc_volume *cdv, const char *toma_id,
+	const char *tpv_uuid, u64 **out_indices, u64 *out_count);

@@ -48,7 +48,8 @@
   - [Why this does not need detach / attach](#why-this-does-not-need-detach--attach)
   - [Design: per-L2-entry lock on the xarray value](#design-per-l2-entry-lock-on-the-xarray-value)
   - [Relocation protocol (per slot)](#relocation-protocol-per-slot)
-  - [Deferred slot visibility — why step 11 does not free directly](#deferred-slot-visibility--why-step-11-does-not-free-directly)
+  - [Durability invariant - synchronous L2 commit](#durability-invariant---synchronous-l2-commit)
+  - [Deferred slot visibility — DISCARD path only](#deferred-slot-visibility--discard-path-only)
   - [Ordering summary after the defer-to-free fix](#ordering-summary-after-the-defer-to-free-fix)
   - [Correctness](#correctness)
   - [Trigger and planner - detailed design pending](#trigger-and-planner---detailed-design-pending)
@@ -114,7 +115,7 @@ defined at length in the main doc
 | **xarray (extent_map)** | The in-memory client-side `virt_idx -> nvmeibc_tpv_extent_entry` map; authoritative while attached, rebuilt from L1/L2 on attach. |
 | **cdv_extent_ref** | Per-CDV_extent tracking struct on the client: `allocated_count`, `pending_free_slots`, list membership (`cdv_extent_list` vs `pending_return_list`). |
 | **free_tpv_extents** | Per-TPV pool of slots available for immediate allocation. |
-| **pending_free_slots** | Per-ref list of slots logically freed but not yet L2-durable; invisible to the allocator until flushed (see Step 5 § Deferred slot visibility). |
+| **pending_free_slots** | Per-ref list of slots logically freed but not yet L2-durable; invisible to the allocator until flushed.  Used by the DISCARD path (Step 2) where the L2-null write is async; **not** used by online relocation, which writes L2 synchronously before exposing the new mapping (see Step 5 § Durability invariant). |
 | **pending_return_list** | Per-TPV list of refs whose `allocated_count` hit zero and are awaiting `CDV_FREE_EXTENT`. |
 | **persist_work / flush_state** | Client-kernel work item that flushes dirty L1/L2 pages to CDV. |
 | **compaction attach** | Weak-reservation TPV attach issued by management to a target-hosted compaction client for the duration of an offline-compaction job; preemptible by any regular guest attach without a preempt flag. Display name `<tpv-name>-compaction`. |
@@ -1701,36 +1702,42 @@ relocate(virt_idx, dest_ref):
      guest write is already durable at source; we discard the
      work.
   7. Allocate a fresh nvmeibc_tpv_extent_entry with new phys_offset
-     / cdv_extent_index / state == NORMAL / inflight == 0.
-  8. Commit (the critical step; see Bug 1 analysis in design
-     history):
+     / cdv_extent_index / state == NORMAL / inflight == 0 /
+     persisted == TRUE (the L2 leaf will be on disk before this
+     entry is reachable - see step 8b).
+  8a. Latch commit:
          if (cmpxchg(&entry->state, RELOCATING, COMMITTED) !=
              RELOCATING) goto abort;
+      The cmpxchg is a full memory barrier; once it succeeds, any
+      subsequent guest cmpxchg(RELOCATING, RELOC_CANCELLED) will
+      fail, so no guest write can be dispatched to the source slot
+      after this point. The xarray still holds the OLD entry;
+      readers that load it observe state == COMMITTED and
+      spin-retry (no concurrent guest mapping change is possible).
+  8b. SYNCHRONOUSLY write the L2 leaf to disk via
+      tpv_l2_writer_submit_and_wait(virt_idx, dest_phys).  This is
+      the durability commit point: on-disk L2 now says
+      virt_idx -> dest_phys.  On error, force state back to NORMAL
+      (so spinners drop out), free new_entry, return dest slot;
+      goto abort.  See "Durability invariant" below for why this
+      must precede xa_store.
+  8c. Publish:
          old = xa_store(extent_map, virt_idx, new_entry);
-     The cmpxchg is a full memory barrier; once it succeeds, any
-     subsequent guest cmpxchg(RELOCATING, RELOC_CANCELLED) will
-     fail, so no guest write can be dispatched to the source slot
-     after this point. old == entry; entry is now unreachable
-     via future xa_load (readers that already loaded old will
-     observe state == COMMITTED and spin-retry).
-  9. Mark the owning L2 page dirty (leaf at virt_idx % N_L2 now
-     holds the new cdv_offset).
- 10. Drain guest bios against the old entry, then park the
+      old == entry; entry is now unreachable via future xa_load
+      (readers that already loaded old still see state == COMMITTED
+      and spin-retry until the next xa_load returns new_entry).
+  9. Drain guest bios against the old entry, then return the
      source slot:
          synchronize_rcu();     /* no new xa_load returns old */
          wait_event(tpv->inflight_drain_wq,
-                    atomic_read(&entry->inflight) == 0);
-     Under allocator lock, park the *source* slot on
-     source_ref->pending_free_slots (NOT free_tpv_extents yet -
-     see "Deferred slot visibility" below). Do not decrement
-     allocated_count yet; the slot is still logically allocated
-     from the CDV's perspective because the on-disk L2 still
-     points at it.  The synchronize_rcu + wait_event pair is what
-     makes in-flight reads safe across slot reuse: it guarantees
-     every bio dispatched against entry->phys_offset has
-     completed before the slot can be promoted to the free pool
-     by the L2-flush promotion callback.
- 11. kfree_rcu(old, rcu).
+                    atomic_read(&entry->inflight) == 1);
+     Under allocator lock, return the source slot to
+     free_tpv_extents and decrement source_ref->allocated_count
+     directly (no parking).  Safe because step 8b made on-disk L2
+     point at dest_phys; src_phys is no longer needed for any
+     crash-recovery scenario.  If allocated_count drops to 0 and
+     !is_l1_extent, move source_ref to pending_return_list.
+ 10. kfree_rcu(old, rcu).
      return COMMITTED.
 
 abort:
@@ -1781,54 +1788,149 @@ sequenceDiagram
 
     alt no cancellation observed
         Worker->>Entry: cmpxchg RELOCATING->COMMITTED (succeeds)
-        Worker->>Entry: xa_store new_entry (phys=dest, state=NORMAL)
-        Worker->>Worker: mark L2 page dirty
-        Worker->>Worker: synchronize_rcu() + wait inflight==0
-        Worker->>Worker: park source slot on pending_free_slots
+        Note over Entry: Guest IO that loads old entry now<br/>spins on COMMITTED until xa_store
+        Worker->>Flush: tpv_l2_writer_submit_and_wait<br/>(synchronous L2 leaf write)
+        Flush->>Worker: L2 leaf durable on disk
+        Worker->>Entry: xa_store new_entry (phys=dest, state=NORMAL, persisted=TRUE)
+        Worker->>Worker: synchronize_rcu() + wait inflight==1
+        Worker->>Worker: reloc_return_source_slot<br/>(slot to free pool, allocated_count--)
         Worker->>Worker: kfree_rcu(old)
-        Flush->>Flush: flush_state writes dirty L2 page
-        Flush->>Worker: promote source slot<br/>pending_free_slots -> free_tpv_extents<br/>decrement allocated_count
-    else cancellation observed (step 6 READ_ONCE or step 8 cmpxchg)
+    else cancellation observed (step 6 READ_ONCE or step 8a cmpxchg)
         Worker->>Entry: READ_ONCE or cmpxchg sees RELOC_CANCELLED
         Worker->>Worker: ABORT: free CDV buffer, dest slot, new_entry<br/>xchg state->NORMAL
+    else L2 leaf write fails (step 8b)
+        Flush->>Worker: -EIO / -ENOTSUPP
+        Worker->>Entry: xchg state RELOCATING/COMMITTED -> NORMAL<br/>(spinners drop out)
+        Worker->>Worker: ABORT: free CDV buffer, dest slot, new_entry
     end
 
     Note over Guest: Guest READ during RELOCATING/RELOC_CANCELLED<br/>inflight++, dispatch to source (source data is valid)<br/>no cmpxchg, no wait, inflight-- at end_io
 ```
 
-*Figure 3: Single-slot online relocation with abort-on-conflict.
-A guest WRITE that arrives during RELOCATING flips state to
-RELOC_CANCELLED via a single cmpxchg and proceeds in-place
-against the source slot; it never waits. The worker's step-8
-commit cmpxchg(RELOCATING, COMMITTED) then fails and the worker
-aborts: destination slot returned to the free pool, no xa_store.
-Once COMMITTED, no subsequent guest can reach RELOC_CANCELLED,
-so post-commit the source slot cannot be the target of a new
-guest write.  Guest READs ignore state entirely (the source
-slot holds valid data through the copy); they bump `inflight`
-so the worker's step-10 drain knows when it is safe to park the
-source slot.  Crash-safety is provided by the parked-slot
-invisibility gate - source stays allocated from the CDV's
-perspective until the L2 flush commits the redirect (see §
-Correctness and § Deferred slot visibility below).*
+*Figure 3: Single-slot online relocation with abort-on-conflict
+and synchronous L2 commit.  A guest WRITE that arrives during
+RELOCATING flips state to RELOC_CANCELLED via a single cmpxchg
+and proceeds in-place against the source slot; it never waits.
+The worker's step-8a commit cmpxchg(RELOCATING, COMMITTED) then
+fails and the worker aborts.  Once COMMITTED, no subsequent
+guest can reach RELOC_CANCELLED; guest IO that loads the old
+entry observes state == COMMITTED and spin-retries until step
+8c's xa_store publishes new_entry.  The synchronous L2 leaf
+write at step 8b runs inside this spin window so that on-disk
+L2 reflects dest_phys before any reader is allowed to dispatch
+against it; this is what makes online compaction crash-safe
+without depending on `sync_flush` (see § Durability invariant
+below).  Guest READs ignore state entirely (source data is
+valid through the copy); they bump `inflight` so the worker's
+step-9 drain knows when the source slot can be returned.*
 
-### Deferred slot visibility — why step 11 does not free directly
+### Durability invariant - synchronous L2 commit
 
-The naive version of step 11 - push source slot straight to
-`free_tpv_extents` and decrement `allocated_count` - is unsound.
-Consider the following race:
+The relocation protocol's correctness rests on a single ordering
+rule: **on-disk L2 must point at `dest_phys` before any guest IO
+can dispatch a write to `dest_phys`.**  The protocol enforces
+this with two interlocking gates:
 
-1. Relocation of virt_idx A moves A from source slot S to dest.
-2. Step 11 pushes S onto `free_tpv_extents`. L2 page holding A's
-   leaf is dirty (points at dest) but not yet flushed to CDV.
+**Gate 1 - the COMMITTED spin (step 8a -> 8c).**
+After `cmpxchg(state, RELOCATING, COMMITTED)` and before
+`xa_store(new_entry)`, the xarray still holds the *old* entry
+with `state == COMMITTED`.  `nvmeibc_tpv_make_request` retries
+on COMMITTED:
+
+```c
+if (state == NVMEIBC_TPV_ENTRY_COMMITTED) {
+    rcu_read_unlock();
+    cpu_relax();
+    goto retry_load;
+}
+```
+
+So all guest IO (read AND write) is blocked for the duration of
+step 8b's L2 write - regardless of `sync_flush` mode.  This is
+unconditional by design: `sync_flush` controls *durability of
+acknowledged writes*, not *consistency of an in-progress mapping
+change*; there is no safe `sync_flush=off` variant of this
+window because letting guest writes land on `src_phys` while L2
+is committing to `dest_phys` would lose those writes on the
+crash-recovery path (L2 says dest, guest write went to src,
+recovery returns the pre-relocation contents of dest).
+The cost is one ~4 KiB synchronous CDV write of latency per
+relocation; on RDMA fabrics the spin is microseconds.
+
+**Gate 2 - `persisted=TRUE` at publication (step 8c).**
+Because step 8b has already made the L2 leaf durable, `new_entry`
+is published with `persisted = TRUE`.  After `xa_store`, guest IO
+loading new_entry takes the normal-mapped path and dispatches
+straight to `dest_phys`, which matches what on-disk L2 already
+says.  `nvmeibc_tpv_make_request`'s sync_flush gate
+(`if (sync_flush && is_write && !persisted)` -> park on
+`pending_l1_flush_bios`) is short-circuited by `persisted=TRUE`,
+so no sync_flush dependency exists in the relocation path.
+
+**Crash analysis (any window):**
+
+| Crash window | On-disk L2 | src_phys data | dest_phys data | Recovery reads |
+|---|---|---|---|---|
+| Before step 4 (data copy) | virt -> src | original | undefined | original via src - correct |
+| After step 5, before step 8a | virt -> src | original | identical copy | original via src - correct |
+| After step 8a, before step 8b | virt -> src | original | identical copy | original via src - correct (state=COMMITTED in memory is lost on reboot, recovery rebuilds xarray from L2) |
+| After step 8b, before step 8c | virt -> dest | unchanged | identical copy | identical via dest - correct |
+| After step 8c, any later | virt -> dest | (slot returned to free pool) | newest data | correct |
+
+There is no window in which on-disk L2 disagrees with the
+visible xarray mapping.
+
+**Why `sync_flush` still applies elsewhere.**
+The sync_flush gate at `nvmeibc_tpv_make_request:479` (park bio
+on `pending_l1_flush_bios` iff `sync_flush && is_write &&
+!persisted`) remains the durability mechanism for the
+**allocation** path, where `nvmeibc_tpv_alloc_extent` returns a
+fresh entry with `persisted=FALSE` and the L2 leaf for it is
+async-flushed by `persist_work`.  The relocation path no longer
+produces a `persisted=FALSE` entry, so the gate is never
+triggered during online compaction.  This is the desired
+property: `sync_flush` controls per-TPV alloc-then-write
+durability semantics, while online compaction is unconditionally
+crash-safe.
+
+**Implementation note.**  `tpv_l2_writer_submit_and_wait` is
+served by a single per-TPV kthread (`tpv_l2w/<name>`) spawned in
+`tpv_compaction_init` and torn down in `tpv_compaction_destroy`.
+Both online and offline compaction submit through the same queue;
+the writer serializes 4 KiB L2-page writes so concurrent
+relocations targeting different leaves of the same page do not
+clobber each other.  Online compaction refuses to run if init
+failed to spawn the writer.
+
+### Deferred slot visibility — DISCARD path only
+
+> **Note.**  Online relocation no longer uses this deferred-visibility
+> mechanism: step 8b's synchronous L2 write makes the L2 leaf
+> durable *before* `xa_store` exposes the new mapping, so step 9
+> can return the source slot directly via
+> `reloc_return_source_slot` (see § Durability invariant above).
+> The discussion below applies to the **DISCARD** path (Step 2),
+> where the L2-null write is still asynchronous and the slot must
+> stay invisible to the allocator until the flush lands.
+
+The naive version of "free directly" - push the freed slot
+straight to `free_tpv_extents` and decrement `allocated_count` -
+is unsound for asynchronously-flushed L2 updates.  Consider the
+following race:
+
+1. DISCARD of virt_idx A nulls A's xarray entry and queues an L2
+   leaf null-write.
+2. The naive path pushes A's slot S onto `free_tpv_extents`. L2
+   page holding A's leaf is dirty (says null) but not yet flushed
+   to CDV.
 3. Guest writes virt_idx B. Allocator pops S from free pool, maps
    B -> S in xarray, writes guest data to S. L2 page holding B's
    leaf is also dirty, also not yet flushed.
 4. Crash.
 5. On recovery, `load_state` reads on-disk L2. A's leaf still
-   says S (flush never landed). B's leaf is null (flush never
-   landed). Xarray reconstructs A -> S. Guest reads A and gets
-   B's data.
+   says S (null-flush never landed). B's leaf is null (flush
+   never landed). Xarray reconstructs A -> S. Guest reads A and
+   gets B's data.
 
 The fix is to defer the slot's reappearance in the free pool
 until the L2 flush that commits A's new mapping has landed on
@@ -2844,6 +2946,9 @@ defining section.
 | `cdv_extent_zero_on_free` | per-TOMA runtime | 0 (off) | 0 or 1 | `toma_rpc config set cdv_extent_zero_on_free N` | main doc §3.9 (inherited) |
 | `high_watermark` (Step 2 return threshold) | per-TPV | `2 * low_watermark` (suggested) | >= `low_watermark` | compile-time / future `/proc` knob | Step 2 item 2 |
 | compaction watermark (Step 5 trigger) | per-TPV | TBD (detailed-design pending) | > Step 2 `high_watermark` | future `/proc` knob | Step 5 § Trigger and planner |
+| `tpvConfig.onlineCompactionEnabled` | per-TPV (mutable) | `true` | bool | volume-create / `POST /volumes/tpv/update` | Step 5 Phase D |
+| `tpvConfig.onlineCompactionArmHighPct` | per-TPV (mutable) | 30 | 1..100, strictly > ArmLowPct | volume-create / `POST /volumes/tpv/update` | Step 5 Phase D |
+| `tpvConfig.onlineCompactionArmLowPct` | per-TPV (mutable) | 15 | 0..99, strictly < ArmHighPct | volume-create / `POST /volumes/tpv/update` | Step 5 Phase D |
 | `minIdleDays` (candidates filter) | per-query | operator-supplied | >= 0 | `GET /candidates-for-compaction` query param | Step 6 |
 | Attachment age gate (Step 5) | per-TPV | 24 h | >= 0 | compile-time / future knob | Step 5 Policy |
 | Offline batch size | per-compaction-client | ~1 MB of live data | client module parameter | client-side config | Step 4 Interruptibility |

@@ -985,6 +985,8 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 		xa_for_each(&data_alloc->extent_map, idx, ee)
 			kfree(ee);
 		xa_destroy(&data_alloc->extent_map);
+		(void)idx;	/* xa_for_each writes it; we never read it. Quiets
+				 * -Werror=unused-but-set-variable in the unitest build. */
 
 		list_for_each_entry_safe(ref, tmp, &alloc->cdv_extent_list, node) {
 			nvmeibc_tpv_free_slots_list(&ref->pending_free_slots);
@@ -1363,6 +1365,9 @@ int nvmeibc_tpv_load_state(struct nvmeibc_tpv *tpv)
 			ee->phys_offset      = data_phys;
 			ee->cdv_extent_index = data_idx;
 			ee->persisted        = true;
+			ee->state            = NVMEIBC_TPV_ENTRY_NORMAL;
+			/* inflight refcount pre-charged for the xarray link. */
+			atomic_set(&ee->inflight, 1);
 
 			/* Leaves point at data-CDV offsets and live on the
 			 * data-side allocator's extent_map. */
@@ -1725,6 +1730,15 @@ void nvmeibc_tpv_load_state_work_fn(struct work_struct *work)
 				    tpv->tpv_name, kick_rv);
 		}
 	}
+
+	/*
+	 * Online compaction arm check (TPV_Trimming.md Step 5).  Must run
+	 * AFTER state_loaded=true so nvmeibc_tpv_wastage_pct sees the
+	 * fully-populated cdv_extent_list.  If the freshly-loaded TPV is
+	 * above arm_high_pct (re-attach after heavy trim), the worker
+	 * begins relocating immediately.
+	 */
+	nvmeibc_tpv_online_maybe_arm(tpv);
 }
 EXPORT_SYMBOL(nvmeibc_tpv_load_state_work_fn);
 

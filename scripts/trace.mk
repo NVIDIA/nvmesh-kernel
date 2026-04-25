@@ -81,8 +81,8 @@ clean-files += $(shell find $(obj) -name '*.trace.json' 2>/dev/null)
 $(PP_OUTDIR)/%.i: ORIG_OBJ_NAME = $(subst $(PP_OUTDIR)/,,$(patsubst %.i,%.o,$@))
 $(PP_OUTDIR)/%.i: $(src)/%.c $(PP_OUTDIR)/.headers.stamp
 	$(shell mkdir -p $(dir $@))
-	[ -f $(obj)/.trace_pp_dir/$*.c_gen_events.h ] || touch $(obj)/.trace_pp_dir/$*.c_gen_events.h
-	$(CC) $(c_flags) $(call per_file_iflags_varval,$(ORIG_OBJ_NAME)) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -o $@.new $<
+	@[ -f $(obj)/.trace_pp_dir/$*.c_gen_events.h ] || touch $(obj)/.trace_pp_dir/$*.c_gen_events.h
+	@$(CC) $(c_flags) $(call per_file_iflags_varval,$(ORIG_OBJ_NAME)) -E -D__FIRST_PASS__ -D"__attribute__(x)=" -o $@.new $<
 	@if cmp -s $@.new $@ 2>/dev/null; then \
 	    rm -f $@.new; \
 	else \
@@ -108,5 +108,6 @@ $(obj)/traces_ids.o : $(obj)/traces_ids.c
 $(obj)/traces_ids.c: $(patsubst %.o,$(obj)/%.o,$(TRACE_MODULE_OBJ))
 	$(obj)/../tools/pre_processor/merge_multi_gen_events.py $(obj)/$(TRACE_MODULE).trace.json $(obj) $(TRACE_MODULE_OBJ)
 	cd $(obj); $(PYTHON_WRAPPER) "$(PYTHON_RUNTIME) $(TRACE_GEN_SCRIPT) $(TRACE_MODULE).trace.json $(TRACE_MODULE) -o gen_events.h --only_trace_ids"
+	@touch $@
 
 .PRECIOUS: $(PP_OUTDIR)/%.c_gen_events.h $(PP_OUTDIR)/%.trace.json $(PP_OUTDIR)/%.i

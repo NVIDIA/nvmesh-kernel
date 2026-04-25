@@ -153,6 +153,26 @@ static struct nvmeibc_tpv_ktest_ctx {
 
 static DEFINE_MUTEX(g_tc_lock);	/* serialises concurrent selftest invocations */
 
+/*
+ * Iteration count for tpv_ktest_cross_slot_drain - re-read each iteration so
+ * the user can raise / lower it mid-run via:
+ *   echo "cross_slot_drain_loops=N" > /proc/nvmeibc/tpv/<name>/selftest
+ *
+ * Default is intentionally low (2 iterations) so that a casual reader of
+ * /proc/.../selftest gets quick smoke coverage without burning ~5-10 minutes
+ * of grace-period waits (the test sleeps ~30-60 ms per iter dominated by
+ * synchronize_rcu + rcu_barrier).  Operators stress-testing the cross-slot
+ * fix can raise the count to 10000 for high-confidence runs:
+ *   echo "cross_slot_drain_loops=10000" > /proc/nvmeibc/tpv/<name>/selftest
+ *
+ * cross_slot_drain_abort, when set, causes the loop to exit at the next
+ * iteration boundary.  Reset to false at the start of each cross_slot_drain
+ * invocation, set true by:
+ *   echo "cross_slot_drain_abort"  > /proc/nvmeibc/tpv/<name>/selftest
+ */
+static unsigned int cross_slot_drain_loops = 2;
+static bool         cross_slot_drain_abort;
+
 /* -- CDV sync I/O test hooks ----------------------------------------------- */
 
 /*
@@ -292,7 +312,7 @@ static void *ktest_meta_cdv_sentinel;	/* test-owned; set by split-mode tests */
 static int ktest_cdv_list_extents(
 	struct nvmeibc_volume *cdv,
 	const char            *toma_id __maybe_unused,
-	const char            *tpv_uuid,
+	const char            *tpv_uuid __maybe_unused,
 	u64                  **out_indices,
 	u64                   *out_count)
 {
@@ -420,6 +440,15 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
 	spin_lock_init(&tpv->persist_lock);
 	tpv->dirty = false;
 
+	/*
+	 * inflight_drain_wq is touched by tpv_inflight_release (wake_up_all on
+	 * last-ref drop) and by tpv_drain_flushing_entries (wait_event from
+	 * flush_and_promote).  prepare_to_wait_event walks the wait queue's
+	 * list head, so an uninitialised queue NULL-derefs.  Initialise here
+	 * so every test gets a usable queue without per-test setup.
+	 */
+	init_waitqueue_head(&tpv->inflight_drain_wq);
+
 	spin_lock_init(&tpv->pending_bio_lock);
 	/* pending_bios zeroed by kzalloc -> head = tail = NULL (empty) */
 
@@ -443,9 +472,22 @@ static struct nvmeibc_tpv *tpv_ktest_create(void)
  * slots 1..N_SLOTS-1 enter the free pool as ordinary data/L2 candidates.
  * Data extents at indices TPV_KTEST_L1_EXT_IDX+1 .. +n_data_extents.
  *
- * Slots are spliced at the tail so the free-pool order is L1-extent slots
- * first, then data-extent slots - matching the natural order in which
- * tpv_on_cdv_alloc_ok would insert them.
+ * Ref insertion ordering is critical for nvmeibc_tpv_alloc_extent's
+ * density-aware reverse walk.  The allocator picks the densest non-full
+ * ref first; when all refs are seeded with allocated_count=0, ties resolve
+ * by tail position.  Tests assume L1 slots are taken first, then data1,
+ * then data2, etc. - the historical FIFO-from-pool-head behavior.  To
+ * deliver that under reverse-walk-from-tail, insert refs in the inverse
+ * order: highest-index data extent first, lowest-index data extent next,
+ * L1 ref LAST so it sits at the cdv_extent_list tail and the reverse walk
+ * picks it before any data extent.  Within the L1 ref's run, slots 1..N-1
+ * are still inserted in ascending order so the free-pool match is slot 1
+ * first.
+ *
+ * Free-pool ordering (slot list) keeps the historical "L1 slots first,
+ * then data slots in ascending extent-index order" so that, once L1 is
+ * exhausted, the next match the alloc walk finds is the lowest-index
+ * data extent's slot 0.
  */
 static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 {
@@ -455,7 +497,31 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 	u64 A = (u64)TPV_KTEST_ALLOC_GB << 30;
 	u64 ei, s;
 
-	/* L1 extent: slot 0 reserved, slots 1..N-1 added to free pool. */
+	/*
+	 * Data extent refs first, in REVERSE index order so the lowest-index
+	 * data extent ends up adjacent to the L1 ref at the list tail.
+	 */
+	if (n_data_extents > 0) {
+		u64 ei_iter;
+
+		for (ei_iter = 0; ei_iter < n_data_extents; ei_iter++) {
+			struct nvmeibc_cdv_extent_ref *ref;
+			u64 idx = TPV_KTEST_L1_EXT_IDX + n_data_extents - ei_iter;
+
+			ref = kzalloc(sizeof(*ref), GFP_KERNEL);
+			if (!ref)
+				return -ENOMEM;
+			ref->extent_index    = idx;
+			ref->allocated_count = 0;
+			ref->l2_slots        = 0;
+			ref->is_l1_extent    = false;
+			nvmeibc_cdv_extent_ref_init_lists(ref);
+			list_add_tail(&ref->node, &alloc->cdv_extent_list);
+			alloc->cdv_extents_count++;
+		}
+	}
+
+	/* L1 ref LAST - lands at cdv_extent_list tail so reverse walk picks it. */
 	{
 		struct nvmeibc_cdv_extent_ref *ref;
 
@@ -472,37 +538,25 @@ static int tpv_ktest_seed_pool(struct nvmeibc_tpv *tpv, u64 n_data_extents)
 		alloc->l1_extent_index  = TPV_KTEST_L1_EXT_IDX;
 		alloc->n_l2_tables_used = 0;
 		nvmeibc_tpv_mark_l1_full_dirty(tpv);
-
-		for (s = 1; s < TPV_KTEST_N_SLOTS; s++) {
-			struct nvmeibc_tpv_free_slot *fs;
-
-			fs = kzalloc(sizeof(*fs), GFP_KERNEL);
-			if (!fs)
-				return -ENOMEM;
-			fs->phys_offset      = A + (TPV_KTEST_L1_EXT_IDX - 1) * E + s * T;
-			fs->cdv_extent_index = TPV_KTEST_L1_EXT_IDX;
-			INIT_LIST_HEAD(&fs->node);
-			list_add_tail(&fs->node, &alloc->free_tpv_extents);
-			alloc->free_tpv_extent_count++;
-		}
 	}
 
-	/* Data extents: indices L1_EXT_IDX+1 .. +n_data_extents. */
+	/* Free-slot pool: L1 slots 1..N-1 first (slot 0 pinned for L1 table). */
+	for (s = 1; s < TPV_KTEST_N_SLOTS; s++) {
+		struct nvmeibc_tpv_free_slot *fs;
+
+		fs = kzalloc(sizeof(*fs), GFP_KERNEL);
+		if (!fs)
+			return -ENOMEM;
+		fs->phys_offset      = A + (TPV_KTEST_L1_EXT_IDX - 1) * E + s * T;
+		fs->cdv_extent_index = TPV_KTEST_L1_EXT_IDX;
+		INIT_LIST_HEAD(&fs->node);
+		list_add_tail(&fs->node, &alloc->free_tpv_extents);
+		alloc->free_tpv_extent_count++;
+	}
+
+	/* Data extent slots: ascending extent index, slots 0..N-1. */
 	for (ei = TPV_KTEST_L1_EXT_IDX + 1;
 	     ei <= TPV_KTEST_L1_EXT_IDX + n_data_extents; ei++) {
-		struct nvmeibc_cdv_extent_ref *ref;
-
-		ref = kzalloc(sizeof(*ref), GFP_KERNEL);
-		if (!ref)
-			return -ENOMEM;
-		ref->extent_index    = ei;
-		ref->allocated_count = 0;
-		ref->l2_slots        = 0;
-		ref->is_l1_extent    = false;
-		nvmeibc_cdv_extent_ref_init_lists(ref);
-		list_add_tail(&ref->node, &alloc->cdv_extent_list);
-		alloc->cdv_extents_count++;
-
 		for (s = 0; s < TPV_KTEST_N_SLOTS; s++) {
 			struct nvmeibc_tpv_free_slot *fs;
 
@@ -548,8 +602,10 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 	rcu_barrier();
 
 	/* Free xarray entries that were not freed by free_extent(). */
-	xa_for_each(&alloc->extent_map, idx, entry)
+	xa_for_each(&alloc->extent_map, idx, entry) {
+		(void)idx;
 		kfree(entry);
+	}
 	xa_destroy(&alloc->extent_map);
 
 	/* Free active CDV_extent refs. */
@@ -573,6 +629,7 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 		unsigned long      li;
 
 		xa_for_each(&alloc->l1_to_l2_ctx, li, ctx) {
+			(void)li;
 			if (ctx) {
 				bitmap_free(ctx->dirty_snapshot);
 				bitmap_free(ctx->dirty_pages);
@@ -611,6 +668,7 @@ static void tpv_ktest_destroy(struct nvmeibc_tpv *tpv)
 			unsigned long      li;
 
 			xa_for_each(&m->l1_to_l2_ctx, li, ctx) {
+				(void)li;
 				if (ctx) {
 					bitmap_free(ctx->dirty_snapshot);
 					bitmap_free(ctx->dirty_pages);
@@ -673,6 +731,38 @@ static int tpv_ktest_upgrade_to_split(struct nvmeibc_tpv *tpv,
 	return 0;
 }
 
+/* -- Test helper: alloc_extent that mirrors production caller-ref lifecycle */
+
+/*
+ * tpv_ktest_alloc_extent - wrapper around nvmeibc_tpv_alloc_extent that
+ * immediately drops the alloc-caller ref.
+ *
+ * Production lifecycle: nvmeibc_tpv_alloc_extent returns inflight=2 (xarray
+ * ref + alloc-caller ref).  In production the caller ref is "loaned" to the
+ * dispatched bio and released asynchronously by tpv_inflight_submit_bio's
+ * end_io.  Tests do not dispatch real bios, so without an explicit release
+ * the entry sits at inflight=2 forever.
+ *
+ * Before the cross-slot drain fix this was harmless: free_extent dropped the
+ * xarray ref unconditionally, so the leaked caller ref just left the entry
+ * at inflight=1 indefinitely (still alive, never reclaimed by the test
+ * framework either).  After the fix free_extent transfers the xarray ref
+ * onto slot->draining_entry and tpv_drain_flushing_entries waits for
+ * inflight==1 (drain ref alone) - which a leaked caller ref blocks forever.
+ *
+ * Tests that intentionally model an in-flight bio (cross_slot_drain) call
+ * nvmeibc_tpv_alloc_extent directly and manage the ref by hand.
+ */
+static int tpv_ktest_alloc_extent(struct nvmeibc_tpv *tpv, u64 virt_idx,
+				   struct nvmeibc_tpv_extent_entry **out)
+{
+	int rc = nvmeibc_tpv_alloc_extent(tpv, virt_idx, out);
+
+	if (rc == 0 && out && *out)
+		tpv_inflight_release(tpv, *out);
+	return rc;
+}
+
 /* -- Self-test functions --------------------------------------------------- */
 
 /*
@@ -718,7 +808,7 @@ static void tpv_ktest_alloc_free(struct tpv_ktest_output *kto)
 	expect_phys1 = (u64)128 << 10;
 
 	/* First alloc. */
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry0);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry0);
 	if (rc != 0) {
 		KTO_FAIL(kto, "alloc_free", "first alloc_extent rc=%d", rc);
 		goto done;
@@ -735,7 +825,7 @@ static void tpv_ktest_alloc_free(struct tpv_ktest_output *kto)
 	}
 
 	/* Second alloc (different virt_idx to avoid xarray key collision). */
-	rc = nvmeibc_tpv_alloc_extent(tpv, 1, &entry1);
+	rc = tpv_ktest_alloc_extent(tpv, 1, &entry1);
 	if (rc != 0 || !entry1 || entry1->phys_offset != expect_phys1) {
 		KTO_FAIL(kto, "alloc_free",
 			 "second alloc_extent rc=%d phys=0x%llx", rc,
@@ -815,7 +905,7 @@ static void tpv_ktest_persist(struct tpv_ktest_output *kto)
 	 */
 	expect_phys = A_b + (TPV_KTEST_L1_EXT_IDX - 1) * E_b + 1 * T_b;
 	(void)data_ext_idx;
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &e);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &e);
 	if (rc != 0 || !e || e->phys_offset != expect_phys) {
 		KTO_FAIL(kto, "persist", "alloc_extent rc=%d phys=0x%llx",
 			 rc, e ? e->phys_offset : 0ULL);
@@ -970,7 +1060,7 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 	 * alloc_l2_slot has nothing to pop.  Doing it here burns the L2
 	 * slot up front - subsequent flushes re-use the existing ctx.
 	 */
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "pool_exhaustion",
 			 "initial alloc rc=%d", rc);
@@ -994,7 +1084,7 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 	n_more        = after_l2_free;	/* drain exactly these */
 
 	for (v = 1; v <= n_more; v++) {
-		rc = nvmeibc_tpv_alloc_extent(tpv, v, &entry);
+		rc = tpv_ktest_alloc_extent(tpv, v, &entry);
 		if (rc != 0) {
 			KTO_FAIL(kto, "pool_exhaustion",
 				 "alloc_extent(%llu) rc=%d (expected 0)", v, rc);
@@ -1011,7 +1101,7 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 	}
 
 	/* Next alloc must return -EAGAIN. */
-	rc = nvmeibc_tpv_alloc_extent(tpv, last_v, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, last_v, &entry);
 	if (rc != -EAGAIN) {
 		KTO_FAIL(kto, "pool_exhaustion",
 			 "alloc past full returned %d (want -EAGAIN)", rc);
@@ -1045,7 +1135,7 @@ static void tpv_ktest_pool_exhaustion(struct tpv_ktest_output *kto)
 	 * Allocating a new virt_idx (beyond the ones already in xarray)
 	 * should now succeed - the promoted slot is back in the pool.
 	 */
-	rc = nvmeibc_tpv_alloc_extent(tpv, last_v, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, last_v, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "pool_exhaustion",
 			 "alloc after free returned %d (want 0)", rc);
@@ -1084,7 +1174,7 @@ static void tpv_ktest_double_free(struct tpv_ktest_output *kto)
 	}
 
 	/* Alloc virt_idx=7 (arbitrary). */
-	rc = nvmeibc_tpv_alloc_extent(tpv, 7, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 7, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "double_free", "alloc_extent rc=%d", rc);
 		goto done;
@@ -1387,7 +1477,7 @@ static void tpv_ktest_split_alloc_free(struct tpv_ktest_output *kto)
 	}
 	meta_free_before = tpv->meta_allocator->free_tpv_extent_count;
 
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0 || !entry) {
 		KTO_FAIL(kto, "split_alloc_free", "alloc rc=%d", rc);
 		goto done;
@@ -1448,7 +1538,7 @@ static void tpv_ktest_split_persist(struct tpv_ktest_output *kto)
 	}
 
 	/* Install a leaf so flush_state has something to persist. */
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "split_persist", "alloc rc=%d", rc);
 		goto cleanup_buf;
@@ -1529,7 +1619,7 @@ static void tpv_ktest_split_pool_exhaustion(struct tpv_ktest_output *kto)
 
 	/* Drain the data pool. */
 	for (v = 0; v < (TPV_KTEST_N_SLOTS - 1); v++) {
-		rc = nvmeibc_tpv_alloc_extent(tpv, v, &entry);
+		rc = tpv_ktest_alloc_extent(tpv, v, &entry);
 		if (rc != 0) {
 			KTO_FAIL(kto, "split_pool_exhaustion",
 				 "unexpected rc=%d at v=%llu", rc, v);
@@ -1537,7 +1627,7 @@ static void tpv_ktest_split_pool_exhaustion(struct tpv_ktest_output *kto)
 		}
 	}
 	/* Next allocation must -EAGAIN on data side. */
-	rc = nvmeibc_tpv_alloc_extent(tpv, TPV_KTEST_N_SLOTS, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, TPV_KTEST_N_SLOTS, &entry);
 	if (rc != -EAGAIN) {
 		KTO_FAIL(kto, "split_pool_exhaustion",
 			 "expected -EAGAIN on exhausted data pool, got %d", rc);
@@ -1578,7 +1668,7 @@ static void tpv_ktest_split_double_free(struct tpv_ktest_output *kto)
 		goto done;
 	}
 
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0) { KTO_FAIL(kto, "split_double_free", "alloc rc=%d", rc); goto done; }
 	rc = nvmeibc_tpv_free_extent(tpv, 0);
 	if (rc != 0) { KTO_FAIL(kto, "split_double_free", "first free rc=%d", rc); goto done; }
@@ -1709,11 +1799,18 @@ static void tpv_ktest_discard_whole_extent(struct tpv_ktest_output *kto)
 	alloc        = &tpv->allocator;
 	extent_bytes = (u64)alloc->tpv_extent_size_kb << 10;
 
-	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
+	/*
+	 * seed_pool(0) -> only the L1 ref exists; the alloc lands on an L1 slot
+	 * (the density-aware reverse walk has no data extent to consider) and
+	 * list_first_entry below correctly returns the ref the alloc affected.
+	 * seed_pool(1) here would put a data ref at the list head and the
+	 * pending_free_count assertions would track the wrong ref.
+	 */
+	if (tpv_ktest_seed_pool(tpv, 0) < 0) {
 		KTO_FAIL(kto, "discard_whole", "seed_pool failed");
 		goto done;
 	}
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "discard_whole", "alloc_extent rc=%d", rc);
 		goto done;
@@ -1844,7 +1941,7 @@ static void tpv_ktest_discard_misaligned(struct tpv_ktest_output *kto)
 		KTO_FAIL(kto, "discard_misaligned", "seed_pool failed");
 		goto done;
 	}
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "discard_misaligned", "alloc_extent rc=%d", rc);
 		goto done;
@@ -1931,11 +2028,16 @@ static void tpv_ktest_discard_crash_before_flush(struct tpv_ktest_output *kto)
 	alloc        = &tpv->allocator;
 	extent_bytes = (u64)alloc->tpv_extent_size_kb << 10;
 
-	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
+	/*
+	 * seed_pool(0): only L1 ref exists, so the alloc and the subsequent
+	 * pending_free_count check track the same ref (matches the rationale
+	 * in tpv_ktest_discard_whole).
+	 */
+	if (tpv_ktest_seed_pool(tpv, 0) < 0) {
 		KTO_FAIL(kto, "discard_crash_before_flush", "seed_pool failed");
 		goto done;
 	}
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0 || !entry) {
 		KTO_FAIL(kto, "discard_crash_before_flush",
 			 "alloc_extent rc=%d", rc);
@@ -2036,12 +2138,13 @@ done:
  * tpv_ktest_return_watermark_gate - Step 2 Commit 2.
  *
  * Drives a data CDV_extent to allocated_count=0 on pending_return_list, then
- * exercises tpv_drain_pending_returns under two settings of high_watermark:
+ * exercises tpv_drain_pending_returns under two settings of low_watermark
+ * (the gate moved from high_watermark to low_watermark; see allocator.c:1320):
  *
- *   - high_watermark raised well above free_tpv_extent_count + n_slots:
+ *   - low_watermark raised so n_slots + low_watermark > free_tpv_extent_count:
  *     drain must park the ref (leave it on pending_return_list), bump
  *     stat_cdv_returns_parked, and leave stat_cdv_free_ok unchanged.
- *   - high_watermark lowered to 0: drain must send CDV_FREE_EXTENT (via the
+ *   - low_watermark lowered to 0: drain must send CDV_FREE_EXTENT (via the
  *     ktest stub), remove the ref, and bump stat_cdv_free_ok.
  *
  * Exercises the gate logic in tpv_drain_pending_returns without depending on
@@ -2066,11 +2169,16 @@ static void tpv_ktest_return_watermark_gate(struct tpv_ktest_output *kto)
 	alloc = &tpv->allocator;
 
 	/*
-	 * Two data extents so after consuming the L1 slots we are guaranteed
-	 * to have at least one alloc landing on the data extent we want to
-	 * empty out.
+	 * One data extent suffices.  The density-aware allocator
+	 * (nvmeibc_tpv_alloc_extent) walks cdv_extent_list reverse and prefers
+	 * the densest non-full ref; with seed_pool's L1-at-tail ordering, all
+	 * allocs go to L1 until its slot pool drains, then to the lone data
+	 * extent.  Adding a second data extent would only insert a parallel
+	 * non-empty pool that the reverse walk would prefer over the parked
+	 * ref's slots after promote, defeating the cancel-return scenario in
+	 * the alloc step below.
 	 */
-	if (tpv_ktest_seed_pool(tpv, 2) < 0) {
+	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
 		KTO_FAIL(kto, "return_watermark_gate", "seed_pool failed");
 		goto done;
 	}
@@ -2083,7 +2191,7 @@ static void tpv_ktest_return_watermark_gate(struct tpv_ktest_output *kto)
 	 * promote flush and steal a slot from the data extent we are trying
 	 * to drive to allocated_count=0, inflating its count by 1.
 	 */
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "return_watermark_gate",
 			 "pre-alloc rc=%d", rc);
@@ -2103,7 +2211,7 @@ static void tpv_ktest_return_watermark_gate(struct tpv_ktest_output *kto)
 	 * extent L1_EXT_IDX+1 slots 0 and 1.
 	 */
 	for (virt = 1; virt < n_slots; virt++) {
-		rc = nvmeibc_tpv_alloc_extent(tpv, virt, &entry);
+		rc = tpv_ktest_alloc_extent(tpv, virt, &entry);
 		if (rc != 0) {
 			KTO_FAIL(kto, "return_watermark_gate",
 				 "alloc virt=%llu rc=%d", virt, rc);
@@ -2150,12 +2258,22 @@ static void tpv_ktest_return_watermark_gate(struct tpv_ktest_output *kto)
 	}
 
 	/*
-	 * Phase A: raise the gate above the current free pool so the drain
-	 * must park.  The ktest stubs return success from cdv_free_extent, so
-	 * the only way stat_cdv_free_ok stays 0 is if the gate refused to
-	 * send.
+	 * Phase A: nudge the gate so the drain must park.  Two paths in
+	 * cdv_alloc_work_fn share low_watermark:
+	 *   - returns park when free_count < n_slots + low_watermark
+	 *   - allocs request more from TOMA when free_count < low_watermark
+	 * We want to park returns but NOT trigger the alloc path (which would
+	 * call nvmeibc_volume_get_size on the fake cdv_vol sentinel and crash).
+	 *   park returns:  low_watermark > free_count - n_slots  (=> >=1 here,
+	 *                  since free_count == n_slots after promote)
+	 *   skip alloc:    low_watermark <= free_count           (=> <=16 here)
+	 * low_watermark = 1 is in the safe band.  Note: the original design
+	 * gated returns on high_watermark; allocator.c:1320 documents the
+	 * switch to low_watermark, so setting high_watermark alone is now a
+	 * no-op.  The ktest stubs return success from cdv_free_extent, so the
+	 * only way stat_cdv_free_ok stays 0 is if the gate refused to send.
 	 */
-	alloc->high_watermark = alloc->free_tpv_extent_count + 1;
+	alloc->low_watermark = 1;
 
 	/* Open the allocator work path: non-empty toma_id + state_loaded. */
 	strncpy(tpv->allocator_toma_id, "ktest-gate-toma",
@@ -2188,7 +2306,7 @@ static void tpv_ktest_return_watermark_gate(struct tpv_ktest_output *kto)
 	 * Phase B: drop the gate.  Drain must now send CDV_FREE_EXTENT for
 	 * the parked ref and remove it.
 	 */
-	alloc->high_watermark = 0;
+	alloc->low_watermark = 0;
 	atomic_set(&tpv->cdv_alloc_pending, 0);
 	nvmeibc_tpv_cdv_alloc_work_fn(&tpv->cdv_alloc_work);
 
@@ -2242,7 +2360,13 @@ static void tpv_ktest_alloc_cancels_return(struct tpv_ktest_output *kto)
 	}
 	alloc = &tpv->allocator;
 
-	if (tpv_ktest_seed_pool(tpv, 2) < 0) {
+	/*
+	 * One data extent.  See tpv_ktest_return_watermark_gate for the
+	 * rationale: an extra data extent would let the density-aware reverse
+	 * walk satisfy the follow-up alloc from a non-parked ref, bypassing
+	 * the cancel-return code path the test certifies.
+	 */
+	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
 		KTO_FAIL(kto, "alloc_cancels_return", "seed_pool failed");
 		goto done;
 	}
@@ -2252,7 +2376,7 @@ static void tpv_ktest_alloc_cancels_return(struct tpv_ktest_output *kto)
 	 * an L1-extent slot (pinned), not on a data-extent slot.  See
 	 * tpv_ktest_return_watermark_gate for the full rationale.
 	 */
-	rc = nvmeibc_tpv_alloc_extent(tpv, 0, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "alloc_cancels_return",
 			 "pre-alloc rc=%d", rc);
@@ -2268,7 +2392,7 @@ static void tpv_ktest_alloc_cancels_return(struct tpv_ktest_output *kto)
 	/* Consume rest of L1 plus two data-extent slots, then free both so
 	 * promote moves the data ref onto pending_return_list. */
 	for (virt = 1; virt < n_slots; virt++) {
-		rc = nvmeibc_tpv_alloc_extent(tpv, virt, &entry);
+		rc = tpv_ktest_alloc_extent(tpv, virt, &entry);
 		if (rc != 0) {
 			KTO_FAIL(kto, "alloc_cancels_return",
 				 "alloc virt=%llu rc=%d", virt, rc);
@@ -2310,7 +2434,7 @@ static void tpv_ktest_alloc_cancels_return(struct tpv_ktest_output *kto)
 	 * consumed, but those L1 slots are in allocated_count now so the
 	 * head entry belongs to the data ref).
 	 */
-	rc = nvmeibc_tpv_alloc_extent(tpv, n_slots + 1 /* new virt_idx */, &entry);
+	rc = tpv_ktest_alloc_extent(tpv, n_slots + 1 /* new virt_idx */, &entry);
 	if (rc != 0) {
 		KTO_FAIL(kto, "alloc_cancels_return",
 			 "follow-up alloc rc=%d", rc);
@@ -2375,6 +2499,542 @@ static void tpv_ktest_alloc_cancels_return(struct tpv_ktest_output *kto)
 done:
 	tpv_ktest_destroy(tpv);
 }
+
+/*
+ * tpv_ktest_online_compaction - online relocation aborts on guest write conflict.
+ *
+ * Drives tpv_reloc_one_online() through the cancellation path defined in
+ * nvmeibc_tpv_compaction.c S.6 (entry->state == RELOC_CANCELLED check after
+ * the data CDV read/write but before the L2 leaf commit). The CDV sync_read
+ * hook is wrapped to flip the targeted entry's state to RELOC_CANCELLED right
+ * after the source-data read completes, simulating a guest write that arrived
+ * mid-relocation.
+ *
+ * Verifies:
+ *   - tpv_reloc_one_online returns -ECANCELED.
+ *   - stat_online_aborts_write_conflict increments by 1.
+ *   - stat_online_reloc_ok stays at 0 (no commit).
+ *   - The entry's state is restored to NORMAL by the abort path.
+ *   - The entry remains mapped at its original (source) phys_offset.
+ *   - The dest slot is returned to the free pool (no leak).
+ *
+ * The test deliberately stays clear of the L2 writer thread: the abort path
+ * triggers at S.6, which is reached BEFORE tpv_l2_writer_submit_and_wait. The
+ * L2 writer is spawned only by tpv_compaction_init() (full attach), which the
+ * minimal tpv_ktest_create() bypasses.
+ */
+static struct nvmeibc_tpv_extent_entry *g_ktest_inject_cancel_entry;
+
+static int ktest_cdv_sync_read_inject_cancel(struct nvmeibc_tpv *tpv,
+					      u64 cdv_offset,
+					      void *buf, u64 len)
+{
+	int rv = ktest_cdv_sync_read(tpv, cdv_offset, buf, len);
+
+	if (rv == 0 && g_ktest_inject_cancel_entry)
+		WRITE_ONCE(g_ktest_inject_cancel_entry->state,
+			   NVMEIBC_TPV_ENTRY_RELOC_CANCELLED);
+	return rv;
+}
+
+static void tpv_ktest_online_compaction(struct tpv_ktest_output *kto)
+{
+	struct nvmeibc_tpv              *tpv;
+	struct nvmeibc_tpv_allocator    *alloc;
+	struct nvmeibc_tpv_extent_entry *entry = NULL;
+	struct nvmeibc_cdv_extent_ref   *src_ref = NULL, *dst_ref = NULL, *r;
+	int (*saved_read_fn)(struct nvmeibc_tpv *tpv, u64 cdv_offset,
+			     void *buf, u64 len);
+	u64 saved_phys, saved_cdv_idx;
+	u64 free_before, free_after;
+	int rc;
+
+	memset(g_tc.cdv_buf, 0, g_tc.cdv_len);
+
+	tpv = tpv_ktest_create();
+	if (!tpv) {
+		KTO_FAIL(kto, "online_compaction", "create failed");
+		return;
+	}
+	alloc = &tpv->allocator;
+
+	/*
+	 * stat_online_* counters are zero-initialised by kzalloc in
+	 * tpv_ktest_create.  Seed two data extents so plan_pick_one_online
+	 * (not invoked here) would have a viable (src, dst) pair, and so we
+	 * can hand-pick the refs ourselves.
+	 */
+	if (tpv_ktest_seed_pool(tpv, 2) < 0) {
+		KTO_FAIL(kto, "online_compaction", "seed_pool failed");
+		goto done;
+	}
+
+	/*
+	 * Allocate one slot at virt_idx=0.  Under dynamic L2 placement this
+	 * pops slot 1 of the L1 extent.  We don't care which extent owns the
+	 * entry as long as we can find a different ref to use as dest below.
+	 */
+	rc = tpv_ktest_alloc_extent(tpv, 0, &entry);
+	if (rc != 0 || !entry) {
+		KTO_FAIL(kto, "online_compaction",
+			 "alloc_extent rc=%d entry=%p", rc, entry);
+		goto done;
+	}
+	saved_phys    = entry->phys_offset;
+	saved_cdv_idx = entry->cdv_extent_index;
+
+	/* Locate the ref that owns the allocated entry (source) and any other
+	 * non-L1 ref (destination). */
+	list_for_each_entry(r, &alloc->cdv_extent_list, node) {
+		if (r->extent_index == saved_cdv_idx) {
+			src_ref = r;
+			continue;
+		}
+		if (!r->is_l1_extent && !dst_ref)
+			dst_ref = r;
+	}
+	if (!src_ref || !dst_ref) {
+		KTO_FAIL(kto, "online_compaction",
+			 "could not find src(%p) and dst(%p) refs",
+			 src_ref, dst_ref);
+		goto done;
+	}
+
+	/*
+	 * Install the cancel-injection read hook in place of the plain
+	 * ktest_cdv_sync_read.  The hook flips entry->state to
+	 * RELOC_CANCELLED after each successful read, simulating a guest
+	 * write that races the relocation between S.5 (data CDV write) and
+	 * S.6 (cancellation check).  Only fires when g_ktest_inject_cancel_entry
+	 * is set, so it is a no-op for everything else.
+	 */
+	saved_read_fn                       = nvmeibc_tpv_cdv_test_sync_read_fn;
+	nvmeibc_tpv_cdv_test_sync_read_fn   = ktest_cdv_sync_read_inject_cancel;
+	g_ktest_inject_cancel_entry         = entry;
+
+	free_before = alloc->free_tpv_extent_count;
+
+	rc = tpv_reloc_one_online(tpv, 0, src_ref, dst_ref);
+
+	/* Restore hook state regardless of outcome. */
+	g_ktest_inject_cancel_entry         = NULL;
+	nvmeibc_tpv_cdv_test_sync_read_fn   = saved_read_fn;
+
+	/*
+	 * reloc_return_slot inside the abort path schedules cdv_alloc_work
+	 * (because dest_ref->allocated_count hit zero and got moved to
+	 * pending_return_list).  Drain it now so any concurrent kworker
+	 * activity completes before we observe free_tpv_extent_count.  The
+	 * minimal tpv_ktest_create() leaves state_loaded=false so the work
+	 * bails early at the state_loaded check; this cancel_work_sync just
+	 * eliminates the timing race against the kworker entering the work
+	 * function while we read the count.
+	 */
+	cancel_work_sync(&tpv->cdv_alloc_work);
+
+	free_after = alloc->free_tpv_extent_count;
+
+	if (rc != -ECANCELED) {
+		KTO_FAIL(kto, "online_compaction",
+			 "tpv_reloc_one_online returned %d, want -ECANCELED",
+			 rc);
+		goto done;
+	}
+	if (atomic64_read(&tpv->stat_online_aborts_write_conflict) != 1) {
+		KTO_FAIL(kto, "online_compaction",
+			 "stat_online_aborts_write_conflict=%lld, want 1",
+			 (long long)atomic64_read(&tpv->stat_online_aborts_write_conflict));
+		goto done;
+	}
+	if (atomic64_read(&tpv->stat_online_reloc_ok) != 0) {
+		KTO_FAIL(kto, "online_compaction",
+			 "stat_online_reloc_ok=%lld, want 0 on abort",
+			 (long long)atomic64_read(&tpv->stat_online_reloc_ok));
+		goto done;
+	}
+	/* Abort path xchg's RELOCATING back to NORMAL.  RELOC_CANCELLED was
+	 * the injection sentinel; it must have been overwritten. */
+	if (READ_ONCE(entry->state) != NVMEIBC_TPV_ENTRY_NORMAL) {
+		KTO_FAIL(kto, "online_compaction",
+			 "entry state %u after abort, want NORMAL(%u)",
+			 (unsigned)READ_ONCE(entry->state),
+			 (unsigned)NVMEIBC_TPV_ENTRY_NORMAL);
+		goto done;
+	}
+	/* Source mapping must still resolve to the original phys_offset. */
+	{
+		struct nvmeibc_tpv_extent_entry *e =
+			xa_load(&alloc->extent_map, 0);
+
+		if (!e || e->phys_offset != saved_phys ||
+		    e->cdv_extent_index != saved_cdv_idx) {
+			KTO_FAIL(kto, "online_compaction",
+				 "xa entry drifted (got phys=0x%llx idx=%llu, want 0x%llx idx=%llu)",
+				 e ? e->phys_offset : 0ULL,
+				 e ? e->cdv_extent_index : 0ULL,
+				 saved_phys, saved_cdv_idx);
+			goto done;
+		}
+	}
+	/*
+	 * Dest slot must have been returned (or "dark-released") by the abort
+	 * path:
+	 *   - happy path: reloc_take_dest_slot popped one (free_count--),
+	 *     reloc_return_slot's kzalloc succeeded and pushed one back
+	 *     (free_count++).  Net 0.
+	 *   - rare GFP_KERNEL kzalloc fail in reloc_return_slot: the slot
+	 *     becomes "dark" (allocated_count is decremented, but the slot
+	 *     is not relinked into free_tpv_extents - data on the CDV is
+	 *     untouched, recovery on next attach reclaims it).  Net -1.
+	 *
+	 * Both are correct outcomes for the abort path, so accept either.
+	 */
+	if (free_after != free_before && free_after != free_before - 1) {
+		KTO_FAIL(kto, "online_compaction",
+			 "free pool delta after abort: before=%llu after=%llu (want 0 or -1)",
+			 free_before, free_after);
+		goto done;
+	}
+
+	KTO_PASS(kto, "online_compaction");
+done:
+	tpv_ktest_destroy(tpv);
+}
+
+/* -- tpv_ktest_cross_slot_drain ------------------------------------------
+ *
+ * Regression coverage for the cross-slot return reproduced once by the
+ * userspace online_compact_verify_collisions test (-T 20 -t 30 with
+ * compaction armed at 1%).  The bug:
+ *
+ *   1. Reader for virt_A enters tpv_handle_one_bio, snapshots
+ *      entry->phys_offset = X under rcu_read_lock, bumps inflight,
+ *      dispatches a bio to the CDV transport.  The bio sits queued
+ *      behind other admin/data traffic and has not yet transmitted.
+ *   2. Concurrently, free_extent(virt_A) runs (e.g. a guest TRIM):
+ *      xa_erase the entry, park slot X on pending_free_slots.
+ *   3. persist_work runs flush_and_promote: snapshot pending ->
+ *      flushing, flush L2 to CDV, promote flushing into
+ *      free_tpv_extents.  WITHOUT the per-slot drain, X is now reusable.
+ *   4. alloc_extent(virt_B, write) picks X, writes virt_B's data
+ *      onto X.  pwrite returns to the writer.
+ *   5. The reader's bio (still queued in step 1) finally transmits.
+ *      CDV reads X -> sees virt_B's data.  Cross-slot return.
+ *
+ * The fix transfers the xarray's inflight ref onto the parked slot
+ * (slot->draining_entry) and has tpv_drain_flushing_entries wait for
+ * inflight to drop to that single ref before letting promote splice
+ * the slot into the free pool.
+ *
+ * The test is looped (default 10000 iterations, configurable via
+ * /proc write) to maximise the chance of catching a timing regression.
+ * Each iteration constructs an independent TPV so there is no state
+ * leak between loops.  The per-iteration timing is 2 ms (msleep(2)
+ * to let synchronize_rcu + the flush kthread settle); the race window
+ * is deterministic rather than timing-dependent because the simulated
+ * bio ref is held until after we assert the kthread is still blocked.
+ *
+ * If the drain regresses, the kthread completes before the simulated
+ * bio ref is dropped, the assertion fires, and the test fails - exactly
+ * the cross-slot window the production bug exploits.
+ */
+
+struct tpv_ktest_drain_arg {
+	struct nvmeibc_tpv *tpv;
+	struct completion   done;
+	int                 rv;
+};
+
+static int tpv_ktest_drain_flush_thread(void *data)
+{
+	struct tpv_ktest_drain_arg *a = data;
+
+	a->rv = nvmeibc_tpv_flush_and_promote(a->tpv);
+	complete(&a->done);
+	return 0;
+}
+
+/* Single iteration; returns true on pass, false on fail (already recorded). */
+static bool tpv_ktest_cross_slot_drain_once(struct tpv_ktest_output *kto,
+					     unsigned int iter)
+{
+	struct nvmeibc_tpv              *tpv;
+	struct nvmeibc_tpv_allocator    *alloc;
+	struct nvmeibc_tpv_extent_entry *entry_a = NULL, *entry_b = NULL;
+	struct task_struct              *flush_thread = NULL;
+	struct tpv_ktest_drain_arg       arg;
+	bool sim_bio_ref_held = false;
+	bool passed = false;
+	u64  virt_a = 0, virt_b = 1;
+	u64  phys_a;
+	int  rc;
+
+	tpv = tpv_ktest_create();
+	if (!tpv) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] create failed", iter);
+		return false;
+	}
+	alloc = &tpv->allocator;
+
+	if (tpv_ktest_seed_pool(tpv, 1) < 0) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] seed_pool failed", iter);
+		goto cleanup;
+	}
+
+	/* Alloc virt_a -> entry installed in xarray, inflight = 2
+	 * (xarray + alloc-caller).  Record the phys; we will assert it is
+	 * recycled after the drain releases. */
+	rc = nvmeibc_tpv_alloc_extent(tpv, virt_a, &entry_a);
+	if (rc != 0 || !entry_a) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] alloc virt_a rc=%d", iter, rc);
+		goto cleanup;
+	}
+	phys_a = entry_a->phys_offset;
+
+	/* Drop the alloc-caller ref: inflight 2 -> 1 (xarray ref only). */
+	tpv_inflight_release(tpv, entry_a);
+	if (atomic_read(&entry_a->inflight) != 1) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] post alloc-release inflight=%d, want 1",
+			 iter, atomic_read(&entry_a->inflight));
+		goto cleanup;
+	}
+
+	/* Simulate a guest read in flight: model the atomic_add_unless
+	 * that tpv_handle_one_bio's mapped path performs after xa_load.
+	 * inflight 1 -> 2 (xarray + simulated bio). */
+	atomic_inc(&entry_a->inflight);
+	sim_bio_ref_held = true;
+
+	/* free_extent: xa_erase, transfer xarray ref onto parked slot's
+	 * draining_entry.  inflight stays at 2 (drain ref + simulated bio). */
+	rc = nvmeibc_tpv_free_extent(tpv, virt_a);
+	if (rc != 0) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] free_extent virt_a rc=%d", iter, rc);
+		goto cleanup;
+	}
+	if (atomic_read(&entry_a->inflight) != 2) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] post free_extent inflight=%d, want 2 (drain+bio)",
+			 iter, atomic_read(&entry_a->inflight));
+		goto cleanup;
+	}
+
+	/* Run flush_and_promote on a background kthread.  Without the
+	 * per-slot drain it returns immediately, having promoted the slot
+	 * to free_tpv_extents while a bio is still queued against its
+	 * phys.  With the drain it blocks in wait_event until the
+	 * simulated bio ref is released below. */
+	arg.tpv = tpv;
+	arg.rv  = 0;
+	init_completion(&arg.done);
+	flush_thread = kthread_run(tpv_ktest_drain_flush_thread, &arg,
+				   "tpv-ktest-drain");
+	if (IS_ERR(flush_thread)) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] kthread_run err=%ld",
+			 iter, PTR_ERR(flush_thread));
+		flush_thread = NULL;
+		goto cleanup;
+	}
+
+	/* 2 ms is enough for synchronize_rcu to complete and the kthread to
+	 * reach the wait_event.  The race window is held open deterministically
+	 * by the simulated bio ref, not by timing. */
+	msleep(2);
+
+	if (try_wait_for_completion(&arg.done)) {
+		/* The kthread completed without our releasing the simulated
+		 * bio ref - the per-slot drain did not block.  This is the
+		 * cross-slot window: the slot would have been promoted to
+		 * the free pool while a bio is still in flight against it.
+		 */
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] flush_and_promote completed before drain ref "
+			 "released; slot reusable while bio still queued", iter);
+		flush_thread = NULL;
+		/* Drain ref already released by flush_and_promote in this
+		 * (buggy) path; only the simulated bio ref remains. */
+		goto release_bio;
+	}
+
+	/* Drain is correctly held.  Release the simulated bio ref:
+	 * inflight 2 -> 1, wake_up_all on inflight_drain_wq.  The drain
+	 * helper observes inflight == 1, releases its own ref (kfree_rcu
+	 * the entry), promote runs, kthread completes. */
+	tpv_inflight_release(tpv, entry_a);
+	sim_bio_ref_held = false;
+	entry_a = NULL;	/* about to be kfree_rcu'd; do not deref */
+
+	if (wait_for_completion_timeout(&arg.done, 5 * HZ) == 0) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] kthread did not complete after bio ref drop",
+			 iter);
+		flush_thread = NULL;
+		goto cleanup;
+	}
+	flush_thread = NULL;
+	if (arg.rv != 0) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] flush_and_promote rv=%d", iter, arg.rv);
+		goto cleanup;
+	}
+
+	/*
+	 * The freed slot must now be back in the free pool.  Promote splices
+	 * flushing_free_slots to the TAIL of free_tpv_extents, and the L1
+	 * extent's other un-allocated slots are at the head, so the next
+	 * alloc will not recycle phys_a specifically - that's expected.
+	 * What matters for the drain's correctness is that the slot is
+	 * actually back in the pool and not stuck on flushing_free_slots.
+	 */
+	{
+		struct nvmeibc_tpv_free_slot *fs;
+		bool found = false;
+
+		spin_lock(&alloc->lock);
+		list_for_each_entry(fs, &alloc->free_tpv_extents, node) {
+			if (fs->phys_offset == phys_a) {
+				found = true;
+				break;
+			}
+		}
+		spin_unlock(&alloc->lock);
+		if (!found) {
+			KTO_FAIL(kto, "cross_slot_drain",
+				 "[iter %u] post-drain freed slot 0x%llx not in pool",
+				 iter, phys_a);
+			goto cleanup;
+		}
+	}
+
+	/* And alloc on a fresh virt_idx still works against the pool. */
+	rc = nvmeibc_tpv_alloc_extent(tpv, virt_b, &entry_b);
+	if (rc != 0 || !entry_b) {
+		KTO_FAIL(kto, "cross_slot_drain",
+			 "[iter %u] post-drain alloc virt_b rc=%d", iter, rc);
+		goto cleanup;
+	}
+
+	passed = true;
+	goto cleanup;
+
+release_bio:
+	if (sim_bio_ref_held && entry_a) {
+		tpv_inflight_release(tpv, entry_a);
+		sim_bio_ref_held = false;
+	}
+cleanup:
+	if (flush_thread) {
+		/* Bail-out path: ensure the kthread is unblocked before
+		 * tearing down the TPV.  Releasing any remaining ref above
+		 * should have woken it; this just joins. */
+		if (sim_bio_ref_held && entry_a) {
+			tpv_inflight_release(tpv, entry_a);
+			sim_bio_ref_held = false;
+		}
+		(void)wait_for_completion_timeout(&arg.done, 5 * HZ);
+	}
+	tpv_ktest_destroy(tpv);
+	return passed;
+}
+
+static void tpv_ktest_cross_slot_drain(struct tpv_ktest_output *kto)
+{
+	unsigned int i = 0;
+	unsigned int n_loops = READ_ONCE(cross_slot_drain_loops);
+
+	/*
+	 * Reset the abort latch at the start of each run so a previous
+	 * abort doesn't carry over.  After this point the user can re-arm
+	 * abort via the proc write handler at any time.
+	 */
+	WRITE_ONCE(cross_slot_drain_abort, false);
+
+	KTO_ADD(kto,
+		"  cross_slot_drain: starting %u loops "
+		"(loops re-read per iter; echo cross_slot_drain_abort to stop)\n",
+		n_loops);
+
+	while (i < n_loops) {
+		if (READ_ONCE(cross_slot_drain_abort)) {
+			KTO_ADD(kto,
+				"  %-24s ABORTED at iter %u/%u\n",
+				"cross_slot_drain", i, n_loops);
+			_NI(tpv_ktest_csd_aborted,
+			    "TPV: cross_slot_drain ABORTED iter @UINT/@UINT",
+			    i, n_loops);
+			return;
+		}
+
+		if (!tpv_ktest_cross_slot_drain_once(kto, i))
+			return;	/* failure already recorded */
+
+		i++;
+		_NI(tpv_ktest_csd_progress,
+		    "TPV: cross_slot_drain iter @UINT/@UINT done",
+		    i, n_loops);
+
+		/* Re-read so live tuning takes effect on the next iter. */
+		n_loops = READ_ONCE(cross_slot_drain_loops);
+	}
+	KTO_PASS(kto, "cross_slot_drain");
+}
+
+/* -- Proc write handler --------------------------------------------------- */
+
+/*
+ * nvmeibc_tpv_selftest_write - proc write handler for "selftest".
+ *
+ * Accepts:
+ *   "cross_slot_drain_loops=N"  - set the iteration count for
+ *                                 tpv_ktest_cross_slot_drain (default 10000).
+ *                                 The cross_slot_drain wrapper re-reads this
+ *                                 each iteration so a write mid-run shortens
+ *                                 (or extends) the active run on the next
+ *                                 boundary.  N=0 is silently promoted to 1.
+ *   "cross_slot_drain_abort"    - request the in-progress cross_slot_drain
+ *                                 loop to exit at the next iteration.  Reset
+ *                                 automatically at the start of each run.
+ */
+ssize_t nvmeibc_tpv_selftest_write(void *arg __maybe_unused,
+				    char *buf, size_t len)
+{
+	char cmd[64];
+	size_t n = len < sizeof(cmd) - 1 ? len : sizeof(cmd) - 1;
+	unsigned int loops;
+
+	if (!buf || n == 0)
+		return (ssize_t)len;
+	memcpy(cmd, buf, n);
+	cmd[n] = '\0';
+	while (n > 0 && (cmd[n - 1] == '\n' || cmd[n - 1] == '\r' ||
+			 cmd[n - 1] == ' '  || cmd[n - 1] == '\t'))
+		cmd[--n] = '\0';
+
+	if (sscanf(cmd, "cross_slot_drain_loops=%u", &loops) == 1) {
+		if (loops == 0)
+			loops = 1;
+		WRITE_ONCE(cross_slot_drain_loops, loops);
+		_NI(tpv_ktest_csd_loops_set,
+		    "TPV: cross_slot_drain_loops set to @UINT", loops);
+		return (ssize_t)len;
+	}
+
+	if (strcmp(cmd, "cross_slot_drain_abort") == 0) {
+		WRITE_ONCE(cross_slot_drain_abort, true);
+		_NI(tpv_ktest_csd_abort_req,
+		    "TPV: cross_slot_drain abort requested");
+		return (ssize_t)len;
+	}
+
+	return -EINVAL;
+}
+EXPORT_SYMBOL(nvmeibc_tpv_selftest_write);
 
 /* -- Proc fill function --------------------------------------------------- */
 
@@ -2449,8 +3109,10 @@ ssize_t nvmeibc_tpv_run_selftests(void *arg __maybe_unused, char *buf, size_t le
 	tpv_ktest_discard_crash_before_flush(&kto);
 	tpv_ktest_return_watermark_gate(&kto);
 	tpv_ktest_alloc_cancels_return(&kto);
+	tpv_ktest_online_compaction(&kto);
+	tpv_ktest_cross_slot_drain(&kto);
 
-#define TPV_KTEST_N_TESTS	16
+#define TPV_KTEST_N_TESTS	18
 	KTO_ADD(&kto, "\n");
 	if (kto.failures == 0)
 		KTO_ADD(&kto, "all %d tests passed\n", TPV_KTEST_N_TESTS);

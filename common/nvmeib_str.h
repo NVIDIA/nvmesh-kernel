@@ -43,7 +43,14 @@ static inline size_t nvmeib_strlcpy(char *dst, const char *src, size_t max_len_u
 	#define strlcpy(dst, src, size) nvmeib_strlcpy(dst, src, size)
 #endif
 #ifndef scnprintf
-	#define scnprintf(buf,len, ...)	({ int _x = snprintf(buf, len, __VA_ARGS__); ((_x >= (int)len-1) ? (int)len-1 : _x); })
+	/*
+	 * Parenthesise (len) so call sites that pass an expression like
+	 * "buf_len - count" cast the whole expression to int.  Without the
+	 * parens, "(int)len - 1" expands to "(int)buf_len - count - 1",
+	 * promoting count back to size_t and triggering -Wsign-compare against
+	 * the int _x in the unitest build.
+	 */
+	#define scnprintf(buf,len, ...)	({ int _x = snprintf(buf, len, __VA_ARGS__); ((_x >= (int)(len)-1) ? (int)(len)-1 : _x); })
 #endif	// Note some kernels do not have this function
 
 /* Daniel: In some kernels strchrnul() function does not appear, also in user space for mac os */

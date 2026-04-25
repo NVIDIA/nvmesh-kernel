@@ -60,8 +60,16 @@ def main():
 
     merged_json['cksum'] = zlib.crc32(str(merged_json).encode()) % (1 << 32)
 
-    with open(output, "w+") as f:
-        json.dump(merged_json, f, indent=4)
+    new_content = json.dumps(merged_json, indent=4)
+    try:
+        with open(output, "r") as f:
+            old_content = f.read()
+    except (IOError, OSError):
+        old_content = None
+
+    if old_content != new_content:
+        with open(output, "w") as f:
+            f.write(new_content)
 
     dict_file = os.path.join(os.path.dirname(output), "dict.{}.json".format(str(merged_json['cksum'])))
     last_file = output + ".lastdict"

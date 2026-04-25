@@ -135,6 +135,17 @@ static inline int xa_err(void *entry)
 }
 
 /*
+ * xa_is_err - boolean predicate paired with xa_err().  Production callers
+ * use it as `if (xa_is_err(p))` before extracting the errno; defining it
+ * separately lets call sites stay branch-cheap when the success path is the
+ * common case.
+ */
+static inline bool xa_is_err(const void *entry)
+{
+	return IS_ERR(entry);
+}
+
+/*
  * xa_for_each - iterate over all entries in an xarray.
  *
  * Usage (caller declares @index and @entry before the loop):

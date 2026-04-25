@@ -100,6 +100,140 @@ static inline bool tpv_bio_is_discard(const struct bio *bio)
 #endif
 }
 
+/* -- Online-compaction inflight refcount trampoline ----------------------
+ *
+ * Every mapped READ/WRITE bio that reaches the CDV carries a refcount on
+ * the xarray entry it was dispatched against.  The entry's `inflight`
+ * field is a refcount: +1 for the xarray link (dropped at xa_erase /
+ * xa_swap), +1 per bio in flight (dropped at bio end_io).  When the
+ * count drops to zero the entry is kfree_rcu'd by whichever decrementer
+ * takes it to zero; this guarantees in-flight bios always see a valid
+ * entry pointer.  The online reloc worker's step-9 drain relies on the
+ * same invariant to decide when parking a source slot is safe.
+ *
+ * We intercept bio completion via a trampoline that dec's inflight and
+ * then chains to whichever end_io the guest originally installed.  A
+ * small kmalloc(GFP_ATOMIC) per bio is the simplest implementation -
+ * acceptable for a block-layer hot path that already allocates
+ * bio_split bios, bioset clones, etc.  A pooled or inline-stashed
+ * variant can replace this later if profiling demands.
+ */
+
+struct tpv_inflight_ctx {
+	struct nvmeibc_tpv              *tpv;
+	struct nvmeibc_tpv_extent_entry *entry;
+	bio_end_io_t                    *orig_end_io;
+	void                            *orig_private;
+};
+
+/*
+ * Drop one inflight ref on an entry.  If this was the last ref
+ * (xarray link + all in-flight bios + any worker ref), wake any
+ * drainers and kfree_rcu the entry.  Exported for the online
+ * compaction worker (nvmeibc_tpv_compaction.c) which holds worker
+ * refs on entries across CDV I/O.
+ */
+void tpv_inflight_release(struct nvmeibc_tpv *tpv,
+			  struct nvmeibc_tpv_extent_entry *entry)
+{
+	if (atomic_dec_and_test(&entry->inflight)) {
+		wake_up_all(&tpv->inflight_drain_wq);
+		kfree_rcu(entry, rcu);
+	} else {
+		/* Workers waiting on step-10 drain need to see the
+		 * intermediate decs.  Cheap - no-op if nothing waits. */
+		wake_up_all(&tpv->inflight_drain_wq);
+	}
+}
+EXPORT_SYMBOL(tpv_inflight_release);
+
+#if KS_ENDIO_1ARG
+static void tpv_inflight_end_io(struct bio *bio)
+{
+	struct tpv_inflight_ctx *ctx = bio->bi_private;
+	struct nvmeibc_tpv              *tpv   = ctx->tpv;
+	struct nvmeibc_tpv_extent_entry *entry = ctx->entry;
+	bio_end_io_t *orig_end_io = ctx->orig_end_io;
+
+	bio->bi_private = ctx->orig_private;
+	bio->bi_end_io  = orig_end_io;
+	kfree(ctx);
+
+	tpv_inflight_release(tpv, entry);
+
+	/* Balance the extra io_inflight ref taken in tpv_inflight_submit_bio.
+	 * This is the counter that detach's drain loop waits on, so releasing
+	 * it here (not earlier in make_request) ensures the tpv struct is not
+	 * freed until every trampolined bio has chained to its original
+	 * end_io. */
+	atomic_dec(&tpv->io_inflight);
+
+	if (orig_end_io)
+		orig_end_io(bio);
+}
+#else
+static void tpv_inflight_end_io(struct bio *bio, int error_arg)
+{
+	struct tpv_inflight_ctx *ctx = bio->bi_private;
+	struct nvmeibc_tpv              *tpv   = ctx->tpv;
+	struct nvmeibc_tpv_extent_entry *entry = ctx->entry;
+	bio_end_io_t *orig_end_io = ctx->orig_end_io;
+
+	bio->bi_private = ctx->orig_private;
+	bio->bi_end_io  = orig_end_io;
+	kfree(ctx);
+
+	tpv_inflight_release(tpv, entry);
+
+	atomic_dec(&tpv->io_inflight);
+
+	if (orig_end_io)
+		orig_end_io(bio, error_arg);
+}
+#endif
+
+/*
+ * Wrap the guest bio with an inflight-release trampoline and forward
+ * to the CDV.  The caller must already have taken a ref on entry
+ * (atomic_add_unless in the IO path).  On success the trampoline will
+ * release exactly one ref in end_io.  On inability to allocate the
+ * trampoline context (GFP_ATOMIC failure) we release the ref ourselves
+ * and complete the bio with -ENOMEM; the guest sees a transient IO
+ * failure rather than a corrupted refcount.
+ *
+ * We also take an extra ref on tpv->io_inflight here (released in the
+ * trampoline's end_io) so that detach's drain loop waits for every
+ * dispatched bio's end_io to fire before the tpv struct is freed.
+ * Without this, an in-flight bio could arrive at its end_io after
+ * detach freed tpv, deref'ing ctx->tpv (use-after-free).
+ */
+static void tpv_inflight_submit_bio(struct nvmeibc_tpv *tpv,
+				    struct nvmeibc_tpv_extent_entry *entry,
+				    struct bio *bio,
+				    u64 cdv_phys_offset)
+{
+	struct tpv_inflight_ctx *ctx;
+
+	ctx = kmalloc(sizeof(*ctx), GFP_ATOMIC);
+	if (unlikely(!ctx)) {
+		tpv_inflight_release(tpv, entry);
+		bio_endio(bio, -ENOMEM);
+		return;
+	}
+	ctx->tpv          = tpv;
+	ctx->entry        = entry;
+	ctx->orig_end_io  = bio->bi_end_io;
+	ctx->orig_private = bio->bi_private;
+
+	bio->bi_end_io  = tpv_inflight_end_io;
+	bio->bi_private = ctx;
+
+	/* Extra io_inflight ref, released in tpv_inflight_end_io. */
+	atomic_inc(&tpv->io_inflight);
+
+	nvmeibc_tpv_cdv_submit_bio(tpv, bio, cdv_phys_offset);
+}
+
 /* -- tpv_handle_one_bio - dispatch one extent-aligned bio ---------------- */
 
 /*
@@ -196,11 +330,24 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 	is_write = (bio_data_dir(bio) == WRITE);
 
 	/*
-	 * Extent map lookup under RCU.  xa_load requires either xa_lock or
-	 * rcu_read_lock; the entry is freed via kfree_rcu in free_extent,
-	 * so dereferencing the returned pointer is safe within the RCU
-	 * read-side critical section.
+	 * Extent-map lookup + online-compaction state machine (design:
+	 * TPV_Trimming.md S. Step 5 - abort-on-conflict).
+	 *
+	 *   NORMAL          -> dispatch directly.
+	 *   RELOCATING + WRITE
+	 *                   -> cmpxchg to RELOC_CANCELLED (forces the worker
+	 *                      to abort its commit) and dispatch to source.
+	 *                      If the cmpxchg loses (state raced to COMMITTED),
+	 *                      retry xa_load and we'll find the new entry.
+	 *   RELOCATING + READ or RELOC_CANCELLED
+	 *                   -> dispatch directly; source data is still the
+	 *                      durable home.
+	 *   COMMITTED       -> the entry we loaded is the OLD entry after a
+	 *                      successful worker commit; the NEW entry is
+	 *                      in the xarray but may not yet be visible on
+	 *                      this CPU.  cpu_relax + retry xa_load.
 	 */
+retry_load:
 	rcu_read_lock();
 	entry = xa_load(&alloc->extent_map, virt_idx);
 
@@ -244,8 +391,10 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		}
 
 		/*
-		 * Freshly allocated entry - not yet visible to concurrent
-		 * erasers, so direct access is safe without RCU.
+		 * Freshly allocated entry, returned by alloc_extent with
+		 * inflight=2 (xarray ref + caller's bio ref).  See
+		 * nvmeibc_tpv_alloc_extent for why both refs are taken
+		 * under alloc->lock rather than post-return.
 		 *
 		 * sync_flush mode: park the bio until persist_work has
 		 * flushed the new L1 entry to the tree extent.  persist_work
@@ -253,23 +402,81 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		 * The parked bio is re-dispatched by
 		 * nvmeibc_tpv_forward_l1_flush_bios() after flush succeeds;
 		 * at that point the extent_map lookup finds the mapping and
-		 * the bio takes the normal mapped-IO path below.
+		 * the bio takes the normal mapped-IO path below.  Since the
+		 * parked bio will NOT be dispatched through the trampoline
+		 * on this path (it is re-entered via make_request), we
+		 * release the extra ref alloc_extent took on our behalf.
 		 */
 		if (tpv->sync_flush) {
 			unsigned long sflags;
 
+			tpv_inflight_release(tpv, entry);
 			spin_lock_irqsave(&tpv->pending_bio_lock, sflags);
 			bio_list_add(&tpv->pending_l1_flush_bios, bio);
 			spin_unlock_irqrestore(&tpv->pending_bio_lock, sflags);
 			return 0;
 		}
 
-		nvmeibc_tpv_cdv_submit_bio(tpv, bio,
-					   entry->phys_offset + intra_offset);
+		/*
+		 * Caller ref (taken by alloc_extent) is consumed by the
+		 * trampoline's end_io release.  No extra atomic_add_unless
+		 * needed - we already have a valid ref, pre-charged under
+		 * alloc->lock before any racing DISCARD could touch this
+		 * fresh entry.
+		 */
+		tpv_inflight_submit_bio(tpv, entry, bio,
+					entry->phys_offset + intra_offset);
 		return 0;
 	}
 
-	/* -- Mapped READ or WRITE - snapshot offset under RCU --------------- */
+	/* -- Mapped READ or WRITE --------------------------------------- */
+	{
+		u8 state = READ_ONCE(entry->state);
+
+		if (state == NVMEIBC_TPV_ENTRY_COMMITTED) {
+			/*
+			 * Worker committed; new entry is on its way to the
+			 * xarray but isn't visible to xa_load yet.  The window
+			 * spans the cmpxchg(RELOCATING -> COMMITTED), the
+			 * synchronous L2 leaf write (a CDV round-trip via the
+			 * L2 writer thread - durability invariant; see
+			 * tpv_reloc_one_online step 8b), and the xa_store.
+			 * Across a busy guest workload that's dispatched
+			 * thousands of bios against the same virt_idx, a tight
+			 * cpu_relax() spin starves both the L2 writer kthread
+			 * (which needs CPU to issue the CDV write) and the
+			 * watchdog (soft lockup).
+			 *
+			 * cond_resched() yields the CPU when the scheduler
+			 * wants - this preserves the spin's low-latency
+			 * common case (millisecond L2 writes) while letting
+			 * the worker make forward progress and breaking the
+			 * watchdog stall under contention.
+			 */
+			rcu_read_unlock();
+			cpu_relax();
+			cond_resched();
+			goto retry_load;
+		}
+
+		if (is_write && state == NVMEIBC_TPV_ENTRY_RELOCATING) {
+			/* Cancel the worker's in-flight commit.  If the
+			 * cmpxchg loses, the worker raced us to COMMITTED
+			 * - retry and dispatch against the new entry. */
+			if (cmpxchg(&entry->state,
+				    NVMEIBC_TPV_ENTRY_RELOCATING,
+				    NVMEIBC_TPV_ENTRY_RELOC_CANCELLED) !=
+			    NVMEIBC_TPV_ENTRY_RELOCATING) {
+				rcu_read_unlock();
+				goto retry_load;
+			}
+			/* fall through: dispatch to source (still the
+			 * durable home; worker will abort at its commit
+			 * check). */
+		}
+	}
+
+	/* -- Mapped READ or WRITE - snapshot offset under RCU ----------- */
 	phys_off = entry->phys_offset + intra_offset;
 
 	/*
@@ -288,9 +495,16 @@ static int tpv_handle_one_bio(struct nvmeibc_tpv *tpv, struct bio *bio)
 		return 0;
 	}
 
+	/* Take the bio's refcount on the entry for the trampoline.  If
+	 * the entry was concurrently erased (inflight = 0), retry. */
+	if (!atomic_add_unless(&entry->inflight, 1, 0)) {
+		rcu_read_unlock();
+		goto retry_load;
+	}
+
 	rcu_read_unlock();
 
-	nvmeibc_tpv_cdv_submit_bio(tpv, bio, phys_off);
+	tpv_inflight_submit_bio(tpv, entry, bio, phys_off);
 	return 0;
 }
 

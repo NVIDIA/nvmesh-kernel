@@ -7,37 +7,37 @@
 #define NVMEIBC_TPV_SIMU_H
 
 /*
- * nvmeibc_tpv_simu.h — CDV/TOMA simulator for TPV unit tests.
+ * nvmeibc_tpv_simu.h - CDV/TOMA simulator for TPV unit tests.
  *
  * Provides in-memory implementations of the five extern functions that the
  * TPV production modules (nvmeibc_tpv_allocator.c, nvmeibc_tpv_persist.c,
  * nvmeibc_tpv_recovery.c, nvmeibc_tpv_io.c) use to reach the CDV/TOMA
  * back-end:
  *
- *   nvmeibc_ib_admin_cdv_alloc_extent()  — allocate one CDV data extent
- *   nvmeibc_ib_admin_cdv_free_extent()   — return one CDV data extent
- *   nvmeibc_ib_admin_cdv_list_extents()  — list extents owned by a TPV UUID
- *   nvmeibc_tpv_cdv_sync_read()          — synchronous CDV read (RAM-backed)
- *   nvmeibc_tpv_cdv_sync_write()         — synchronous CDV write (RAM-backed)
- *   nvmeibc_tpv_cdv_submit_bio()         — async bio (BUG: not used in tests)
+ *   nvmeibc_ib_admin_cdv_alloc_extent()  - allocate one CDV data extent
+ *   nvmeibc_ib_admin_cdv_free_extent()   - return one CDV data extent
+ *   nvmeibc_ib_admin_cdv_list_extents()  - list extents owned by a TPV UUID
+ *   nvmeibc_tpv_cdv_sync_read()          - synchronous CDV read (RAM-backed)
+ *   nvmeibc_tpv_cdv_sync_write()         - synchronous CDV write (RAM-backed)
+ *   nvmeibc_tpv_cdv_submit_bio()         - async bio (BUG: not used in tests)
  *
  * Test geometry (fixed for simplicity):
  *   T = tpv_extent_size_kb = 64 KiB
- *   E = cdv_extent_size_mib = 1 MiB  →  n_slots = E/T = 16 per CDV extent
- *   A = allocator_size_gib  = 0      →  L1 tree at CDV byte offset 0
- *   virtual_size            = 4 MiB →  64 virtual extents
- *   N data CDV extents      = 4     →  indices 1..4, 64 slots total
+ *   E = cdv_extent_size_mib = 1 MiB  ->  n_slots = E/T = 16 per CDV extent
+ *   A = allocator_size_gib  = 0      ->  L1 tree at CDV byte offset 0
+ *   virtual_size            = 4 MiB ->  64 virtual extents
+ *   N data CDV extents      = 4     ->  indices 1..4, 64 slots total
  *   CDV total               = 5 MiB (L1 at 0..1MiB, data at 1..5MiB)
  */
 
 #include "common/kr_incs.h"
 #include "clnt/nvmeibc_msgs_shared.h"	/* nvmeibc_cdv_alloc_req/resp, free_req */
 
-/* ── Geometry constants ─────────────────────────────────────────────────── */
+/* -- Geometry constants --------------------------------------------------- */
 
-#define TPV_SIMU_TPV_EXTENT_KB	64ULL		/* T — TPV extent size in KiB */
-#define TPV_SIMU_CDV_EXTENT_MB	1ULL		/* E — CDV extent size in MiB */
-#define TPV_SIMU_ALLOC_GB	0ULL		/* A — metadata region size in GiB */
+#define TPV_SIMU_TPV_EXTENT_KB	64ULL		/* T - TPV extent size in KiB */
+#define TPV_SIMU_CDV_EXTENT_MB	1ULL		/* E - CDV extent size in MiB */
+#define TPV_SIMU_ALLOC_GB	0ULL		/* A - metadata region size in GiB */
 #define TPV_SIMU_VIRTUAL_MB	4ULL		/* virtual volume size in MiB */
 #define TPV_SIMU_N_DATA_EXT	4		/* number of data CDV extents */
 
@@ -56,12 +56,12 @@
 /* Maximum data extents the simulator can track (indices 1..N) */
 #define TPV_SIMU_MAX_EXTENTS	8
 
-/* ── String identifiers ──────────────────────────────────────────────────── */
+/* -- String identifiers ---------------------------------------------------- */
 
 #define TPV_SIMU_CDV_UUID	"cdv-simu-uuid-000000000000000000"
 #define TPV_SIMU_TPV_UUID	"tpv-simu-uuid-000000000000000000"
 /*
- * Simulator gendisk convention: add_disk() → __disk_name_to_index() scans the
+ * Simulator gendisk convention: add_disk() -> __disk_name_to_index() scans the
  * name for the last "_0<digit>" token and BUGs if absent.  The TPV disk name
  * is "nvmesh/<tpv_name>", so tpv_name must contain "_0<digit>".
  *
@@ -76,7 +76,7 @@
 #define TPV_SIMU_TOMA_ID	"toma-simu-node"
 #define TPV_SIMU_TOMA_GEN	1ULL
 
-/* ── CDV simulator state ────────────────────────────────────────────────── */
+/* -- CDV simulator state -------------------------------------------------- */
 
 /*
  * Per-extent entry in the TOMA ownership table.
@@ -106,26 +106,26 @@ struct tpv_cdv_sim {
 /* Global CDV simulator instance (one per test run). */
 extern struct tpv_cdv_sim *g_tpv_cdv_sim;
 
-/* ── Simulator lifecycle ────────────────────────────────────────────────── */
+/* -- Simulator lifecycle -------------------------------------------------- */
 
 /*
- * tpv_cdv_sim_create — allocate and initialise a fresh CDV simulator.
+ * tpv_cdv_sim_create - allocate and initialise a fresh CDV simulator.
  * Returns a pointer to the simulator (also stored in g_tpv_cdv_sim), or NULL.
  */
 struct tpv_cdv_sim *tpv_cdv_sim_create(void);
 
 /*
- * tpv_cdv_sim_destroy — free the CDV simulator and clear g_tpv_cdv_sim.
+ * tpv_cdv_sim_destroy - free the CDV simulator and clear g_tpv_cdv_sim.
  */
 void tpv_cdv_sim_destroy(void);
 
-/* ── Mock CDV volume ────────────────────────────────────────────────────── */
+/* -- Mock CDV volume ------------------------------------------------------ */
 
 struct nvmeibc_volume;
 struct nvmeibc_block_device;
 
 /*
- * tpv_cdv_vol_create — allocate a minimal nvmeibc_volume + nvmeibc_block_device
+ * tpv_cdv_vol_create - allocate a minimal nvmeibc_volume + nvmeibc_block_device
  * that represents the CDV for the simulator.  The block_dev->size is set to
  * TPV_SIMU_CDV_SECTORS (4 KiB sectors).  The hdr.uuid is set to
  * TPV_SIMU_CDV_UUID.  Status is set to NVS_ATTACHED.
@@ -133,30 +133,30 @@ struct nvmeibc_block_device;
 struct nvmeibc_volume *tpv_cdv_vol_create(void);
 
 /*
- * tpv_cdv_vol_destroy — free the mock CDV volume and its block device.
+ * tpv_cdv_vol_destroy - free the mock CDV volume and its block device.
  */
 void tpv_cdv_vol_destroy(struct nvmeibc_volume *cdv);
 
-/* ── Test helper ─────────────────────────────────────────────────────────── */
+/* -- Test helper ----------------------------------------------------------- */
 
 struct nvmeibc_tpv;
 
 /*
- * tpv_simu_set_toma_id — set the allocator TOMA identity on a TPV.
+ * tpv_simu_set_toma_id - set the allocator TOMA identity on a TPV.
  * Must be called after nvmeibc_tpv_attach() to enable cdv_alloc_work.
  */
 void tpv_simu_set_toma_id(struct nvmeibc_tpv *tpv,
 			   const char *toma_id, u64 generation);
 
 /*
- * tpv_simu_fill_pool — trigger cdv_alloc_work until the CDV simulator
+ * tpv_simu_fill_pool - trigger cdv_alloc_work until the CDV simulator
  * reports CDV_FULL, filling the TPV free-slot pool with all available extents.
  * Calls schedule_work + flush_workqueue in a loop.
  */
 void tpv_simu_fill_pool(struct nvmeibc_tpv *tpv);
 
 /*
- * tpv_simu_exhaust_cdv — mark every simulator data extent as allocated (to a
+ * tpv_simu_exhaust_cdv - mark every simulator data extent as allocated (to a
  * dummy non-TPV tenant) so subsequent admin_cdv_alloc_extent() calls return
  * CDV_FULL naturally.  The dummy UUID differs from the TPV under test so
  * recovery won't adopt them as orphans.  Used by tests that need a sustained
@@ -165,11 +165,30 @@ void tpv_simu_fill_pool(struct nvmeibc_tpv *tpv);
 void tpv_simu_exhaust_cdv(void);
 
 /*
- * tpv_simu_release_one_cdv_extent — clear the allocated flag on one simulator
+ * tpv_simu_release_one_cdv_extent - clear the allocated flag on one simulator
  * extent, bypassing ownership checks.  Simulates an admin-side capacity
  * return.  Returns 0 on success, -EINVAL on bad index, -ENOENT if the extent
  * was already free.
  */
 int tpv_simu_release_one_cdv_extent(u64 extent_index);
+
+/* -- Online-compaction write-conflict injection --------------------------- */
+
+/*
+ * Online compaction's tpv_reloc_one_online() reads the source slot from the
+ * data CDV (via nvmeibc_tpv_cdv_sync_read_data) and then writes it to the
+ * dest slot (nvmeibc_tpv_cdv_sync_write_data).  Between the data write and
+ * the L2 leaf commit, S.6 of the relocation protocol re-checks whether the
+ * entry's state has been flipped to RELOC_CANCELLED by a concurrent guest
+ * write.  Tests inject that flip by setting:
+ *
+ *   g_tpv_simu_cancel_on_data_read = entry_to_cancel;
+ *
+ * The simulator's data-CDV read stub then flips entry->state to
+ * RELOC_CANCELLED right after the read completes, deterministically
+ * reproducing the guest-write race.  A NULL pointer disables injection.
+ */
+struct nvmeibc_tpv_extent_entry;
+extern struct nvmeibc_tpv_extent_entry *g_tpv_simu_cancel_on_data_read;
 
 #endif /* NVMEIBC_TPV_SIMU_H */

@@ -273,6 +273,8 @@ SOURCES += $(TPVDIR)/nvmeibc_tpv_io.c
 SOURCES += $(TPVDIR)/nvmeibc_tpv_persist.c
 SOURCES += $(TPVDIR)/nvmeibc_tpv_proc.c
 SOURCES += $(TPVDIR)/nvmeibc_tpv_recovery.c
+SOURCES += $(TPVDIR)/nvmeibc_tpv_compaction.c
+SOURCES += $(TPVDIR)/nvmeibc_tpv_test.c
 
 # TPV simulator and test scenarios
 SOURCES += ./tpv/nvmeibc_tpv_simu.c
@@ -325,7 +327,11 @@ ifneq ($(MAKECMDGOALS),clean)
 endif
 
 # ********** Define Rules for building *********
-.PHONY: depend clean gf_perf post_lttng write_compilation_cmd autogen ECHO_COMPILING
+.PHONY: depend clean gf_perf post_lttng write_compilation_cmd autogen ECHO_COMPILING pet_dictionary FORCE
+
+FORCE:
+
+write_compilation_cmd: $(COMPILATION_CMD_FILE)
 
 $(OBJ_DIR)/%.o : %.S_shipped
 	gcc -x assembler-with-cpp -c $< -o $@
@@ -463,9 +469,10 @@ clean: clean_prev_run
 print_src_list:
 	@echo $(SOURCES)
 
-write_compilation_cmd:
-	@mkdir -p $(OBJ_DIR)
-	@printf "Writing \e[0;32m$(OBJ_DIR)/compilation_cmd.txt\e[0;0m\n"
-	@echo $(CC) $(CFLAGS) $(INCLUDES) | cmp -s $(COMPILATION_CMD_FILE) -; if test $$? -ne 0; then echo $(CC) $(CFLAGS) $(INCLUDES) > $(COMPILATION_CMD_FILE); fi
-
-$(OBJ_DIR)/compilation_cmd.txt : write_compilation_cmd
+$(COMPILATION_CMD_FILE): FORCE
+	@mkdir -p $(dir $@)
+	@new='$(CC) $(CFLAGS) $(INCLUDES)'; \
+	 if [ ! -f $@ ] || [ "$$new" != "$$(cat $@)" ]; then \
+	     printf "Writing \e[0;32m$@\e[0;0m\n"; \
+	     printf '%s\n' "$$new" > $@; \
+	 fi

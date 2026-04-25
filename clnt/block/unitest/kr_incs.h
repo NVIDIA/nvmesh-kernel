@@ -22,6 +22,8 @@
 #include <stdlib.h>
 #include <semaphore.h>
 #include <stdarg.h>
+#include <limits.h>						// UINT_MAX, INT_MAX, etc. - kernel code expects these
+										// from <linux/kernel.h>; in userspace they live here.
 #ifndef __APPLE__
 #include <sys/auxv.h>
 #endif
@@ -50,6 +52,16 @@ void sim_vfree(const void *addr);
 #include "../common/compat/kr_incs_locks.h"
 #include "../common/compat/kr_incs_xarray.h"
 
+/* __ GCC attribute shims ____________________________________________________
+ *
+ * __maybe_unused is a kernel macro for __attribute__((unused)).  Define it
+ * here so kernel source files compiled in the simulator build do not need
+ * #ifdef guards around parameter annotations.
+ */
+#ifndef __maybe_unused
+#define __maybe_unused	__attribute__((unused))
+#endif
+
 /* ── RCU stubs ───────────────────────────────────────────────────────────────
  *
  * The simulator is single-threaded (or uses explicit locks), so RCU reduces
@@ -72,6 +84,12 @@ struct rcu_head {
  */
 #define kfree_rcu(ptr, rcu_field)	kfree(ptr)
 
+/* rcu_barrier - wait for all pending kfree_rcu callbacks.
+ * In the simulator kfree_rcu is an immediate kfree, so all callbacks are
+ * already complete by the time the call site returns.
+ */
+#define rcu_barrier()	do { } while (0)
+
 /******************************* Simulator Build Config ********************************/
 
 /*
@@ -91,6 +109,13 @@ struct task_struct;
 #undef KS_BVEC_ITER
 #define KS_BVEC_ITER (0)					// Dont use New BIO api, to test the internal implementation
 #define KS_BIO_HAS_BI_BDEV_PTR (1)
+#undef KS_ENDIO_1ARG
+#define KS_ENDIO_1ARG (0)					/* Simulator's bio_end_io_t typedef below is the 2-arg
+											 * (struct bio *, int) form; force KS_ENDIO_1ARG=0 so
+											 * production code (e.g. nvmeibc_tpv_io.c) uses the
+											 * matching 2-arg branch.  The simulated LINUX_VERSION_CODE
+											 * (4.10.13) would otherwise enable the 1-arg branch and
+											 * mismatch the typedef. */
 /******************************* Kernel macros *******************************/
 
 extern pthread_t 	main_os_id;
@@ -639,6 +664,7 @@ int atomic_dec_if_positive(atomic_t *v);
 	#endif
 	#define smp_rmb() barrier()
 	#define smp_wmb() barrier()
+	#define smp_mb()  __atomic_thread_fence(__ATOMIC_SEQ_CST)
 #else
 #define atomic_inc_volatile_int(i)			__atomic_fetch_add (&i, 1, __ATOMIC_SEQ_CST)		// __ATOMIC_SEQ_CST is critical, or else this will be atomic only on 1 cpu. with more cores this will become non atomic
 #define atomic_dec_volatile_int(i)			__atomic_fetch_sub (&i, 1, __ATOMIC_SEQ_CST))		// TODO(EBA): consider using __sync_fetch_and_add(&(i), 1) & __sync_fetch_and_sub(&(i), 1)
@@ -965,6 +991,62 @@ typedef struct cpumask *cpumask_var_t;
 
 void init_waitqueue_head(wait_queue_head_t* q);
 void wake_up(			 wait_queue_head_t* q);	// Signal to threads which handle requests to resume working.
+/*
+ * wake_up_all - in the kernel, wakes every waiter on @q (vs wake_up which
+ * wakes one).  The simulator's wake_up implementation already broadcasts to
+ * all parked threads, so wake_up_all is just an alias.  Used by the TPV
+ * inflight-drain wait queue and the compaction pending-starts queue.
+ */
+#define wake_up_all(q)			wake_up(q)
+
+/*
+ * Low-level wait_queue_entry / prepare_to_wait / finish_wait shims for the
+ * "sleep until condition" pattern used by tpv_compaction.c's L2 writer
+ * (l2_writer_claim_page).  Production kernel code does:
+ *
+ *     DEFINE_WAIT(wait);
+ *     prepare_to_wait(q, &wait, TASK_UNINTERRUPTIBLE);
+ *     if (cond) schedule();
+ *     finish_wait(q, &wait);
+ *
+ * The simulator's wait_queue emulation already supports thread-blocking on
+ * wake_up; we approximate the prepare/finish pair as a no-op (the loop's
+ * condition recheck is enough) and `schedule()` as a brief yield.  Adequate
+ * for unit-test correctness; not a faithful reproduction of kernel scheduler
+ * semantics.
+ */
+#define TASK_UNINTERRUPTIBLE	2
+struct wait_queue_entry {
+	void *private_data;
+	struct list_head entry;	/* unused in this stub but keeps the struct
+				 * usable from C code that takes &entry.entry */
+};
+#define DEFINE_WAIT(name)	struct wait_queue_entry name = { 0 }
+static inline void prepare_to_wait(wait_queue_head_t *q,
+				   struct wait_queue_entry *wait,
+				   int state)
+{
+	(void)q; (void)wait; (void)state;
+}
+static inline void finish_wait(wait_queue_head_t *q,
+			       struct wait_queue_entry *wait)
+{
+	(void)q; (void)wait;
+}
+/* schedule() is defined later in this file (~line 1448 as
+ * `({ sched_yield(); usleep(1); })`); don't redefine it here. */
+
+/*
+ * synchronize_rcu - block until all CPUs that started an RCU read-side
+ * critical section before this call have completed it.  In the simulator
+ * there is no preemption-disabled-equivalent RCU read-side; rcu_read_lock /
+ * unlock are no-ops, so synchronize_rcu can be a no-op too.  Used by
+ * tpv_reloc_one_online's commit point to wait for stale xa_load readers to
+ * drain.
+ */
+#ifndef synchronize_rcu
+#define synchronize_rcu()	do { } while (0)
+#endif
 
 int   __wait_event_interruptible(wait_queue_head_t *q); // Wait until someone wakes us up. Return -1 if must exit
 long __wait_event_interruptible_timeout(wait_queue_head_t *q, unsigned long jiff);	// Wait until someone wakes us up, for max of specified jiffies. Return -1 if must exit, 0 on signal or timedout
@@ -1168,6 +1250,24 @@ static inline void kobject_put(struct kobject *kobj){
 	})
 #endif
 
+/*
+ * xchg - atomic exchange.  Used by TPV persist (snapshotting dirty bitmaps)
+ * and by online-compaction's state-machine resets.  GCC's __atomic_exchange_n
+ * gives us the same store-and-return-old semantics on both x86 and ARM.
+ */
+#ifndef xchg
+#define xchg(ptr, val)	__atomic_exchange_n((ptr), (val), __ATOMIC_SEQ_CST)
+#endif
+
+/*
+ * smp_mb__after_atomic - kernel-side memory barrier paired with an atomic op.
+ * Userspace doesn't need an additional fence after a __sync / __atomic op
+ * that already implies seq_cst, so a no-op is correct here.
+ */
+#ifndef smp_mb__after_atomic
+#define smp_mb__after_atomic()	__atomic_thread_fence(__ATOMIC_SEQ_CST)
+#endif
+
 #ifdef __APPLE__
 /* macOS: getauxval() is not available; provide a no-op stub. */
 static inline unsigned long getauxval(unsigned long type) { (void)type; return 0UL; }
@@ -1368,6 +1468,8 @@ bool completion_done(    struct completion *);
 void completion_verify_not_waiting(struct completion *c);
 #define nvmeib_reinit_completion reinit_completion
 static inline long wait_for_completion_interruptible_timeout(struct completion *comp, unsigned long timeout) { return wait_for_completion_timeout(comp, timeout); }
+/* try_wait_for_completion - non-blocking check; returns true if already done. */
+static inline bool try_wait_for_completion(struct completion *x) { return completion_done(x); }
 
 #define workq_func_t    work_func_t
 #define workqe_struct 	work_struct

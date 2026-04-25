@@ -148,6 +148,19 @@ static int __setup_tpv(const struct nvmeibc_cinst_params_main *p,
 	}
 
 	/*
+	 * Apply per-TPV online-compaction config from the attach payload
+	 * before any wastage signal can arm the worker.  An explicit 0
+	 * percentage means "inherit module param".  CM codec defaults are
+	 * 1 / 30 / 15 (see clnt_scheme.json), so older management that
+	 * omits these fields produces the design-target values directly;
+	 * 0 is reserved for newer management deferring to module params.
+	 */
+	nvmeibc_tpv_online_compaction_config(tpv,
+					     !!conf->onlineCompactionEnabled,
+					     (u32)conf->onlineCompactionArmHighPct,
+					     (u32)conf->onlineCompactionArmLowPct);
+
+	/*
 	 * CDV allocator TOMA identity is determined by TOMA via RAFT and
 	 * delivered to this client through the CDV topology push.  No
 	 * management hint is used.  cdv_alloc_work will defer until the
@@ -489,6 +502,18 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 				_NI(tpv_grow_dispatch,
 				    "TPV @STR: live grow to @LLU bytes", hdr->name, new_virtual_size_bytes);
 				nvmeibc_tpv_grow(tpv, new_virtual_size_bytes);
+				/*
+				 * Hot-apply online-compaction knobs from the
+				 * UpdateVolumes payload.  The grow path is the only
+				 * place an attached TPV receives a config update
+				 * from management.  An explicit 0 percentage means
+				 * "inherit module param"; see _attach path above
+				 * for the codec-default rationale.
+				 */
+				nvmeibc_tpv_online_compaction_config(tpv,
+								     !!conf->onlineCompactionEnabled,
+								     (u32)conf->onlineCompactionArmHighPct,
+								     (u32)conf->onlineCompactionArmLowPct);
 				res = NVMEIB_C_TO_M_VOLUME_ACK_ATTACHED;
 				reply_hdr.last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_ALL;
 				nvmeibc_cc_api_reply_vol_cmd_status(p, &reply_hdr, res, NVMEIBC_IO_PERM_USE_CURR_PERMS, send_to_cli, send_to_mcs, 1);
