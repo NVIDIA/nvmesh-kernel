@@ -312,6 +312,30 @@ int nvmeibt_block_device_print_blkdevs_status(int (*printf_fn)(void *ctx, const 
 	return 0;
 }
 
+void nvmeibt_block_device_get_real_time_errors_str(struct nvmeibt_Str *out)
+{
+	struct nvmeibt_block_device		*blkdev;
+	struct nvmeibt_block_device		*longest_encrypt_vol = NULL;
+	int64_t							longest_encrypt_sec = -1;
+	int								n_encrypting = 0;
+	struct timespec					now = nvmeibt_global_get_cur_event_start_time();
+
+	NVMEIB_HASH_FOREACH(blkdev, nvmeibt_global_get_global()->block_devices_hash_by_uuid) {
+		if (blkdev->encrypt_params) {
+			int64_t		elapsed_sec = now.tv_sec - blkdev->encrypt_params->start_timespec.tv_sec;
+			n_encrypting++;
+			if (elapsed_sec > longest_encrypt_sec) {
+				longest_encrypt_sec = elapsed_sec;
+				longest_encrypt_vol = blkdev;
+			}
+		}
+	}
+	if (n_encrypting > 0) {
+		nvmeibt_Str_sprintf(out, "ENCRYPTION: n_volumes_encrypting=%d longest=%s (%lld sec),\n",
+				n_encrypting, nvmeibt_blkdev_name(longest_encrypt_vol), longest_encrypt_sec);
+	}
+}
+
 static const char *zeroing_db_state_str(enum NVMEIBT_SEGMENT_DIRTY_BITS_STATE s) {
 	switch (s) {
 	case NVMEIBT_SEG_DIRTY_BITS_STATE_X_ZERO: return "In progress";

@@ -2569,6 +2569,7 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 	}
 	//
 	encrypt_params = NNVMEIBT_TOMA_CALLOC(uwwxc91, 1, sizeof(struct nvmeibt_encrypt_params));
+	getnstimeofday_boot(&encrypt_params->start_timespec);
 	encrypt_params->kafka_offset = kafka_offset;
 	vol->encrypt_idx = encrypt_idx;
 	vol->encrypt_params = encrypt_params;

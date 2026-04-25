@@ -59,6 +59,7 @@ struct nvmeibt_encrypt_params {
 	struct nvmeibt_block_device				*origin_vol;
 	int64_t									kafka_offset;
 	int										encrypt_idx;
+	struct timespec							start_timespec;
 	char									old_passphrase[PASSPHRASE_MAX_LEN];
 	char									old_passphrase_file_name[PATH_MAX];
 	char									new_passphrase[PASSPHRASE_MAX_LEN];
@@ -100,6 +101,7 @@ void nvmeibt_block_device_trim_unused_entries(int config_tag, uint8_t trim_flag)
 int nvmeibt_block_device_validate_blkdevs_config(void);
 void nvmeibt_block_device_reservation_mode_change(const union nvmeib_uuid *vol_uuid, uint64_t reservation_version);
 int nvmeibt_block_device_print_blkdevs_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
+void nvmeibt_block_device_get_real_time_errors_str(struct nvmeibt_Str *out);
 void nvmeibt_block_device_print_zeroing_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 #endif // #ifndef NVMEIBT_BLOCK_DEVICE
 

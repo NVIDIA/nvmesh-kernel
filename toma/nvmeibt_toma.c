@@ -1849,6 +1849,7 @@ int nvmeibt_toma_get_real_time_errors_str(struct nvmeibt_Str *out) {
 	nvmeibt_kafka_get_real_time_errors_str(out);
 	nvmeibt_raft_get_real_time_errors_str(out);
 	nvmeibt_topology_get_real_time_errors_str(out);
+	nvmeibt_block_device_get_real_time_errors_str(out);
 	nvmeibt_Str_sprintf(out,"}\n");
 	return nvmeibt_Str_strlen(out);
 }
