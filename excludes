@@ -38,6 +38,7 @@ dictionaries.tar.gz
 /tools/**.d
 /tools/**/pager
 /tools/trace_daemon_2.0/trace_daemon
+/tools/lz4/.lz4_built
 **/gen_events.h
 **/gen_formats.h
 build_sh_conf.*

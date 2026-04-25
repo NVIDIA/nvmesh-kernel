@@ -314,9 +314,11 @@ COMN_AUTOGEN_DIR=$(AUTOGEN_DIR)/common/
 PROC_SCHEME_FILE=../management_cm/clnt/process_scheme.py
 CLNT_SCHEME_FILE=../management_cm/clnt/clnt_scheme.json
 TOMA_SCHEME_FILE=../management_cm/toma_scheme.json
+COMMON_SCHEME_FILE=../management_cm/clnt_toma_common_scheme.json
 PROC_SCHEME_PATH=$(AUTOGEN_DIR)/$(PROC_SCHEME_FILE)
 CLNT_SCHEME_PATH=$(AUTOGEN_DIR)/$(CLNT_SCHEME_FILE)
 TOMA_SCHEME_PATH=$(AUTOGEN_DIR)/$(TOMA_SCHEME_FILE)
+COMMON_SCHEME_PATH=$(AUTOGEN_DIR)/$(COMMON_SCHEME_FILE)
 
 ifneq ($(MAKECMDGOALS),clean)
   -include $(FILES_DEPEND)
@@ -336,11 +338,11 @@ $(AUTOGEN_DIR)/common/nvmeib_mcs_header.h: $(PROC_SCHEME_PATH)
 	@echo $(AUTOGEN_DIR)/common/nvmeib_mcs_header.h
 	@cd $(AUTOGEN_DIR) && python3 $(PROC_SCHEME_FILE) --header ./common/nvmeib_mcs_header.h
 
-$(AUTOGEN_DIR)/clnt/nvmeibc_mcs_stub.h: $(PROC_SCHEME_PATH) $(CLNT_SCHEME_PATH)
+$(AUTOGEN_DIR)/clnt/nvmeibc_mcs_stub.h: $(PROC_SCHEME_PATH) $(CLNT_SCHEME_PATH) $(COMMON_SCHEME_PATH)
 	@echo $(AUTOGEN_DIR)/clnt/nvmeibc_mcs_stub.h
 	@cd $(AUTOGEN_DIR) && python3 $(PROC_SCHEME_FILE) $(CLNT_SCHEME_FILE) ./clnt/nvmeibc_mcs_stub.h
 
-$(AUTOGEN_DIR)/toma/nvmeibt_mcs_stub.h: $(PROC_SCHEME_PATH) $(TOMA_SCHEME_PATH)
+$(AUTOGEN_DIR)/toma/nvmeibt_mcs_stub.h: $(PROC_SCHEME_PATH) $(TOMA_SCHEME_PATH) $(COMMON_SCHEME_PATH)
 	@echo $(AUTOGEN_DIR)/toma/nvmeibt_mcs_stub.h
 	@cd $(AUTOGEN_DIR) && python3 $(PROC_SCHEME_FILE) $(TOMA_SCHEME_FILE) ./toma/nvmeibt_mcs_stub.h
 

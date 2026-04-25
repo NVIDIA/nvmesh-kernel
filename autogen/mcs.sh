@@ -5,8 +5,8 @@
 
 # Auto generate mcs *.h files; invoked by autogen/Makefile
 
-if [[ $# -ne 4 ]] ; then
-    echo 'Usage: mcs.sh scheme.py clnt-scheme.json toma-scheme.json srv-scheme.json'
+if [[ $# -ne 5 ]] ; then
+    echo 'Usage: mcs.sh scheme.py clnt-scheme.json toma-scheme.json srv-scheme.json clnt-toma-common-scheme.json'
     exit 1
 fi
 
@@ -14,6 +14,7 @@ scheme_py=$1
 clnt_scheme_json=$2
 toma_scheme_json=$3
 srv_scheme_json=$4
+common_scheme_json=$5
 
 #echo scheme_py=$scheme_py
 #echo clnt_scheme_json=clnt_scheme_json
@@ -46,9 +47,11 @@ gen_file()
 {
     local gen_file_name=$1
     local dep_file_name=$2
+    local common_dep_file_name=$3
 
     if [ ! -e $gen_file_name -o \
 	$gen_file_name -ot $dep_file_name -o \
+	$gen_file_name -ot $common_dep_file_name -o \
 	$gen_file_name -ot $scheme_py ]; then
 	    echo "Generating $gen_file_name"
 	    $PYTHON_BIN $scheme_py $dep_file_name $gen_file_name || \
@@ -76,6 +79,6 @@ else
 fi
 
 #generate mcs *stub.h files
-gen_file clnt/nvmeibc_mcs_stub.h $clnt_scheme_json
-gen_file toma/nvmeibt_mcs_stub.h $toma_scheme_json
-gen_file srv/nvmeibs_mcs_stub.h $srv_scheme_json
+gen_file clnt/nvmeibc_mcs_stub.h $clnt_scheme_json $common_scheme_json
+gen_file toma/nvmeibt_mcs_stub.h $toma_scheme_json $common_scheme_json
+gen_file srv/nvmeibs_mcs_stub.h $srv_scheme_json $common_scheme_json

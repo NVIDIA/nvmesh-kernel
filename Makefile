@@ -1279,12 +1279,14 @@ export AUTOGEN_SUBDIRS_TOMA = common toma
 # so the recursive invocation re-enters on every top-level build.  rsync
 # runs without -t, so any transferred source gets a current-time mtime and
 # trips the liblz4.a: $(SRCFILES) rule even when content is identical.
-# Gate at parse time: only invoke the sub-make when the archive is missing
-# or an actual source is newer.
+# Use a sentinel file (.lz4_built) that rsync never touches (excluded in the
+# excludes file) and that is only updated after a successful lz4 build, so
+# the staleness check is decoupled from lz4's own clean/archive timestamps.
 LZ4_LIB := $(TOOLS_DIR)/lz4/lib/liblz4.a
-LZ4_NEED_BUILD := $(shell [ ! -f $(LZ4_LIB) ] && echo yes || find $(TOOLS_DIR)/lz4/lib \( -name '*.c' -o -name '*.h' \) -newer $(LZ4_LIB) -print -quit 2>/dev/null)
+LZ4_SENTINEL := $(TOOLS_DIR)/lz4/.lz4_built
+LZ4_NEED_BUILD := $(shell [ ! -f $(LZ4_SENTINEL) ] && echo yes || find $(TOOLS_DIR)/lz4/lib \( -name '*.c' -o -name '*.h' \) -newer $(LZ4_SENTINEL) -print -quit 2>/dev/null)
 ifneq ($(LZ4_NEED_BUILD),)
-COMPILE_LZ4 = +$(MAKE) -C $(TOOLS_DIR)/lz4 BUILD_SHARED=no BUILD_STATIC=yes lib-release
+COMPILE_LZ4 = +$(MAKE) -C $(TOOLS_DIR)/lz4 BUILD_SHARED=no BUILD_STATIC=yes lib-release && touch $(LZ4_SENTINEL)
 else
 COMPILE_LZ4 = @:
 endif
@@ -1298,7 +1300,7 @@ COMPILE_SHARED_INFRA = +$(MAKE) -C $(TOOLS_DIR)/infra_shared SSDA=$(NVMESH_SRC_D
 COMPILE_NVME= +$(MAKE) -C $(SCRIPTS_DIR)/target/nvme-cli CFLAGS="-std=c99 -Wall"
 COLLECT_DICTIONARIES = ./collect_dictionaries.sh
 CLEAN_AUTOGEN = +$(MAKE) -C $(AUTOGEN_DIR) NVMESH_SRC_DIR=$(NVMESH_SRC_DIR) clean
-CLEAN_LZ4 = +$(MAKE) -C $(TOOLS_DIR)/lz4 clean
+CLEAN_LZ4 = +$(MAKE) -C $(TOOLS_DIR)/lz4 clean && $(RM) $(LZ4_SENTINEL)
 CLEAN_COMPRESS = +$(MAKE) -C $(TOOLS_DIR)/trace_compress_lib clean
 CLEAN_TRACE_DAEMON_2 = +$(MAKE) -C $(TOOLS_DIR)/trace_daemon_2.0 clean
 CLEAN_TRACE_PP_DIR = find -name .trace_pp_dir | xargs rm -Rf
