@@ -281,8 +281,9 @@ int nvmeibt_disk_print_status_line(int (*printf_fn)(void *ctx, const char *fmt, 
 		(*printf_fn)(printf_ctx, "\t");
 	}
 
-	(*printf_fn)(printf_ctx, "- ldisk=%s disk=%s n_segments=%d config_node=%s\n",
-				 nvmeibt_disk_get_ldisk_id_str(disk), nvmeibt_disk_id_str(disk), disk->n_segments, nvmeibt_node_name(disk->its_node_config));
+	(*printf_fn)(printf_ctx, "- ldisk=%s disk=%s n_segments=%d config_node=%s%s\n",
+				 nvmeibt_disk_get_ldisk_id_str(disk), nvmeibt_disk_id_str(disk), disk->n_segments, nvmeibt_node_name(disk->its_node_config),
+				 disk->is_drive_write_error ? " DRIVE_WRITE_ERROR" : "");
 out:
 	return 0;
 }
@@ -304,7 +305,7 @@ int nvmeibt_disk_print_disks_status(int (*printf_fn)(void *ctx, const char *fmt,
 				struct nvmeibt_disk_segment				*seg = disk->disk_segments[k];
 				struct nvmeibt_disk_segment_topo_ctx	*topo_ctx;
 				topo_ctx = (nvmeibt_raft_is_leader()? &(seg->seg_leader.baseline_seg_lot.seg_topo) : &(seg->seg_follower.applied_seg_lot.seg_topo));
-				(*printf_fn)(printf_ctx, "\t\t\t- seg=%.8s vol=%s praid_ver=%x state=%s are_reg_sync=%d init_mode(dirty=%s stale=%s) depr_flag=%c%s\n",
+				(*printf_fn)(printf_ctx, "\t\t\t- seg=%.8s vol=%s praid_ver=%x state=%s are_reg_sync=%d init_mode(dirty=%s stale=%s) depr_flag=%c%s%s\n",
 						nvmeibt_disk_segment_id_str(seg),
 						nvmeibt_disk_segment_blkdev_name(seg),
 						topo_ctx->seg_praid_version_major,
@@ -312,7 +313,8 @@ int nvmeibt_disk_print_disks_status(int (*printf_fn)(void *ctx, const char *fmt,
 						topo_ctx->active_seg_flags.are_praid_registrants_aligned_with_sync_cmd,
 						mem_tbl_init_mode_str(topo_ctx->dirty_bits_init_mode), mem_tbl_init_mode_str(topo_ctx->stale_locks_init_mode),
 						seg->from_config.deprecation_flag,
-						nvmeibt_disk_segment_is_config_OK(seg) ? "" : " !is_config_OK");
+						nvmeibt_disk_segment_is_config_OK(seg) ? "" : " !is_config_OK",
+						seg->is_drive_write_error ? " DRIVE_WRITE_ERROR" : "");
 			}
 
 		}

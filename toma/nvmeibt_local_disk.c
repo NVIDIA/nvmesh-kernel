@@ -1702,9 +1702,12 @@ void print_one_local_disk_status(int (*printf_fn)(void *ctx, const char *fmt, ..
 {
 	struct nvmeibt_local_disk_config *f = &local_disk->from_config;
 
-	(*printf_fn)(printf_ctx, "- Disk=%s pblk_size=%d metadata_size=%d n_pblks=%llu n_hw_pblk=%llu dev=%s status=%s\n",
+	(*printf_fn)(printf_ctx, "- Disk=%s pblk_size=%d metadata_size=%d n_pblks=%llu n_hw_pblk=%llu dev=%s status=%s%s%s%s\n",
 				 nvmeibt_local_disk_display(local_disk), f->pblk_size, f->metadata_n_bytes, f->n_pblk, f->n_hw_pblk,
-				 f->dev_file_name, f->status);
+				 f->dev_file_name, f->status,
+				 local_disk->is_excluded ? " EXCLUDED" : "",
+				 local_disk->is_explicitly_excluded ? "(explicit)" : "",
+				 local_disk->is_drive_write_error ? " DRIVE_WRITE_ERROR" : "");
 	if (strstr(f->status, "Initializing") != NULL) {
 		(*printf_fn)(printf_ctx, "last_pba_zeroed=%zu\n", f->disk_metadata.last_pba_zeroed);
 	}
