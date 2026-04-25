@@ -2676,6 +2676,8 @@ bool nvmeibt_topology_add_persistency_save_wq_item(bool is_req_vote)
 	nvmeibt_raft_fill_persistence_buf_for_system_disk(&(write_to_persistency_task->follower_persist_buf_full));
 	if (is_topo_save_submitted_for_all && nvmeibt_toma_persistency_add_work(&(write_to_persistency_task->wq_entry)) != 0) {
 		N_Ef(error_topology_nvmeibt_topology_add_persistency_save_wq_item, "Unable to add persistency offload task to WQ!");
+		nvmeibt_raft_get_my_raft()->n_persist_failures++;
+		nvmeibt_raft_get_my_raft()->last_persist_failure_timestamp_sec = nvmeibt_global_get_cur_event_start_time().tv_sec;
 		is_topo_save_submitted_for_all = 0;
 	}
 	if (!is_topo_save_submitted_for_all) {

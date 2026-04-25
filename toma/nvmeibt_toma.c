@@ -1847,6 +1847,7 @@ void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn
 int nvmeibt_toma_get_real_time_errors_str(struct nvmeibt_Str *out) {
 	nvmeibt_Str_sprintf(out,"{");
 	nvmeibt_kafka_get_real_time_errors_str(out);
+	nvmeibt_raft_get_real_time_errors_str(out);
 	nvmeibt_Str_sprintf(out,"}\n");
 	return nvmeibt_Str_strlen(out);
 }

@@ -2665,11 +2665,15 @@ int nvmeibt_raft_save_toma_state_to_persistency(struct nvmeibt_persistency_wq_en
 
 	if (write_new_version_of_toma_persistency_file(&(entry->follower_persist_buf_full)) < 0) {
 		N_WTf(aji985r, "Failed to write current version of toma persistency");
+		my_raft_global.n_persist_failures++;
+		my_raft_global.last_persist_failure_timestamp_sec = nvmeibt_global_get_cur_event_start_time().tv_sec;
 		goto out;
 	}
 
 	if (keep_old_versions_of_toma_persistency_file() < 0) {
 		N_Wf(djur873, "Failed to keep old versions of toma persistency");
+		my_raft_global.n_persist_failures++;
+		my_raft_global.last_persist_failure_timestamp_sec = nvmeibt_global_get_cur_event_start_time().tv_sec;
 		goto out;
 	}
 
@@ -4956,6 +4960,56 @@ int nvmeibt_raft_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...),
 	}
 	NFOUT;
 	return 0;
+}
+
+void nvmeibt_raft_get_real_time_errors_str(struct nvmeibt_Str *out)
+{
+	struct nvmeibt_raft_member		*peer_member = NULL;
+	__kernel_long_t					now_sec = nvmeibt_global_get_cur_event_start_time().tv_sec;
+	struct nvmeibt_nm_local_node	*local_node = NULL;
+
+	if (!raft_do_we_have_a_stable_leader()) {
+		nvmeibt_Str_sprintf(out, "No stable leader! time_without_leader=%dsec,\n", nvmeibt_raft_get_time_without_leader_sec());
+	}
+
+	if (my_raft_global.n_persist_failures > 0){
+		nvmeibt_Str_sprintf(out, "Cannot commit topology! persist_failures=%d last_failure=%lld sec_ago,\n",
+				my_raft_global.n_persist_failures, now_sec - my_raft_global.last_persist_failure_timestamp_sec);
+	}
+
+	local_node = nvmeibt_get_nw_node();
+	NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
+		if (peer_member->is_me || !peer_member->its_node) {
+			continue;
+		}
+		if (!nvmeibt_nm_is_remote_node_connected(local_node, peer_member->its_node)) {
+			nvmeibt_Str_sprintf(out, "Configured host without connectivity: %s,\n", nvmeibt_raft_member_name(peer_member));
+		}
+	}
+
+	if (nvmeibt_raft_is_leader()) {
+		NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
+			int64_t		peer_topo_idx = extract_lower_32_bits_idx(nvmeibt_tlv_get_idx(&(peer_member->committed_persist_and_wire_buf_hdr.topo_ctx)));
+			int64_t		leader_topo_idx = extract_lower_32_bits_idx(RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit));
+			int64_t		topo_behind = leader_topo_idx - peer_topo_idx;
+			if (topo_behind > 2) {
+				nvmeibt_Str_sprintf(out, "%s is %lld topologies behind leader,\n", nvmeibt_raft_member_name(peer_member), topo_behind);
+			}
+		}
+	} else if (my_raft_global.follower_to_commit_persist_and_wire_buf_full) {
+		int64_t		my_topo_idx = extract_lower_32_bits_idx(RAFT_COMMIT_LIFECYCLE_VAL(TOPO, follower_committed));
+		int64_t		leader_topo_idx = extract_lower_32_bits_idx(nvmeibt_tlv_get_idx(&(my_raft_global.follower_to_commit_persist_and_wire_buf_full->topo_ctx)));
+		int64_t		topo_behind = leader_topo_idx - my_topo_idx;
+		if (topo_behind > 2) {
+			nvmeibt_Str_sprintf(out, "Local toma is %lld topologies behind leader,\n", topo_behind);
+		}
+	}
+}
+
+void nvmeibt_raft_clear_problem_counters(void)
+{
+	my_raft_global.n_persist_failures = 0;
+	my_raft_global.last_persist_failure_timestamp_sec = 0;
 }
 
 int nvmeibt_raft_print_status_json(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)

@@ -120,7 +120,8 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 				"\tkill9\n"
 				"\tincremental-wire-buf enable/disable\n"
 				"\tresend-praids-report all/<volume_name>\n"
-				"\treelect\n");
+				"\treelect\n"
+				"\tclear-problem-counters\n");
 		return -1;
 	}
 
@@ -393,6 +394,12 @@ static int nvmeibt_rpc_command_simulate(int argc, char *argv[], struct nvmeibt_S
 		return 0;
 	}
 #endif
+
+	else if (strcmp("clear-problem-counters", argv[1])==0) {
+		nvmeibt_raft_clear_problem_counters();
+		nvmeibt_Str_sprintf(out, "Problem counters cleared.\n");
+		return 0;
+	}
 
 	nvmeibt_Str_sprintf(out, "Unknown sub-command '%s'. Use 'simulate' alone to get a list of available options.\n", argv[1]);
 	return -1;

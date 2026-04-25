@@ -197,6 +197,8 @@ struct nvmeibt_raft_ctx {
 	int						n_raft_members;
 	int						n_raft_active_members;
 	uint32_t				guaranteed_sw_ver;		// Cluster governance: leader+majority at this sw_ver. Old binaries cannot lead.
+	int						n_persist_failures;
+	int64_t					last_persist_failure_timestamp_sec;
 //	struct nvmeibt_Buf		serialized_members;
 	struct timespec			leader_first_APPEND_ENTRIES_with_cur_committed_and_applied_topo_timespec;
 };
@@ -292,6 +294,8 @@ BOOL nvmeibt_raft_is_raft_valid(void);
 void nvmeibt_raft_convert_to_leader(void);
 int nvmeibt_raft_get_time_without_leader_sec(void);
 int nvmeibt_raft_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
+void nvmeibt_raft_get_real_time_errors_str(struct nvmeibt_Str *out);
+void nvmeibt_raft_clear_problem_counters(void);
 int nvmeibt_raft_print_status_json(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 int nvmeibt_leader_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 void nvmeibt_raft_fill_persistence_buf_for_system_disk(struct nvmeibt_Buf *buf_to_save);
