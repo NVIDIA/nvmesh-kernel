@@ -172,6 +172,7 @@ int nvmeibt_topology_add_seg_active_to_both_mem_gpts(struct nvmeibt_local_disk *
 bool nvmeibt_topology_add_persistency_save_wq_item(bool is_req_vote);
 int nvmeibt_topology_init(void);
 int nvmeibt_topology_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
+void nvmeibt_topology_get_real_time_errors_str(struct nvmeibt_Str *out);
 bool nvmeibt_topology_is_disk_explicitly_excluded(struct nvmeibt_ascii_uuid *native_serial, unsigned int vendor_id, char *model_str, int nsid);
 bool nvmeibt_topology_is_disk_explicitly_auto_takeover(struct nvmeibt_ascii_uuid *native_serial, unsigned int vendor_id, char *model_str, int nsid);
 void nvmeibt_topology_free_resources(void);

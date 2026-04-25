@@ -2709,6 +2709,60 @@ int nvmeibt_topology_print_status(int (*printf_fn)(void *ctx, const char *fmt, .
 	return 0;
 }
 
+void nvmeibt_topology_get_real_time_errors_str(struct nvmeibt_Str *out)
+{
+	struct nvmeibt_disk			*disk;
+	struct nvmeibt_local_disk	*local_disk;
+	struct nvmeibt_praid		*praid;
+	NVMEIB_HASH_FOREACH(disk, nvmeibt_global_get_global()->disks_hash_by_uuid) {
+		if (disk->is_drive_write_error) {
+			nvmeibt_Str_sprintf(out, "DRIVE_WRITE_ERROR: disk=%s node=%s,\n", nvmeibt_disk_id_str(disk), nvmeibt_node_name(disk->its_node_config));
+		}
+		for (int k = 0; k < disk->n_segments; k++) {
+			struct nvmeibt_disk_segment	*seg = disk->disk_segments[k];
+			praid = nvmeibt_disk_segment_get_praid(seg);
+			if (!nvmeibt_disk_segment_is_config_OK(seg)) {
+				nvmeibt_Str_sprintf(out, "CONFIG_ERROR: seg=%.8s vol=%s disk=%s,\n",
+						nvmeibt_disk_segment_id_str(seg), nvmeibt_disk_segment_blkdev_name(seg), nvmeibt_disk_id_str(disk));
+			}
+			if (seg->is_drive_write_error) {
+				nvmeibt_Str_sprintf(out, "DRIVE_WRITE_ERROR: seg=%.8s vol=%s disk=%s,\n",
+						nvmeibt_disk_segment_id_str(seg), nvmeibt_disk_segment_blkdev_name(seg), nvmeibt_disk_id_str(disk));
+			}
+			if (!praid) {
+				nvmeibt_Str_sprintf(out, "ORPHANED_SEG: seg=%.8s disk=%s (no praid),\n",
+						nvmeibt_disk_segment_id_str(seg), nvmeibt_disk_id_str(disk));
+			} else if (!nvmeibt_disk_segment_is_deprecated_in_config(seg) && nvmeibt_praid_is_deprecated_in_config(praid)) {
+				nvmeibt_Str_sprintf(out, "SEG_VOL_MISMATCH: seg=%.8s vol=%s disk=%s (segment active but volume deprecated),\n",
+						nvmeibt_disk_segment_id_str(seg), nvmeibt_disk_segment_blkdev_name(seg), nvmeibt_disk_id_str(disk));
+			}
+		}
+	}
+	NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
+		if (local_disk->is_excluded) {
+			nvmeibt_Str_sprintf(out, "EXCLUDED: disk=%s%s,\n",
+					nvmeibt_local_disk_display(local_disk), local_disk->is_explicitly_excluded ? " (explicit)" : "");
+		}
+		if (local_disk->is_drive_write_error) {
+			nvmeibt_Str_sprintf(out, "DRIVE_WRITE_ERROR: local_disk=%s,\n", nvmeibt_local_disk_display(local_disk));
+		}
+		if (local_disk->is_conf_corrupted) {
+			nvmeibt_Str_sprintf(out, "CONFIG_CORRUPTED: disk=%s,\n", nvmeibt_local_disk_display(local_disk));
+		}
+		// Local disk with segments that is not ready blocks topology persist submission
+		if (!local_disk->is_excluded && local_disk->its_disk && local_disk->its_disk->n_segments &&
+			!nvmeibt_local_disk_is_ready_for_segments(local_disk)) {
+			nvmeibt_Str_sprintf(out, "NOT_READY: local_disk=%s n_segments=%d,\n",
+					nvmeibt_local_disk_display(local_disk), local_disk->its_disk->n_segments);
+		}
+	}
+	NVMEIB_HASH_FOREACH(praid, nvmeibt_global_get_global()->praids_hash_by_uuid) {
+		if (nvmeibt_praid_is_conf_corrupted(praid)) {
+			nvmeibt_Str_sprintf(out, "PRAID_CONFIG_CORRUPTED: vol=%s,\n", nvmeibt_praid_get_blkdev_name(praid));
+		}
+	}
+}
+
 bool is_disk_match_spec(target_drives_spec_t *drives_spec_list, struct nvmeibt_ascii_uuid *native_serial, unsigned int vendor_id, char *model_str, int nsid)
 {
 	struct target_drive	*drive_spec_line;
