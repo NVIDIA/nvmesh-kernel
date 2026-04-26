@@ -2340,9 +2340,9 @@ static void cdv_push_capacity_restore(const char *cdv_uuid)
 		struct nvmeibt_seg_active     *seg_active;
 		struct nvmeibt_registrant_ctx *reg_ctx;
 
-		NVMEIB_HASH_FOREACH(local_disk, nvmeibt_global_get_global()->nvmesh_local_disks_hash_by_ldisk_id_str) {
-			NVMEIB_HASH_FOREACH(seg_active, local_disk->seg_active_hash_by_uuid) {
-				NVMEIB_HASH_FOREACH(reg_ctx, seg_active->active_registrants_hash_by_lockid) {
+		XHASHTABLE_FOR_EACH_SAFE(local_disk, &nvmeibt_global_get_global()->local_disks_hash) {
+			XHASHTABLE_FOR_EACH_SAFE(seg_active, &local_disk->seg_active_hash) {
+				XHASHTABLE_FOR_EACH_SAFE(reg_ctx, &seg_active->active_registrants) {
 					if (nvmeibt_register_is_processing_registrant_removal(reg_ctx))
 						continue;
 					nvmeibt_register_send_msg_to_registrant(

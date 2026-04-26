@@ -941,8 +941,7 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 		N_Tf(3vx723k, "@STR committed=@LD, Watermark [@LD..@LD] commit_err='@STR' wm_err='@STR'", name, pl->elems[0].offset, low_wm, high_wm, rd_kafka_err2str(k_err), rd_kafka_err2str(k_err_watermark));
 		if ((k_err == RD_KAFKA_RESP_ERR_NO_ERROR) && (pl->elems[0].offset >= 0L)) {	// May return RD_KAFKA_OFFSET_INVALID if queue just created and was never read from
 			calc_offset = pl->elems[0].offset;
-			if ((k_err_watermark == RD_KAFKA_RESP_ERR_NO_ERROR) && ((calc_offset < low_wm) || (calc_offset > high_wm)))
-				N_Wf(minwusk, “@STR Kafka error. commited offset @LD is NOT in watermarks [@LD..@LD]”, name, calc_offset, low_wm, high_wm);		// This is a valid, When kafka client connets, broker will respond “offset out of range, and “auto.offset.reset” will take the earliest message
+			/* offset-out-of-watermarks is valid on first connect; already logged by 3vx723k above */
 		} else {
 			calc_offset = RD_KAFKA_OFFSET_BEGINNING;	// Now default is use beginning as fallback
 			k_err = __consumer_assign_partition_and_offset(k, calc_offset);
