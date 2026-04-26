@@ -35,7 +35,8 @@ struct nvmeibt_wq {
 	char *name;
 	pthread_t thr;
 	pthread_mutex_t guard;
-	pthread_cond_t wakeup;
+	/* aligned to prevent cache-line split lock in pthread_cond_wait/signal */
+	pthread_cond_t wakeup __attribute__((aligned(64)));
 	wq_entries_list_t entries1;
 	wq_entries_list_t entries2;
 	wq_entries_list_t *entries;
@@ -203,7 +204,9 @@ struct nvmeibt_wq *nvmeibt_wq_create(const char *name)
 	pthread_condattr_t cattr;
 	pthread_attr_t tattr;
 
-	wq = NNVMEIBT_TOMA_CALLOC(trace_wq_nvmeibt_wq_create, 1, (sizeof(*wq)));
+	NNVMEIBT_TOMA_POSIX_MEMALIGN(trace_wq_nvmeibt_wq_create, (void **)&wq, 64, sizeof(*wq));
+	if (wq)
+		memset(wq, 0, sizeof(*wq));
 	if ((len = strlen(name)) > 0) {
 		wq->name = NNVMEIBT_TOMA_CALLOC(trace_1_wq_nvmeibt_wq_create, len + 1, 1);
 		nvmeibt_strlcpy(wq->name, name, len + 1);
