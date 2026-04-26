@@ -14,7 +14,7 @@ enum nvmeibt_raft_msg_type {
 };
 
 struct raft_msg {
-	unsigned int				sw_ver;										// 4	// TOMA_SW_VER: binary capability version of the sender
+	uint32_t					sw_ver;										// 4	// TOMA_SW_VER: binary capability version of the sender
 	char						git_commit_id[41 + 3];						// 48
 	enum nvmeibt_raft_msg_type	msg_type:32;								// 52
 	union nvmeib_uuid			src_node_id;								// 68
