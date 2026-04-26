@@ -6,7 +6,7 @@
 int nvmeib_remove_unsafe_symbols(char* dst, const char* src)
 {
 	const char *dst_start = dst;
-	const char lut[128] = { // All printable ASCII's simplification lookup table
+	__attribute__((nonstring)) const char lut[128] = { // All printable ASCII's simplification lookup table
 	//"          \n                      !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\ ]^_`abcdefghijklmnopqrstuvwxyz{|}~ ";
 	 "\0         \n                      !_#$%&_()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^__abcdefghijklmnopqrstuvwxyz{|}~ "};
 	#define __transform(src) lut[(((int)(*(src)))&(0x7F))]

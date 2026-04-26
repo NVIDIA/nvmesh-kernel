@@ -46,6 +46,7 @@ GCC_VERSION := $(shell gcc -dumpversion)
 USE_RELEASE?=0#Compile release
 LDFLAGS = -rdynamic -no-pie
 CFLAGS += $(EXTRA_CFLAGS)
+CFLAGS += -Wno-address-of-packed-member
 CFLAGS += -Wall -Werror -std=gnu99 -Wdeclaration-after-statement -Wstrict-prototypes#Simulate kernel compilation & enable all warning. Can use gnu89 instead of 99
 CFLAGS += -Wextra -Wshadow -Werror=strict-aliasing -Wno-type-limits# Location of inline in function declaration
 
