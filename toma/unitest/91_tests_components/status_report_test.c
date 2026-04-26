@@ -22,6 +22,7 @@ extern void print_one_local_disk_status(int (*printf_fn)(void *ctx, const char *
 #include <string.h>
 #include <stdarg.h>
 
+#define VERIFY_WRITE_ERROR_CODE "DRIVE_WRITE_ERROR"		// Todo: should have error code
 /******************** Buffer-capturing printf ***************************/
 
 #define STATUS_BUF_SIZE		(64 * 1024)
@@ -89,7 +90,7 @@ DEFINE_TEST(local_disk_drive_write_error_flag)
 	snprintf(ld->from_config.status, sizeof(ld->from_config.status), "Ok");
 	ld->is_drive_write_error = 1;
 	print_one_local_disk_status(capture_printf, c, ld);
-	TEST_ASSERT_NOT_NULL(strstr(c->buf, "DRIVE_WRITE_ERROR"));
+	TEST_ASSERT_NOT_NULL(strstr(c->buf, VERIFY_WRITE_ERROR_CODE));
 	rv = 0;
 out:
 	free(ld);
@@ -109,7 +110,7 @@ DEFINE_TEST(local_disk_no_flags_when_healthy)
 	snprintf(ld->from_config.status, sizeof(ld->from_config.status), "Ok");
 	print_one_local_disk_status(capture_printf, c, ld);
 	TEST_ASSERT_TRUE(strstr(c->buf, "EXCLUDED") == NULL);
-	TEST_ASSERT_TRUE(strstr(c->buf, "DRIVE_WRITE_ERROR") == NULL);
+	TEST_ASSERT_TRUE(strstr(c->buf, VERIFY_WRITE_ERROR_CODE) == NULL);
 	rv = 0;
 out:
 	free(ld);
@@ -138,8 +139,7 @@ DEFINE_TEST(errors_follower_behind_topology)
 	nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->topo_ctx.tlv_idx = LE_SWAP64((int64_t)10);
 	nvmeibt_raft_get_my_raft()->TOPO_commit_lifecycle.follower_committed = 5;
 	nvmeibt_raft_get_real_time_errors_str(out);
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Local toma is"));
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "topologies behind leader"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7005"));
 	rv = 0;
 out:
 	free(test_buf);
@@ -169,7 +169,7 @@ DEFINE_TEST(errors_follower_not_behind_at_current)
 	nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->topo_ctx.tlv_idx = LE_SWAP64((int64_t)10);
 	nvmeibt_raft_get_my_raft()->TOPO_commit_lifecycle.follower_committed = 9;
 	nvmeibt_raft_get_real_time_errors_str(out);
-	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), "topologies behind leader") == NULL);
+	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), "Err=7005") == NULL);
 	rv = 0;
 out:
 	free(test_buf);
@@ -205,7 +205,9 @@ DEFINE_TEST(errors_leader_reports_peer_behind_topology)
 	nvmeibt_raft_get_my_raft()->role = RAFT_ROLE_LEADER;
 	nvmeibt_raft_get_my_raft()->TOPO_commit_lifecycle.leader_to_commit = 10;
 	nvmeibt_raft_get_real_time_errors_str(out);
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "peer-behind is 6 topologies behind leader"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7004"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "peer-behind"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "6 topologies"));
 	rv = 0;
 out:
 	nvmeibt_raft_get_my_raft()->role = saved_role;
@@ -239,7 +241,7 @@ DEFINE_TEST(errors_raft_configured_host_without_connectivity)
 	member->its_node = node;
 	TEST_set_nm_remote_nodes_connected(false);
 	nvmeibt_raft_get_real_time_errors_str(out);
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Configured host without connectivity: peer-no-conn"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "peer-no-conn"));		// Verify report about the peer, regardless of the specific message
 	rv = 0;
 out:
 	TEST_set_nm_remote_nodes_connected(true);
@@ -330,7 +332,7 @@ DEFINE_TEST(errors_topo_no_errors_when_healthy)
 	TEST_add_local_disk_to_hash("test-ldisk-003", false, false);
 	added_ldisk = true;
 	nvmeibt_topology_get_real_time_errors_str(out);
-	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), "DRIVE_WRITE_ERROR") == NULL);
+	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), VERIFY_WRITE_ERROR_CODE) == NULL);
 	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), "EXCLUDED") == NULL);
 	rv = 0;
 out:
@@ -440,9 +442,11 @@ out:
 	return rv;
 }
 
+#include "../kafka/sandbox_kafka_internal.h"
 DEFINE_TEST(errors_kafka_incompatible_version)
 {
 	struct nvmeibt_Str			*out = NNVMEIBT_STR_ALLOC(kiv01);
+	struct kafka_simulator_t *k = sandbox_kafka_init(NULL);
 	int							rv = -1;
 	(void)_ctx;
 
@@ -453,6 +457,7 @@ DEFINE_TEST(errors_kafka_incompatible_version)
 	rv = 0;
 out:
 	TEST_set_rd_kafka_version(0x020501ff, "2.5.1");
+	sandbox_kafka_destroy(k);
 	NNVMEIBT_STR_FREE(kiv03, out);
 	return rv;
 }
@@ -468,8 +473,7 @@ DEFINE_TEST(errors_raft_no_stable_leader)
 	NNVMEIBT_STR_RESIZE_BUF(spt02, out, 4096);
 	// Raft is UNKNOWN by default — no stable leader
 	nvmeibt_raft_get_real_time_errors_str(out);
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "No stable leader!"));
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "time_without_leader="));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7001"));
 	rv = 0;
 out:
 	NNVMEIBT_STR_FREE(spt03, out);
@@ -487,11 +491,11 @@ DEFINE_TEST(errors_raft_persist_failure)
 	NNVMEIBT_STR_RESIZE_BUF(spt05, out, 4096);
 	saved_n_persist_failures = nvmeibt_raft_get_my_raft()->n_persist_failures;
 	saved_last_persist_failure_timestamp_sec = nvmeibt_raft_get_my_raft()->last_persist_failure_timestamp_sec;
-	nvmeibt_raft_get_my_raft()->n_persist_failures = 5;
+	nvmeibt_raft_get_my_raft()->n_persist_failures = 115;
 	nvmeibt_raft_get_my_raft()->last_persist_failure_timestamp_sec = 100;
 	nvmeibt_raft_get_real_time_errors_str(out);
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Cannot commit topology!"));
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "persist_failures=5"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7002"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "115"));
 	rv = 0;
 out:
 	nvmeibt_raft_get_my_raft()->n_persist_failures = saved_n_persist_failures;
@@ -518,7 +522,7 @@ DEFINE_TEST(errors_raft_clear_counters)
 	TEST_ASSERT_EQ(nvmeibt_raft_get_my_raft()->last_persist_failure_timestamp_sec, 0);
 	// Verify errors output no longer contains persist failure
 	nvmeibt_raft_get_real_time_errors_str(out);
-	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), "Cannot commit topology!") == NULL);
+	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), "Err=7002") == NULL);
 	rv = 0;
 out:
 	nvmeibt_raft_get_my_raft()->n_persist_failures = saved_n_persist_failures;
@@ -552,7 +556,7 @@ DEFINE_TEST(errors_consolidated_output)
 	TEST_ASSERT_TRUE(nvmeibt_Str_str(out)[0] == '{');
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "}"));
 	// Raft is UNKNOWN — should include no stable leader in consolidated output
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "No stable leader!"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7001"));
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "DRIVE_WRITE_ERROR: local_disk="));
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "ENCRYPTION: n_volumes_encrypting=1"));
 	rv = 0;

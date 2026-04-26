@@ -332,7 +332,7 @@ case "$1" in
   rebuild*)		__force_rebuild;;
   framework*)	T_SANDBOX_test_framework ${@:2};;
   wire*)		T_SANDBOX_wire_buf_test ${@:2};;
-  status*)	T_SANDBOX_status_report_test ${@:2};;
+  status*)		T_SANDBOX_status_report_test ${@:2};;
   trace_comp*)	T_SANDBOX_trace_compress_test ${@:2};;
   trace_cmp*)	T_SANDBOX_trace_compress_comparison ${@:2};;
   main*)		T_SANDBOX_main_self_unit_test ${@:2};;

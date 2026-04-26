@@ -8,15 +8,6 @@
 #include "sandbox_kafka_public.h"
 #include "nvmeibt_debug.h"
 
-int TEST_sandbox_rd_kafka_version = 0x020501ff;
-const char *TEST_sandbox_rd_kafka_version_str = "2.5.1";
-
-void TEST_set_rd_kafka_version(int version, const char *version_str)
-{
-	TEST_sandbox_rd_kafka_version = version;
-	TEST_sandbox_rd_kafka_version_str = version_str;
-}
-
 /************************************* Internal struct definitions ********************************/
 struct sim_broker_topic {		// Kafka Broker topic implementation = append-only log of messages
 	pthread_mutex_t lock;		// Toma sends sends/consume messages only from kafka thread. Simulated management may send/consume in other thread
@@ -173,6 +164,8 @@ struct kafka_simulator_t {
 	struct sim_broker_topic topics[7];		// Kafka broker (backend) topics, always exist even if Toma is not connected to them via kafka client
 	rd_kafka_t *obj[7];						// Kafka client: 4 Toma consumers, 3 Toma producers
 	int n_obj;
+	int version;		// hex MM.mm.rr.xx
+	const char *version_str;
 	void (*notify_toma_producer_msg_accepted)( rd_kafka_t *rk, const rd_kafka_message_t *kmsg, void *opaque);
 	void (*notify_toma_consumer_offset_commit)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque);
 	void (*notify_mgmt_simu_toma_send_msg)(struct sim_broker_topic *t);
@@ -191,6 +184,8 @@ struct kafka_simulator_t *sandbox_kafka_init(void (*fn)(struct sim_broker_topic 
 	sim_broker_topic_create(&ks->topics[5], KTOPIC_TYPE_T2M_KEEPALIVE,		1);		// Mgmt Simu will consume toma reports immediately, May discard all messages except for last one
 	sim_broker_topic_create(&ks->topics[6], KTOPIC_TYPE_T2M_LOW,			1);		// Mgmt Simu will consume toma reports immediately
 	ks->notify_mgmt_simu_toma_send_msg = fn;
+	ks->version = 0x020501ff;		// hex MM.mm.rr.xx
+	ks->version_str = "2.5.1";
 	return ks;
 }
 
@@ -202,6 +197,14 @@ void sandbox_kafka_destroy(struct kafka_simulator_t *ks) {
 	free(g_kafka_simu);
 	g_kafka_simu = NULL;
 }
+
+void TEST_set_rd_kafka_version(int version, const char *version_str) {
+	g_kafka_simu->version = version;
+	g_kafka_simu->version_str = version_str;
+}
+
+int         rd_kafka_version(    void) { return g_kafka_simu ? g_kafka_simu->version     : 0x0; }		// Kafka might be uninitialized in some white box tests. With live Toma this should not occur
+const char* rd_kafka_version_str(void) { return g_kafka_simu ? g_kafka_simu->version_str : "???"; }
 
 /************************************* Static helpers ********************************/
 static bool is_kafka_cp_used(const rd_kafka_t* o) {

@@ -26,3 +26,4 @@ void sandbox_kafka_destroy(struct kafka_simulator_t *ks);
 
 // Errors injection:
 void sim_broker_topic_msg_inject_next_msg_offset(struct sim_broker_topic *t, int delta_offset);
+void TEST_set_rd_kafka_version(int version, const char *version_str);

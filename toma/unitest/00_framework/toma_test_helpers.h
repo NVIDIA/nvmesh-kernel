@@ -18,7 +18,6 @@ extern void TEST_init(void);
 
 /* Sandbox controls — unitest/toma_in_sandbox.c and unitest/kafka/sandbox_kafka.c */
 extern void TEST_set_nm_remote_nodes_connected(bool is_connected);
-extern void TEST_set_rd_kafka_version(int version, const char *version_str);
 
 /* RPC command dispatch — nvmeibt_rpc.c */
 extern int TEST_nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out);

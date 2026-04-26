@@ -81,9 +81,6 @@ enum my_rd_kafka_producer_flags { RD_KAFKA_MSG_F_FREE = 0x1, RD_KAFKA_MSG_F_COPY
 #define RD_KAFKA_PURGE_F_INFLIGHT 0x2
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque);
 rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *rk, char *errstr, size_t errstr_size);
-extern int TEST_sandbox_rd_kafka_version;
-extern const char *TEST_sandbox_rd_kafka_version_str;
-void TEST_set_rd_kafka_version(int version, const char *version_str);
-static inline int         rd_kafka_version(    void)	{ return TEST_sandbox_rd_kafka_version; }	// hex MM.mm.rr.xx
-static inline const char* rd_kafka_version_str(void)	{ return TEST_sandbox_rd_kafka_version_str; }
+int         rd_kafka_version(    void);	// hex MM.mm.rr.xx
+const char* rd_kafka_version_str(void);
 rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t *rk, int purge_flags);
