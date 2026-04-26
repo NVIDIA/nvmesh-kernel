@@ -128,8 +128,8 @@ static inline int32_t nvmeibt_tlv_get_CRC(const struct nvmeibt_wire_type_len_val
 }
 
 struct nvmeibt_persist_and_wire_buf {
-	int32_t												buf_encoding_ver;			// 4	// TOMA_ENCODING_VER: byte layout version of this buffer's content
-	int													persist_and_wire_total_len;	// 8
+	uint32_t											buf_encoding_ver;			// 4	TOMA_ENCODING_VER: byte layout version of this buffer's content
+	uint32_t											persist_and_wire_total_len;	// 8	This struct with all appendices
 	struct raft_persistency								raft_ctx;					// 96
 	struct nvmeibt_wire_type_len_value					topo_ctx;					// 128
 	struct nvmeibt_wire_type_len_value					topo_config_ctx;			// 160
