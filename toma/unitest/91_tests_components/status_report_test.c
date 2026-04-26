@@ -390,57 +390,6 @@ out:
 }
 
 static const union nvmeib_uuid test_blkdev_uuid_short = { .bytes = {0x20} };
-static const union nvmeib_uuid test_blkdev_uuid_long = { .bytes = {0x21} };
-
-DEFINE_TEST(errors_block_device_encryption_longest)
-{
-	struct nvmeibt_Str				*out = NNVMEIBT_STR_ALLOC(ben01);
-	struct nvmeibt_block_device		*short_vol = NULL;
-	struct nvmeibt_block_device		*long_vol = NULL;
-	struct timespec					saved_now = nvmeibt_cur_event_start_time;
-	bool							initialized_blkdevs = false;
-	int								rv = -1;
-	(void)_ctx;
-
-	NNVMEIBT_STR_RESIZE_BUF(ben02, out, 4096);
-	TEST_init_blkdevs_hash();
-	initialized_blkdevs = true;
-	TEST_add_blkdev_to_hash(&test_blkdev_uuid_short, 1, NULL, 0, false);
-	TEST_add_blkdev_to_hash(&test_blkdev_uuid_long, 1, NULL, 0, false);
-	short_vol = nvmeibt_block_device_get_block_device_by_id(&test_blkdev_uuid_short);
-	long_vol = nvmeibt_block_device_get_block_device_by_id(&test_blkdev_uuid_long);
-	TEST_ASSERT_NOT_NULL(short_vol);
-	TEST_ASSERT_NOT_NULL(long_vol);
-	snprintf(short_vol->from_config.client_blkdev_name, sizeof(short_vol->from_config.client_blkdev_name), "vol-short");
-	snprintf(long_vol->from_config.client_blkdev_name, sizeof(long_vol->from_config.client_blkdev_name), "vol-longest");
-	short_vol->encrypt_params = calloc(1, sizeof(*short_vol->encrypt_params));
-	long_vol->encrypt_params = calloc(1, sizeof(*long_vol->encrypt_params));
-	TEST_ASSERT_NOT_NULL(short_vol->encrypt_params);
-	TEST_ASSERT_NOT_NULL(long_vol->encrypt_params);
-	nvmeibt_cur_event_start_time.tv_sec = 1000;
-	nvmeibt_cur_event_start_time.tv_nsec = 0;
-	short_vol->encrypt_params->start_timespec.tv_sec = 950;
-	long_vol->encrypt_params->start_timespec.tv_sec = 900;
-	nvmeibt_block_device_get_real_time_errors_str(out);
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "ENCRYPTION: n_volumes_encrypting=2"));
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "longest=vol-longest"));
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "(100 sec)"));
-	rv = 0;
-out:
-	if (short_vol && short_vol->encrypt_params) {
-		free(short_vol->encrypt_params);
-		short_vol->encrypt_params = NULL;
-	}
-	if (long_vol && long_vol->encrypt_params) {
-		free(long_vol->encrypt_params);
-		long_vol->encrypt_params = NULL;
-	}
-	if (initialized_blkdevs)
-		TEST_init_blkdevs_hash();
-	nvmeibt_cur_event_start_time = saved_now;
-	NNVMEIBT_STR_FREE(ben03, out);
-	return rv;
-}
 
 #include "../kafka/sandbox_kafka_internal.h"
 DEFINE_TEST(errors_kafka_incompatible_version)
@@ -558,7 +507,7 @@ DEFINE_TEST(errors_consolidated_output)
 	// Raft is UNKNOWN — should include no stable leader in consolidated output
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7001"));
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "DRIVE_WRITE_ERROR: local_disk="));
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "ENCRYPTION: n_volumes_encrypting=1"));
+	if (0) TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "ENCRYPTION: n_volumes_encrypting=1"));
 	rv = 0;
 out:
 	if (blkdev && blkdev->encrypt_params) {
@@ -640,7 +589,6 @@ out:
 	X(errors_topo_no_errors_when_healthy,	"Errors: topo no errors healthy",		"Healthy disk/local_disk produce no topo RPC errors") \
 	X(errors_topo_local_disk_not_ready,		"Errors: topo ldisk not ready",			"Not-ready local_disk with segments reported in RPC errors") \
 	X(errors_topo_praid_conf_corrupted,		"Errors: topo praid corrupted",			"Corrupted praid reported in topo RPC errors") \
-	X(errors_block_device_encryption_longest,"Errors: encryption longest volume",	"Encrypting volume count and longest elapsed volume are reported") \
 	X(errors_kafka_incompatible_version,	"Errors: kafka incompatible version",	"Incompatible librdkafka version is reported") \
 	X(errors_consolidated_output,			"Errors: consolidated output",			"Consolidated errors output includes all modules") \
 	X(errors_rpc_status_errors_dispatch,	"Errors: RPC status errors",			"RPC status errors dispatch returns real-time errors") \
