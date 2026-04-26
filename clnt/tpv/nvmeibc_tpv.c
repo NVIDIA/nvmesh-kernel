@@ -832,6 +832,16 @@ static struct nvmeibc_tpv *nvmeibc_tpv_adopt(struct nvmeibc_tpv *tpv,
 	INIT_DELAYED_WORK(&tpv->load_state_work, nvmeibc_tpv_load_state_work_fn);
 	INIT_DELAYED_WORK(&tpv->timeout_work, nvmeibc_tpv_timeout_work_fn);
 
+	/*
+	 * A3b. Re-spawn the compaction L2 writer kthread and re-init the
+	 * online-compaction delayed work.  Abandon torn these down so the
+	 * pre-NDU kthread (whose function lived in the old module text)
+	 * could exit cleanly before rmmod.  Init zeros the job state and
+	 * spawns a fresh kthread bound to this module's l2_writer_thread_fn.
+	 */
+	tpv_compaction_init(tpv);
+	nvmeibc_tpv_online_compaction_init(tpv);
+
 	/* A4. Refresh allocator identity from CDV cache. */
 	{
 		unsigned long vflags;
@@ -943,6 +953,20 @@ again:
 
 			/* Step 3: Cancel deferred state loader. */
 			cancel_delayed_work_sync(&tpv->load_state_work);
+
+			/*
+			 * Step 3b: Stop the compaction L2 writer kthread and the
+			 * online-compaction delayed work.  Both reference nvmeibc
+			 * text (l2_writer_thread_fn and nvmeibc_tpv_online_compact_work_fn);
+			 * if left running across rmmod the kthread page-faults when
+			 * its code page is unmapped.  Adopt re-spawns them via
+			 * tpv_compaction_init / nvmeibc_tpv_online_compaction_init,
+			 * with the new module's text addresses.  The compaction
+			 * progress counters and online_armed bit reset across NDU
+			 * (acceptable - NDU is a discontinuity).
+			 */
+			nvmeibc_tpv_online_compaction_destroy(tpv);
+			tpv_compaction_destroy(tpv);
 
 			/* Step 4: Flush dirty allocator state to CDV. */
 			if (tpv->dirty) {
