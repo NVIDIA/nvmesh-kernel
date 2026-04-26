@@ -756,6 +756,9 @@ if (elem->type != JSON_E_DICT)
 			JSON_ASSIGN_OPTIONAL(0ecdaun, "dataBlocks");	// MGMT sends depending on raidType (Dec 24)
 			JSON_ASSIGN_OPTIONAL(4bs8o4e, "parityBlocks");	// MGMT sends depending on raidType (Dec 24)
 			JSON_ASSIGN_PLAIN_OPTIONAL(v8c2dka, "volumeClass", vol->is_cdv, (uint8_t)(s && !strcmp(s, "CDV")));
+			JSON_ASSIGN_OPTIONAL(m3cx9tp, "metaCdvUUID");
+			JSON_ASSIGN_OPTIONAL(q7vn2kw, "metaCdvExtentSizeMib");
+			JSON_ASSIGN_OPTIONAL(p5rj8sf, "metaTpvExtentSizeKb");
 			JSON_LOOP_ITERATION_END(4gt67sk, kv->key);
 		}
 	}

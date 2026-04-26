@@ -743,6 +743,9 @@ static void praid_leader_serialize_topo(struct nvmeibt_praid *praid)
 	serialized_praid.leader_did_all_segs_sync_registrants = praid_topo->leader_did_all_segs_sync_registrants;
 	serialized_praid.is_activated = praid_topo->is_activated;
 	serialized_praid.segs_num = XDLIST_N_ELEMNTS(&praid_lot->all_seg_lot_list);
+	nvmeibt_strlcpy(serialized_praid.allocator_toma_id, praid_topo->allocator_toma_id,
+			sizeof(serialized_praid.allocator_toma_id));
+	serialized_praid.allocator_generation = praid_topo->allocator_generation;
 	// send_topo_ptr->res_1 = 0;
 	// send_topo_ptr->res_2 = 0;
 	// send_topo_ptr->res_3 = 0;
