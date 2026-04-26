@@ -1329,10 +1329,38 @@ err_free_alloc:
  */
 void nvmeibc_tpv_detach(struct nvmeibc_tpv *tpv)
 {
+	int prev_state;
+
 	if (WARN_ON(!tpv))
 		return;
 
-	atomic_set(&tpv->state, TPV_DETACHING);
+	/*
+	 * Two paths can race to detach the same TPV: MCS detach (by UUID)
+	 * and instance/CDV-preempt shutdown (by list iteration).  Both look
+	 * up the TPV under nvmeibc_tpv_list_lock and then drop the lock
+	 * before calling here, so without an entry guard both can run the
+	 * teardown concurrently.  tpv_compaction_destroy in particular is
+	 * not reentrant: two callers can both pass the if (job->l2_writer)
+	 * check, leading to a double kthread_stop on the L2 writer and a
+	 * use-after-free on its kernel stack when the second wake_up_all
+	 * walks the now-stale wait_queue_entry.
+	 *
+	 * Use the state field as the entry mutex.  ATTACHING / ATTACHED /
+	 * ORPHAN all transition to DETACHING; if we observe DETACHING the
+	 * winner is already running teardown, so we return.  The losing
+	 * caller is one of: nvmeibc_tpv_detach_all_for_inst (re-iterates
+	 * the list and won't find this TPV again once the winner removes
+	 * it), nvmeibc_tpv_cdv_preempted_work_fn (same), or the MCS detach
+	 * dispatcher (which sends an MCS ACK after we return, which is
+	 * still correct - the TPV is being detached, just not by us).
+	 */
+	prev_state = atomic_xchg(&tpv->state, TPV_DETACHING);
+	if (prev_state == TPV_DETACHING) {
+		_NI(tpv_detach_already,
+		    "TPV @STR: detach already in progress; skipping reentrant call",
+		    tpv->tpv_name);
+		return;
+	}
 
 	/* Cancel any in-flight offline compaction (TPV_Trimming.md Step 4).
 	 * Sets the abort flag; tpv_compaction_destroy below waits for the
