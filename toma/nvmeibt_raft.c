@@ -1987,12 +1987,7 @@ void nvmeibt_raft_del_member(char *hostname, int n_raft_members_total_before_add
 	if (raft_is_voted_for_uuid(uuid)) {
 		nvmeibt_raft_set_voted_for_uuid(NULL);
 	}
-	// Clear disk->leader_its_raft_member back-references and reset their
-	// remote-applied state before freeing this member. Without this, a
-	// later leader-timeout heartbeat reaches nvmeibt_disk_segment_is_node_leader_valid
-	// via topo calc and dereferences the freed member (heap-use-after-free
-	// in nvmeibt_raft_leader_is_peer_vote_recent).
-	nvmeibt_topology_leader_detach_all_disks_from_raft_member(member);
+	nvmeibt_topology_leader_detach_all_disks_from_raft_member(member);	// Clear disk->leader_its_raft_member back-references and reset their, remote-applied state before freeing this member. Without this, a later leader-timeout heartbeat reaches nvmeibt_disk_segment_is_node_leader_valid via topo calc and dereferences the freed member (heap-use-after-free in nvmeibt_raft_leader_is_peer_vote_recent).
 	nvmeibt_raft_unlink_member_from_node(member, NULL);
 	N_Tf(vnhve8w, "Del member hostname=@STR n_members_after=@INT uuid=@UUID_LE @KAFKA_OFST",
 		 nvmeibt_raft_member_name(member), nvmeib_hash_get_n_elements(my_raft_global.raft_members_hash_by_uuid), nvmeibt_raft_member_id(member), kafka_offset);
