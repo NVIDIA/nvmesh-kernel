@@ -499,16 +499,18 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 			struct nvmeibc_tpv *tpv = nvmeibc_tpv_find_by_uuid(hdr->uuid);
 
 			if (tpv && new_virtual_size_bytes) {
-				_NI(tpv_grow_dispatch,
-				    "TPV @STR: live grow to @LLU bytes", hdr->name, new_virtual_size_bytes);
-				nvmeibc_tpv_grow(tpv, new_virtual_size_bytes);
+				if (new_virtual_size_bytes > tpv->virtual_size) {
+					_NI(tpv_grow_dispatch,
+					    "TPV @STR: live grow to @LLU bytes", hdr->name, new_virtual_size_bytes);
+					nvmeibc_tpv_grow(tpv, new_virtual_size_bytes);
+				}
 				/*
 				 * Hot-apply online-compaction knobs from the
-				 * UpdateVolumes payload.  The grow path is the only
-				 * place an attached TPV receives a config update
-				 * from management.  An explicit 0 percentage means
-				 * "inherit module param"; see _attach path above
-				 * for the codec-default rationale.
+				 * UpdateVolumes payload.  UpdateVolumes is sent for
+				 * any TPV change (description, compaction config, or
+				 * size), so always re-apply even when size is unchanged.
+				 * An explicit 0 percentage means "inherit module param";
+				 * see _attach path above for the codec-default rationale.
 				 */
 				nvmeibc_tpv_online_compaction_config(tpv,
 								     !!conf->onlineCompactionEnabled,
