@@ -7893,6 +7893,7 @@ int main(int argc, char* argv[])
 {
 	const struct blk_unittest_conf *ut_conf;
 	struct task_struct		*ut_kthread;
+	bool skip_client_memmgr_check;
 
 	simulator_alloc_tracking_init();
 
@@ -7919,6 +7920,7 @@ int main(int argc, char* argv[])
 	if (!ut_conf->bunitest.config_path) {
 		unitest_global_cfg = NULL;
 	} else BUG_ON(!(unitest_global_cfg = unitest_init_config(ut_conf->bunitest.config_path)));
+	skip_client_memmgr_check = unitest_config_has_exclude_all_rule(unitest_global_cfg);
 
 	machine_restart(&ut_conf->kernel_prm);					// Create kernel simulator (as if we started VM)
 	BUG_ON(!(ut_kthread = kthread_run(blk_unit_test, NULL, "blk unit test")));
@@ -7941,7 +7943,10 @@ int main(int argc, char* argv[])
 	/* must be done after all simulator allocations are freed */
 	nvmesh_memmgr_metrics_dump_to_file("memmgr_info_run_end.json", __start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 	nvmesh_memmgr_metrics_verify_idle(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
-	unitest_memmgr_metric_check_client();
+	if (skip_client_memmgr_check)
+		_NI(mat_skip_exclude_all_filter, "Skipping client memmgr accounting check because unitest config has exclude-all filter");
+	else
+		unitest_memmgr_metric_check_client();
 	simulator_alloc_tracking_disable();
 	nvmeib_wq_metrics_free_pcpu(__start_nvmeibc_wq_metrics, __stop_nvmeibc_wq_metrics);
 	nvmesh_memmgr_metrics_free_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);

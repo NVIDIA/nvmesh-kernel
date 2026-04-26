@@ -205,3 +205,16 @@ int unitest_get_test_num_of_rep(struct unitest_config *self, const char *tname) 
 		return 1;
 	return __test_get_num_of_rep_from_conf(self, tname);
 }
+
+bool unitest_config_has_exclude_all_rule(const struct unitest_config *self) {
+	int i;
+
+	if (!self)
+		return false;
+
+	for (i = 0; self->filters.exclude[i]; i++)
+		if (!strcmp(self->filters.exclude[i], "*"))
+			return true;
+
+	return false;
+}

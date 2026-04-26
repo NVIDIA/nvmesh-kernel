@@ -6,6 +6,8 @@
 #ifndef TESTS_CONF
 #define TESTS_CONF
 
+#include <stdbool.h>
+
 struct test_config;
 
 extern struct unitest_config *unitest_global_cfg;
@@ -32,6 +34,11 @@ void unitest_destroy_config(struct unitest_config *self);
  * @return number of repetitions, to run test.
  */
 int unitest_get_test_num_of_rep(struct unitest_config *self, const char *tname);
+
+/**
+ * @return non-zero if the config has an exclude-all rule.
+ */
+bool unitest_config_has_exclude_all_rule(const struct unitest_config *self);
 
 
 #endif /* TESTS_CONF */
