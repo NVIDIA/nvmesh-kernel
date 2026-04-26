@@ -320,7 +320,7 @@ bool nvmeibc_block_dev_is_shadow(struct nvmeibc_block_device *dev)
 
 static void __data_path_flags_tostring(const struct nvmeibc_datapath *dp, struct nvmeib_txt *txt)
 {
-	nvmeib_txt_append(txt, "DP Flags: edic=%d, local_read=%d, mutable_r_bio=%d, alw=%ul, alr=%ul, elev=%u, snake=%u, jent=%u",
+	nvmeib_txt_append(txt, "\"dp_flags\": {\"edic\": %d, \"local_read\": %d, \"mutable_r_bio\": %d, \"alw\": %u, \"alr\": %u, \"elev\": %u, \"snake\": %u, \"jent\": %u}",
 		dp->enable_edic_check, dp->enable_local_read_optimization, dp->read_has_mutable_bio_buffers,
 		(dp->alignment_sectors.write >> KERNEL_SECTOR_TO_SECTOR_SHIFT),
 		(dp->alignment_sectors.read >> KERNEL_SECTOR_TO_SECTOR_SHIFT),
