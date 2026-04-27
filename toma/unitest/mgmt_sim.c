@@ -536,10 +536,6 @@ bool mgmt_sim_consume_got_report_target(void) {
 	return false;
 }
 
-int mgmt_sim_get_n_leader_keep_alives_received(void) {
-	return g_mgmt_sim->cfg->rep.ldr.n_keep_alives;
-}
-
 bool mgmt_sim_v_r1_praid_reported(void) {
 	return g_mgmt_sim->v_r1_praid_reported;
 }

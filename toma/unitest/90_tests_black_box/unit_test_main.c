@@ -400,8 +400,10 @@ static void scenario_create_remove_r1(void) {
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	mgmt_sim_send_disk_report_req(0); yield();
 	SCENARIO_PRINT(__AUTOID__, "waiting for leader to exists");
-	WAIT_UNTIL(mgmt_sim_get_n_leader_keep_alives_received() > 0);
-	mgmt_sim_send_leader_keep_alive();
+	WAIT_UNTIL(cfg->rep.ldr.n_keep_alives > 0);
+	BUG_ON(cfg->rep.ldr.reported_majority_sw_ver != TOMA_SW_VER);
+	BUG_ON(cfg->rep.ldr.reported_token != -1);					// Mgmt did not give a valid token to the leader
+	mgmt_sim_send_leader_keep_alive();							// Give it now.
 
 	SCENARIO_PRINT(__AUTOID__, "sending addVolume @DEV_NAME, waiting for report target", cfg->vols[0].name);
 	mgmt_sim_send_add_volume(0);

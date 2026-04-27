@@ -24,8 +24,6 @@ bool mgmt_sim_v_r1_seg_zeroing_seen(void);
 bool mgmt_sim_v_r1_praid_deprecated(void);
 bool mgmt_sim_v_r1_praid_absent_from_report(void);
 
-int mgmt_sim_get_n_leader_keep_alives_received(void);
-
 /* Message-sender functions for fiber-based test scenario */
 void mgmt_sim_send_format_drive(int disk_idx_on_node);
 void mgmt_sim_send_leader_keep_alive(void);
