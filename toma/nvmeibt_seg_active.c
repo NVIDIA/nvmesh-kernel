@@ -1535,7 +1535,6 @@ static void nvmeibt_seg_active_stale_rebuild(struct nvmeibt_seg_active *seg_acti
 	if (nsec_since_last_registrant_disconnect < SEC_TO_NSEC(1)) {
 		N_Tf(opo09s3, "nsec_since_last_registrant_disconnect=@LLD, Waiting some more",
 			nsec_since_last_registrant_disconnect);
-		nvmeibt_seg_active_mark_stale_rebuild_required(seg_active);
 		goto out;
 	}
 	// Launch a stale-rebuild
@@ -2284,16 +2283,6 @@ out:
 	NFOUT;
 }
 
-
-void nvmeibt_seg_active_mark_stale_rebuild_needed_as_needed(struct nvmeibt_seg_active *seg_active, struct nvmeibt_disk_segment_topo_ctx *prev_active_topo)
-{
-	// Any segment that changes goes through here, and marks its praid as requires_stale_rebuild
-	if (	nvmeibt_praid_applied_is_qualify_for_sync_stale(nvmeibt_seg_active_get_praid(seg_active)) &&
-			nvmeibt_disk_segment_are_topos_actionably_different(nvmeibt_seg_active_UUID(seg_active), &(seg_active->active_seg_topo), prev_active_topo)) {
-		nvmeibt_seg_active_mark_stale_rebuild_required(seg_active);
-	}
-}
-
 /********************************************************************************************/
 /****************                         Zeroing                          ******************/
 /********************************************************************************************/
@@ -2833,7 +2822,6 @@ void nvmeibt_seg_active_upd_active_topo_from_applied_topo(struct nvmeibt_seg_act
 	}
 #endif
 	NNVMEIBT_SEG_ACTIVE_SET_DIRTY_BITS(w0c2nh4, seg_active, applied_topo->dirty_bits_state);
-	nvmeibt_seg_active_mark_stale_rebuild_needed_as_needed(seg_active, &prev_active_topo);
 
 mark_applied_post_update_actions_required:
 	nvmeibt_seg_active_reset_serjio_clean_range_state_on_new_config_or_topo(seg_active);
