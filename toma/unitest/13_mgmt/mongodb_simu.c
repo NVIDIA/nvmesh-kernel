@@ -79,6 +79,10 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 			pv->num_blocks = pv->chunks[pv->num_chunks-1].vlba_end + 1;
 		}
 	}
+	// Initialize report tokens
+	sb->rep.ldr.expected_token = 50;						// Just some number. Real mgmt starts from 1
+	sb->rep.fol.expected_token = 10;						// Different number from the above
+	sb->rep.fol.expected_sw_ver = TOMA_SW_VER;				// Live Toma is compiled with the latest version
 }
 
 void sb_cluster_praid_alloc_replacement_seg(struct sb_cluster_conf *sb, struct sb_praid_conf* pr) {

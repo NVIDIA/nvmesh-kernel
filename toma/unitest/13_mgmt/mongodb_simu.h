@@ -3,8 +3,7 @@
 * SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 */
 #pragma once
-/* Implements mongo-db which store volumes / cluster configuration and reported states, by Tomas,
-    Primarily used by management simulator and unit-test code */
+/* Implements mongo-db which store volumes / cluster configuration and reported states, by Tomas */
 #include "../sandbox_util.h"
 #include "../../../autogen/clnt/nvmeibc_mcs_stub.h"	// Client simulator - report to mgmt simulator
 #define SB_CLUSTER_CONF_N_NODES_TOTAL (3)			// Cluster of 3 machines, 1 live followed by 2 simulated other tomas, presented as nodes n37, n38, n39
@@ -98,6 +97,23 @@ struct sb_cluster_conf {
 	} vols[            SB_CLUSTER_CONF_MAX_VOLS];
 	int n_vols;
 	int zone_idx;											// All those volume exist in a specific zone
+	// --------------- Toma reports
+	struct sb_live_toma_reports {
+		struct sb_live_toma_reports_leader {
+			int expected_token;
+			int reported_token;
+			int reported_majority_sw_ver;
+			uint32_t raftTerm;
+			int n_keep_alives;								// Number of received keep alives
+		} ldr;
+		struct sb_live_toma_reports_follower {
+			int expected_token;
+			int reported_token;
+			int expected_sw_ver;
+			int reported_sw_ver;
+			int n_keep_alives;								// Number of received keep alives
+		} fol;
+	} rep;
 };
 
 #define UUID_from_U32 			 "%8x-0000-0000-0000-000000000000"		// All the UUID's have unique first u32 so we dont use the rest of 12[b]
