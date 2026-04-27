@@ -68,10 +68,8 @@ struct mgmt_sim_state {
 	} k_producers;
 
 	/* Test scenario state */
-	int64_t boot_time;                      /* from reportTarget payload.node.bootTime */
 	struct mgmt_sim_disk_status disks_st[3];	// Toma report of up to N disks
 	bool v_r1_praid_reported;               /* updatePRaidReport contained V_R1's pRaid UUID */
-	bool got_report_target;                 /* reportTarget received since last FSM transition */
 	bool v_r1_seg_zeroing_progress_seen;    /* segmentZeroingProgress received for V_R1 praid */
 	bool v_r1_praid_deprecated;             /* updatePRaidReport shows all V_R1 segs "deprecated" */
 	bool v_r1_delete_completed_sent;        /* deleteVolumeCompleted was sent */
@@ -195,8 +193,8 @@ static struct mgmt_sim_disk_status *__lookup_disk_by_uuid(const char *disk_uuid)
 static void __send_format_drive_msg(const struct mgmt_sim_disk_status *d) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	char *buf = malloc(1024);
-	size_t len = (size_t)make_msg_format_drive(buf, 1024, d, (unsigned long)m->boot_time);
-	N_IMf(__AUTOID__, "sending formatDrive disk=@STR format_gen=@INT, bootTime=@INT64_TD", d->conf->serial, d->format.counter_sent, m->boot_time);
+	size_t len = (size_t)make_msg_format_drive(buf, 1024, d, (unsigned long)m->cfg->rep.target.boot_time);
+	N_IMf(__AUTOID__, "sending formatDrive disk=@STR format_gen=@INT", d->conf->serial, d->format.counter_sent);
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
 
@@ -417,18 +415,28 @@ static void __extract_disks_status_from_report_target_msg(struct mm_json_elem *d
 	}
 }
 
+static int __parse_zone_idx(struct mm_json_elem *j) {
+	const char *str_zone = json_get_dict_str(j, "zone", NULL);
+	int zone_idx;
+	BUG_ON(sscanf(str_zone, "%d", &zone_idx) != 1);	// Scan 1 argument
+	return zone_idx;
+}
+
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root) {
 	struct mm_json_elem *payload = json_get_dict_value(root,    "payload");
 	struct mm_json_elem *node =    json_get_dict_value(payload, "node");
 	struct mm_json_elem *disks =   json_get_dict_value(node,    "disks");
 	const uint64_t msg_seq = json_get_dict_num(root, "messageSequence", ~0UL);
+	const int zone_idx = __parse_zone_idx(node);
 	struct mgmt_sim_state *m = g_mgmt_sim;
-
-	m->boot_time = json_get_dict_num(node, "bootTime", 0);
+	struct sb_live_target_report *tr = &m->cfg->rep.target;
+	tr->boot_time = json_get_dict_num(node, "bootTime", 0);
+	tr->last_reportId = json_get_dict_num(node, "reportID", 0);
+	BUG_ON((tr->boot_time <= 0) || (m->cfg->zone_idx != zone_idx));
 	if (disks && (disks->type == JSON_E_ARRAY))
 		__extract_disks_status_from_report_target_msg(disks, msg_seq);
-	m->got_report_target = true;
-	// N_Tf(__AUTOID__, "reportTarget bootTime=@INT64_TD", m->boot_time);
+	tr->n_reports++;
+	N_Tf(__AUTOID__, "bootTime=@INT64_TD, reportID=@INT, n_msgs=@INT, msg_seq=@INT", tr->boot_time, tr->last_reportId, tr->n_reports, (int)msg_seq);
 }
 
 static void __mongodb_insert_praid_hdr(struct sb_praid_topo *pr, struct mm_json_elem *j) {
@@ -527,15 +535,6 @@ bool mgmt_sim_both_disks_ready_for_format(void) {
 	return __disk_ready_for_format(&m->disks_st[0]) && __disk_ready_for_format(&m->disks_st[1]);
 }
 
-bool mgmt_sim_consume_got_report_target(void) {
-	struct mgmt_sim_state *m = g_mgmt_sim;
-	if (m->got_report_target) {
-		m->got_report_target = false;
-		return true;
-	}
-	return false;
-}
-
 bool mgmt_sim_v_r1_praid_reported(void) {
 	return g_mgmt_sim->v_r1_praid_reported;
 }
@@ -578,7 +577,7 @@ void mgmt_sim_send_praid_report_req(const u32 praid_uuid) {
 	char *buf = malloc(512);
 	size_t len = snprintf(buf, 512,
 		"{\"messageType\":\"sendPRaidReport\",\"messageTypeVersion\":1,\"payload\":{\"pRaids\":[{\"uuid\":\"" UUID_from_U32 "\",\"lastKnownVersion\":\"<5,2,17>\"},{\"uuid\":\"" UUID_from_U32 "\",\"lastKnownVersion\":\"<6,1,12>\"}],\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}",
-		praid_uuid, praid_uuid, m->boot_time);
+		praid_uuid, praid_uuid, m->cfg->rep.target.boot_time);
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
 
@@ -586,7 +585,7 @@ void mgmt_sim_send_volume_exclusive_attach_notify(const u32 volume_uuid) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	char *buf = malloc(512);
 	size_t len = snprintf(buf, 512,
-		"{\"messageType\":\"reservationModeChange\",\"messageTypeVersion\":1,\"payload\":{\"volumeUUID\":\"" UUID_from_U32 "\",\"reservationMode\":\"Exclusive\",\"reservationVersion\":55656,\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}", volume_uuid, m->boot_time);
+		"{\"messageType\":\"reservationModeChange\",\"messageTypeVersion\":1,\"payload\":{\"volumeUUID\":\"" UUID_from_U32 "\",\"reservationMode\":\"Exclusive\",\"reservationVersion\":55656,\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}", volume_uuid, m->cfg->rep.target.boot_time);
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }
 
@@ -596,7 +595,7 @@ void mgmt_sim_send_disk_report_req(const u32 disk_idx) {
 	char *buf = malloc(512);
 	size_t len = snprintf(buf, 512,
 		"{\"messageType\":\"resendReport\",\"messageTypeVersion\":1,\"payload\":{\"drives\":[{" DISK_ID_FMT ",\"vendor\":%u,\"reappearingCounter\":789576,\"reappearingOutOfSync\":1}],\"bootTime\":%lu, " MGMT_DB_UUID_JSON "}}",
-		DISK_ID_VAL(d->conf), d->conf->vendor, m->boot_time);
+		DISK_ID_VAL(d->conf), d->conf->vendor, m->cfg->rep.target.boot_time);
 	// Todo: Inject field reappearingCounter, from incomming message segmentsDirtyBitsUpdate
 	sim_broker_topic_msg_produce(m->k_producers.cmd, buf, len, false);
 }

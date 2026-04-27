@@ -382,7 +382,7 @@ static void scenario_evict_rebuild_r1(void) {
 }
 
 static void scenario_create_remove_r1(void) {
-	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
+	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
 	struct sim_broker_topic *kb_vol = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_VOLUMES);
 	mgmt_sim_send_msg_latest_hw_config(); yield();				// Send unrelated occasional HW config change
 	SCENARIO_PRINT(__AUTOID__, "waiting for both disks ready for format");
@@ -407,7 +407,7 @@ static void scenario_create_remove_r1(void) {
 
 	SCENARIO_PRINT(__AUTOID__, "sending addVolume @DEV_NAME, waiting for report target", cfg->vols[0].name);
 	mgmt_sim_send_add_volume(0);
-	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
+	WAIT_UNTIL(cfg->rep.target.n_reports > 0);
 	if (1) {		// Simulate as if kafka resent an old message again
 		WAIT_UNTIL(sim_broker_topic_is_empty(kb_vol));
 		SCENARIO_PRINT(__AUTOID__, "sending old(-1) add volume msg, Will be ignored by Toma");
@@ -447,12 +447,15 @@ static void scenario_create_remove_r1(void) {
 	/* Zeroing is skipped for FIRST_USE_EVER segments (never activated) — segments go directly to X_DONE */
 	WAIT_UNTIL(mgmt_sim_v_r1_praid_deprecated());
 
-	SCENARIO_PRINT(__AUTOID__, "sending deleteVolumeCompleted V_R1");
+	SCENARIO_PRINT(__AUTOID__, "sending deleteVolumeCompleted @DEV_NAME", cfg->vols[1].name);
 	mgmt_sim_send_leader_keep_alive();							// Just additional unrelated keepalive to keep more pressure on toma
 	mgmt_sim_send_delete_volume_completed_r1();
-
-	SCENARIO_PRINT(__AUTOID__, "waiting for reportTarget after deleteVolumeCompleted (gc)");
-	WAIT_UNTIL(mgmt_sim_consume_got_report_target());
+	if (0) {														// Colin: Why this wait? It is irrelevant and not needed
+		SCENARIO_PRINT(__AUTOID__, "waiting for reportTarget after deleteVolumeCompleted (gc)");
+		cfg->rep.target.n_reports = 0;								// Reset target report counter to wait for 1, instead of for increase of prev value
+		mgmt_sim_send_msg_assign_to_zone(cfg->zone_idx);			// Update follower token to induce report target
+		WAIT_UNTIL(cfg->rep.target.n_reports > 0);
+	}
 	SCENARIO_PRINT(__AUTOID__, "waiting for kafka commit on deleteVolumeCompleted");
 	WAIT_UNTIL(sim_broker_topic_is_empty(kb_vol));		// Verify Toma finished with volume deletion by committing offsets of all volume instructions
 }

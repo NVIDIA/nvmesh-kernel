@@ -113,6 +113,11 @@ struct sb_cluster_conf {
 			int reported_sw_ver;
 			int n_keep_alives;								// Number of received keep alives
 		} fol;
+		struct sb_live_target_report {
+			int64_t boot_time;								// reportTarget: payload.node.bootTime, A way to distinguish that Toma was restarted
+			int last_reportId;
+			int n_reports;									// Number of received reports
+		} target;
 	} rep;
 };
 
