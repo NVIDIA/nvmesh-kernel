@@ -56,8 +56,8 @@
  *   - Once all peers at sw_ver=0x350, leader sends incremental to everyone.
  *     All bufs still carry encoding_ver=0x310 (same byte layout).
  */
-#define TOMA_SW_VER                         ((0x0003U << 16) | 0x0350U)     // 16bits features compatibility, bottom 16bits software version. Bump feature compatibility when new feature introduced for mgmt gating its activation during upgrade
-#define TOMA_SW_VER_MIN_FOR_INCREMENTAL     ((0x0001U << 16) | 0x0350U)     // Peer sw_ver must be >= this for leader to send incremental wire bufs (feature gate, not encoding).
+#define TOMA_SW_VER                         ((0x0000U << 16) | 0x0350U)     // 16bits features compatibility, bottom 16bits software version. Bump feature compatibility when new feature introduced for mgmt gating its activation during upgrade
+#define TOMA_SW_VER_MIN_FOR_INCREMENTAL     ((0x0000U << 16) | 0x0350U)     // Peer sw_ver must be >= this for leader to send incremental wire bufs (feature gate, not encoding).
 #define TOMA_ENCODING_VER                   ((0x0000U << 16) | 0x0310U)     // Wire byte layout version. Stamped in all bufs (complete and incremental alike).
 #define TOMA_ENCODING_VER_OLDEST_SUPPORTED  ((0x0002U << 16) | 0x0800U)     // Oldest encoding this binary decodes (v2.8 format), Confusing because its format > Version 3.* up to 3.5.
 
