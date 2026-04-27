@@ -19,11 +19,6 @@ enum e_disk_format_state {
 	FMT_DONE = 'D',
 };
 
-static int make_msg_update_leader_keepalive_token(char *buf, size_t capacity) {
-	return snprintf(buf, capacity, "{\"messageType\":\"updateLeaderKeepaliveToken\""
-		",\"messageTypeVersion\":1,\"payload\":{\"token\":1,\"keepaliveInterval\":1}}");
-}
-
 /* Forward declarations */
 static void mgmt_sim_parse_report_target(struct mm_json_elem *root);
 static void mgmt_sim_parse_praid_report(struct mm_json_elem *root);
@@ -71,10 +66,6 @@ struct mgmt_sim_state {
 	struct t_mgmt_kafka_producers {		// Toma side consumers are mgmt side producers
 		struct sim_broker_topic *hw, *cmd, *l_vol, *l_raft;
 	} k_producers;
-
-	/* Per-Producer state for deterministic message sequencing */
-	int n_leader_keep_alives;
-	uint32_t raftTerm;					// AS reported by Toma leader
 
 	/* Test scenario state */
 	int64_t boot_time;                      /* from reportTarget payload.node.bootTime */
@@ -239,8 +230,8 @@ void mgmt_sim_send_msg_assign_to_zone(int zone_idx) {
 	char *msg = malloc(capacity);
 	const size_t len = snprintf(msg, capacity,
 		"{\"messageType\":\"updateTomaKeepaliveToken\",\"messageTypeVersion\":1"
-		",\"payload\":{\"nodeID\":\"%s\",\"token\":3,\"zone\":\"%d\",\"keepaliveInterval\":1}}",
-		m->cfg->live->hostname, zone_idx);
+		",\"payload\":{\"nodeID\":\"%s\",\"token\":%u,\"zone\":\"%d\",\"keepaliveInterval\":1}}",
+		m->cfg->live->hostname, ++m->cfg->rep.fol.expected_token, zone_idx);
 	m->cfg->zone_idx = zone_idx;
 	sim_broker_topic_msg_produce(g_mgmt_sim->k_producers.cmd, msg, len, false);
 	m->cmd.msg_count++;
@@ -270,9 +261,9 @@ void mgmt_sim_send_msg_latest_hw_config(void) {
 	const int kafka_seq =  (++m->hw.msg_count);
 	int n, i;
 	BUF_ADD("{\"messageType\":\"hardwareConfiguration\",\"messageTypeVersion\":1,\"payload\":{\"managementConfiguration\":{\"_id\":\"1\""
-		",\"configurationVersion\":%d,\"leaderToken\":1,\"kafkaMessageSequence\":%d,\"raftTerm\":9"
+		",\"configurationVersion\":%d,\"leaderToken\":%u,\"kafkaMessageSequence\":%d,\"raftTerm\":%u"
 		",\"stopSendingKeepaliveToken\":false," MGMT_DB_UUID_JSON "},\"targets\":[",
-		config_ver, kafka_seq);
+		config_ver, m->cfg->rep.ldr.expected_token, kafka_seq, m->cfg->rep.ldr.raftTerm);
 	for (n = 0; n < m->cfg->n_nodes; n++) {
 		const struct sb_node_conf *N = &m->cfg->nodes[n];
 		BUF_ADD("{\"_id\":\"%u\",\"node_id\":\"%s\",\"uuid\":\"" UUID_from_U32 "\",""\"disks\":[",
@@ -314,19 +305,36 @@ static void __handle_low_prio_msg(const rd_kafka_message_t *msg) {
 	nvmeibt_mm_json_free_kv_tree(root);
 }
 
+static unsigned __parse_sw_version(struct mm_json_elem *j) {
+	const char *str_ver = json_get_dict_str(j, "tomaSoftwareVersion", NULL);
+	unsigned sw_version;
+	BUG_ON(sscanf(str_ver, "%u", &sw_version) != 1);	// Scan 1 argument
+	return sw_version;
+}
+
 static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	struct mm_json_elem *root = parse_json_txt_into_kv_tree(msg->payload, msg->len);
 	const char *message_type = json_get_dict_str(root, "messageType", NULL);
-	BUG_ON(!m);
-	BUG_ON(!root || (root->type != JSON_E_DICT) || !message_type);
+	struct sb_live_toma_reports_follower *fol = &m->cfg->rep.fol;
+	BUG_ON(!m || !root || (root->type != JSON_E_DICT) || !message_type);
+	fol->reported_token = json_get_dict_num(root, "tomaToken", 0);			// Exists in every message
+	BUG_ON(fol->reported_token > fol->expected_token);
 	if (strcmp(message_type, "leaderKeepalive") == 0) {
 		struct mm_json_elem *payload = json_get_dict_value(root, "payload");
-		m->raftTerm = json_get_dict_num(payload, "raftTerm", 0);
-		m->n_leader_keep_alives++;
-		N_Tf(__AUTOID__, "<< Leader KAL {raftTerm=@INT, gen=@INT}", m->raftTerm, m->n_leader_keep_alives);
+		struct sb_live_toma_reports_leader *ldr = &m->cfg->rep.ldr;
+		ldr->raftTerm = json_get_dict_num(payload, "raftTerm", 0);
+		ldr->reported_token = json_get_dict_num(root, "leaderToken", 0);
+		BUG_ON(ldr->reported_token > ldr->expected_token);
+		ldr->reported_majority_sw_ver = __parse_sw_version(payload);
+		ldr->n_keep_alives++;
+		N_Tf(__AUTOID__, "<< L_KAL[@INT]={raftTerm=@INT, F_token=@INT, L_token=@INT, 50%%+_VER=@X}", ldr->n_keep_alives, ldr->raftTerm, fol->reported_token, ldr->reported_token, ldr->reported_majority_sw_ver);
 	} else if (strcmp(message_type, "keepalive") == 0) {
-		// {"originType":"TOMA","messageType":"keepalive","messageTypeVersion":2,"hostname":"nvme34.nvidia.com","tomaToken":2,"messageSequence":11831,"leaderToken":null,"keepaliveInterval":5,"payload":{"zone":"1","leaderUUID":"nvme39.nvidia.com","bootTime":1767279770145,"featureCompatibilityVersion":"0","tomaSoftwareVersion":"784","version":"3.3.0-1332","buildNumber":"","rebuildStats":{"nRunningDirtyRebuild":0,"nPendingDirtyRebuild":0,"nRunningStaleRebuild":0,"nPendingStaleRebuild":6,"nRunningTxidRebuild":0,"nPendingTxidRebuild":0,"nRunningColdRecovery":0,"nPendingColdRecovery":0,"nRunningJGCRebuild":0,"nPendingJGCRebuild":0,"nRunningScrubbing":0,"nPendingScrubbing":3}}}
+		struct mm_json_elem *payload = json_get_dict_value(root, "payload");
+		fol->reported_sw_ver = __parse_sw_version(payload);
+		BUG_ON(fol->reported_sw_ver != fol->expected_sw_ver);
+		fol->n_keep_alives++;
+		N_Tf(__AUTOID__, "<< F_KAL[@INT]={F_token=@INT, F_VER=@X}", fol->n_keep_alives, fol->reported_token, fol->reported_sw_ver);
 	} else {
 		BUG_ON(true);
 	}
@@ -359,8 +367,11 @@ static void __handle_priority_msg(const rd_kafka_message_t *msg) {
 
 void mgmt_sim_destroy(bool do_verify_used) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
-	if (do_verify_used)
-		BUG_ON((m->n_leader_keep_alives <= 0) || (m->raftTerm == 0));
+	if (do_verify_used) {
+		const struct sb_live_toma_reports_leader *ldr = &m->cfg->rep.ldr;
+		const struct sb_live_toma_reports_follower *fol = &m->cfg->rep.fol;
+		BUG_ON((ldr->n_keep_alives <= 0) || (ldr->raftTerm == 0) || (fol->n_keep_alives <= 0));
+	}
 	free(m);
 	g_mgmt_sim = NULL;
 }
@@ -526,7 +537,7 @@ bool mgmt_sim_consume_got_report_target(void) {
 }
 
 int mgmt_sim_get_n_leader_keep_alives_received(void) {
-	return g_mgmt_sim->n_leader_keep_alives;
+	return g_mgmt_sim->cfg->rep.ldr.n_keep_alives;
 }
 
 bool mgmt_sim_v_r1_praid_reported(void) {
@@ -603,7 +614,8 @@ bool mgmt_sim_drive_format_is_done(int disk_idx) {
 void mgmt_sim_send_leader_keep_alive(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	char *payload = malloc(256);
-	const size_t len = make_msg_update_leader_keepalive_token(payload, 256);
+	const size_t len = snprintf(payload, 256, "{\"messageType\":\"updateLeaderKeepaliveToken\",\"messageTypeVersion\":1,\"payload\":{\"token\":%u,\"keepaliveInterval\":1}}",
+						++m->cfg->rep.ldr.expected_token);
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, payload, len, false);
 }
 
