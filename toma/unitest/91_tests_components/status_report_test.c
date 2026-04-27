@@ -400,14 +400,51 @@ DEFINE_TEST(errors_kafka_incompatible_version)
 	(void)_ctx;
 
 	NNVMEIBT_STR_RESIZE_BUF(kiv02, out, 4096);
-	TEST_set_rd_kafka_version(0x040601ff, "4.6.1");
+	TEST_set_rd_kafka_version(0x040601ff, "4.6.1");		// Far above supported upper bound; triggers "Too new"
 	nvmeibt_kafka_get_real_time_errors_str(out);
-	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Wrong kafka version"));
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7016"));
 	rv = 0;
 out:
 	TEST_set_rd_kafka_version(0x020501ff, "2.5.1");
 	sandbox_kafka_destroy(k);
 	NNVMEIBT_STR_FREE(kiv03, out);
+	return rv;
+}
+
+DEFINE_TEST(errors_kafka_transient_recent)
+{
+	struct nvmeibt_Str			*out = NNVMEIBT_STR_ALLOC(ktr01);
+	int							rv = -1;
+	(void)_ctx;
+
+	NNVMEIBT_STR_RESIZE_BUF(ktr02, out, 4096);
+	TEST_check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__TRANSPORT);
+	nvmeibt_kafka_get_real_time_errors_str(out);
+	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7017"));
+	rv = 0;
+out:
+	TEST_set_kafka_last_transient_err_boot_sec(0);
+	NNVMEIBT_STR_FREE(ktr03, out);
+	return rv;
+}
+
+DEFINE_TEST(errors_kafka_transient_old)
+{
+	struct nvmeibt_Str			*out = NNVMEIBT_STR_ALLOC(kto01);
+	struct timespec				now;
+	int							rv = -1;
+	(void)_ctx;
+
+	NNVMEIBT_STR_RESIZE_BUF(kto02, out, 4096);
+	TEST_check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__TRANSPORT);
+	getnstimeofday_boot(&now);
+	TEST_set_kafka_last_transient_err_boot_sec(now.tv_sec - 120);		// Backdate past the 60s window
+	nvmeibt_kafka_get_real_time_errors_str(out);
+	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), "Err=7017") == NULL);
+	rv = 0;
+out:
+	TEST_set_kafka_last_transient_err_boot_sec(0);
+	NNVMEIBT_STR_FREE(kto03, out);
 	return rv;
 }
 
@@ -590,6 +627,8 @@ out:
 	X(errors_topo_local_disk_not_ready,		"Errors: topo ldisk not ready",			"Not-ready local_disk with segments reported in RPC errors") \
 	X(errors_topo_praid_conf_corrupted,		"Errors: topo praid corrupted",			"Corrupted praid reported in topo RPC errors") \
 	X(errors_kafka_incompatible_version,	"Errors: kafka incompatible version",	"Incompatible librdkafka version is reported") \
+	X(errors_kafka_transient_recent,		"Errors: kafka transient recent",		"Transient kafka comm error within 60s is reported") \
+	X(errors_kafka_transient_old,			"Errors: kafka transient old",			"Transient kafka comm error older than 60s is suppressed") \
 	X(errors_consolidated_output,			"Errors: consolidated output",			"Consolidated errors output includes all modules") \
 	X(errors_rpc_status_errors_dispatch,	"Errors: RPC status errors",			"RPC status errors dispatch returns real-time errors") \
 	X(errors_rpc_clear_problem_counters_dispatch,"Errors: RPC clear counters",	"RPC simulate clear-problem-counters resets counters")

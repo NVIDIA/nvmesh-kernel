@@ -219,6 +219,7 @@ static volatile int				kafka_applied_init_preserve_state_vars_counter = 0;
 static volatile int				kafka_requested_init_preserve_state_vars_counter = 0;
 
 struct timespec					kafka_last_restart_timestamp = {0, 0};
+static volatile int64_t			kafka_last_transient_err_boot_sec = 0;	// Boot-time seconds of last transient kafka comm error; set from kafka thread, read from main thread
 static volatile int64_t			requested_incremental_VOL_updates_consumer_offset = RD_KAFKA_OFFSET_INVALID;   // For a new node, start reading from whatever was committed
 static volatile int64_t			requested_incremental_TARGET_updates_consumer_offset = RD_KAFKA_OFFSET_INVALID;   // For a new node, start reading from whatever was committed
 static volatile int64_t			requested_incremental_TARGET_updates_consumer_seq_no = -1;   // For a new node, start reading from whatever was committed
@@ -404,6 +405,7 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 	struct timespec						now;
 	if (err == RD_KAFKA_RESP_ERR_NO_ERROR)
 		return;
+	getnstimeofday_boot(&now);
 	switch (err) {
 	case RD_KAFKA_RESP_ERR__FATAL:
 	case RD_KAFKA_RESP_ERR__SSL:
@@ -428,13 +430,13 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 	case RD_KAFKA_RESP_ERR__WAIT_CACHE:
 	case RD_KAFKA_RESP_ERR__DESTROY:
 		N_Tf(__AUTOID__, "kafka err[@INT]='@STR'", err, rd_kafka_err2str(err));
+		kafka_last_transient_err_boot_sec = now.tv_sec;
 		return;		// Definitely ignore transient network errors.
 	default:
 		// return;	Should we ignore errors that do not look like security related
 		break;
 	}
 	N_Wf(__AUTOID__, "kafka err[@INT]='@STR'", err, rd_kafka_err2str(err));
-	getnstimeofday_boot(&now);
 	if ((timespec_diff_ns(now, kafka_last_restart_timestamp) > SEC_TO_NSEC(30)) && !is_waiting_for_reinit()) {
 		N_IMf(hu8a475, "Marking kafka soft init required");
 		kafka_requested_init_preserve_state_vars_counter++;
@@ -2793,6 +2795,24 @@ int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...)
 
 void nvmeibt_kafka_get_real_time_errors_str(struct nvmeibt_Str *out)
 {
+	struct timespec						now;
+	const int64_t						last_sec = kafka_last_transient_err_boot_sec;
+
 	if (!__is_compatible_kafka_version())
-		nvmeibt_Str_sprintf(out, "Wrong kafka version,\n");
+		nvmeibt_Str_sprintf(out, "Err=7016, Wrong kafka version,\n");
+	if (last_sec != 0) {
+		getnstimeofday_boot(&now);
+		if ((now.tv_sec - last_sec) < 60)
+			nvmeibt_Str_sprintf(out, "Err=7017, transient kafka comm error %lld[sec] ago,\n", (long long)(now.tv_sec - last_sec));
+	}
+}
+
+void TEST_set_kafka_last_transient_err_boot_sec(int64_t sec)
+{
+	kafka_last_transient_err_boot_sec = sec;
+}
+
+void TEST_check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t err)
+{
+	check_if_kafka_init_preserve_state_vars_required(err);
 }
