@@ -36,6 +36,7 @@ alias lsd='ls -lhA --group-directories-first | pr -2Tn -W200'
 alias grep='grep -a --color=auto'
 alias gg=git_grep
 alias gb=git_branch
+alias gbl='git_branch log'
 alias view='less -RN'
 [ -z "$(which pssh)" ] && PSSH_UTIL='parallel-ssh' || PSSH_UTIL='pssh';
 
@@ -55,18 +56,14 @@ function NVMESH_help() {
 		clear; typeset -f "$1"
 	fi
 	source ${THIS_FILE};
-	echo -e "--------------------- \e[0;32mR&D Docs\e[0;39m ---------------------"
-	echo "5.1 Videos (Recorded) -    server2:/home/qa/training/data_services_team"
-	echo -e "--------------------- \e[0;32mNVRocks Clusters\e[0;39m ---------------------"
+	echo -e "--------------------- \e[0;32mNVMesh Clusters\e[0;39m ---------------------"
 	echo "ssh opc@infra-jump-ashburn;          ssh nvmesh-ci-8012-n{1-10}  : NVRocks OCI";
 	echo "    ssh client-5010-n{1-10}          ssh      in-c99021-n{1-10}  : NVRocks Luster";
-	echo "NVrocksDev($MY_DEV_SERVER)"
-	echo "Mgmt UI: From lapotop: ssh -f -N -L 4034:localhost:4000 n34;   Type in chrome: http://localhost:4034/";
-	echo "Jenkins: ssh mtv-excelero1.mtl.labs.mlnx; cd /logs/jenkins/jenkins-MTV-CI-Build-15839/; /home/alexander/pager.py"; # root, password 3tango
-	echo -e "--------------------- \e[0;32mNVmesh Production Clusters\e[0;39m ---------------------"
+	echo " * Mgmt UI: From lapotop: ssh -f -N -L 4034:localhost:4000 n34;   Type in chrome: http://localhost:4034/";
+	echo " * Jenkins/Logs: ssh mtv-excelero1; cd /auto/nvmesh_jenkins/jenkins-builds/; cd /auto/nvmesh_log/logs/;  grep __copyCI";
 	echo "ssh opc@infra-jump-madrid;           ssh nvmesh-ci-1646-n{1-10}, ssh -f -N -L 1646:nvmesh-ci-1646-n1:4000 opc@infra-jump-madrid;  https://localhost:1646/";
 	echo "ssh root@10.65.34.67;                ssh in-c{1000-1015}-n{1-10}";
-	echo "Orange:  Ctrl+B + [0-9] to select window, dd skip=in, seek=out";
+	echo " * Orange:  Ctrl+B + [0-9] to select window, dd skip=in, seek=out";
 }
 
 function APP_calc() {
@@ -158,7 +155,6 @@ if [[ $IS_LOCAL == "Y" ]]; then
 
 	function git_branch() {
 		if [ "$1" == "fap" ]; then
-			#read -n 1 k <&1
 			git fetch --all --prune --tags
 		elif [ "$1" == "switch" ]; then
 			# Switch fast between workign branches, without the need to stash push and stash pop
@@ -172,15 +168,11 @@ if [[ $IS_LOCAL == "Y" ]]; then
 				git reset HEAD^
 			fi
 			return 0;
-		elif [ "$1" == "squash" ]; then
-			# Squash n top commits. Very usefull for code review
-			VVV=$2
-			git reset --hard HEAD~$VVV;
-			git merge --squash HEAD@{1};
-			git commit;
-			return 0;
-		elif [ "$1" == "log" ]; then
-			git log --color --graph --pretty=format:'%C(yellow)%h%C(bold red)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative --all;
+		elif [ "$1" == "squash" ]; then			# Squash n top commits. Very useful for code review
+			local VVV=$2; git reset --hard HEAD~$VVV; git merge --squash HEAD@{1}; git commit; return 0;
+		elif [ "$1" == "log" ]; then			# use --all -1000 to show all
+			if [[ -z "$2" ]]; then local branches_flags="wip_work origin/master danielhsh/wip_work"; else local branches_flags="${@:2}"; fi
+			git log --color --graph --pretty=format:'%C(yellow)%h%C(bold red)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative ${branches_flags};
 			return 0;
 		elif [ "$1" == "latest" ]; then
 			cur_user=$2
@@ -318,25 +310,6 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		else
 			echo "compile / m - rpm on machines / simulator / l n111 - clean toma dir + rpms / guest / um";
 		fi
-	}
-
-	function NVMESH_reinstall_mgmt() {
-		if [ $# -eq 0 ]; then
-			MGMT=n34
-		else
-			MGMT=$1
-		fi
-		echo_title "nvmesh-mgmt-reinstalling on $MGMT"
-		cd ${MY_PROJECTS_DIR}/management;
-		git fetch -p --all;
-		git rebase;
-		cd -;
-		cd ${MY_PROJECTS_DIR}/;
-		#ssh $MGMT rm -rf projects/management;
-		#scp -r management $MGMT:projects;		# Daniel can use scp -r, it is slower than rsync
-		rsync -hvari --size-only --delete --modify-window=10000000 management $MGMT:projects/
-		cd -;
-		ssh $MGMT "NVMESH_service management reinstall";
 	}
 
 	function NVMESH_reinstall_core() {
@@ -633,6 +606,8 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		echo -e "  \e[0;31mRed\e[0;39m  \e[0;32mgreen\e[0;39m  \e[16;34mBlue\e[0;39m  \e[1;31mBold\e[0;39m  \e[2;31mDark\e[0;39m  \e[4mUnd\e[0;39m  \e[5mBlink\e[0m  "
 		echo "LineWrap off: " 'echo -ne "\x1b[?7l"' " LineWrap on: " 'echo -ne "\x1b[?7h"';
 		echo_title "GOODIES";
+		echo "* Employee ID 49355, Desk: 31-268, IT 24x7: 074-7238000 ext 1, " 'Wifi: NV-Mobile: 99$@2000';
+		echo "* Ahmash: 0747236000/3, RSOC-Israel@nvidia.com"
 		echo "* DEV: $MY_DEV_SERVER";
 		#eval ${DISABLE_LINE_WRAP};
 		wsl.exe -l -v; echo "wsl.exe --shutdown";
