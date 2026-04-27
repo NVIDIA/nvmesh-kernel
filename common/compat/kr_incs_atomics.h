@@ -13,7 +13,8 @@
 	typedef struct { int       c; } __attribute__((aligned(sizeof(int))))       atomic_t;					// c - counter, force alignment to prevent a bug of using atomic fields in packed struct, splitting atomic to cachelines
 
 	// 32[bit]
-	#define ATOMIC_INIT(i)	{i}
+	#define ATOMIC_INIT(i)		{i}
+	#define ATOMIC64_INIT(i)	{i}
 	static inline void atomic_set(      atomic_t *v, int i) {        __atomic_store_n(  &v->c, i, __ATOMIC_SEQ_CST); }
 	static inline int atomic_read(const atomic_t *v       ) { return __atomic_load_n(   &v->c,    __ATOMIC_SEQ_CST); }
 	static inline int atomic_dec_return(atomic_t *v) {        return __atomic_sub_fetch(&v->c, 1, __ATOMIC_SEQ_CST); } // (v->c)--;  return v->c;
@@ -41,6 +42,8 @@
 	static inline long long atomic64_inc_return(atomic64_t *v) { return __atomic_add_fetch(&v->c, 1, __ATOMIC_SEQ_CST);	} // (v->c)++;  return v->c;
 	static inline void atomic64_inc(            atomic64_t *v) { (void)atomic64_inc_return(v); }
 	static inline void atomic64_dec(            atomic64_t *v) { (void)atomic64_dec_return(v); }
+	static inline void atomic64_add(long long x, atomic64_t *v) { (void)__atomic_add_fetch(&v->c, x, __ATOMIC_SEQ_CST); }
+	static inline long long atomic64_sub_return(long long x, atomic64_t *v) { return __atomic_sub_fetch(&v->c, x, __ATOMIC_SEQ_CST); }
 
 	// Atomically adds @a to @v, so long as @v was not already @u.
 	static inline int __atomic_add_unless(atomic_t *v, int a, int u){
