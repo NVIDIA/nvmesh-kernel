@@ -1857,7 +1857,7 @@ void send_keepalive_msgs_as_needed(void)
 							TOMA_SW_VER >> 16, TOMA_SW_VER & 0xFFFF, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT);
 		rebuild_stats_to_json(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "}}");
-		N_Tf(jsghw7b, "Sending follower keep_alive to management, seconds from last update=@LLD msg=@STR", now.tv_sec - last_follower_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
+		N_Tf(jsghw7b, "follower_to_mgmt, last_update=@LLD[sec] ago, msg=@STR", now.tv_sec - last_follower_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
 		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE);
 		last_follower_keepalive_ts = now;
 	}
@@ -1871,7 +1871,7 @@ void send_keepalive_msgs_as_needed(void)
 							KAFKA_PRODUCER_MSG_HEADER_VAR_L("leaderKeepalive", 1),
 							nvmeibt_leader_keep_alive_secs, nvmeibt_raft_get_current_term(),
 							kafka_mgmt_zone_number, nvmeibt_raft_get_guaranteed_sw_ver() >> 16, nvmeibt_raft_get_guaranteed_sw_ver() & 0xFFFF, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT);
-		N_Tf(fbdsiuh, "Sending leader keep_alive to management, seconds from last update=@LLD msg=@STR", now.tv_sec - last_follower_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
+		N_Tf(fbdsiuh, "leader___to_mgmt, last_update=@LLD[sec] ago, msg=@STR", now.tv_sec - last_leader_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
 		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE);
 		last_leader_keepalive_ts = now;
 	}
