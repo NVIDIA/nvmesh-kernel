@@ -22,39 +22,19 @@
 /*
  * TOMA Version Architecture
  * -------------------------
- * Two version concepts exist, each with a distinct role:
- * 1. Software version (sw_ver, TOMA_SW_VER):
- *    Per-TOMA-binary. Represents the features and decoding capability of
- *    this TOMA binary. Used ONLY for:
+ * 1. Software version (sw_ver, TOMA_SW_VER): Per-TOMA-binary. Represents the features and decoding capability of
  *    - Advertising capability to peers (stamped in raft_msg.sw_ver).
- *    - Per-peer feature gating: receiver stores peer's sw_ver as peer_sw_ver
- *      on the raft_member, and leader uses it to decide what features to
- *      enable for that peer (e.g. incremental wire-buf support).
- *      Management can gate feature activation like 3-mirror volumes
+ *    - Per-peer feature gating: leader uses follower version to decide what features to enable for that peer. Like sending incremental topology
+ *    - Increased when new abilities introduced between Tomas.
+ * 2. Encoding version (encoding_ver, TOMA_ENCODING_VER): Per-buffer. Stamped into wire buffers (topo headers, persist_and_wire_buf, disk-segment metadata) and persistence files.
+ *    - Represents the wire byte layout format he same for both complete and incremental buffers. Tomas (A,B) will use format min(TOMA_A_ENCODING,TOMA_B_ENCODING) to communicate
  *    - A TOMA with higher sw_ver can decode any encoding_ver <= its sw_ver.
- *    - Bumps only on real feature/semantic changes (not every release).
- * 2. Encoding version (encoding_ver, TOMA_ENCODING_VER):
- *    Per-buffer. Stamped into wire buffers (topo headers, persist_and_wire_buf,
- *    disk-segment metadata) and persistence files. Represents the wire byte
- *    layout format — the same for both complete and incremental buffers (the
- *    byte layout is identical; incremental is a content/feature distinction,
- *    not a format distinction, and is gated by sw_ver not encoding_ver).
- *    - Receiver checks: encoding_ver <= my TOMA_SW_VER => decodable.
- *    - Bumps only when the wire byte layout actually changes.
- * 3. guaranteed_sw_ver (persisted in raft_ctx, runtime in raft_ctx):
- *    Cluster governance: "the leader and a majority of peers are at this
- *    sw_ver or higher." Ratchets up when 66% of peers report higher sw_ver.
- *    - Old binaries below guaranteed_sw_ver cannot lead or win elections.
- *    - Followers at >= guaranteed_sw_ver know their leader can decode at that
- *      level, so they can safely use that encoding in replies without checking
- *      the leader's version explicitly.
- * Hot-upgrade flow (3.4.0 -> HEAD):
- *   - HEAD advertises sw_ver=0x350 in raft_msg. 3.4.0 warns but accepts.
- *   - HEAD stamps encoding_ver=0x310 in complete topo bufs. 3.4.0 accepts.
- *   - HEAD reads 3.4.0's sw_ver=0x310 from raft_msg, sets peer_sw_ver=0x310,
- *     sends complete (not incremental) wire bufs to that peer.
- *   - Once all peers at sw_ver=0x350, leader sends incremental to everyone.
- *     All bufs still carry encoding_ver=0x310 (same byte layout).
+ *    - Increased only when the wire byte layout actually changes (Possibly due to new features, or just format change)
+ * 3. Feature compatibility - Increased when Toma Leader needs management to gate feature activation using its interop-DB. Example 3-Mirror introduction
+ * 4. guaranteed_sw_ver (persisted in raft_ctx, runtime in raft_ctx). Relevant only during upgrade
+ *    Cluster governance: "the leader and a majority of peers are at this sw_ver (clause-1) or higher."
+ *    - Old Toma's below guaranteed_sw_ver cannot become raft leader.
+ *    - Followers at >= guaranteed_sw_ver know their leader can decode/use-features at that level, so they can safely use that encoding in replies without checking the leader's version explicitly.
  */
 #define TOMA_SW_VER                         ((0x0003U << 16) | 0x0350U)     // 16bits features compatibility, bottom 16bits software version. Bump feature compatibility when new feature introduced for mgmt gating its activation during upgrade
 #define TOMA_SW_VER_MIN_FOR_INCREMENTAL     ((0x0003U << 16) | 0x0350U)     // Peer sw_ver must be >= this for leader to send incremental wire bufs (feature gate, not encoding).
