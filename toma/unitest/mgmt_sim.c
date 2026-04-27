@@ -309,7 +309,7 @@ static unsigned __parse_sw_version(struct mm_json_elem *j) {
 	BUG_ON(sscanf(str_ver, "%u", &sw_version) != 1);	// Scan 1 argument
 	str_ver = json_get_dict_str(j, "featureCompatibilityVersion", NULL);
 	BUG_ON(sscanf(str_ver, "%u", &sw_compatibility_version) != 1);	// Scan 1 argument
-	BUG_ON((sw_compatibility_version != 0) || (sw_version > 0xffff));
+	BUG_ON((sw_compatibility_version != 3) || (sw_version > 0xffff));
 	return (sw_compatibility_version << 16) | sw_version;
 }
 
