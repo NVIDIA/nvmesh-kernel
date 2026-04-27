@@ -38,7 +38,6 @@ struct km_comm_msg_hdr;
 struct nvmeibt_udev_event_info;
 struct nvmeibt_raft_member;
 
-bool nvmeibt_toma_is_running_as_a_utility(void);
 void nvmeibt_toma_mark_is_need_to_update_the_main_select_fds(void);
 struct nvmeibt_topology *nvmeibt_global_get_global(void);
 void nvmeibt_toma_dispatch_received_msg(struct nvmeibt_big_msg *big_msg);

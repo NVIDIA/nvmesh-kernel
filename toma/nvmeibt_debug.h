@@ -191,11 +191,8 @@ int64_t nvmeibt_raft_get_effective_heartbeat_timeout_ns(void);
 	#define NVMEIBT_THROTTLED_SYSLOG(SYSLOG_LOG_LVL, __FMT, ...) syslog(SYSLOG_LOG_LVL, __FMT, ## __VA_ARGS__)
 #endif
 
-static inline bool is_replace_syslog_with_printf(void)
-{
-	bool nvmeibt_toma_is_running_as_a_utility(void);
-	return nvmeibt_toma_is_running_as_a_utility();
-}
+bool nvmeibt_toma_is_running_as_a_utility(void);
+static inline bool is_replace_syslog_with_printf(void) { return nvmeibt_toma_is_running_as_a_utility(); }
 
 #define get_my_tid() (unsigned long)pthread_self()	//syscall(__NR_gettid)
 #define SEND_TO_SYSLOG(_syslog_lvl, auto_generated_printf_fmt, ...) ({															\
