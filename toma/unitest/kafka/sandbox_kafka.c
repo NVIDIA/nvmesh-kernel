@@ -198,7 +198,7 @@ void sandbox_kafka_destroy(struct kafka_simulator_t *ks) {
 	g_kafka_simu = NULL;
 }
 
-void TEST_set_rd_kafka_version(int version, const char *version_str) {
+void sandbox_set_rd_kafka_version(int version, const char *version_str) {
 	g_kafka_simu->version = version;
 	g_kafka_simu->version_str = version_str;
 }

@@ -12,12 +12,18 @@
  * source file that owns the state it accesses.
  */
 #include "nvmeibt_persistency_info.h"
+#include "nvmeibt_kafka.h"		// For rd_kafka_resp_err_t
 
 /* Test environment init — 00_framework/toma_test_helpers.c */
 extern void TEST_init(void);
 
 /* Sandbox controls — unitest/toma_in_sandbox.c and unitest/kafka/sandbox_kafka.c */
 extern void TEST_set_nm_remote_nodes_connected(bool is_connected);
+
+/* Kafka real-time error visibility — nvmeibt_kafka.c */
+extern void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t err);
+extern volatile int64_t kafka_last_transient_err_boot_sec;
+#include "../kafka/sandbox_kafka_internal.h"
 
 /* RPC command dispatch — nvmeibt_rpc.c */
 extern int TEST_nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out);
