@@ -305,9 +305,12 @@ static void __handle_low_prio_msg(const rd_kafka_message_t *msg) {
 
 static unsigned __parse_sw_version(struct mm_json_elem *j) {
 	const char *str_ver = json_get_dict_str(j, "tomaSoftwareVersion", NULL);
-	unsigned sw_version;
+	unsigned sw_version, sw_compatibility_version;
 	BUG_ON(sscanf(str_ver, "%u", &sw_version) != 1);	// Scan 1 argument
-	return sw_version;
+	str_ver = json_get_dict_str(j, "featureCompatibilityVersion", NULL);
+	BUG_ON(sscanf(str_ver, "%u", &sw_compatibility_version) != 1);	// Scan 1 argument
+	BUG_ON((sw_compatibility_version != 3) || (sw_version > 0xffff));
+	return (sw_compatibility_version << 16) | sw_version;
 }
 
 static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {

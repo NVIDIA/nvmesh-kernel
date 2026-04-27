@@ -4951,8 +4951,8 @@ int nvmeibt_raft_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...),
 		if (my_raft_global.role == RAFT_ROLE_LEADER) {
 			(*printf_fn)(printf_ctx, "\t- Status=LEADER\tMature=%s\n", (my_raft_global.is_leader_mature ? "Yes" : "No"));
 			elapsed = timespec_sub(nvmeibt_global_get_cur_event_start_time(), my_raft_global.time_converted_to_leader);
-			(*printf_fn)(printf_ctx, "\t\t- time_since_converted_to_leader=%lld.%09lld\n",
-					elapsed.tv_sec, elapsed.tv_nsec);
+			(*printf_fn)(printf_ctx, "\t\t- time_since_converted_to_leader=%lld.%09lld\n", elapsed.tv_sec, elapsed.tv_nsec);
+			(*printf_fn)(printf_ctx, "\t\t- guaranteed_sw_ver=0x%llx\n", nvmeibt_raft_get_guaranteed_sw_ver());
 		} else {
 			(*printf_fn)(printf_ctx, "\t- Status=CANDIDATE\n");
 		}
