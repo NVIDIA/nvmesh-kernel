@@ -69,7 +69,7 @@ struct sb_cluster_conf {
 			uint32_t attachment_version;			// 0 if not attached.
 			struct nvmeibc_reservation reserv;		// Todo: Use this to test enforcing reservation version attached by Toma
 			bool ioEnabled;							// Client reports that its IO is enabled (after conversation with Toma).
-			bool is_recovery_attach;
+			bool is_recovery_attach;				// Live client registers with permission to do RW, recovery client attaches to fix the praid and might not have such permissions.
 			struct sb_chunk_reg {							// Registration vs Live Toma on disk segments
 				struct clnt_praid_reg_ctx {					// The praid client is registering due to volume attach
 					struct sb_praid_topo *topo;				// Direct link to Toma topology for verification.
@@ -81,7 +81,8 @@ struct sb_cluster_conf {
 					u32 n_ios;								// N simulated ios to praid blocksets that were done
 				} raids[  SB_CLUSTER_CONF_MAX_PR_IN_CH];
 			} chunks[     SB_CLUSTER_CONF_MAX_CHUNKS];
-		} clnts[          SB_CLUSTER_CONF_N_CLNTS_TOTAL];	// All possible clients (shared-RW mode), though in exclusive mode only 1 client is attached
+		} clnts[          SB_CLUSTER_CONF_N_CLNTS_TOTAL],	// All possible clients (shared-RW mode), though in exclusive mode only 1 client is attached
+		  live_toma_recov_clnt;								// Attachment of recovery client
 		// --------------- Toma reports
 		struct sb_chunk_topo {
 			struct sb_praid_topo {
