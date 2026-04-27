@@ -1883,7 +1883,7 @@ void nvmeibt_kafka_send_keepalive_msgs_as_needed(void)
 		nvmeibt_Str_reuse(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT_L
 							"\"keepaliveInterval\": %lld, \"payload\": {\"raftTerm\": %lld, \"zone\": \"%ld\", \"featureCompatibilityVersion\": \"%ld\", \"tomaSoftwareVersion\": \"%ld\", \"version\": \"%s\", \"buildNumber\": \"%s\", "
-							"\"isReady\": %d, \"raftMembers\": [",
+							"\"isReconciled\": %d, \"raftMembers\": [",
 							KAFKA_PRODUCER_MSG_HEADER_VAR_L("leaderKeepalive", 1),
 							nvmeibt_leader_keep_alive_secs, nvmeibt_raft_get_current_term(),
 							kafka_mgmt_zone_number, nvmeibt_raft_get_guaranteed_sw_ver() >> 16, nvmeibt_raft_get_guaranteed_sw_ver() & 0xFFFF,
