@@ -131,7 +131,7 @@ struct mm_raft_member_conf {	// Both wire-packed and serialized
 	int64_t		kafka_offset;						// 12
 	char		hostname[NVMEIB_HOST_NAME_LEN];		// 76
 	char		filler_1[12];						// 88
-	int64_t		raft_members_seq_no_updated;		// 96 The kafka seq_no in which this member was added
+	int64_t		raft_members_seq_no_updated;		// 96, very small ~2[b] unique id of raft quorum member. Start from 1, each raft add/rmv member increases by 1
 	union		nvmeib_uuid uuid;					// 112
 	char	align[0] __attribute__((aligned(16)));
 } __attribute__((__packed__, aligned(16)));

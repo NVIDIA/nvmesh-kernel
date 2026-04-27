@@ -7553,6 +7553,11 @@
         "fmt": "k_offset[%zu]",
         "fmt_func": "fmt_kafka_offset"
     },
+    "@RAFT_MEMBER_SEQ_NO": {
+        "size": 64,
+        "type": "long",
+        "fmt": "seq_no_updated=%ld"
+    },
     "@KERNEL_DEV": {
         "size": 64,
         "type": "const void*",

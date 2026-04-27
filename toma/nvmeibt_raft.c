@@ -1930,8 +1930,8 @@ void nvmeibt_raft_add_member(char *hostname, int n_raft_members_total_before_add
 	}
 	nvmeibt_raft_leader_generate_member_wire_from_member(member);
 	raft_reset_member_ctx(member);
-	N_Tf(d4v39sa, "Added member hostname=@STR n_members_after=@INT uuid=@UUID_LE @KAFKA_OFST",
-		 nvmeibt_raft_member_name(member), nvmeib_hash_get_n_elements(my_raft_global.raft_members_hash_by_uuid), nvmeibt_raft_member_id(member), kafka_offset);
+	N_Tf(d4v39sa, "Added member hostname=@STR n_members_after=@INT uuid=@UUID_LE @KAFKA_OFST, @RAFT_MEMBER_SEQ_NO",
+		 nvmeibt_raft_member_name(member), nvmeib_hash_get_n_elements(my_raft_global.raft_members_hash_by_uuid), nvmeibt_raft_member_id(member), kafka_offset, raft_members_seq_no_updated);
 	convert_to_follower_if_majority_is_lost();
 	// If I am the first and only member, then convert to candidate that starts from the committed members_list
 out:
@@ -2047,8 +2047,8 @@ int nvmeibt_raft_ignore_member(char *hostname)
 }
 
 #define DUMP_RAFT_MEMBER_CONF(name, _i, _raft_member)	({																										\
-	struct mm_raft_member_conf		*mmb = _raft_member;																										\
-	N_Tf(name, "member[@INT]: eyecatcher=@STR hostname=@STR uuid=@UUID_LE @KAFKA_OFST seq_no_updated=@LD", _i, mmb->eyecatcher, mmb->hostname, &(mmb->uuid), mmb->kafka_offset, mmb->raft_members_seq_no_updated);	\
+	const struct mm_raft_member_conf *mmb = _raft_member;																										\
+	N_Tf(name, "member[@INT]: eyecatcher=@STR hostname=@STR uuid=@UUID_LE @KAFKA_OFST @RAFT_MEMBER_SEQ_NO", _i, mmb->eyecatcher, mmb->hostname, &(mmb->uuid), mmb->kafka_offset, mmb->raft_members_seq_no_updated);	\
 })
 
 static void serialize_tlv_JSON(struct nvmeibt_Str *JSON_output, char *tlv_name, struct nvmeibt_wire_type_len_value *tlv)
