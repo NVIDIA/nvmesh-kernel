@@ -188,33 +188,26 @@ int nvmeibc_ib_admin_schedule_abnd2free(struct nvmeibc_disk *disk, struct volume
 	return rv;
 }
 
-static eCPU_cb_ret_type __async_serjio_jam_cmd_cb(eCPU_cb_param_list) {		// Todo: Unify with __async_op_cb(), real method is called on admin workqueue
-	int rv;
-	t_async_cb_params *p = eCPU_thread_extract_param(t_async_cb_params);
-	struct volume_server_req *req = &p->jrr->req;
-	//struct volume_client_rsp *rsp = &p->jrr->rsp;
-	struct serverSimulator *S = p->jrr->S;
+/* Keep A2F delivery ordered with the disk workqueue. If this path is routed
+ * through eCPU_thread_launch(), callbacks are distributed round-robin across
+ * eCPU queues. An A2F carries the range GenID captured by Serjio at send time;
+ * while that delayed callback waits on another eCPU, an entry GenID wrap can
+ * make Serjio advance the journal range GenID. JAM may then receive a stale
+ * A2F for the old range GenID, which is a simulator ordering artifact. */
+void nvmeibc_nic_send_jam_free_abandoned(struct serverSimulator *S, struct nvmeibc_nic_rspreq *rr) {
+	struct volume_server_req *req = &rr->req;
 	struct nvmeibc_disk* disk = S->disk;
-	eCPU_thread_start_execution(p);
 
 	if (atomic_read(&disk->dying) || ((disk)->base.ops.should_pause(&((disk))->base))) // Do not send in case disk is being freed/pausing. This does not prevent a race condition
 		goto _out;
 
 	if (req->opcode == NVMEIBS_JAM_ABND2FREE) {
-		rv = nvmeibc_jam_process_recv_comp(disk, req); // Send to JAM, Jam does not response to this message
+		int const rv = nvmeibc_jam_process_recv_comp(disk, req); // Send to JAM, Jam does not response to this message
 		BUG_ON(rv);
 	}
 
 _out:
-	sim_kfree(p->jrr);
-	eCPU_thread_end_execution(p);
-}
-
-void nvmeibc_nic_send_jam_free_abandoned(struct serverSimulator *S, struct nvmeibc_nic_rspreq *rr) {
-	eCPU_thread_prepare(t_async_cb_params, p);
-	rr->S = S;
-	p->jrr = rr;
-	eCPU_thread_launch(__async_serjio_jam_cmd_cb, p, ut_conf__get_transport()->is_disk_callback_sync);
+	sim_kfree(rr);
 }
 
 void serverRam_dma_do_pigback(struct ramDiskSimulator* ram, struct nvmeibc_block_command *bcmd) {
@@ -355,4 +348,3 @@ int nvmeibs_disk_locks_gen_op_lock(struct nvmeib_local_disk *disk,
 
 /*****************************************************************************/
 // EOF.
-
