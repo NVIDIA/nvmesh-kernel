@@ -290,7 +290,7 @@ TOMA_RPC_CONFIG="_root/opt/nvmesh/common-repo/tools/toma_rpc.config";
 function T_SANDBOX_main_self_unit_test() {
 	__cleanup_prev_run_state;
 	__build_if_needed;
-	./${EXE_NAME};
+	./${EXE_NAME} -Z;
 	__abort_ci_on_failure;
 	${PAGER} ${TRACE_DIR} --toma --color  > ${TOMA_TXT_LOGS};
 }
