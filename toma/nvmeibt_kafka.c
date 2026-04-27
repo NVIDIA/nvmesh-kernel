@@ -2358,7 +2358,7 @@ static bool __is_compatible_kafka_version(void)
 	     if ((v & 0xff) != 0xff) err_msg = "Unstable pre-release";
 	else if (v < 0x1060200)		 err_msg = "Too old, Unsupported";
 	else if (v < 0x20102ff)		 err_msg = "Old Unrecommended";
-	else if (v > 0x20600ff)		 err_msg = "Too new, never tested";
+	else if (v > 0x20800ff)		 err_msg = "Too new, never tested";
 	if (err_msg) {
 		N_Ef(__AUTOID__, "Wrong librdkafka version=@X, @STR! @STR", v, rd_kafka_version_str(), err_msg);
 		return false;
