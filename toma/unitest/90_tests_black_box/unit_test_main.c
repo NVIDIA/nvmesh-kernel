@@ -298,6 +298,7 @@ static void scenario_create_remove_r1(void) {
 	WAIT_UNTIL(cfg->rep.ldr.n_keep_alives > 0);
 	BUG_ON(cfg->rep.ldr.reported_majority_sw_ver != TOMA_SW_VER);
 	BUG_ON(cfg->rep.ldr.reported_token != -1);					// Mgmt did not give a valid token to the leader
+	cfg->rep.ldr.ndu.expected_praid_token = 117;
 	mgmt_sim_send_leader_keep_alive();							// Give it now.
 
 	SCENARIO_PRINT(__AUTOID__, "sending addVolume @DEV_NAME, waiting for report target", cfg->vols[0].name);

@@ -313,6 +313,12 @@ static unsigned __parse_sw_version(struct mm_json_elem *j) {
 	return (sw_compatibility_version << 16) | sw_version;
 }
 
+static void __parse_leader_praid_token_and_verify(struct mm_json_elem *j) {
+	struct sb_live_toma_reports_leader *ldr = &g_mgmt_sim->cfg->rep.ldr;
+	ldr->ndu.reported_praid_token = json_get_dict_num(j, "updatePRaidToken", ~0U);
+	BUG_ON(ldr->ndu.reported_praid_token > ldr->ndu.expected_praid_token); // ' <' is valid, when unit test increases expected but old message arrives
+}
+
 static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	struct mm_json_elem *root = parse_json_txt_into_kv_tree(msg->payload, msg->len);
@@ -327,6 +333,8 @@ static void __handle_keepalive_msg(const rd_kafka_message_t *msg) {
 		ldr->raftTerm = json_get_dict_num(payload, "raftTerm", 0);
 		ldr->reported_token = json_get_dict_num(root, "leaderToken", 0);
 		BUG_ON(ldr->reported_token > ldr->expected_token);
+		__parse_leader_praid_token_and_verify(root);
+		ldr->ndu.reported_isReconciled = (int)json_get_dict_num(payload, "isReconciled", -1);	// Todo, during upgrade parse array of "raftMembers"
 		ldr->reported_majority_sw_ver = __parse_sw_version(payload);
 		ldr->n_keep_alives++;
 		N_Tf(__AUTOID__, "<< L_KAL[@INT]={raftTerm=@INT, F_token=@INT, L_token=@INT, 50%%+_VER=@X}", ldr->n_keep_alives, ldr->raftTerm, fol->reported_token, ldr->reported_token, ldr->reported_majority_sw_ver);
@@ -478,6 +486,7 @@ static void mgmt_sim_parse_praid_report(struct mm_json_elem *root) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	bool v_r1_found = false;
 	BUG_ON(!praids_update || (praids_update->type != JSON_E_ARRAY));
+	__parse_leader_praid_token_and_verify(root);
 	for (int i = 0; i < praids_update->array.len; i++) {
 		struct mm_json_elem *entry = praids_update->array.elements[i];
 		struct mm_json_elem *segments = json_get_dict_value(entry, "segments");
@@ -612,8 +621,8 @@ bool mgmt_sim_drive_format_is_done(int disk_idx) {
 void mgmt_sim_send_leader_keep_alive(void) {
 	struct mgmt_sim_state *m = g_mgmt_sim;
 	char *payload = malloc(256);
-	const size_t len = snprintf(payload, 256, "{\"messageType\":\"updateLeaderKeepaliveToken\",\"messageTypeVersion\":1,\"payload\":{\"token\":%u,\"keepaliveInterval\":1}}",
-						++m->cfg->rep.ldr.expected_token);
+	const size_t len = snprintf(payload, 256, "{\"messageType\":\"updateLeaderKeepaliveToken\",\"messageTypeVersion\":1,\"payload\":{\"token\":%u,\"keepaliveInterval\":1, \"updatePRaidToken\":%u}}",
+						++m->cfg->rep.ldr.expected_token, m->cfg->rep.ldr.ndu.expected_praid_token);
 	sim_broker_topic_msg_produce(m->k_producers.l_vol, payload, len, false);
 }
 

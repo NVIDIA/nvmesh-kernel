@@ -81,6 +81,7 @@ void sb_cluster_conf_create( struct sb_cluster_conf *sb) {
 	}
 	// Initialize report tokens
 	sb->rep.ldr.expected_token = 50;						// Just some number. Real mgmt starts from 1
+	sb->rep.ldr.ndu.expected_praid_token = -1;				// Relevant only during unit-tests of NDU
 	sb->rep.fol.expected_token = 10;						// Different number from the above
 	sb->rep.fol.expected_sw_ver = TOMA_SW_VER;				// Live Toma is compiled with the latest version
 }

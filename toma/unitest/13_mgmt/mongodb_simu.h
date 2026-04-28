@@ -106,6 +106,11 @@ struct sb_cluster_conf {
 			int reported_majority_sw_ver;
 			uint32_t raftTerm;
 			int n_keep_alives;								// Number of received keep alives
+			struct sb_live_toma_reports_leader_ndu {		// Non disruptive upgrade related reports
+				int expected_praid_token;
+				int reported_praid_token;
+				int reported_isReconciled;
+			} ndu;
 		} ldr;
 		struct sb_live_toma_reports_follower {
 			int expected_token;
