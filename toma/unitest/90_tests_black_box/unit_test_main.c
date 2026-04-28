@@ -257,22 +257,17 @@ static void scenario_evict_rebuild_r1(void) {
 	// PHASE 4 -- Toma enters under_recovery; praid sync_cmd: STABLE -> RESET_REGISTRANTS -> SWITCH_TOPO_I -> SWITCH_TOPO_W -> SWITCH_TOPO_U ->In SWITCH_TOPO_U: {Live segmentds = OWNER_RECOVERER, seg_idx_to == UNDER_RECOVERY_R}
 	WAIT_UNTIL(evict_under_recovery());
 
-	// PHASE 5 -- Fake recovery completion in simulated peer Toma's, real recovery if applicable on the live Toma
+	// PHASE 5 -- Sandbox marks node 1 peer recoverers done
 	SCENARIO_PRINT(__AUTOID__, "Phase 5: forcing OWNER_RECOVERER_DONE on node 1's surviving mirrors");
 	{	// This should be a 'for' loop on all segs which are not local to live toma and are "normal" (surviving)
 		struct peer_toma_simu *p1 = sb_cluster_get_conf()->nodes[1].peer;
-		peer_toma_simu_set_seg_inject(p1, &(struct toma_simu_inject_seg_state_t){
-			.uuid = pr->segs[1].uuid, .dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
-		});
-		peer_toma_simu_set_seg_inject(p1, &(struct toma_simu_inject_seg_state_t){
-			.uuid = pr->segs[2].uuid, .dbits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE,
-		});
+		peer_toma_simu_complete_recovery(p1, pr->segs[1].uuid);
+		peer_toma_simu_complete_recovery(p1, pr->segs[2].uuid);
 	}
 
 	// PHASE 6 -- Rebuild complete; verify. {Surviving seg: OWNER_RECOVERER(OWNER_RECOVERER_DONE) -> OWNER_IDLE, Replacement: UNDER_RECOVERY_R -> OWNER_IDLE, Praid: SWITCH_TOPO_U -> STABLE
 	WAIT_UNTIL(evict_rebuild_complete(pr->segs[seg_idx_to].uuid));
 	SCENARIO_PRINT(__AUTOID__, "Phase 6: V_R1 segment replacement rebuild complete");
-	peer_toma_simu_clear_seg_injects(sb_cluster_get_conf()->nodes[1].peer);
 }
 
 static void __leader_keepalive_force_resend_test_only(void) {
