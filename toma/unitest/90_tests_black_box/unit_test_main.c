@@ -233,15 +233,15 @@ static void scenario_evict_rebuild_r1(void) {
 	sb_cluster_praid_alloc_replacement_seg(cfg, pr);
 	SCENARIO_PRINT(__AUTOID__, "start: seg-replacement uuids @X -> @X ", pr->segs[seg_idx_from].uuid, pr->segs[seg_idx_to].uuid);
 
-	// PHASE 1 -- Management triggers eviction + rebuild
+	// PHASE 1 -- Mark the evicted disk OOS, then send the replacement update
 	mgmt_sim_reset_v_r1_report_state();
-	SCENARIO_PRINT(__AUTOID__, "Phase 1: updateVolume v2 with replacement segment");
-	mgmt_sim_send_volume_update(1, "online", "markedForRebuild", evict_segs, (int)ARRAY_SIZE(evict_segs));
-	yield();
-
 	SCENARIO_PRINT(__AUTOID__, "Phase 1: HW cfg marking seg[0] disk OOS");
 	sb_cluster_get_conf()->live->disks[1].is_out_of_service = true;
 	mgmt_sim_send_msg_latest_hw_config();
+	yield();
+
+	SCENARIO_PRINT(__AUTOID__, "Phase 1: updateVolume v2 with replacement segment");
+	mgmt_sim_send_volume_update(1, "online", "markedForRebuild", evict_segs, (int)ARRAY_SIZE(evict_segs));
 	yield();
 	mgmt_sim_send_leader_keep_alive();
 
