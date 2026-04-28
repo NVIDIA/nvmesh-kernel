@@ -9,6 +9,7 @@
 #include "kr_incs.h"
 #include "block/recovery/nvmeibc_block_dp_sync_api_manager.h"			// Sync statistics
 #include "block/datapath_utils_generic/nvmeibc_block_dp_lock_server.h"	// Topology locking mechanism
+#include "clnt/block/platform_services.h"
 
 #define SYMBOL_EXPORT __attribute__((__visibility__("default")))
 
@@ -95,6 +96,8 @@ struct lib_call_api_params_generic {				// Parameters to launch sync/io operatio
 	} pr;
 	enum nvmeib_block_io_op op;						// Which IO/Sync you want to launch. Note: For IO this should match 'bio->bi_rw', For recovery use NVMEIB_BLOCK_IO_OP_NOP
 	u32 dbg_id;										// Will use this dbg_id to print all operation/state machine logs. Makes it easier to debug callers action.
+
+	struct dp_platform_services services; // provides access to the UM platform services
 };
 
 // Generic execution counters / statisitcs

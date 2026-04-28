@@ -568,6 +568,7 @@ static int __create_dummy_block_device(const struct dplib_caller *sw, struct nvm
 	dev->size = 0;
 	strlcpy(dev->name, "slib_bdev_name", sizeof(dev->name));
 	strlcpy(dev->uuid, "slib_bdev_uuid", sizeof(dev->uuid));
+	dev->services = sw->gp->services;
 	//TODO 
 	// - nvmeib_io_stats_create_traced(dev->name, VERB_RW_T_BITMASK, NVMEIBC_SECTOR_SIZE);
 	//Right now too much compilation errors.
