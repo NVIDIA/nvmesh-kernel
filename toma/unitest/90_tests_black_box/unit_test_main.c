@@ -259,11 +259,7 @@ static void scenario_evict_rebuild_r1(void) {
 
 	// PHASE 5 -- Sandbox marks node 1 peer recoverers done
 	SCENARIO_PRINT(__AUTOID__, "Phase 5: forcing OWNER_RECOVERER_DONE on node 1's surviving mirrors");
-	{	// This should be a 'for' loop on all segs which are not local to live toma and are "normal" (surviving)
-		struct peer_toma_simu *p1 = sb_cluster_get_conf()->nodes[1].peer;
-		peer_toma_simu_complete_recovery(p1, pr->segs[1].uuid);
-		peer_toma_simu_complete_recovery(p1, pr->segs[2].uuid);
-	}
+	BUG_ON(peer_toma_simu_complete_all_recoveries(sb_cluster_get_conf()->nodes[1].peer) <= 0);
 
 	// PHASE 6 -- Rebuild complete; verify. {Surviving seg: OWNER_RECOVERER(OWNER_RECOVERER_DONE) -> OWNER_IDLE, Replacement: UNDER_RECOVERY_R -> OWNER_IDLE, Praid: SWITCH_TOPO_U -> STABLE
 	WAIT_UNTIL(evict_rebuild_complete(pr->segs[seg_idx_to].uuid));

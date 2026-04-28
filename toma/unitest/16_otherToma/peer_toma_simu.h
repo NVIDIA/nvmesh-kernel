@@ -17,7 +17,7 @@
  *              (analog of seg_follower.applied_seg_lot.seg_topo). Mutates via
  *              apply_committed_to_active() on each ingest (state-machine acceptance plus
  *              zero-latency auto-progress for X_ZERO/INIT/FIRST_USE_EVER) and via the
- *              scenario event peer_toma_simu_complete_recovery(). The OWNER_RECOVERER
+ *              scenario event peer_toma_simu_complete_all_recoveries(). The OWNER_RECOVERER
  *              -> OWNER_RECOVERER_DONE transition the scenario injects is preserved across
  *              re-ingest by an inline never-demote check inside apply_committed_to_active.
  *
@@ -63,9 +63,10 @@ void peer_toma_simu_upd_committed_from_bin_topo(struct peer_toma_simu *peer, con
 /* Build an ACT_TOPO reply body by walking applied_segs[]. */
 int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, char *out_buf, int out_buf_size);
 
-/* Scenario-driven event: recovery client signaled completion. Valid only when applied
- * dirty_bits_state is OWNER_RECOVERER. Writes OWNER_RECOVERER_DONE on the applied
- * layer and bumps running_local_serialization_version. Subsequent BIN_TOPO ingests
- * with committed still at OWNER_RECOVERER will not demote it. BUG_ONs if seg uuid
- * is not present in applied_segs[] or applied state is wrong. */
-void peer_toma_simu_complete_recovery(struct peer_toma_simu *peer, uint32_t seg_uuid);
+/* Scenario-driven event: recovery client signaled completion for every applied seg
+ * currently in OWNER_RECOVERER on this peer. Returns the number of segs transitioned.
+ * Use when the test does not need to know which specific segs the leader picked as
+ * recoverers (production marks de-facto owners on the basis of current praid topology;
+ * the set can shift across topology variants). Each transition writes
+ * OWNER_RECOVERER_DONE on the applied layer and bumps ser_ver per seg. */
+int peer_toma_simu_complete_all_recoveries(struct peer_toma_simu *peer);

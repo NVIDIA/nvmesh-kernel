@@ -51,20 +51,11 @@ static inline void __progress_seg_init_mode(enum NVMEIBT_MEM_TBL_INIT_MODE *s, e
 	}
 }
 
-/* Linear search applied_segs[] by low-32-bits uuid (the public APIs use a 32-bit handle). */
-static int __find_seg_by_uuid32(const struct peer_toma_simu *T, uint32_t uuid32) {
-	for (int i = 0; i < T->n_segs; i++) {
-		if ((uint32_t)T->applied_segs[i].uuid.ll[0] == uuid32)
-			return i;
-	}
-	return -1;
-}
-
 /* Apply the committed -> applied transition rules for seg index i.
  *
  *   1. praid_version always tracks committed (pure value sync).
  *   2. Never-demote: if applied is OWNER_RECOVERER_DONE (the only "_DONE" the scenario
- *      ever injects via complete_recovery), preserve it. The leader hasn't yet
+ *      ever injects via complete_all_recoveries), preserve it. The leader hasn't yet
  *      processed our previous report so committed still says OWNER_RECOVERER; demoting
  *      back would lose Phase 5's inject between AE rounds. Once the leader catches up,
  *      committed moves past OWNER_RECOVERER and acceptance resumes naturally.
@@ -126,7 +117,7 @@ void peer_toma_simu_upd_committed_from_bin_topo(struct peer_toma_simu *T, const 
 
 	/* Snapshot prior applied so we can match incoming uuids against existing applied state.
 	 * Without this, a re-ingest would lose any scenario-injected applied progression
-	 * (complete_recovery) written between BIN_TOPO arrivals. */
+	 * (complete_all_recoveries) written between BIN_TOPO arrivals. */
 	struct peer_toma_simu_seg_topo old_applied[PEER_TOMA_SIMU_MAX_SEGS];
 	const int n_old = T->n_segs;
 	memcpy(old_applied, T->applied_segs, (size_t)n_old * sizeof(*old_applied));
@@ -180,16 +171,19 @@ void peer_toma_simu_upd_committed_from_bin_topo(struct peer_toma_simu *T, const 
 	T->running_local_serialization_version++;	// Applied state may have changed; next AE handler's is_applied_topo_ready_and_different gate will see running != leader_echoed.
 }
 
-void peer_toma_simu_complete_recovery(struct peer_toma_simu *T, uint32_t seg_uuid) {
-	const int i = __find_seg_by_uuid32(T, seg_uuid);
-	struct peer_toma_simu_seg_topo *a;
-	BUG_ON(i < 0);							// Scenario completed recovery on a seg the peer hasn't received in BIN_TOPO yet
-	a = &T->applied_segs[i];
-	BUG_ON(a->dirty_bits_state != NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER);	// complete_recovery only valid in OWNER_RECOVERER
-	N_Tf(__AUTOID__, "seg=@UUID_8 complete_recovery: applied OWNER_RECOVERER->OWNER_RECOVERER_DONE",
-		(uint32_t)a->uuid.ll[0]);
-	a->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE;
-	T->running_local_serialization_version++;
+int peer_toma_simu_complete_all_recoveries(struct peer_toma_simu *T) {
+	int n = 0;
+	for (int i = 0; i < T->n_segs; i++) {
+		struct peer_toma_simu_seg_topo *a = &T->applied_segs[i];
+		if (a->dirty_bits_state != NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER)
+			continue;
+		N_Tf(__AUTOID__, "seg=@UUID_8 complete_all_recoveries: applied OWNER_RECOVERER->OWNER_RECOVERER_DONE",
+			(uint32_t)a->uuid.ll[0]);
+		a->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE;
+		T->running_local_serialization_version++;
+		n++;
+	}
+	return n;
 }
 int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *T, char *out_buf, int out_buf_size) {
 	struct nvmeibt_act_topo_builder builder;
