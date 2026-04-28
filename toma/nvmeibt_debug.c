@@ -475,21 +475,13 @@ void nvmeibt_debug_config_params_print(struct nvmeibt_Str *s, bool print_values,
 	int i;
 	nvmeibt_Str_sprintf(s, "%s=%x\n", TOMA_PARAMS_ENCODING_STRING, TOMA_ENCODING_VER);
 	for (i=0; i<ARRAY_SIZE(oper_params); i++) {
-		struct oper_param_t *param = &oper_params[i];
+		const struct oper_param_t *param = &oper_params[i];
 		if (print_values) {
-			int64_t val=0;
-			if (param->getf)
-				val = param->getf();
-			else if (param->ptr)
-				val = *param->ptr;
-
-			if (!print_defaults && val == param->default_value)
-				continue;
-
-			nvmeibt_Str_sprintf(s, "+ param %s %" PRIu64 "\n", param->name, val);
-		}
-		else {
-			nvmeibt_Str_sprintf(s, "    %s\n", param->name);
+			const int64_t val = (param->getf ? param->getf() : (param->ptr ? *param->ptr : 0));
+			if (print_defaults || (val != param->default_value))
+				nvmeibt_Str_sprintf(s, "+ param %s %" PRIu64 "\n", param->name, val);
+		} else {
+				nvmeibt_Str_sprintf(s, "    %s\n", param->name);
 		}
 	}
 }
