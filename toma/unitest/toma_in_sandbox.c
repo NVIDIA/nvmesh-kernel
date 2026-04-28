@@ -881,7 +881,6 @@ void os_sim_destroy(struct TSB_operating_system_impl *os, bool do_verify_used) {
 }
 
 /************************************* network ********************************/
-int64_t ibud_enable_periodic_traces = 0;
 int64_t udp_max_header_length = 128;
 
 struct nvmeibt_nm_local_node { 					// Network module simulator. For Toma to communicate with other simulated Toma's

@@ -18,7 +18,6 @@
 #define XDLIST_INIT_ELEM(field) XDLIST_INIT_LINK(field, NULL)
 
 static const int wait_first_ping = 0;
-int64_t ibud_enable_periodic_traces = ENABLE_NETWORKING_PERIODIC_TRACES_DEFAULT;
 int64_t udp_max_header_length = MAX_HEADER_LENGTH_DEFAULT;
 
 static void print_status(struct nvmeibt_nm_local_node *ln);

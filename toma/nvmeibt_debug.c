@@ -354,9 +354,6 @@ extern int64_t udp_max_header_length;
 extern int64_t nvmeibt_kafka_get_offset_timeout_secs;
 extern int64_t recovery_timeout_wait_client_sec;
 extern int64_t nvmeibt_topology_freeze_topo;
-#ifdef TOMA_IB_ROCE
-extern int64_t ibud_enable_periodic_traces;
-#endif
 
 struct oper_param_t {
 	char *name;
@@ -417,10 +414,6 @@ struct oper_param_t {
 				NULL, nvmeibt_raft_set_incremental_wire_buf_enabled, nvmeibt_raft_get_incremental_wire_buf_enabled},
 		{"trace_compress",									0,
 				NULL, nvmeibt_binary_tracing_set_trace_compress, nvmeibt_binary_tracing_get_trace_compress},
-#ifdef TOMA_IB_ROCE
-		{"enable_networking_periodic_traces",				ENABLE_NETWORKING_PERIODIC_TRACES_DEFAULT,
-			&ibud_enable_periodic_traces, NULL, NULL},
-#endif
 };
 
 static int _debug_config_params_set(struct oper_param_t *param, const char *valstr)
