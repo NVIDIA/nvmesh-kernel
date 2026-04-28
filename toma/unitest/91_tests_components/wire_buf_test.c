@@ -1387,6 +1387,81 @@ out:
 	return rv;
 }
 
+DEFINE_TEST(incremental_topo_config_stale_idx_keeps_old)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len;
+	int									upd_len;
+	int									rv = -1;
+	int									merge_size = -1;
+
+	old_len = craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 20LL, 64, 0xAA);
+	upd_len = craft_section_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 10LL, 32, 0xBB);
+	TEST_ASSERT_TRUE(old_len > 0);
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_EQ(merge_size, old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst_tlv), 20LL);
+	TEST_ASSERT_MEM_EQ(ctx->dst_buf, ctx->old_buf, (size_t)old_len);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), old_len);
+	rv = 0;
+out:
+	return rv;
+}
+
+DEFINE_TEST(incremental_raft_members_stale_seq_keeps_old)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len;
+	int									upd_len;
+	int									rv = -1;
+	int									merge_size = -1;
+
+	old_len = craft_section_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_RAFT_MEMBERS_COMPLETE, 20LL, 64, 0x11);
+	upd_len = craft_section_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_RAFT_MEMBERS_INCREMENTAL, 30LL, 32, 0x22);
+	TEST_ASSERT_TRUE(old_len > 0);
+	TEST_ASSERT_TRUE(upd_len > 0);
+	old_tlv.seq_no = LE_SWAP64(5LL);
+	upd_tlv.seq_no = LE_SWAP64(4LL);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+	TEST_ASSERT_EQ(merge_size, old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst_tlv), 20LL);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_seq_no(&dst_tlv), 5LL);
+	TEST_ASSERT_MEM_EQ(ctx->dst_buf, ctx->old_buf, (size_t)old_len);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), old_len);
+	rv = 0;
+out:
+	return rv;
+}
+
 /*************** Incremental raft_members merge (non-empty) ********************/
 
 struct test_raft_member_spec {
@@ -2436,6 +2511,66 @@ DEFINE_TEST(incremental_topo_config_vol_added)
 		TEST_ASSERT_EQ((int)merged->volumes[1].version, 20);
 		mm_conf_free_tree(merged);
 	}
+	rv = 0;
+out:
+	return rv;
+}
+
+/*
+ * Regression: hash has a newly added volume, but upd is a same-idx stale
+ * topo_config incremental. Dispatcher must keep old instead of decoding upd,
+ * which would compare 1 stale vol against 2 hash vols and trip tc_inc_counts_chk.
+ */
+DEFINE_TEST(incremental_topo_config_stale_with_extra_hash_vol_keeps_old)
+{
+	struct section_merge_test_ctx		*ctx = (struct section_merge_test_ctx *)_ctx;
+	struct nvmeibt_wire_type_len_value	old_tlv, upd_tlv, dst_tlv;
+	struct test_vol_spec				vols[2];
+	union nvmeib_uuid					chunk_uuid, praid_uuid;
+	char								*old_ptr, *upd_ptr, *dst_ptr;
+	int									old_len, upd_len;
+	int									rv = -1;
+	int									merge_size = -1;
+
+	TEST_init_praids_hash();
+	TEST_init_chunks_hash();
+	TEST_init_blkdevs_hash();
+
+	for (int i = 0; i < 2; i++) {	// 2 valid blkdevs in hash, mimicking V_REMOTE1 + just-added V_R1
+		make_test_uuid(&vols[i].uuid, i + 1);
+		vols[i].version = 10;
+		vols[i].kafka_offset_or_idx = 100;
+		TEST_add_blkdev_to_hash(&vols[i].uuid, 10, NULL, 0, false);
+	}
+
+	make_test_uuid(&praid_uuid, 2000);
+	TEST_add_praid_to_hash(&praid_uuid, 100, 10, 0);
+	make_test_uuid(&chunk_uuid, 1000);
+	TEST_add_chunk_to_hash(&chunk_uuid, 1, &praid_uuid);
+
+	old_len = craft_topo_config_buf(ctx->old_buf, ctx->buf_size, &old_tlv,
+			TLV_TYPE_TOPO_CONFIG_COMPLETE, 100LL, 1, vols);
+	TEST_ASSERT_TRUE(old_len > 0);
+
+	upd_len = craft_topo_config_buf(ctx->upd_buf, ctx->buf_size, &upd_tlv,
+			TLV_TYPE_TOPO_CONFIG_INCREMENTAL, 100LL, 1, vols);	// same idx as old → stale re-broadcast
+	TEST_ASSERT_TRUE(upd_len > 0);
+
+	old_ptr = ctx->old_buf;
+	upd_ptr = ctx->upd_buf;
+	dst_ptr = ctx->dst_buf;
+
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
+
+	TEST_ASSERT_EQ(merge_size, old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst_tlv), old_len);
+	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst_tlv), 100LL);
+	TEST_ASSERT_MEM_EQ(ctx->dst_buf, ctx->old_buf, (size_t)old_len);
+	TEST_ASSERT_EQ((int)(old_ptr - ctx->old_buf), old_len);
+	TEST_ASSERT_EQ((int)(upd_ptr - ctx->upd_buf), upd_len);
+	TEST_ASSERT_EQ((int)(dst_ptr - ctx->dst_buf), old_len);
 	rv = 0;
 out:
 	return rv;

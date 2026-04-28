@@ -681,6 +681,54 @@ static void _advance_ptrs(char **old_data_ptr, const char **upd_data_ptr, int ol
 	*old_data_ptr += old_len;
 }
 
+static int _copy_old_section_advance_ptrs(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+										  const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+										  const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+										  char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
+{
+	const int upd_len = nvmeibt_tlv_get_len(upd_wire_ctx);
+	const int old_len = nvmeibt_tlv_get_len(old_wire_ctx);
+
+	if (dst_data_ptr) {
+		memcpy(*dst_data_ptr, *old_data_ptr, old_len);
+		*dst_wire_ctx = *old_wire_ctx;
+		*dst_data_ptr += old_len;
+	}
+	_advance_ptrs(old_data_ptr, upd_data_ptr, old_len, upd_len);
+	return old_len;
+}
+
+static bool is_upd_section_stale(const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+								 const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+								 int old_len, int upd_len, int8_t upd_tlv_type)
+{
+	bool	upd_is_stale = false;
+
+	if (upd_len == 0 || !old_wire_ctx || old_len == 0) {
+		return false;	// Empty upd or fresh receiver: never drop
+	}
+
+	if (upd_tlv_type == TLV_TYPE_RAFT_MEMBERS_INCREMENTAL || upd_tlv_type == TLV_TYPE_RAFT_MEMBERS_COMPLETE) {
+		const int64_t	old_seq_no = nvmeibt_tlv_get_seq_no(old_wire_ctx);
+		const int64_t	upd_seq_no = nvmeibt_tlv_get_seq_no(upd_wire_ctx);
+		upd_is_stale = (old_seq_no != nvmeibt_offset_and_idx_uninitialized && upd_seq_no <= old_seq_no);
+	} else { // All other types
+		const int64_t	old_idx = nvmeibt_tlv_get_idx(old_wire_ctx);
+		const int64_t	upd_idx = nvmeibt_tlv_get_idx(upd_wire_ctx);
+		upd_is_stale = (old_idx != nvmeibt_offset_and_idx_uninitialized && upd_idx <= old_idx);
+	}
+
+	if (upd_is_stale) {
+		N_Tf(stl_inc_drp, "Dropping stale upd: tlv_type=@INT8_TD old_idx=@INT64_TX upd_idx=@INT64_TX old_seq_no=@INT64_TX upd_seq_no=@INT64_TX",
+			upd_tlv_type,
+			nvmeibt_tlv_get_idx(old_wire_ctx), nvmeibt_tlv_get_idx(upd_wire_ctx),
+			nvmeibt_tlv_get_seq_no(old_wire_ctx), nvmeibt_tlv_get_seq_no(upd_wire_ctx));
+		return true;	// Stale upd: drop
+	}
+
+	return false;
+}
+
 static void _copy_inc_ctx_old_data_advance_ptrs(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
 												const struct nvmeibt_wire_type_len_value *old_wire_ctx,
 												const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
@@ -1034,6 +1082,7 @@ static int merge_topo_config_incremental(struct nvmeibt_wire_type_len_value *dst
 		}
 	}
 
+	// If upd is from an older generation, its vol count reflects a smaller past state and could legitimately be < n_old_vols. But that has been filtered out by the upstream dispatcher.
 	NTOMA_ASSERT(tc_inc_counts_chk, new_mgmt_conf->num_vols >= n_old_vols, "Number of new volumes (@INT) should always be >= number of valid old volumes (@INT)", new_mgmt_conf->num_vols, n_old_vols);
 
 	for (int new_vol_idx = 0; new_vol_idx < new_mgmt_conf->num_vols; new_vol_idx++) {
@@ -1336,6 +1385,13 @@ int persist_and_wire_buf_calculate_and_merge_data_to_section(struct nvmeibt_wire
 	old_len = old_wire_ctx ? nvmeibt_tlv_get_len(old_wire_ctx) : 0;
 	upd_tlv_type = nvmeibt_tlv_get_type(upd_wire_ctx);
 
+	// We have to drop stale upd sections, or we risk tripping downstream merge assertions
+	if (is_upd_section_stale(old_wire_ctx, upd_wire_ctx, old_len, upd_len, upd_tlv_type)) {
+		total_size = _copy_old_section_advance_ptrs(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
+													dst_data_ptr, old_data_ptr, upd_data_ptr);
+		goto out;
+	}
+
 	// Complete types - just copy upd data
 	if (upd_tlv_type == TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE ||
 		upd_tlv_type == TLV_TYPE_TOPO_CONFIG_COMPLETE ||
@@ -1466,10 +1522,10 @@ bool compute_is_configs_and_raft_members_incremental(
 	if (!is_topo_incremental)
 		return false;
 
-	inc_window_start_topo_config_idx		= leader_topo_config_to_commit;
+	inc_window_start_topo_config_idx			= leader_topo_config_to_commit;
 	inc_window_start_kafka_mgmt_config_offset	= leader_kafka_mgmt_config_to_commit;
 	inc_window_start_raft_members_seq_no		= leader_raft_members_seq_no_to_commit;
-	inc_window_start_topo_config_idx		= (inc_window_start_topo_config_idx > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX ? inc_window_start_topo_config_idx - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX : 0);
+	inc_window_start_topo_config_idx			= (inc_window_start_topo_config_idx > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX ? inc_window_start_topo_config_idx - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_CONFIG_IDX : 0);
 	inc_window_start_kafka_mgmt_config_offset	= (inc_window_start_kafka_mgmt_config_offset > NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET ? inc_window_start_kafka_mgmt_config_offset - NVMEIBT_INCREMENTAL_WINDOW_SIZE_KAFKA_MGMT_CONFIG_OFFSET : 0);
 	inc_window_start_raft_members_seq_no		= (inc_window_start_raft_members_seq_no > NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO ? inc_window_start_raft_members_seq_no - NVMEIBT_INCREMENTAL_WINDOW_SIZE_RAFT_MEMBERS_SEQ_NO : 0);
 	inc_window_start_kafka_mgmt_config_offset	= max(inc_window_start_kafka_mgmt_config_offset, last_delete_kafka_mgmt_config_offset);
