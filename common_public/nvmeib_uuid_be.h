@@ -105,11 +105,19 @@
 #endif
 
 /*****************************************************************************/
-#ifndef UUID_BE
+// The typedef and the UUID_BE constructor macro have separate guards:
+//   * _NVMEIB_UUID_BE_TYPE_DEFINED guards just the type (shared with
+//     utils/nvmeib_jdr/nvmeib_jdr.h, which may define the same struct first).
+//   * UUID_BE guards the constructor macro (some legacy kernel/other headers
+//     may define it together with the type).
+#ifndef _NVMEIB_UUID_BE_TYPE_DEFINED
+#define _NVMEIB_UUID_BE_TYPE_DEFINED
 	typedef struct{
 		unsigned char b[16];
 	} uuid_be;
+#endif
 
+#ifndef UUID_BE
 	#define UUID_BE(a, b, c, d0, d1, d2, d3, d4, d5, d6, d7)		\
 	((uuid_be)								\
 	{{ ((a) >> 24) & 0xff, ((a) >> 16) & 0xff, ((a) >> 8) & 0xff, (a) & 0xff, \

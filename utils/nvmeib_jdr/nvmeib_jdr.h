@@ -25,7 +25,13 @@
 	#define JDR_ASSERT(cond) assert(cond)
 #endif
 
-#ifndef UUID_BE
+// Cooperate with common_public/nvmeib_uuid_be.h: only one of us defines the
+// typedef. The shared sentinel _NVMEIB_UUID_BE_TYPE_DEFINED prevents a
+// conflicting redefinition no matter which header is included first. We still
+// honor UUID_BE for the case where some other (e.g. legacy/kernel) header
+// already provides both the macro and the type.
+#if !defined(UUID_BE) && !defined(_NVMEIB_UUID_BE_TYPE_DEFINED)
+	#define _NVMEIB_UUID_BE_TYPE_DEFINED
 	typedef struct {
 		unsigned char b[16];
 	} uuid_be;
