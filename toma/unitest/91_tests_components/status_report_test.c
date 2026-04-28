@@ -400,7 +400,7 @@ DEFINE_TEST(errors_kafka_incompatible_version)
 	(void)_ctx;
 
 	NNVMEIBT_STR_RESIZE_BUF(kiv02, out, 4096);
-	TEST_set_rd_kafka_version(0x020601ff, "2.6.1");
+	TEST_set_rd_kafka_version(0x040601ff, "4.6.1");
 	nvmeibt_kafka_get_real_time_errors_str(out);
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Wrong kafka version"));
 	rv = 0;
