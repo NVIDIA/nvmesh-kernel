@@ -202,17 +202,21 @@ static bool evict_under_recovery(void) {
 	return mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed;
 }
 
-/* Phase-6 verification: recovery actually happened AND the surviving + replacement
- * segs converged back to "normal" (mdb_seg_RW). segs[0] is the evicted slot --
- * cluster topo retains its mdb_seg_dep from Phase 2 (reports after Phase 3 omit
- * it, and there's no mgmt_sim writer to clear stale per-uuid status), so we
- * deliberately don't check it. */
+/* Phase-6 verification: recovery actually happened AND every non-evicted seg in
+ * the praid (D+P surviving slots + 1 replacement) converged back to "normal"
+ * (mdb_seg_RW). Slots whose latest status is mdb_seg_dep are the evicted ones --
+ * cluster topo retains that status because reports after Phase 3 omit them and
+ * there is no mgmt_sim writer that clears stale per-uuid status -- so we skip
+ * those rather than fail. */
 static bool evict_rebuild_complete(const struct sb_praid_conf *pr) {
 	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
 	if (!mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed) return false;
-	return sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, pr->segs[1].uuid)->status == mdb_seg_RW
-		&& sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, pr->segs[2].uuid)->status == mdb_seg_RW
-		&& sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, pr->segs[3].uuid)->status == mdb_seg_RW;
+	for (int i = 0; i < (int)(pr->D + pr->P + 1); i++) {
+		const enum seg_topo_state st = sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, pr->segs[i].uuid)->status;
+		if (st == mdb_seg_dep) continue;
+		if (st != mdb_seg_RW) return false;
+	}
+	return true;
 }
 
 static void scenario_evict_rebuild_r1(void) {
