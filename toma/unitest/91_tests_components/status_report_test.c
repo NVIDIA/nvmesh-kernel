@@ -14,6 +14,7 @@
 #include "vol/nvmeibt_block_device.h"
 #include "unitest/00_framework/toma_test_framework.h"
 #include "unitest/00_framework/toma_test_helpers.h"
+#include "unitest/kafka/sandbox_kafka_internal.h"
 #include "status_report_test.h"
 #include <stdlib.h>
 
@@ -569,7 +570,7 @@ DEFINE_TEST(errors_rpc_status_errors_dispatch)
 	NNVMEIBT_STR_RESIZE_BUF(rse02, out, 4096);
 	TEST_add_local_disk_to_hash("test-rpc-ldisk", false, true);
 	added_ldisk = true;
-	TEST_ASSERT_TRUE(TEST_nvmeibt_rpc_handle_command(cmd, out) > 0);
+	TEST_ASSERT_TRUE(nvmeibt_rpc_handle_command(cmd, out) > 0);
 	TEST_ASSERT_TRUE(nvmeibt_Str_str(out)[0] == '{');
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "DRIVE_WRITE_ERROR: local_disk="));
 	rv = 0;
@@ -594,7 +595,7 @@ DEFINE_TEST(errors_rpc_clear_problem_counters_dispatch)
 	saved_last_persist_failure_timestamp_sec = nvmeibt_raft_get_my_raft()->last_persist_failure_timestamp_sec;
 	nvmeibt_raft_get_my_raft()->n_persist_failures = 9;
 	nvmeibt_raft_get_my_raft()->last_persist_failure_timestamp_sec = 300;
-	TEST_ASSERT_EQ(TEST_nvmeibt_rpc_handle_command(cmd, out), 0);
+	TEST_ASSERT_EQ(nvmeibt_rpc_handle_command(cmd, out), 0);
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Problem counters cleared."));
 	TEST_ASSERT_EQ(nvmeibt_raft_get_my_raft()->n_persist_failures, 0);
 	TEST_ASSERT_EQ(nvmeibt_raft_get_my_raft()->last_persist_failure_timestamp_sec, 0);

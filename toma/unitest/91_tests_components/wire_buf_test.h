@@ -10,6 +10,31 @@
  * Invoked via: ./nvmeibt_toma wire_buf_test [selection]
  */
 #include "nvmeibt_common.h"
+#include "nvmeibt_persistency_info.h"
+
+extern int compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(  // Declared as int (not enum PERSIST_AND_WIRE_BUF_DIFF) so the enum stays private to nvmeibt_raft.c; the test only checks against numeric values 0/1/2.
+	const struct nvmeibt_persist_and_wire_buf *b1,
+	const struct nvmeibt_persist_and_wire_buf *b2);
+extern int persist_and_wire_buf_calculate_and_merge_data_to_section(
+	struct nvmeibt_wire_type_len_value *dst_wire_ctx,
+	const struct nvmeibt_wire_type_len_value *old_wire_ctx,
+	const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+	char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr);
+extern bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_topo_to_commit);
+extern bool compute_is_configs_and_raft_members_incremental(
+	bool is_topo_incremental,
+	int64_t peer_topo_config_idx, int64_t peer_kafka_mgmt_config_offset,
+	int64_t peer_raft_members_seq_no, int64_t peer_raft_members_kafka_offset,
+	int64_t leader_topo_config_to_commit, int64_t leader_kafka_mgmt_config_to_commit,
+	int64_t leader_raft_members_seq_no_to_commit,
+	int64_t last_delete_kafka_mgmt_config_offset, int64_t last_delete_raft_members_kafka_offset);
+extern bool raft_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver);
+extern struct nvmeibt_persist_and_wire_buf *realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(
+	struct nvmeibt_persist_and_wire_buf *old,
+	const struct nvmeibt_persist_and_wire_buf *upd,
+	bool is_with_raft_log);
+extern bool is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf, int data_len);
+extern void persist_and_wire_buf_validate_len(const struct nvmeibt_persist_and_wire_buf *b);
 
 #define WIRE_BUF_TEST_MAX_PRAIDS		64
 #define WIRE_BUF_TEST_MAX_SEGS			8

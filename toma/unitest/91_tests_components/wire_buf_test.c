@@ -5,9 +5,9 @@
 /**
  * wire_buf_test.c - Wire buffer unit tests
  * Tests persist_and_wire_buf operations:
- * - Per-section merge via TEST_raft_merge_data_to_section
- * - Follower realloc_and_upd orchestration via TEST_realloc_and_upd_follower_persist_and_wire_bufs
- * - Incremental selection logic via TEST_compute_is_configs_incremental
+ * - Per-section merge via persist_and_wire_buf_calculate_and_merge_data_to_section
+ * - Follower realloc_and_upd orchestration via realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data
+ * - Incremental selection logic via compute_is_configs_and_raft_members_incremental
  */
 
 #include "nvmeibt_debug.h"
@@ -280,7 +280,7 @@ DEFINE_TEST(complete_topo_replaces)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, upd_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -322,7 +322,7 @@ DEFINE_TEST(complete_topo_same_idx_keeps_old)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, old_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -363,7 +363,7 @@ DEFINE_TEST(complete_topo_empty_old)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, upd_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -400,7 +400,7 @@ DEFINE_TEST(complete_topo_config_replaces)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, upd_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
@@ -437,7 +437,7 @@ DEFINE_TEST(complete_kafka_config_replaces)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, upd_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
@@ -474,7 +474,7 @@ DEFINE_TEST(complete_raft_members_replaces)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, upd_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
@@ -512,7 +512,7 @@ DEFINE_TEST(complete_all_sections_mixed)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, 128);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
@@ -535,7 +535,7 @@ DEFINE_TEST(complete_all_sections_mixed)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, 32);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
@@ -556,7 +556,7 @@ DEFINE_TEST(complete_all_sections_mixed)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, 40);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
@@ -601,7 +601,7 @@ DEFINE_TEST(incremental_topo_empty_keeps_old)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, old_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -649,7 +649,7 @@ DEFINE_TEST(incremental_topo_single_praid_updated)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 
@@ -704,7 +704,7 @@ DEFINE_TEST(incremental_topo_single_praid_not_updated)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -755,7 +755,7 @@ DEFINE_TEST(incremental_topo_multi_praid_partial_update)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -823,7 +823,7 @@ DEFINE_TEST(incremental_topo_multi_praid_all_updated)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -882,7 +882,7 @@ DEFINE_TEST(incremental_topo_praid_with_segments)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -955,7 +955,7 @@ DEFINE_TEST(incremental_topo_praid_seg_count_changes)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -1013,7 +1013,7 @@ DEFINE_TEST(incremental_topo_extra_uuid_ignored)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -1079,7 +1079,7 @@ DEFINE_TEST(incremental_topo_ordering_differs)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -1139,7 +1139,7 @@ DEFINE_TEST(incremental_topo_same_idx_keeps_old)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -1202,7 +1202,7 @@ DEFINE_TEST(incremental_topo_large_praid_count)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_COMPLETE);
@@ -1245,7 +1245,7 @@ DEFINE_TEST(incremental_topo_unknown_type_fails)
 	old_ptr = ctx->old_buf;
 	upd_ptr = ctx->upd_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
 			NULL, &old_ptr, &upd_ptr);
 	TEST_ASSERT_EQ(merge_size, -1);
 	rv = 0;
@@ -1278,7 +1278,7 @@ DEFINE_TEST(incremental_topo_size_only_no_dst)
 	old_ptr = ctx->old_buf;
 	upd_ptr = ctx->upd_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
 			NULL, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, old_len);
 	rv = 0;
@@ -1307,7 +1307,7 @@ DEFINE_TEST(incremental_topo_config_empty_keeps_old)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, old_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
@@ -1340,7 +1340,7 @@ DEFINE_TEST(incremental_kafka_config_empty_keeps_old)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, old_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
@@ -1373,7 +1373,7 @@ DEFINE_TEST(incremental_raft_members_empty_keeps_old)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_EQ(merge_size, old_len);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
@@ -1493,7 +1493,7 @@ DEFINE_TEST(incremental_raft_members_partial_update)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
@@ -1540,7 +1540,7 @@ DEFINE_TEST(incremental_raft_members_new_member_accepted)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
@@ -1584,7 +1584,7 @@ DEFINE_TEST(incremental_raft_members_old_seq_keeps_hash)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 
@@ -1637,7 +1637,7 @@ DEFINE_TEST(incremental_raft_members_removed_member_kept)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_RAFT_MEMBERS_COMPLETE);
@@ -1870,7 +1870,7 @@ DEFINE_TEST(incremental_kafka_config_partial_update)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
@@ -1930,7 +1930,7 @@ DEFINE_TEST(incremental_kafka_config_old_version_keeps_hash)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
@@ -1993,7 +1993,7 @@ DEFINE_TEST(incremental_kafka_config_vol_deleted)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
@@ -2057,7 +2057,7 @@ DEFINE_TEST(incremental_kafka_config_vol_added)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_KAFKA_MGMT_CONFIG_COMPLETE);
@@ -2119,7 +2119,7 @@ DEFINE_TEST(incremental_topo_config_partial_praid_update)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
@@ -2261,7 +2261,7 @@ DEFINE_TEST(incremental_topo_config_mixed_keep_and_update)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
@@ -2345,7 +2345,7 @@ DEFINE_TEST(incremental_topo_config_vol_deleted)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
@@ -2422,7 +2422,7 @@ DEFINE_TEST(incremental_topo_config_vol_added)
 	upd_ptr = ctx->upd_buf;
 	dst_ptr = ctx->dst_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(&dst_tlv, &old_tlv, &upd_tlv,
 			&dst_ptr, &old_ptr, (const char **)&upd_ptr);
 	TEST_ASSERT_TRUE(merge_size > 0);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst_tlv), TLV_TYPE_TOPO_CONFIG_COMPLETE);
@@ -2458,17 +2458,19 @@ DEFINE_TEST(deletion_guard_forces_complete_configs)
 	/* Leader state: topo=100, topo_config=50, kafka=50, raft_members_seq_no=20 */
 	/* Peer is within all windows (close to leader values) */
 	/* No deletion yet => should be incremental */
-	result = TEST_compute_is_configs_incremental(
-		/* peer */    98, 49, 49, 19, 50,
-		/* leader */  100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(98, 100),
+		/* peer */    49, 49, 19, 50,
+		/* leader */  50, 50, 20,
 		/* deletes */ 0, 0);
 	TEST_ASSERT_EQ(result, 1);
 
 	/* Volume deletion: last_delete_kafka_mgmt_config_offset = 50 (current offset) */
 	/* Peer's kafka offset (49) < deletion offset (50) => forced complete */
-	result = TEST_compute_is_configs_incremental(
-		/* peer */    98, 49, 49, 19, 50,
-		/* leader */  100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(98, 100),
+		/* peer */    49, 49, 19, 50,
+		/* leader */  50, 50, 20,
 		/* deletes */ 50, 0);
 	TEST_ASSERT_EQ(result, 0);
 
@@ -2490,23 +2492,26 @@ DEFINE_TEST(deletion_guard_no_effect_when_peer_caught_up)
 
 	/* Deletion happened at kafka offset 40, but peer is at 49 (past it) */
 	/* Leader is at 50, peer is within window */
-	result = TEST_compute_is_configs_incremental(
-		/* peer */    98, 49, 49, 19, 50,
-		/* leader */  100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(98, 100),
+		/* peer */    49, 49, 19, 50,
+		/* leader */  50, 50, 20,
 		/* deletes */ 40, 0);
 	TEST_ASSERT_EQ(result, 1);
 
 	/* Same but with raft_members deletion guard too */
-	result = TEST_compute_is_configs_incremental(
-		/* peer */    98, 49, 49, 19, 50,
-		/* leader */  100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(98, 100),
+		/* peer */    49, 49, 19, 50,
+		/* leader */  50, 50, 20,
 		/* deletes */ 40, 40);
 	TEST_ASSERT_EQ(result, 1);
 
 	/* Peer's raft_members_kafka_offset (30) < last_delete (40) => forced complete */
-	result = TEST_compute_is_configs_incremental(
-		/* peer */    98, 49, 49, 19, 30,
-		/* leader */  100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(98, 100),
+		/* peer */    49, 49, 19, 30,
+		/* leader */  50, 50, 20,
 		/* deletes */ 40, 40);
 	TEST_ASSERT_EQ(result, 0);
 
@@ -2526,15 +2531,17 @@ DEFINE_TEST(selection_topo_window_boundary)
 
 	(void)_ctx;
 
-	result = TEST_compute_is_configs_incremental(
-		topo_window_start - 1, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
-		100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(topo_window_start - 1, 100),
+		config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		50, 50, 20,
 		0, 0);
 	TEST_ASSERT_EQ(result, 0);
 
-	result = TEST_compute_is_configs_incremental(
-		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
-		100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(topo_window_start, 100),
+		config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		50, 50, 20,
 		0, 0);
 	TEST_ASSERT_EQ(result, 1);
 	rv = 0;
@@ -2553,15 +2560,17 @@ DEFINE_TEST(selection_topo_config_window_boundary)
 
 	(void)_ctx;
 
-	result = TEST_compute_is_configs_incremental(
-		topo_window_start, config_window_start - 1, kafka_window_start, raft_members_seq_window_start, 50,
-		100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(topo_window_start, 100),
+		config_window_start - 1, kafka_window_start, raft_members_seq_window_start, 50,
+		50, 50, 20,
 		0, 0);
 	TEST_ASSERT_EQ(result, 0);
 
-	result = TEST_compute_is_configs_incremental(
-		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
-		100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(topo_window_start, 100),
+		config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		50, 50, 20,
 		0, 0);
 	TEST_ASSERT_EQ(result, 1);
 	rv = 0;
@@ -2580,15 +2589,17 @@ DEFINE_TEST(selection_kafka_window_boundary)
 
 	(void)_ctx;
 
-	result = TEST_compute_is_configs_incremental(
-		topo_window_start, config_window_start, kafka_window_start - 1, raft_members_seq_window_start, 50,
-		100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(topo_window_start, 100),
+		config_window_start, kafka_window_start - 1, raft_members_seq_window_start, 50,
+		50, 50, 20,
 		0, 0);
 	TEST_ASSERT_EQ(result, 0);
 
-	result = TEST_compute_is_configs_incremental(
-		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
-		100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(topo_window_start, 100),
+		config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		50, 50, 20,
 		0, 0);
 	TEST_ASSERT_EQ(result, 1);
 	rv = 0;
@@ -2607,15 +2618,17 @@ DEFINE_TEST(selection_raft_members_seq_window_boundary)
 
 	(void)_ctx;
 
-	result = TEST_compute_is_configs_incremental(
-		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start - 1, 50,
-		100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(topo_window_start, 100),
+		config_window_start, kafka_window_start, raft_members_seq_window_start - 1, 50,
+		50, 50, 20,
 		0, 0);
 	TEST_ASSERT_EQ(result, 0);
 
-	result = TEST_compute_is_configs_incremental(
-		topo_window_start, config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
-		100, 50, 50, 20,
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(topo_window_start, 100),
+		config_window_start, kafka_window_start, raft_members_seq_window_start, 50,
+		50, 50, 20,
 		0, 0);
 	TEST_ASSERT_EQ(result, 1);
 	rv = 0;
@@ -2630,11 +2643,12 @@ DEFINE_TEST(selection_old_peer_version_forces_complete)
 
 	(void)_ctx;
 
-	is_incremental_allowed = TEST_is_configs_incremental_allowed_for_peer_sw_ver(
-		TOMA_SW_VER_MIN_FOR_INCREMENTAL - 1,
-		/* peer */    98, 49, 49, 19, 50,
-		/* leader */  100, 50, 50, 20,
-		/* deletes */ 0, 0);
+	is_incremental_allowed = raft_is_peer_incremental_wire_buf_supported(TOMA_SW_VER_MIN_FOR_INCREMENTAL - 1) &&
+		compute_is_configs_and_raft_members_incremental(
+			compute_is_topo_incremental(98, 100),
+			/* peer */    49, 49, 19, 50,
+			/* leader */  50, 50, 20,
+			/* deletes */ 0, 0);
 	TEST_ASSERT_EQ(is_incremental_allowed, 0);
 	rv = 0;
 out:
@@ -2648,11 +2662,12 @@ DEFINE_TEST(selection_supported_peer_version_allows_incremental)
 
 	(void)_ctx;
 
-	is_incremental_allowed = TEST_is_configs_incremental_allowed_for_peer_sw_ver(
-		TOMA_SW_VER_MIN_FOR_INCREMENTAL,
-		/* peer */    98, 49, 49, 19, 50,
-		/* leader */  100, 50, 50, 20,
-		/* deletes */ 0, 0);
+	is_incremental_allowed = raft_is_peer_incremental_wire_buf_supported(TOMA_SW_VER_MIN_FOR_INCREMENTAL) &&
+		compute_is_configs_and_raft_members_incremental(
+			compute_is_topo_incremental(98, 100),
+			/* peer */    49, 49, 19, 50,
+			/* leader */  50, 50, 20,
+			/* deletes */ 0, 0);
 	TEST_ASSERT_EQ(is_incremental_allowed, 1);
 	rv = 0;
 out:
@@ -2680,7 +2695,7 @@ DEFINE_TEST(compare_both_null_returns_equal)
 	int		rv = -1;
 
 	(void)_ctx;
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(NULL, NULL), 0);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(NULL, NULL), 0);
 	rv = 0;
 out:
 	return rv;
@@ -2697,8 +2712,8 @@ DEFINE_TEST(compare_one_null_returns_topo_and_configs)
 	buf = build_test_buf(1, topo, 64, 10, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
 	TEST_ASSERT_NOT_NULL(buf);
 
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(buf, NULL), 2);
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(NULL, buf), 2);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(buf, NULL), 2);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(NULL, buf), 2);
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_cmp1, buf);
@@ -2718,7 +2733,7 @@ DEFINE_TEST(compare_equal_bufs_returns_equal)
 	TEST_ASSERT_NOT_NULL(b1);
 	TEST_ASSERT_NOT_NULL(b2);
 
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 0);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(b1, b2), 0);
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_cmp2a, b1);
@@ -2739,7 +2754,7 @@ DEFINE_TEST(compare_topo_only_diff)
 	TEST_ASSERT_NOT_NULL(b1);
 	TEST_ASSERT_NOT_NULL(b2);
 
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 1);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(b1, b2), 1);
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_cmp3a, b1);
@@ -2760,7 +2775,7 @@ DEFINE_TEST(compare_topo_config_only_diff)
 	TEST_ASSERT_NOT_NULL(b1);
 	TEST_ASSERT_NOT_NULL(b2);
 
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 2);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(b1, b2), 2);
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_cmp4a, b1);
@@ -2781,7 +2796,7 @@ DEFINE_TEST(compare_kafka_config_only_diff)
 	TEST_ASSERT_NOT_NULL(b1);
 	TEST_ASSERT_NOT_NULL(b2);
 
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 2);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(b1, b2), 2);
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_cmp5a, b1);
@@ -2802,7 +2817,7 @@ DEFINE_TEST(compare_raft_members_only_diff)
 	TEST_ASSERT_NOT_NULL(b1);
 	TEST_ASSERT_NOT_NULL(b2);
 
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 2);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(b1, b2), 2);
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_cmp6a, b1);
@@ -2823,7 +2838,7 @@ DEFINE_TEST(compare_topo_and_config_diff)
 	TEST_ASSERT_NOT_NULL(b1);
 	TEST_ASSERT_NOT_NULL(b2);
 
-	TEST_ASSERT_EQ(TEST_compare_persist_and_wire_bufs(b1, b2), 2);
+	TEST_ASSERT_EQ(compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(b1, b2), 2);
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_cmp7a, b1);
@@ -2853,7 +2868,7 @@ DEFINE_TEST(crc_corrupted_topo_data_fails)
 	TEST_ASSERT_NOT_NULL(topo_data_out);
 	topo_data_out[0] ^= 0xFF;
 
-	TEST_ASSERT_TRUE(!TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
+	TEST_ASSERT_TRUE(!is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_crc2, buf);
@@ -2876,7 +2891,7 @@ DEFINE_TEST(crc_corrupted_raft_ctx_fails)
 	// Corrupt raft_ctx CRC field
 	buf->raft_ctx.raft_ctx_crc ^= 0xDEADBEEF;
 
-	TEST_ASSERT_TRUE(!TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
+	TEST_ASSERT_TRUE(!is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_crc3, buf);
@@ -2895,7 +2910,7 @@ DEFINE_TEST(crc_length_mismatch_fails)
 	TEST_ASSERT_NOT_NULL(buf);
 
 	// Pass wrong data_len (actual is 64, pass 128)
-	TEST_ASSERT_TRUE(!TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, 128));
+	TEST_ASSERT_TRUE(!is_persist_and_wire_buf_crc_and_len_ok(buf, 128));
 	rv = 0;
 out:
 	NNVMEIBT_TOMA_FREE(test_crc4, buf);
@@ -2918,7 +2933,7 @@ DEFINE_TEST(generate_buf_crc_valid)
 	TEST_ASSERT_NOT_NULL(buf);
 	data_len = 64 + 32 + 16 + 16;
 
-	TEST_ASSERT_TRUE(TEST_is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
+	TEST_ASSERT_TRUE(is_persist_and_wire_buf_crc_and_len_ok(buf, data_len));
 	persist_and_wire_buf_validate_len(buf);
 	rv = 0;
 out:
@@ -2944,14 +2959,14 @@ DEFINE_TEST(follower_merge_produces_valid_crc)
 	memset(rm, 0xDD, sizeof(rm));
 	old = build_test_buf(1, topo_old, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
 	upd = build_test_buf(3, topo_upd, 200, 15, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, true);
 	TEST_ASSERT_NOT_NULL(dst);
 
 	data_len = nvmeibt_tlv_get_len(&dst->topo_ctx) +
 			   nvmeibt_tlv_get_len(&dst->topo_config_ctx) +
 			   nvmeibt_tlv_get_len(&dst->kafka_mgmt_config_ctx) +
 			   nvmeibt_tlv_get_len(&dst->raft_members_ctx);
-	TEST_ASSERT_TRUE(TEST_is_persist_and_wire_buf_crc_and_len_ok(dst, data_len));
+	TEST_ASSERT_TRUE(is_persist_and_wire_buf_crc_and_len_ok(dst, data_len));
 	persist_and_wire_buf_validate_len(dst);
 	rv = 0;
 out:
@@ -2979,7 +2994,7 @@ DEFINE_TEST(merge_topo_old_incremental_fails)
 	old_ptr = ctx->old_buf;
 	upd_ptr = ctx->upd_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
 			NULL, &old_ptr, &upd_ptr);
 	TEST_ASSERT_EQ(merge_size, -1);
 	rv = 0;
@@ -3004,7 +3019,7 @@ DEFINE_TEST(merge_topo_config_old_incremental_fails)
 	old_ptr = ctx->old_buf;
 	upd_ptr = ctx->upd_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
 			NULL, &old_ptr, &upd_ptr);
 	TEST_ASSERT_EQ(merge_size, -1);
 	rv = 0;
@@ -3029,7 +3044,7 @@ DEFINE_TEST(merge_kafka_config_old_incremental_fails)
 	old_ptr = ctx->old_buf;
 	upd_ptr = ctx->upd_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
 			NULL, &old_ptr, &upd_ptr);
 	TEST_ASSERT_EQ(merge_size, -1);
 	rv = 0;
@@ -3054,7 +3069,7 @@ DEFINE_TEST(merge_raft_members_old_incremental_fails)
 	old_ptr = ctx->old_buf;
 	upd_ptr = ctx->upd_buf;
 
-	merge_size = TEST_raft_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
+	merge_size = persist_and_wire_buf_calculate_and_merge_data_to_section(NULL, &old_tlv, &upd_tlv,
 			NULL, &old_ptr, &upd_ptr);
 	TEST_ASSERT_EQ(merge_size, -1);
 	rv = 0;
@@ -3151,7 +3166,7 @@ DEFINE_TEST(topo_incremental_configs_complete_inplace)
 			false, kmc_wire, kmc_len, 30LL,
 			false, rm_wire, rm_len, 40LL, -1LL);
 
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, true);
 	TEST_ASSERT_TRUE(dst == old_saved);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->topo_ctx), TLV_TYPE_TOPO_COMPLETE);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 20LL);
@@ -3279,7 +3294,7 @@ DEFINE_TEST(all_sections_incremental_full_merge)
 			true, incr_kmc_wire, incr_kmc_len, 200LL,
 			true, incr_rm_wire, incr_rm_len, 200LL, 20LL);
 
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, true);
 	TEST_ASSERT_TRUE(dst != old_saved);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->topo_ctx), TLV_TYPE_TOPO_COMPLETE);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_type(&dst->topo_config_ctx), TLV_TYPE_TOPO_CONFIG_COMPLETE);
@@ -3359,7 +3374,7 @@ DEFINE_TEST(first_update_with_raft_log)
 	memset(kmc, 0xCC, sizeof(kmc));
 	memset(rm, 0xDD, sizeof(rm));
 	upd = build_test_buf(5, topo, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(NULL, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(NULL, upd, true);
 	TEST_ASSERT_TRUE(dst != NULL);
 	TEST_ASSERT_TRUE(dst != upd);
 	TEST_ASSERT_EQ(persist_and_wire_buf_get_total_len(dst), persist_and_wire_buf_get_total_len(upd));
@@ -3384,7 +3399,7 @@ DEFINE_TEST(first_update_without_raft_log)
 	memset(kmc, 0xCC, sizeof(kmc));
 	memset(rm, 0xDD, sizeof(rm));
 	upd = build_test_buf(7, topo, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(NULL, upd, false);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(NULL, upd, false);
 	TEST_ASSERT_TRUE(dst != NULL);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 7LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 0);
@@ -3414,7 +3429,7 @@ DEFINE_TEST(equal_bufs_only_raft_ctx_updated)
 	memset(rm, 0xDD, sizeof(rm));
 	old = build_test_buf(1, topo, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
 	upd = build_test_buf(5, topo, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, true);
 	TEST_ASSERT_TRUE(dst == old);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 5LL);
 	TEST_ASSERT_EQ(dst->buf_encoding_ver, upd->buf_encoding_ver);
@@ -3444,7 +3459,7 @@ DEFINE_TEST(no_raft_log_keeps_old)
 	memset(tc_upd, 0xFF, sizeof(tc_upd));
 	old = build_test_buf(1, topo_old, 100, 10, tc_old, 50, 20, kmc_old, 30, 30, rm_old, 40, 40);
 	upd = build_test_buf(9, topo_upd, 200, 99, tc_upd, 80, 88, NULL, 0, 77, NULL, 0, 66);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, false);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, false);
 	TEST_ASSERT_TRUE(dst == old);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 9LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 10LL);
@@ -3475,7 +3490,7 @@ DEFINE_TEST(topo_only_same_size_inplace)
 	memset(rm, 0xDD, sizeof(rm));
 	old = build_test_buf(1, topo_old, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
 	upd = build_test_buf(3, topo_upd, 100, 15, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, true);
 	TEST_ASSERT_TRUE(dst == old);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 15LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 100);
@@ -3518,7 +3533,7 @@ DEFINE_TEST(topo_only_diff_size_realloc)
 	old = build_test_buf(1, topo_old, 100, 10, tc, 50, 20, kmc, 30, 30, rm, 40, 40);
 	old_saved = old;
 	upd = build_test_buf(3, topo_upd, 200, 15, NULL, 0, 20, NULL, 0, 30, NULL, 0, 40);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, true);
 	TEST_ASSERT_TRUE(dst != old_saved);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 15LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 200);
@@ -3566,7 +3581,7 @@ DEFINE_TEST(full_alloc_topo_and_configs)
 	old = build_test_buf(1, topo_old, 100, 10, tc_old, 50, 20, kmc, 30, 30, rm, 40, 40);
 	old_saved = old;
 	upd = build_test_buf(5, topo_upd, 120, 15, tc_upd, 60, 25, NULL, 0, 30, NULL, 0, 40);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, true);
 	TEST_ASSERT_TRUE(dst != old_saved);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_idx(&dst->topo_ctx), 15LL);
 	TEST_ASSERT_EQ(nvmeibt_tlv_get_len(&dst->topo_ctx), 120);
@@ -3615,7 +3630,7 @@ DEFINE_TEST(error_in_pass1_keeps_old)
 	upd = build_test_buf(8, topo_upd, 120, 15, tc_upd, 60, 25, NULL, 0, 30, NULL, 0, 40);
 	// Corrupt topo TLV type to invalid value. The merge function will return -1.
 	upd->topo_ctx.tlv_type = LE_SWAP8((int8_t)99);
-	dst = TEST_realloc_and_upd_follower_persist_and_wire_bufs(old, upd, true);
+	dst = realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, true);
 	TEST_ASSERT_TRUE(dst == old);
 	TEST_ASSERT_EQ((long long)persist_and_wire_buf_get_current_raft_TERM(dst), 8LL);
 	TEST_ASSERT_EQ(dst->buf_encoding_ver, upd->buf_encoding_ver);

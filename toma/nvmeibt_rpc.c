@@ -775,7 +775,7 @@ static struct rpc_handler_t {
 		{ "export-memory-gpt",  nvmeibt_rpc_command_export_memory_gpt },
 };
 
-static int nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out)
+int nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out)
 {
 	#define MAX_ARGV 12
 	int rc = 0;
@@ -818,13 +818,6 @@ static int nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out)
 	NFOUT;
 	return rc;
 }
-
-#if defined(TOMA_SIMULATOR_SANDBOX)
-int TEST_nvmeibt_rpc_handle_command(char *in, struct nvmeibt_Str *out)
-{
-	return nvmeibt_rpc_handle_command(in, out);
-}
-#endif
 
 void nvmeibt_rpc_run(void)
 {

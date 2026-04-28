@@ -223,7 +223,7 @@ void nvmeibt_raft_set_incremental_wire_buf_enabled(int64_t is_enabled)
 
 int64_t nvmeibt_raft_get_incremental_wire_buf_enabled(void)	{ return raft_is_incremental_wire_buf_enabled; }
 
-static bool raft_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver)
+bool raft_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver)
 {
 	return (peer_sw_ver >= TOMA_SW_VER_MIN_FOR_INCREMENTAL);
 }
@@ -373,7 +373,7 @@ static void persist_and_wire_recalc_total_len(struct nvmeibt_persist_and_wire_bu
 								   nvmeibt_tlv_get_len(&(buf->raft_members_ctx)));
 }
 
-static enum PERSIST_AND_WIRE_BUF_DIFF compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(const struct nvmeibt_persist_and_wire_buf *b1, const struct nvmeibt_persist_and_wire_buf *b2)
+enum PERSIST_AND_WIRE_BUF_DIFF compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(const struct nvmeibt_persist_and_wire_buf *b1, const struct nvmeibt_persist_and_wire_buf *b2)
 {
 	enum PERSIST_AND_WIRE_BUF_DIFF		rv;
 	int64_t								wire_t1, wire_t2, wire_tc1, wire_tc2, wire_kmc1, wire_kmc2, wire_rm1, wire_rm2;
@@ -1316,7 +1316,7 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
  *
  * Returns: Size of the resulting data, or -1 on error
  */
-static int persist_and_wire_buf_calculate_and_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx, const struct nvmeibt_wire_type_len_value *old_wire_ctx, const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
+int persist_and_wire_buf_calculate_and_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx, const struct nvmeibt_wire_type_len_value *old_wire_ctx, const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
 								   char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
 {
 	int			upd_len = 0;
@@ -1382,24 +1382,7 @@ out:
 	return total_size;
 }
 
-static bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_topo_to_commit);
-static bool compute_is_configs_and_raft_members_incremental(
-	bool is_topo_incremental, int64_t peer_topo_config_idx, int64_t peer_kafka_mgmt_config_offset,
-	int64_t peer_raft_members_seq_no, int64_t peer_raft_members_kafka_offset,
-	int64_t leader_topo_config_to_commit, int64_t leader_kafka_mgmt_config_to_commit,
-	int64_t leader_raft_members_seq_no_to_commit,
-	int64_t last_delete_kafka_mgmt_config_offset, int64_t last_delete_raft_members_kafka_offset);
-
 #if defined(TOMA_SIMULATOR_SANDBOX)
-int TEST_raft_merge_data_to_section(struct nvmeibt_wire_type_len_value *dst_wire_ctx,
-		const struct nvmeibt_wire_type_len_value *old_wire_ctx,
-		const struct nvmeibt_wire_type_len_value *upd_wire_ctx,
-		char **dst_data_ptr, char **old_data_ptr, const char **upd_data_ptr)
-{
-	return persist_and_wire_buf_calculate_and_merge_data_to_section(dst_wire_ctx, old_wire_ctx, upd_wire_ctx,
-			dst_data_ptr, old_data_ptr, upd_data_ptr);
-}
-
 void TEST_init_raft_members_hash(void)
 {
 	struct nvmeib_hash_table			*hash_tbl = my_raft_global.raft_members_hash_by_uuid;
@@ -1450,50 +1433,9 @@ void TEST_remove_raft_member_from_hash(const union nvmeib_uuid *uuid)
 	member = nvmeib_hash_delete_uuid(my_raft_global.raft_members_hash_by_uuid, uuid);
 	free(member);
 }
-
-int TEST_compute_is_configs_incremental(
-	int64_t peer_topo_idx, int64_t peer_topo_config_idx,
-	int64_t peer_kafka_mgmt_config_offset, int64_t peer_raft_members_seq_no,
-	int64_t peer_raft_members_kafka_offset,
-	int64_t leader_topo_to_commit, int64_t leader_topo_config_to_commit,
-	int64_t leader_kafka_mgmt_config_to_commit, int64_t leader_raft_members_seq_no_to_commit,
-	int64_t last_delete_kafka_mgmt_config_offset, int64_t last_delete_raft_members_kafka_offset)
-{
-	bool is_topo_incremental = compute_is_topo_incremental(peer_topo_idx, leader_topo_to_commit);
-	return compute_is_configs_and_raft_members_incremental(
-		is_topo_incremental, peer_topo_config_idx, peer_kafka_mgmt_config_offset,
-		peer_raft_members_seq_no, peer_raft_members_kafka_offset,
-		leader_topo_config_to_commit,
-		leader_kafka_mgmt_config_to_commit, leader_raft_members_seq_no_to_commit,
-		last_delete_kafka_mgmt_config_offset, last_delete_raft_members_kafka_offset);
-}
-
-int TEST_is_peer_incremental_wire_buf_supported(uint32_t peer_sw_ver)
-{
-	return raft_is_peer_incremental_wire_buf_supported(peer_sw_ver);
-}
-
-int TEST_is_configs_incremental_allowed_for_peer_sw_ver(
-	uint32_t peer_sw_ver,
-	int64_t peer_topo_idx, int64_t peer_topo_config_idx,
-	int64_t peer_kafka_mgmt_config_offset, int64_t peer_raft_members_seq_no,
-	int64_t peer_raft_members_kafka_offset,
-	int64_t leader_topo_to_commit, int64_t leader_topo_config_to_commit,
-	int64_t leader_kafka_mgmt_config_to_commit, int64_t leader_raft_members_seq_no_to_commit,
-	int64_t last_delete_kafka_mgmt_config_offset, int64_t last_delete_raft_members_kafka_offset)
-{
-	return raft_is_peer_incremental_wire_buf_supported(peer_sw_ver) &&
-		TEST_compute_is_configs_incremental(
-			peer_topo_idx, peer_topo_config_idx,
-			peer_kafka_mgmt_config_offset, peer_raft_members_seq_no,
-			peer_raft_members_kafka_offset,
-			leader_topo_to_commit, leader_topo_config_to_commit,
-			leader_kafka_mgmt_config_to_commit, leader_raft_members_seq_no_to_commit,
-			last_delete_kafka_mgmt_config_offset, last_delete_raft_members_kafka_offset);
-}
 #endif // #if defined(TOMA_SIMULATOR_SANDBOX)
 
-static bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_topo_to_commit)
+bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_topo_to_commit)
 {
 	int64_t inc_window_start = extract_lower_32_bits_idx(leader_topo_to_commit);
 	inc_window_start = (inc_window_start > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX ? inc_window_start - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX : 0);
@@ -1505,7 +1447,7 @@ static bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_to
  * Extracted so that raft_leader_send_appendentries_to_a_peer and unit tests
  * share the same logic.
  */
-static bool compute_is_configs_and_raft_members_incremental(
+bool compute_is_configs_and_raft_members_incremental(
 	bool is_topo_incremental,
 	int64_t peer_topo_config_idx,
 	int64_t peer_kafka_mgmt_config_offset,
@@ -1541,7 +1483,7 @@ static bool compute_is_configs_and_raft_members_incremental(
 // returns a newly allocated struct where the new-upd takes presidence (whenever it carries a value)
 // Always returns a ptr to a valid usable struct (possibly with no data)
 // The old buf is freed / reused
-static struct nvmeibt_persist_and_wire_buf *realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(
+struct nvmeibt_persist_and_wire_buf *realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(
 	struct nvmeibt_persist_and_wire_buf *old, const struct nvmeibt_persist_and_wire_buf *upd, bool is_with_raft_log)
 {
 	int										dst_data_len;
@@ -1645,28 +1587,7 @@ out:
 	return dst;
 }
 
-static bool is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf, int data_len);
-
-#if defined(TOMA_SIMULATOR_SANDBOX)
-struct nvmeibt_persist_and_wire_buf *TEST_realloc_and_upd_follower_persist_and_wire_bufs(
-	struct nvmeibt_persist_and_wire_buf *old,
-	const struct nvmeibt_persist_and_wire_buf *upd,
-	bool is_with_raft_log)
-{
-	return realloc_and_upd_follower_persist_and_wire_bufs_with_incoming_data(old, upd, is_with_raft_log);
-}
-
-int TEST_compare_persist_and_wire_bufs(const struct nvmeibt_persist_and_wire_buf *b1,
-									   const struct nvmeibt_persist_and_wire_buf *b2)
-{
-	return (int)compare_persist_and_wire_bufs_tlvs_excl_raft_ctx(b1, b2);
-}
-
-bool TEST_is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf, int data_len)
-{
-	return is_persist_and_wire_buf_crc_and_len_ok(buf, data_len);
-}
-#endif
+bool is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf, int data_len);
 
 void raft_leader_regenerate_the_to_commit_persist_and_wire_bufs_as_needed(void)
 {
@@ -2300,7 +2221,7 @@ static bool is_tlv_crc_ok(struct nvmeibt_wire_type_len_value *type_len_ptr, char
 	return rv;
 }
 
-static bool is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf, int data_len)
+bool is_persist_and_wire_buf_crc_and_len_ok(struct nvmeibt_persist_and_wire_buf *buf, int data_len)
 {
 	int							section_len;
 	char						*section_buf;
