@@ -219,7 +219,7 @@ static volatile int				kafka_applied_init_preserve_state_vars_counter = 0;
 static volatile int				kafka_requested_init_preserve_state_vars_counter = 0;
 
 struct timespec					kafka_last_restart_timestamp = {0, 0};
-static volatile int64_t			kafka_last_transient_err_boot_sec = 0;	// Boot-time seconds of last transient kafka comm error; set from kafka thread, read from main thread
+volatile int64_t				kafka_last_transient_err_boot_sec = 0;	// Boot-time seconds of last transient kafka comm error; set from kafka thread, read from main thread
 static volatile int64_t			requested_incremental_VOL_updates_consumer_offset = RD_KAFKA_OFFSET_INVALID;   // For a new node, start reading from whatever was committed
 static volatile int64_t			requested_incremental_TARGET_updates_consumer_offset = RD_KAFKA_OFFSET_INVALID;   // For a new node, start reading from whatever was committed
 static volatile int64_t			requested_incremental_TARGET_updates_consumer_seq_no = -1;   // For a new node, start reading from whatever was committed
@@ -401,7 +401,7 @@ static bool is_waiting_for_reinit(void)
 	return ((kafka_applied_init_counter < kafka_requested_init_counter) || (kafka_applied_init_preserve_state_vars_counter < kafka_requested_init_preserve_state_vars_counter));
 }
 
-static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t err) {
+void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t err) {		// Called by white-box unit-tests
 	struct timespec						now;
 	if (err == RD_KAFKA_RESP_ERR_NO_ERROR)
 		return;
@@ -2805,14 +2805,4 @@ void nvmeibt_kafka_get_real_time_errors_str(struct nvmeibt_Str *out)
 		if ((now.tv_sec - last_sec) < 60)
 			nvmeibt_Str_sprintf(out, "Err=7017, transient kafka comm error %lld[sec] ago,\n", (long long)(now.tv_sec - last_sec));
 	}
-}
-
-void TEST_set_kafka_last_transient_err_boot_sec(int64_t sec)
-{
-	kafka_last_transient_err_boot_sec = sec;
-}
-
-void TEST_check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t err)
-{
-	check_if_kafka_init_preserve_state_vars_required(err);
 }

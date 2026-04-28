@@ -392,6 +392,10 @@ out:
 static const union nvmeib_uuid test_blkdev_uuid_short = { .bytes = {0x20} };
 
 #include "../kafka/sandbox_kafka_internal.h"
+#include "nvmeibt_kafka.h"		// For rd_kafka_resp_err_t
+extern volatile int64_t kafka_last_transient_err_boot_sec;
+void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t err);
+
 DEFINE_TEST(errors_kafka_incompatible_version)
 {
 	struct nvmeibt_Str			*out = NNVMEIBT_STR_ALLOC(kiv01);
@@ -418,12 +422,12 @@ DEFINE_TEST(errors_kafka_transient_recent)
 	(void)_ctx;
 
 	NNVMEIBT_STR_RESIZE_BUF(ktr02, out, 4096);
-	TEST_check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__TRANSPORT);
+	check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__TRANSPORT);
 	nvmeibt_kafka_get_real_time_errors_str(out);
 	TEST_ASSERT_NOT_NULL(strstr(nvmeibt_Str_str(out), "Err=7017"));
 	rv = 0;
 out:
-	TEST_set_kafka_last_transient_err_boot_sec(0);
+	kafka_last_transient_err_boot_sec = 0;
 	NNVMEIBT_STR_FREE(ktr03, out);
 	return rv;
 }
@@ -436,14 +440,14 @@ DEFINE_TEST(errors_kafka_transient_old)
 	(void)_ctx;
 
 	NNVMEIBT_STR_RESIZE_BUF(kto02, out, 4096);
-	TEST_check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__TRANSPORT);
+	check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__TRANSPORT);
 	getnstimeofday_boot(&now);
-	TEST_set_kafka_last_transient_err_boot_sec(now.tv_sec - 120);		// Backdate past the 60s window
+	kafka_last_transient_err_boot_sec = (now.tv_sec - 120);		// Backdate past the 60s window
 	nvmeibt_kafka_get_real_time_errors_str(out);
 	TEST_ASSERT_TRUE(strstr(nvmeibt_Str_str(out), "Err=7017") == NULL);
 	rv = 0;
 out:
-	TEST_set_kafka_last_transient_err_boot_sec(0);
+	kafka_last_transient_err_boot_sec = 0;
 	NNVMEIBT_STR_FREE(kto03, out);
 	return rv;
 }
