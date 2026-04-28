@@ -1043,6 +1043,10 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 		out_r_msg->src_node_idx = in_r_msg->dst_node_idx;
 		out_r_msg->dst_node_idx = in_r_msg->src_node_idx;
 		out_r_msg->sw_ver = LE_SWAP32(peer->does_support_incremental_topo ? TOMA_SW_VER : TOMA_SW_VER_MIN_FOR_INCREMENTAL-0x20);
+		if (!peer->does_support_incremental_topo) {
+			BUG_ON((out_r_msg->build_version[0] != 'v') || (out_r_msg->build_version[3] != ('0' + ((TOMA_SW_VER >> 4)&0xF))));
+			out_r_msg->build_version[3] -= 2;		// Toma is 2 minor versions behind, like the -0x20 above
+		}
 		BUG_ON(LE_SWAP32(in_r_msg->persist_and_wire_buf.buf_encoding_ver) > LE_SWAP32(out_r_msg->sw_ver));	// Verify: leader must not send encoding newer than what this peer can decode
 		switch (in_msg_type) {
 			case RAFT_MSG_REQ_VOTE:
