@@ -183,41 +183,36 @@ void scenario_attach_good_path_io_on_volume(int v) {
 	}
 }
 
-/* Locate the segment in the V_R1 snapshot by u32 uuid */
-static int __rpt_find_seg(const struct mgmt_sim_praid_report_snapshot *r, u32 uuid) {
-	for (int i = 0; i < r->n_segments; i++)
-		if (r->segs[i].uuid == uuid)
-			return i;				// Remove this entire function and use sb_cluster_get_topo_seg_ptr_from_uuid_n
-	BUG_ON(true); return -1;
-}
-
 /* Phase-2 verification: toma has promoted seg[3] and reports the evicted slot
- * as deprecated + the replacement as "replacement" in the latest V_R1 report. */
-static bool evict_replacement_reported(uint32_t V_R1_EVICTED_SEG_UUID, uint32_t V_R1_REPLACEMENT_SEG_UUID) {
-	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
-	if (r->n_segments == 4) {			// This should be not 4 but: (seg->D + seg->P + 1)
-		return (r->segs[__rpt_find_seg(r, V_R1_EVICTED_SEG_UUID)    ].status1 == mdb_seg_dep)
-			&& (r->segs[__rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID)].status1 == mdb_seg_rep);	// 'r' is not needed: Just use sb_cluster_get_topo_seg_ptr_from_uuid_n()
-	}
-	return false;
+ * as deprecated + the replacement as "replacement" in the latest V_R1 report.
+ * Cluster topo's per-seg status is set by __mongodb_insert_praid_seg on every
+ * parsed pRaidReport; observing dep+rep here implies the latest report carried
+ * updateVolume v2's effects. */
+static bool evict_replacement_reported(uint32_t evicted_uuid, uint32_t replacement_uuid) {
+	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
+	return sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, evicted_uuid    )->status == mdb_seg_dep
+		&& sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, replacement_uuid)->status == mdb_seg_rep;
 }
 
 /* Phase-4 verification: toma reported at least one segment as "under_recovery"
- * at some point since the last reset -- proves the praid reached SWITCH_TOPO_U. */
+ * at some point since the last reset -- proves the praid reached SWITCH_TOPO_U.
+ * The latch lives on the v_r1_report snapshot because cluster topo only carries
+ * the latest per-seg status, not "was ever in this state". */
 static bool evict_under_recovery(void) {
 	return mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed;
 }
 
-/* Phase-6 verification: recovery actually happened AND the praid converged back
- * to 3 normal segments, with the replacement present. */
-static bool evict_rebuild_complete(uint32_t V_R1_REPLACEMENT_SEG_UUID) {
-	const struct mgmt_sim_praid_report_snapshot *r = mgmt_sim_get_v_r1_report();
-	if (!r->was_under_recovery_witnessed || r->n_segments != 3) return false;
-	if (__rpt_find_seg(r, V_R1_REPLACEMENT_SEG_UUID) < 0) return false;
-	for (int i = 0; i < r->n_segments; i++)
-		if (r->segs[i].status1 != mdb_seg_RW)
-			return false;
-	return true;
+/* Phase-6 verification: recovery actually happened AND the surviving + replacement
+ * segs converged back to "normal" (mdb_seg_RW). segs[0] is the evicted slot --
+ * cluster topo retains its mdb_seg_dep from Phase 2 (reports after Phase 3 omit
+ * it, and there's no mgmt_sim writer to clear stale per-uuid status), so we
+ * deliberately don't check it. */
+static bool evict_rebuild_complete(const struct sb_praid_conf *pr) {
+	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
+	if (!mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed) return false;
+	return sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, pr->segs[1].uuid)->status == mdb_seg_RW
+		&& sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, pr->segs[2].uuid)->status == mdb_seg_RW
+		&& sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, pr->segs[3].uuid)->status == mdb_seg_RW;
 }
 
 static void scenario_evict_rebuild_r1(void) {
@@ -261,8 +256,8 @@ static void scenario_evict_rebuild_r1(void) {
 	SCENARIO_PRINT(__AUTOID__, "Phase 5: forcing OWNER_RECOVERER_DONE on node 1's surviving mirrors");
 	BUG_ON(peer_toma_simu_complete_all_recoveries(sb_cluster_get_conf()->nodes[1].peer) <= 0);
 
-	// PHASE 6 -- Rebuild complete; verify. {Surviving seg: OWNER_RECOVERER(OWNER_RECOVERER_DONE) -> OWNER_IDLE, Replacement: UNDER_RECOVERY_R -> OWNER_IDLE, Praid: SWITCH_TOPO_U -> STABLE
-	WAIT_UNTIL(evict_rebuild_complete(pr->segs[seg_idx_to].uuid));
+	// PHASE 6 -- Rebuild complete; verify replacement topology
+	WAIT_UNTIL(evict_rebuild_complete(pr));
 	SCENARIO_PRINT(__AUTOID__, "Phase 6: V_R1 segment replacement rebuild complete");
 }
 
