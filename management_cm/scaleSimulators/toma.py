@@ -399,29 +399,47 @@ class TOMA(Component):
 
 		for chunk in volume.get('chunks', []):
 			for pRaid in chunk.get('pRaids', []):
-				pRaidUUID = pRaid.get('uuid')
-				hasMarkedForRebuildOld = len([s for s in pRaid['diskSegments'] if s['status'] == DiskSegmentStatuses.MARKED_FOR_REBUILD_OLD]) > 0
-
-				self.createPRaidIfNeeded(pRaidUUID)
-
-				if self.autoRebuild and hasMarkedForRebuildOld:
-					autoRebuildSettings = self.rebuildSettings.copy()
-					autoRebuildSettings['sideUnderRecovery'] = 'auto'
-					self.startRebuildVolume(volume, pRaid, autoRebuildSettings)
-
-				else:
-					for diskSegment in pRaid.get('diskSegments', []):
-						status = DiskSegmentStatuses.NORMAL
-
-						if diskSegment.get('status') == DiskSegmentStatuses.MARKED_FOR_REBUILD_OLD:
-							status = DiskSegmentStatuses.DEPRECATED
-
-						self.updateSegmentStatus(pRaidUUID, diskSegment['uuid'], status)
-
-				pRaidsToUpdate[pRaidUUID] = self.pRaids[pRaidUUID]
+				self.handlePRaidUpdate(volume, pRaid, pRaidsToUpdate)
 
 		if pRaidsToUpdate:
 			self.sendUpdatePRaidReportMessage(pRaidsToUpdate=pRaidsToUpdate)
+
+	def handlePRaidUpdate(self, volume, pRaid, pRaidsToUpdate):
+		pRaidUUID = pRaid.get('uuid')
+		self.createPRaidIfNeeded(pRaidUUID)
+
+		if self.isPRaidInReinstate(pRaid):
+			self.applyReinstatePhase1(pRaidUUID, pRaid)
+			pRaidsToUpdate[pRaidUUID] = self.pRaids[pRaidUUID]
+			return
+
+		if volume.get('_id') in self.volumesUnderRebuild:
+			pRaidsToUpdate[pRaidUUID] = self.pRaids[pRaidUUID]
+			return
+
+		if self.autoRebuild and self.pRaidNeedsRebuild(pRaid):
+			autoRebuildSettings = self.rebuildSettings.copy()
+			autoRebuildSettings['sideUnderRecovery'] = 'auto'
+			self.startRebuildVolume(volume, pRaid, autoRebuildSettings)
+		else:
+			self.applyDefaultSegmentStatuses(pRaidUUID, pRaid)
+
+		pRaidsToUpdate[pRaidUUID] = self.pRaids[pRaidUUID]
+
+	def pRaidNeedsRebuild(self, pRaid):
+		return (self.pRaidHasSegmentWithStatus(pRaid, DiskSegmentStatuses.MARKED_FOR_REBUILD_OLD)
+				or self.pRaidHasSegmentWithStatus(pRaid, DiskSegmentStatuses.MARKED_FOR_REBUILD))
+
+	def pRaidHasSegmentWithStatus(self, pRaid, status):
+		return any(s['status'] == status for s in pRaid.get('diskSegments', []))
+
+	def applyDefaultSegmentStatuses(self, pRaidUUID, pRaid):
+		for diskSegment in pRaid.get('diskSegments', []):
+			if diskSegment.get('status') == DiskSegmentStatuses.MARKED_FOR_REBUILD_OLD:
+				status = DiskSegmentStatuses.DEPRECATED
+			else:
+				status = DiskSegmentStatuses.NORMAL
+			self.updateSegmentStatus(pRaidUUID, diskSegment['uuid'], status)
 
 	def handleAddTargetMessage(self, target):
 		nodeID = target.get('nodeID')
@@ -565,6 +583,24 @@ class TOMA(Component):
 		if not self.pRaids.get(pRaidUUID):
 			self.pRaids[pRaidUUID] = {'diskSegments': {}, 'pRaidMajorVersion': 0, 'pRaidMinorVersion': 0, 'uuid': pRaidUUID}
 
+	def isPRaidInReinstate(self, pRaid):
+		return any(self.isReinstatePlaceholder(s) for s in pRaid.get('diskSegments', []))
+
+	def isReinstatePlaceholder(self, diskSegment):
+		return diskSegment.get('diskUUID') == Consts.REINSTATE_FAKE_DRIVE_UUID
+
+	def applyReinstatePhase1(self, pRaidUUID, pRaid):
+		for diskSegment in pRaid.get('diskSegments', []):
+			segmentID = diskSegment['uuid']
+			incomingStatus = diskSegment.get('status') or DiskSegmentStatuses.NORMAL
+
+			if self.isReinstatePlaceholder(diskSegment):
+				self.updateSegmentStatus(pRaidUUID, segmentID, DiskSegmentStatuses.CONF_CORRUPTED, vitality=DiskSegmentVitalities.DOWN)
+			elif incomingStatus == DiskSegmentStatuses.MARKED_FOR_REBUILD_OLD:
+				self.updateSegmentStatus(pRaidUUID, segmentID, DiskSegmentStatuses.DEPRECATED)
+			else:
+				self.updateSegmentStatus(pRaidUUID, segmentID, incomingStatus)
+
 	def handleRebuildingVolumes(self):
 		for volume in list(self.volumesUnderRebuild.values()):
 			if volume['changedToUnderRecovery']:
@@ -575,26 +611,26 @@ class TOMA(Component):
 					volume['changedToUnderRecovery'] = True
 
 	def handleRecoveryProcess(self, volume):
+		self.deprecateOldSegments(volume)
+
 		if volume['dbsStatusThreshold'] < volume['amountOfDBsToClean']:
-			for s in volume['pRaid']['diskSegments']:
-				pRaidUUID = volume['pRaid']['uuid']
-
-				if s['status'] == DiskSegmentStatuses.MARKED_FOR_REBUILD_OLD:
-					self.updateSegmentStatus(pRaidID=pRaidUUID, segmentID=s['uuid'], status=DiskSegmentStatuses.DEPRECATED)
-					s['status'] = DiskSegmentStatuses.DEPRECATED
-					self.sendUpdatePRaidReportMessage(pRaidsToUpdate={pRaidUUID: self.pRaids.get(pRaidUUID)})
-
-				if s['status'] == DiskSegmentStatuses.DEPRECATED:
-					if s['uuid'] in self.pRaids[pRaidUUID]['diskSegments']:
-						del self.pRaids[pRaidUUID]['diskSegments'][s['uuid']]
-					del s
-
 			if Component.isTimeForNextMsg(volume['lastDBsMsgTime'], PeriodicMessagesIntervals.DIRTY_BITS_UPDATE):
 				self.cleanDirtyBits(volume)
 				self.sendUpdateDiskSegmentsDirtyBitsMessage(volume)
 		else:
 			self.changeRebuildSegmentStatus(volume, status=DiskSegmentStatuses.NORMAL)
 			del self.volumesUnderRebuild[volume['volume']['_id']]
+
+	def deprecateOldSegments(self, volume):
+		pRaidUUID = volume['pRaid']['uuid']
+		for diskSegment in volume['pRaid']['diskSegments']:
+			if diskSegment['status'] == DiskSegmentStatuses.MARKED_FOR_REBUILD_OLD:
+				self.updateSegmentStatus(pRaidUUID, diskSegment['uuid'], DiskSegmentStatuses.DEPRECATED)
+				diskSegment['status'] = DiskSegmentStatuses.DEPRECATED
+				self.sendUpdatePRaidReportMessage(pRaidsToUpdate={pRaidUUID: self.pRaids.get(pRaidUUID)})
+
+			if diskSegment['status'] == DiskSegmentStatuses.DEPRECATED:
+				self.pRaids[pRaidUUID]['diskSegments'].pop(diskSegment['uuid'], None)
 
 	def cleanDirtyBits(self, volume):
 		remainingDirtyBits = volume['amountOfDBsToClean'] - (volume['dbsCleanRate'] * PeriodicMessagesIntervals.DIRTY_BITS_UPDATE)
@@ -738,14 +774,18 @@ class TOMA(Component):
 			return
 
 		if segmentID not in pRaid['diskSegments']:
-			pRaid['diskSegments'][segmentID] = {'segmentID': segmentID, 'status': '', 'vitality': vitality}
-
-		diskSegment = pRaid['diskSegments'][segmentID]
-
-		if diskSegment['status'] != status:
-			diskSegment['status'] = status
+			pRaid['diskSegments'][segmentID] = {'segmentID': segmentID, 'status': status, 'vitality': vitality}
 			pRaid['pRaidMajorVersion'] += 1
 			return True
+
+		diskSegment = pRaid['diskSegments'][segmentID]
+		if diskSegment['status'] == status and diskSegment.get('vitality') == vitality:
+			return
+
+		diskSegment['status'] = status
+		diskSegment['vitality'] = vitality
+		pRaid['pRaidMajorVersion'] += 1
+		return True
 
 	def setIsLeader(self, isLeader, resubscribeToTopic=False):
 		self.logger.debug("setIsLeader %s" % isLeader)

@@ -15,6 +15,9 @@ class Consts:
 	NODE_PERSISTENCY_FILE = 'node-persistency.json'
 	ZONE_BEFORE_ASSIGNEMENT = '-1'
 	KEYS_DIR = '/etc/nvmesh/keys/'
+	# Sentinel diskUUID used in the reinstate handshake to tell the simulator
+	# "treat this segment as non-existent on a real drive and report CONF_CORRUPTED".
+	REINSTATE_FAKE_DRIVE_UUID = '11111111-1111-1111-1111-111111111111'
 
 class Components:
 	TOMA = 'TOMA'
@@ -59,6 +62,7 @@ class DiskSegmentStatuses:
 	MARKED_FOR_REBUILD = 'markedForRebuild'
 	REMAP = 'remap'
 	ZEROING = 'zeroing'
+	CONF_CORRUPTED = 'conf_corrupted'
 
 class DiskSegmentVitalities:
 	UP = 'up'
