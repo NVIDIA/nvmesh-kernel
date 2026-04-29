@@ -1081,11 +1081,11 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 					NNVMEIBT_BM_FREE(__AUTOID__, msg);
 					return 0;
 				}
-				// Ingest any BIN_TOPO the leader shipped: update committed_segs[] and seed applied_segs[] with simulated-apply. The helper bumps running_local_serialization_version as needed.
+				// Cache the leader's BIN_TOPO on the peer so subsequent ACT_TOPO replies can be derived from it. The helper bumps running_local_serialization_version as needed.
 				if (in_r_msg->is_with_raft_log)
 					peer_toma_simu_upd_committed_from_bin_topo(peer, req->cnst_data, LE_SWAP32(in_r_msg->persist_and_wire_buf.topo_ctx.tlv_len));
 				// Path 1 gate mirrors is_applied_topo_ready_and_different(): emit ACT_TOPO when our running ser_ver differs from what the leader echoed. Must use != not >: before any exchange the leader echoes NVMEIBT_NOT_INITIALIZED_SER_VER (0xFFFF...FFFF) and any bumped running value would compare "less than" numerically.
-				is_ready_and_different = (peer->running_local_serialization_version != LE_SWAP64(in_r_msg->local_serialization_version)) && (peer->n_segs > 0);
+				is_ready_and_different = (peer->running_local_serialization_version != LE_SWAP64(in_r_msg->local_serialization_version)) && (peer->latest_bin_topo_len > 0);
 				if (is_ready_and_different) {
 					struct nvmeibt_active_topo_header *f_topo = (typeof(f_topo))wire_buf->data;
 					const int out_buf_size = (int)req->data_len + act_topo_headroom;

@@ -204,6 +204,7 @@ static void scenario_evict_rebuild_r1(void) {
 		{ .seg_idx = 3, .praid_idx = 0, .status = "markedForRebuild" },
 	};	// V_R1 is a 3-way mirror (D=1, P=2). The eviction moves data off seg[0] (on the live toma's disk[1]) to a replacement seg[3] on peer node 2's disk[0]. seg[1] and seg[2] on peer node 1 provide the surviving mirror.
 	sb_cluster_praid_alloc_replacement_seg(cfg, pr);
+	peer_toma_simu_set_seg_override(cfg->nodes[2].peer, pr->segs[seg_idx_to].uuid, NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_IDLE);	// Stand in for the new peer finishing local format+GPT; without this, the leader's convert_unusable_to_dead trap marks the replacement DEAD before recovery starts
 	SCENARIO_PRINT(__AUTOID__, "start: seg-replacement uuids @X -> @X ", pr->segs[seg_idx_from].uuid, pr->segs[seg_idx_to].uuid);
 
 	// PHASE 1 -- Mark the evicted disk OOS, then send the replacement update
@@ -236,6 +237,8 @@ static void scenario_evict_rebuild_r1(void) {
 
 	// PHASE 6 -- Rebuild complete; verify replacement topology
 	WAIT_UNTIL(evict_rebuild_complete(pr, tp, seg_idx_from));
+	peer_toma_simu_clear_all_overrides(cfg->nodes[1].peer);
+	peer_toma_simu_clear_all_overrides(cfg->nodes[2].peer);
 	SCENARIO_PRINT(__AUTOID__, "Phase 6: V_R1 segment replacement rebuild complete");
 }
 
