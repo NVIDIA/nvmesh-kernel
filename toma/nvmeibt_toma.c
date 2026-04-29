@@ -1311,6 +1311,7 @@ void wakeup_format_event(const struct nvmeibt_ascii_uuid *ldisk_id,
 	disk = NNVMEIBT_LOCAL_DISK_GET_DISK(trace_10_toma_wakeup_format_event, local_disk);
 	if (nvmeibt_disk_brute_force_del_all_segs_due_to_format(disk) < 0) {
 		N_Wf(t_04_toma, "ldisk=@STR has segments. Skipping", nvmeibt_local_disk_display(local_disk));
+		NVMEIBT_GLOBAL_MARK_REPORT_TARGET_HAS_NEW_DATA(i990nzz); // It will cause MGMT to resend the formatDrive command
 		goto out;
 	}
 
