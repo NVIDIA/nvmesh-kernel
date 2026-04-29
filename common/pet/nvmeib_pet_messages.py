@@ -20,6 +20,7 @@ import argparse
 import datetime
 import pydantic
 import itertools
+import hashlib
 
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import Section
@@ -45,18 +46,6 @@ PRINTF_SPEC_RE = printf_enum_re = re.compile(
 """,
 	re.VERBOSE,
 )
-
-# ---------------------------------------------------------------------------
-# Reconstructed message
-# ---------------------------------------------------------------------------
-
-
-class Message(typing.NamedTuple):
-	fname: str
-	entity: int
-	ns_stamp: int
-	dt_stamp: datetime.datetime
-	text: str
 
 
 # ---------------------------------------------------------------------------
@@ -565,6 +554,39 @@ class ArgDecoder:
 			return '0'
 
 
+# ---------------------------------------------------------------------------
+# Reconstructed message
+# ---------------------------------------------------------------------------
+
+class Message(typing.NamedTuple):
+	fname: str
+	entity: int
+	ns_stamp: int
+	dt_stamp: datetime.datetime
+	text: str
+
+
+class EntitySkeleton:
+	"""Stable signature of an entity's execution shape.
+
+	The skeleton is built from the entity commit id plus ordered PET message
+	offsets. It ignores timestamps and argument values, so entities with the
+	same control/message flow group under the same hash.
+	"""
+
+	def __init__(self, commit_id: int):
+		self.offsets: list[int] = [commit_id]
+
+	def update(self, msg: NvmeibPetArchive.Message) -> None:
+		self.offsets.append(msg.offset)
+
+	def hexdigest(self) -> str:
+		hasher = hashlib.blake2s(digest_size=6)
+		for offset in self.offsets:
+			hasher.update(offset.to_bytes(8, byteorder='little', signed=False))
+		return hasher.hexdigest()
+
+
 class Template:
 	def __init__(self, msg_spec: MessageSpec, user_defined_types: dict[str, TypeInfo]):
 		self.__user_defined_types = user_defined_types
@@ -619,7 +641,13 @@ class Template:
 		args: list[typing.Any] = self.__load_args(msg)
 		text = self.__py_spec.format(*args)
 		dt_stamp = datetime.datetime.fromtimestamp(msg.timestamp.uv8 / (10**9))  # type: ignore
-		return Message(fname=fname, entity=entity, ns_stamp=msg.timestamp.uv8, dt_stamp=dt_stamp, text=text)  # type: ignore
+		return Message(
+			fname=fname,
+			entity=entity,
+			ns_stamp=msg.timestamp.uv8,
+			dt_stamp=dt_stamp,
+			text=text,
+		)  # type: ignore
 
 
 class Dictionary(pydantic.BaseModel):
@@ -823,6 +851,17 @@ class ViewMessages(Command):
 			+ 'useful to see some entity traces in a single screen',
 		)
 
+		parser.add_argument(
+			'--no-metadata',
+			action='store_true',
+			dest='no_metadata',
+			default=False,
+			help='By default, print an entity metadata line after each entity with '
+			+ 'the entity byte size and skeleton hash; --no-metadata disables '
+			+ 'these metadata lines and prints only PET messages.',
+		)
+
+
 	def __load_schemas(self, dict_dir: pathlib.Path) -> dict[int, PETSchema]:
 		schemas: dict[int, PETSchema] = {}
 		for f in dict_dir.glob('dict.*.json'):
@@ -847,6 +886,7 @@ class ViewMessages(Command):
 		super().__init__(args)
 		self.traces = args.traces
 		self.sort = not args.no_sort
+		self.print_metadata = not args.no_metadata
 		self.schemas: dict[int, PETSchema] = self.__load_schemas(args.dicts_dir)  # dict of dicts, keyed by commit id
 		# Detect and skip UM tracer buffer headers; learned from first header, verified for subsequent ones.
 		self.__tsc_khz = None
@@ -900,13 +940,13 @@ class ViewMessages(Command):
 							pass
 						if kstream.is_eof():
 							break
+					entity_start_position = kstream.pos()
 					entity = NvmeibPetArchive.Entity(kstream)
 					if entity.commit_id not in self.schemas:
 						raise RuntimeError(
 							f'No dictionary found for commit_id {hex(entity.commit_id)} in entity {idx} '
 							f'from file {fpath.name}'
 						)
-					entity_start_position = kstream.pos()
 					entity.fname = fpath.name if n_files > 1 else ''
 					entity.idx = idx
 					entity.size = kstream.pos() - entity_start_position
@@ -918,7 +958,7 @@ class ViewMessages(Command):
 			# yield entity
 
 	@typing.no_type_check
-	def __iter_entity_messages(
+	def __iter_entity_raw_messages(
 		self, entity: NvmeibPetArchive.Entity
 	) -> typing.Generator[NvmeibPetArchive.Message, None, None]:
 		prev_ns_stamp = 0
@@ -937,25 +977,44 @@ class ViewMessages(Command):
 			yield msg
 
 	@typing.no_type_check
+	def __iter_entity_human_messages(
+		self, entity: NvmeibPetArchive.Entity
+	) -> typing.Generator[Message, None, None]:
+		if entity.commit_id not in self.schemas:
+			raise RuntimeError(
+				f'No dictionary found for commit_id {hex(entity.commit_id)} in entity {entity.idx} '
+				f'from file {entity.fname}'
+			)
+		human_msg: typing.Optional[Message] = None
+		schema: PETSchema = self.schemas[entity.commit_id]
+		skeleton:EntitySkeleton = EntitySkeleton(entity.commit_id)
+
+		for msg in self.__iter_entity_raw_messages(entity):
+			try:
+				tmpl = schema.templates[msg.offset - 1]
+			except KeyError:
+				msg = (
+					f'Unknown PET message offset {msg.offset:#06x} '
+					f'for entity {entity.idx} in schema {schema.git_commit_id}'
+				)
+				raise RuntimeError(msg)
+			skeleton.update(msg)
+			human_msg = tmpl.instantiate(msg, entity.fname, entity.idx)
+			yield human_msg
+
+		if self.print_metadata and human_msg:
+			yield Message(
+				fname=human_msg.fname,
+				entity=human_msg.entity,
+				ns_stamp=human_msg.ns_stamp,
+				dt_stamp=human_msg.dt_stamp,
+				text=f'size={entity.size} skeleton={skeleton.hexdigest()}',
+			)  # type: ignore
+
+	@typing.no_type_check
 	def __iter_human_messages(self) -> typing.Generator[Message, None, None]:
 		for entity in self.__iter_entities():
-			if entity.commit_id not in self.schemas:
-				raise RuntimeError(
-					f'No dictionary found for commit_id {hex(entity.commit_id)} in entity {entity.idx} '
-					f'from file {entity.fname}'
-				)
-			schema: PETSchema = self.schemas[entity.commit_id]
-			for msg in self.__iter_entity_messages(entity):
-				try:
-					tmpl = schema.templates[msg.offset - 1]
-				except KeyError:
-					msg = (
-						f'Unknown PET message offset {msg.offset:#06x} '
-						f'for entity {entity.idx} in schema {schema.git_commit_id}'
-					)
-					raise RuntimeError(msg)
-				human_msg = tmpl.instantiate(msg, entity.fname, entity.idx)
-				yield human_msg
+			yield from self.__iter_entity_human_messages(entity)
 
 	def __call__(self):
 		human_msgs: typing.Generator[Message, None, None] = self.__iter_human_messages()

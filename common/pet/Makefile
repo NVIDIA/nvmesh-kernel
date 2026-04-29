@@ -49,7 +49,7 @@ demo_dict: dirs test $(PET_BINFILE_READER)
 	./pet_messages.sh save-dictionary $(TEST_EXE) test_pet_msgs $(TEST_DCT)
 
 demo: dirs test demo_dict $(PET_BINFILE_READER)
-	./pet_messages.sh view $(BUILD_DIR) $(TEST_OUT)
+	./pet_messages.sh view --no-sort $(BUILD_DIR) $(TEST_OUT)
 
 clean:
 	rm -rf $(BUILD_DIR)
