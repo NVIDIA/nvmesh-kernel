@@ -44,8 +44,9 @@ static int num_tracer_sections = 0;
 
 static struct config_params_io_t {
 	char *full_path;
+	time_t last_read_time;
 	bool was_updated_by_toma;
-} config_params = { TOMA_ROOT_DIR "opt/nvmesh/common-repo/tools/toma_rpc.config", false };
+} config_params = { TOMA_ROOT_DIR "opt/nvmesh/common-repo/tools/toma_rpc.config", 0, false};
 int nvmeibt_disk_flow_params_try_read_from_config_line(const char*config, int *n_matches);		// Load parameters from config line
 int nvmeibt_debug_config_params_parse(char *line, int *n_matches);
 
@@ -126,7 +127,6 @@ void persist_params_in_cfg_file(const struct nvmeibt_Str *s)
 void read_rpc_config_from_persist(bool is_initial_read)
 {
 	char						config[1024];
-	static struct stat			config_stat_last;
 	struct stat					config_stat;
 	uint32_t					params_encode_ver = 0;
 	FILE						*f = 0;
@@ -134,7 +134,7 @@ void read_rpc_config_from_persist(bool is_initial_read)
 
 	if (stat(config_params.full_path, &config_stat))
 		return;	// File does not exist
-	if (config_stat.st_mtime == config_stat_last.st_mtime)
+	if (config_stat.st_mtime == config_params.last_read_time)
 		return;	// Already read this file
 
 	if (config_params.was_updated_by_toma) {
@@ -180,7 +180,7 @@ continue_reading:
 			N_WTf(ploi98c, "No config param matches '@STR'", config + 2);
 		}
 	}
-	config_stat_last = config_stat;		// Mark that we read this file
+	config_params.last_read_time = config_stat.st_mtime;		// Mark that we read this file
 out:
 	if (f)
 		fclose(f);
