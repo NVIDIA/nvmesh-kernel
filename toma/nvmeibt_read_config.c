@@ -885,7 +885,7 @@ TODO(If there were changes, then delete the unused entries, and recalc the relat
 			if (add_rv == NVMEIBT_ADD_FAILED || add_rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL) {
 				N_Ef(ttu678w, "Add failed, @SECTION_TYPE, line='@LINE'", section_type, line);
 				if (add_rv == NVMEIBT_ADD_FAILED) {
-					N_Ef(fyyy732, "\n@STR", csv_or_wire_buf);
+					N_Ef(fyyy732, ", Crashing on buf=@STR", csv_or_wire_buf ? csv_or_wire_buf : "NULL");
 					nvmeibt_abort(ES_FATAL);
 				}
 			}
