@@ -1476,6 +1476,7 @@ static inline void blk_queue_physical_block_size(	struct request_queue *q, unsig
 static inline void blk_queue_io_min(				struct request_queue *q, unsigned int 	i) { q->limits.io_min = i; }
 static inline void blk_queue_io_opt(				struct request_queue *q, unsigned int 	i) { q->limits.io_opt = i; }
 static inline void blk_queue_max_hw_sectors(		struct request_queue *q, unsigned int	i) { q->limits.max_hw_sectors = i; }
+static inline void blk_queue_dma_alignment(		struct request_queue *q, int mask) { (void)q; (void)mask; }
 
 struct blk_plug_cb;
 typedef void (*blk_plug_cb_fn)(struct blk_plug_cb *, bool);

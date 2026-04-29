@@ -1261,6 +1261,9 @@ static void __request_queue_set_default_params(struct request_queue *q, const ch
 	if (params.is_trim_disabled) blk_queue_flag_clear(QUEUE_FLAG_DISCARD, q);
 	else						 blk_queue_flag_set(  QUEUE_FLAG_DISCARD, q);
 #endif
+
+	/* Tell that we only support block-size aligned memory buffers */
+	blk_queue_dma_alignment(q, logical_block_size - 1);
 }
 
 static inline void ALLERT_NAME_TRUNCATION(bool cond, const char *src, const char *dst)
