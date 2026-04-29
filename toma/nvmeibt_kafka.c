@@ -1845,11 +1845,11 @@ static void rebuild_stats_to_json(struct nvmeibt_Str *json_payload)
 	nvmeibt_Str_sprintf(json_payload, "}"); // rebuildStats ends
 }
 
+static struct timespec	last_follower_keepalive_ts = TIMESPEC_ZERO;
+       struct timespec	last_leader_keepalive_ts = TIMESPEC_ZERO;
 void nvmeibt_kafka_send_keepalive_msgs_as_needed(void)
 {
-	static struct timespec		last_follower_keepalive_ts = TIMESPEC_ZERO;
-	static struct timespec		last_leader_keepalive_ts = TIMESPEC_ZERO;
-	static struct timespec		now;
+	struct timespec		now;
 	static struct nvmeibt_Str	*json_payload = NULL;
 	struct nvmeibt_raft_member	*member;
 
@@ -1890,7 +1890,7 @@ void nvmeibt_kafka_send_keepalive_msgs_as_needed(void)
 							BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT, nvmeibt_global_get_global()->last_raft_members_version_change_is_applied);
 
 		NVMEIB_HASH_FOREACH(member, nvmeibt_raft_get_my_raft()->raft_members_hash_by_uuid) {
-			if (member->build_version[0]) // new format 
+			if (member->build_version[0]) // new format
 				nvmeibt_Str_sprintf(json_payload, "{ \"memberID\" : \"%s\", \"version\" : \"%s\"},", member->hostname, member->build_version);
 			else
 				nvmeibt_Str_sprintf(json_payload, "{ \"memberID\" : \"%s\", \"version\" : null},", member->hostname);
