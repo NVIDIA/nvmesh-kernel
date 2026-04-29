@@ -207,7 +207,7 @@ static int						raft_min_election_timeout_factor = RAFT_MIN_ELECTION_TIMEOUT_FAC
 static int64_t					raft_min_election_timeout_nsec;
 static int						raft_max_election_timeout_factor = DEFAULT_MAX_ELECTION_TIMEOUT_FACTOR;
 static int64_t					raft_max_election_timeout_nsec;
-static int64_t					raft_max_time_leader_survives_without_majority_nsec;
+       int64_t					raft_max_time_leader_survives_without_majority_nsec;
 static int64_t					raft_max_time_non_responsive_member_is_considered_alive_for_topo_nsec;
 static int64_t					praid_leader_max_nsec_wait_for_registrable_seg_to_apply;
 static int64_t					praid_leader_max_nsec_wait_for_non_registrable_seg_to_apply;

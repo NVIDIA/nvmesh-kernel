@@ -136,7 +136,6 @@ void read_rpc_config_from_persist(bool is_initial_read)
 		return;	// File does not exist
 	if (config_stat.st_mtime == config_params.last_read_time)
 		return;	// Already read this file
-
 	if (config_params.was_updated_by_toma) {
 		config_params.was_updated_by_toma = false;
 		return;
@@ -184,7 +183,6 @@ continue_reading:
 out:
 	if (f)
 		fclose(f);
-	return;
 }
 
 static const uint8_t			explicit_plus = 0x10;

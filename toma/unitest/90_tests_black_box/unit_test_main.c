@@ -326,6 +326,11 @@ static void scenario_create_remove_r1(void) {
 	BUG_ON(cfg->rep.ldr.reported_token != -1);					// Mgmt did not give a valid token to the leader
 	cfg->rep.ldr.ndu.expected_praid_token = 117;
 	mgmt_sim_send_leader_keep_alive();							// Give it now.
+	if (0) {	// This is just to make sure that leader does not step down during the test due to "survive without majority" timeout, which can happen if we have a lot of yields in the test and raft does not get to run for a long time. Better solution is to make this timeout infinite for tests by default, and only set it to a low value for specific tests that need it.
+		extern int64_t raft_max_time_leader_survives_without_majority_nsec;
+		SCENARIO_PRINT(__AUTOID__, "Make leader more stable, override amount of time leader can survive without majority from @UINT[ms] to infinity", (unsigned)(raft_max_time_leader_survives_without_majority_nsec/1000000));
+		raft_max_time_leader_survives_without_majority_nsec *= 1000;
+	}
 
 	SCENARIO_PRINT(__AUTOID__, "sending addVolume @DEV_NAME, waiting for report target", cfg->vols[0].name);
 	mgmt_sim_send_add_volume(0);
