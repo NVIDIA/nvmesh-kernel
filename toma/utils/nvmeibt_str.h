@@ -160,8 +160,8 @@ nvmeibt_str_with_escape_chars_t nvmeibt_escape_special_characters(const char *in
 ssize_t _Str_fread(struct nvmeibt_Str *this, int fd);
 ssize_t nvmeibt_str_read_from_pipe_fd(struct nvmeibt_Str *this, int fd, const char *pipe_name);
 ssize_t _Str_fread_atomic(struct nvmeibt_Str *this, int fd);
-ssize_t _Str_fwrite(struct nvmeibt_Str *this, int fd);
-ssize_t _Buf_fwrite(struct nvmeibt_Buf *this, int fd);
+ssize_t _Str_fwrite(const struct nvmeibt_Str *this, int fd);
+ssize_t _Buf_fwrite(const struct nvmeibt_Buf *this, int fd);
 
 #define NNVMEIBT_STR_FREAD NNVMEIBT_STR_FREAD_ATOMIC
 

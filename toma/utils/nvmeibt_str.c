@@ -197,7 +197,7 @@ ssize_t _Str_fread_atomic(struct nvmeibt_Str *this, int fd)
 	return nread;
 }
 
-ssize_t _Str_fwrite(struct nvmeibt_Str *this, int fd)
+ssize_t _Str_fwrite(const struct nvmeibt_Str *this, int fd)
 {
 	const size_t  this_strlen = nvmeibt_Str_strlen(this);
 	const ssize_t n_written = nvmeibt_write(fd, nvmeibt_Str_str(this), this_strlen);
@@ -206,7 +206,7 @@ ssize_t _Str_fwrite(struct nvmeibt_Str *this, int fd)
 	return n_written;
 }
 
-ssize_t _Buf_fwrite(struct nvmeibt_Buf *this, int fd)
+ssize_t _Buf_fwrite(const struct nvmeibt_Buf *this, int fd)
 {
 	const ssize_t n_written = nvmeibt_write(fd, this->data_buf, this->buf_len);
 	if (n_written < 0) N_Ef(tqmut37, "csv buffer no full write (asked @STRLEN)", this->buf_len);
