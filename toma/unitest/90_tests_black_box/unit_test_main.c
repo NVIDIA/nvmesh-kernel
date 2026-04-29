@@ -276,6 +276,32 @@ static void scenario_evict_rebuild_r1(void) {
 	peer_toma_simu_clear_seg_injects(sb_cluster_get_conf()->nodes[1].peer);
 }
 
+static void __leader_keepalive_force_resend_test_only(void) {
+	extern struct timespec last_leader_keepalive_ts;
+	last_leader_keepalive_ts = TIMESPEC_ZERO;
+}
+
+void scenario_ndu_test(void) {
+	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
+	struct peer_toma_simu *peer = cfg->other[1].peer;
+	struct sb_live_toma_reports_leader *ldr = &cfg->rep.ldr;
+	BUG_ON(peer->my_sw_version >= TOMA_SW_VER); // Should be behind
+	SCENARIO_PRINT(__AUTOID__, "start");
+	peer->my_sw_version += 1;					// Simulate upgrade, Next raft cycle - the leader will see new version
+	ldr->ndu.expected_praid_token += 10;
+	peer->n_replies_to_leader = 0;
+	yield();									// We want raft leader to pickup the upgrade. May not happen in this epoll cycle
+	mgmt_sim_send_leader_keep_alive(); 			// Give the new token from management to Toma.
+	do {
+		ldr->n_keep_alives = 0;
+		__leader_keepalive_force_resend_test_only();
+		WAIT_UNTIL(ldr->n_keep_alives > 0);
+		WAIT_UNTIL(peer->n_replies_to_leader >= 2);	// Todo: Wrong wait. We wait too much (2 raft life cycles, to verify that leader received the followers upgrade update). Need to verify that leader reported correct updated software version, parse it in mgmt simu, or else leader can reconcile on older version
+		BUG_ON(ldr->ndu.expected_praid_token != ldr->ndu.reported_praid_token);
+	} while(ldr->ndu.reported_isReconciled != 1);
+	SCENARIO_PRINT(__AUTOID__, "done");
+}
+
 static void scenario_create_remove_r1(void) {
 	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
 	struct sim_broker_topic *kb_vol = sim_broker_topic_find_by(KTOPIC_TYPE_M2T_VOLUMES);
@@ -354,10 +380,12 @@ static void scenario_create_remove_r1(void) {
 	}
 	SCENARIO_PRINT(__AUTOID__, "waiting for kafka commit on deleteVolumeCompleted");
 	WAIT_UNTIL(sim_broker_topic_is_empty(kb_vol));		// Verify Toma finished with volume deletion by committing offsets of all volume instructions
+	peer_toma_simu_resume_append_entries_by_node(2);
 }
 
 static void all_test_scenarios(void) {
 	scenario_create_remove_r1();
+	scenario_ndu_test();
 	scenario_test_signals();
 	SCENARIO_PRINT(__AUTOID__, "test scenario complete");
 	os_sim_send_signal_to_toma(SIGKILL);		// Issue shutdown instruction

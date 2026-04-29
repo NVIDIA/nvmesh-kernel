@@ -1656,9 +1656,13 @@ void nvmeibt_topology_calc_topology(void)
 		N_Tf(nj2m93c, "Topo is freezed");
 		goto out;
 	}
-	if (!(nvmeibt_global_get_global()->last_raft_members_version_change_is_applied) &&
+	time_diff_nsec = 2 * NSEC_TO_SEC(nvmeibt_raft_get_praid_leader_max_nsec_wait_for_registrable_seg_to_apply(0));	// Guaranteed time for leader to see followers update, recaluclate topology with it and commit it to majority
+	#ifdef TOMA_SIMULATOR_SANDBOX
+		time_diff_nsec = 0;		// Todo: Make it a paramter
+	#endif
+	if ((!nvmeibt_global_get_global()->last_raft_members_version_change_is_applied) &&
 		((nvmeibt_global_get_cur_event_start_time().tv_sec - nvmeibt_global_get_global()->last_raft_members_version_change_timestamp_sec) >
-		 NSEC_TO_SEC(nvmeibt_raft_get_praid_leader_max_nsec_wait_for_registrable_seg_to_apply(0)) * 2)) {
+		time_diff_nsec)) {
 		nvmeibt_global_get_global()->last_raft_members_version_change_is_applied = 1;
 		N_Tf(j8hy273,"last_raft_members_version_change_is_applied = 1");
 	}
