@@ -45,7 +45,7 @@ static int num_tracer_sections = 0;
 static struct config_params_io_t {
 	char *full_path;
 	time_t last_read_time;
-	bool was_updated_by_toma;
+	bool was_updated_by_toma;		// Just an optimization, dont re-read a file that we already wrote
 } config_params = { TOMA_ROOT_DIR "opt/nvmesh/common-repo/tools/toma_rpc.config", 0, false};
 int nvmeibt_disk_flow_params_try_read_from_config_line(const char*config, int *n_matches);		// Load parameters from config line
 int nvmeibt_debug_config_params_parse(char *line, int *n_matches);
@@ -120,8 +120,8 @@ void persist_params_in_cfg_file(const struct nvmeibt_Str *s)
 	if (fd>=0) {
 		_Str_fwrite(s, fd);
 		close(fd);
+		config_params.was_updated_by_toma = true;
 	}
-	config_params.was_updated_by_toma = true;
 }
 
 void read_rpc_config_from_persist(bool is_initial_read)
