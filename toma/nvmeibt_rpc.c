@@ -468,19 +468,9 @@ static int nvmeibt_rpc_command_locate(int argc, char *argv[], struct nvmeibt_Str
 static void persist_params_in_file(void)
 {
 	struct nvmeibt_Str *s = NNVMEIBT_STR_ALLOC(nvmeibt_disk_flow_params_trace_1);
-	extern char *config_params_full_path;
-	extern bool trace_config_updated_by_toma;
-	int fd;
-
 	nvmeibt_debug_config_params_print(s, true, false);
 	nvmeibt_disk_flow_params_print(s);
-
-	fd = open(config_params_full_path, O_RDWR | O_TRUNC | O_CREAT, 0644);
-	if (fd>=0) {
-		_Str_fwrite(s, fd);
-		close(fd);
-	}
-	trace_config_updated_by_toma = true;
+	persist_params_in_cfg_file(s);
 	NNVMEIBT_STR_FREE(nvmeibt_disk_flow_params_trace_2, s);
 }
 

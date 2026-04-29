@@ -40,11 +40,12 @@ static int num_tracer_sections = 0;
 
 #define TRACE_LIST_FILENAME				"/tracelist.txt"			// Toma outputs all its traces so developer knows which traces he can turn on/off
 #define TRACE_CONFIG_FILENAME			"toma_trace.config"
-#define	TOMA_CONFIG_PARAMS_FULL_PATH	TOMA_ROOT_DIR "opt/nvmesh/common-repo/tools/toma_rpc.config"
 #define TOMA_PARAMS_ENCODING_STRING				"SW_VER"			// Very confusing, but backwards compatible!!!
 
-bool trace_config_updated_by_toma = false;
-char *config_params_full_path = TOMA_CONFIG_PARAMS_FULL_PATH;
+static struct config_params_io_t {
+	char *full_path;
+	bool was_updated_by_toma;
+} config_params = { TOMA_ROOT_DIR "opt/nvmesh/common-repo/tools/toma_rpc.config", false };
 int nvmeibt_disk_flow_params_try_read_from_config_line(const char*config, int *n_matches);		// Load parameters from config line
 int nvmeibt_debug_config_params_parse(char *line, int *n_matches);
 
@@ -112,6 +113,16 @@ static bool __is_unsupported_version_of_params_config(uint32_t ver, bool should_
 	return false;
 }
 
+void persist_params_in_cfg_file(const struct nvmeibt_Str *s)
+{
+	int fd = open(config_params.full_path, O_RDWR | O_TRUNC | O_CREAT, 0644);
+	if (fd>=0) {
+		_Str_fwrite(s, fd);
+		close(fd);
+	}
+	config_params.was_updated_by_toma = true;
+}
+
 void read_rpc_config_from_persist(bool is_initial_read)
 {
 	char						config[1024];
@@ -121,22 +132,22 @@ void read_rpc_config_from_persist(bool is_initial_read)
 	FILE						*f = 0;
 	__MEASURE_TOOK_INIT();
 
-	if (stat(config_params_full_path, &config_stat))
+	if (stat(config_params.full_path, &config_stat))
 		return;	// File does not exist
 	if (config_stat.st_mtime == config_stat_last.st_mtime)
 		return;	// Already read this file
 
-	if (trace_config_updated_by_toma) {
-		trace_config_updated_by_toma = false;
-		goto out;
+	if (config_params.was_updated_by_toma) {
+		config_params.was_updated_by_toma = false;
+		return;
 	}
 
-	f = fopen(config_params_full_path, "r");
+	f = fopen(config_params.full_path, "r");
 	__MEASURE_TOOK(N_IMf(nr5e38m, "fopen() Took @LLD ms", NSEC_TO_MSEC(__measure_took_time_took_nsec)));
 	if (!f)
 		goto out;
 	if (!fgets(config, sizeof(config), f)) {
-		N_Wf(ga19a6b, "file=@STR is empty", config_params_full_path);
+		N_Wf(ga19a6b, "file=@STR is empty", config_params.full_path);
 		goto out;
 	}
 

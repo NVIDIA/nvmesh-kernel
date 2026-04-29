@@ -317,6 +317,7 @@ int update_traces_turn_all_on_or_off(char plus_or_minus, bool is_forced);
 void update_traces(void);
 int nvmeibt_debug_config_params_set(const char *param, const char *valstr);
 struct nvmeibt_Str;
+void persist_params_in_cfg_file(const struct nvmeibt_Str *s);
 void nvmeibt_debug_config_params_print(struct nvmeibt_Str *s, bool print_values, bool print_defaults);
 
 // Tracer section management functions (for .so file support)
