@@ -1042,10 +1042,11 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 		out_r_msg->dst_node_id =  in_r_msg->src_node_id;
 		out_r_msg->src_node_idx = in_r_msg->dst_node_idx;
 		out_r_msg->dst_node_idx = in_r_msg->src_node_idx;
-		out_r_msg->sw_ver = LE_SWAP32(peer->does_support_incremental_topo ? TOMA_SW_VER : TOMA_SW_VER_MIN_FOR_INCREMENTAL-0x20);
-		if (!peer->does_support_incremental_topo) {
-			BUG_ON((out_r_msg->build_version[0] != 'v') || (out_r_msg->build_version[3] != ('0' + ((TOMA_SW_VER >> 4)&0xF))));
-			out_r_msg->build_version[3] -= 2;		// Toma is 2 minor versions behind, like the -0x20 above
+		out_r_msg->sw_ver = LE_SWAP32(peer->my_sw_version);
+		if (peer->my_sw_version != TOMA_SW_VER) {
+			BUG_ON((out_r_msg->build_version[0] != 'v') || (out_r_msg->build_version[3] != ('0' + ((TOMA_SW_VER >> 4)&0xF))));	// Sanity, leader reports correctly its version
+			out_r_msg->build_version[3] = '0' + (((peer->my_sw_version) >> 4) & 0xF);
+			out_r_msg->build_version[5] = '0' + (((peer->my_sw_version)     ) & 0xF);
 		}
 		BUG_ON(LE_SWAP32(in_r_msg->persist_and_wire_buf.buf_encoding_ver) > LE_SWAP32(out_r_msg->sw_ver));	// Verify: leader must not send encoding newer than what this peer can decode
 		switch (in_msg_type) {
@@ -1097,6 +1098,7 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 			}
 			default: BUG_ON(true);							// Currently only support reply as follower on leader/candidate msgs
 		}
+		peer->n_replies_to_leader++;
 		out_r_msg->raft_hdr_crc = 0;
 		out_r_msg->raft_hdr_crc = LE_SWAP32(crc32(0, out_r_msg, sizeof(*out_r_msg)));
 		rq->msg_q[rq->n_msgs++] = msg;

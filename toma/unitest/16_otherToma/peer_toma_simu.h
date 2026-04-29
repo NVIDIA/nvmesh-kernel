@@ -10,7 +10,8 @@
 
 struct peer_toma_simu {
 	struct sb_node_conf *node;							// Reference to node configuration in mongo-db
-	bool does_support_incremental_topo;					// Todo: Extend this mechanism to test toma software upgrade
+	uint32_t my_sw_version;
+	int n_replies_to_leader;							// Count how many replies this peer sent to the leader, used for unit-test assertions
 	bool ignore_append_entries;							// Emulates infinitely slow local disk response time, does not commit raft leaders topo, Much like real Toma 'enum raft_pause_mode_enm'
 	bool ignore_segs_initialization;					// Emulates as if Toma cannot initialize any local segment
 	unsigned long long ser_ver_per_seg_counter;			// Incrementing ACT_TOPO serialization version (per-seg wire field)
