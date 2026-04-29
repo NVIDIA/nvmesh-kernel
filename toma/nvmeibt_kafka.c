@@ -1121,6 +1121,7 @@ static int parse_updateTomaKeepaliveToken(struct mm_json_elem *root, struct keep
 	unsigned int			parsed_mask = 0;
 
 	NFIN;
+	memset(out, 0, sizeof(*out));			// Below parsing optional params, do not allow un initialized values
 	for (i = 0; i < root->dict.len; i++) {
 		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
 		if (strcmp(root_kv->key, "payload"))
