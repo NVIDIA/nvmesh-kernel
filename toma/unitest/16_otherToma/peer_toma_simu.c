@@ -67,7 +67,7 @@ static inline void __progress_seg_init_mode(enum NVMEIBT_MEM_TBL_INIT_MODE *s, e
  */
 static void apply_committed_to_active(struct peer_toma_simu *T, int i) {
 	const struct peer_toma_simu_seg_topo *c = &T->committed_segs[i];
-	struct peer_toma_simu_seg_topo *a = &T->applied_segs[i];
+	struct peer_toma_simu_seg_topo *a =       &T->applied_segs[i];
 	const enum NVMEIBT_SEGMENT_DIRTY_BITS_STATE prev_applied_dbits = a->dirty_bits_state;
 
 	a->praid_version_major = c->praid_version_major;
@@ -98,7 +98,7 @@ static void apply_committed_to_active(struct peer_toma_simu *T, int i) {
 
 	if (c->dirty_bits_init_mode == NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER &&
 		c->dirty_bits_state     == NVMEIBT_SEG_DIRTY_BITS_STATE_UNKNOWN) {
-		a->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_IDLE;
+		a->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_IDLE;						// For segments the peer is seeing for the first time (FIRST_USE_EVER) with the leader still at UNKNOWN, simulate the real peer finishing its local format+GPT by reporting OWNER_IDLE. Without this, the leader's nvmeibt_seg_lot_leader_convert_unusable_to_dead trap marks the segment DEAD during eviction's replacement flow (leader_switch_to_replacement_seg) and recovery never starts.
 	}
 
 	if (a->dirty_bits_state != prev_applied_dbits) {
@@ -173,12 +173,11 @@ void peer_toma_simu_upd_committed_from_bin_topo(struct peer_toma_simu *T, const 
 
 int peer_toma_simu_complete_all_recoveries(struct peer_toma_simu *T) {
 	int n = 0;
-	for (int i = 0; i < T->n_segs; i++) {
+	for (int i = 0; i < T->n_segs; i++) {		// This cant work, T->nsegs is set to 0 and rebuilt in a Toma main thread.
 		struct peer_toma_simu_seg_topo *a = &T->applied_segs[i];
 		if (a->dirty_bits_state != NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER)
 			continue;
-		N_Tf(__AUTOID__, "seg=@UUID_8 complete_all_recoveries: applied OWNER_RECOVERER->OWNER_RECOVERER_DONE",
-			(uint32_t)a->uuid.ll[0]);
+		N_Tf(__AUTOID__, "seg=@UUID_8 complete_all_recoveries: applied OWNER_RECOVERER->OWNER_RECOVERER_DONE", (uint32_t)a->uuid.ll[0]);
 		a->dirty_bits_state = NVMEIBT_SEG_DIRTY_BITS_STATE_OWNER_RECOVERER_DONE;
 		T->running_local_serialization_version++;
 		n++;

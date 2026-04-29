@@ -59,14 +59,5 @@ void                   peer_toma_simu_resume_append_entries_by_node(int node_idx
  * scenario-injected OWNER_RECOVERER_DONE back to OWNER_RECOVERER. Segs no longer in
  * BIN_TOPO are dropped from both arrays. */
 void peer_toma_simu_upd_committed_from_bin_topo(struct peer_toma_simu *peer, const void *bin_topo, int bin_topo_len);
-
-/* Build an ACT_TOPO reply body by walking applied_segs[]. */
-int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, char *out_buf, int out_buf_size);
-
-/* Scenario-driven event: recovery client signaled completion for every applied seg
- * currently in OWNER_RECOVERER on this peer. Returns the number of segs transitioned.
- * Use when the test does not need to know which specific segs the leader picked as
- * recoverers (production marks de-facto owners on the basis of current praid topology;
- * the set can shift across topology variants). Each transition writes
- * OWNER_RECOVERER_DONE on the applied layer and bumps ser_ver per seg. */
+int peer_toma_simu_build_act_topo_reply(   struct peer_toma_simu *peer, char *out_buf, int out_buf_size);
 int peer_toma_simu_complete_all_recoveries(struct peer_toma_simu *peer);

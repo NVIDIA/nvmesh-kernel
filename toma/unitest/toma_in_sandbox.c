@@ -1020,6 +1020,22 @@ int nvmeibt_nm_process_toma_requests(struct nvmeibt_nm_local_node *ln) {
 const struct sb_cluster_conf *sb_cluster_get_const_conf(void) { return &sys->cfg; }
 struct sb_cluster_conf       *sb_cluster_get_conf(void)       { return &sys->cfg; }
 
+static void __remove_sections_from_raft_follower_reply(struct nvmeibt_wire_type_len_value *tlvs[], unsigned n_tlvs) {
+	for (unsigned i = 0; i < n_tlvs; i++) {
+		tlvs[i]->tlv_len = 0;
+		tlvs[i]->tlv_crc = 0;
+		tlvs[i]->tlv_crc = LE_SWAP32(crc32(0, tlvs[i], sizeof(*tlvs[i])));
+	}
+}
+static void __calc_crc_of_wire_buf_section(struct nvmeibt_wire_type_len_value *tlv, const void *payload, int len) {			// Todo: share this function with production code
+	uint32_t crc;
+	tlv->tlv_len = LE_SWAP32(len);
+	tlv->tlv_crc = 0;
+	crc = crc32(0, tlv, sizeof(*tlv));
+	crc = crc32(crc, payload, (size_t)len);
+	tlv->tlv_crc = LE_SWAP32(crc);
+}
+
 int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_node *node, struct nvmeibt_msg_request *req) {
 	const struct raft_msg *in_r_msg = (typeof(in_r_msg))req->cnst_msg;
 	const enum nvmeibt_raft_msg_type in_msg_type = LE_SWAP32((uint32_t)in_r_msg->msg_type);
@@ -1029,8 +1045,7 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 	}
 	{ // Add reply to to list, no needs for locks. Accessed only from Toma main threads
 		struct t_raft_msg_queue_from_other_tomas *rq = &ln->raft_msg_queue_from_other_tomas;
-		// Extra body space for REPs that carry ACT_TOPO on heartbeat-only AEs (real path 1 -- see MESSAGING.md). is_with_raft_log=1 AEs already allocate enough since ACT_TOPO is smaller than the BIN_TOPO it replaces.
-		const int act_topo_headroom = (in_msg_type == RAFT_MSG_APPEND_ENTRIES && !in_r_msg->is_with_raft_log) ? 1024 : 0;
+		const int act_topo_headroom = (in_msg_type == RAFT_MSG_APPEND_ENTRIES && !in_r_msg->is_with_raft_log) ? 1024 : 0;		// Extra body space for ACT_TOPO on heartbeat-only. is_with_raft_log=1, memory is already allocate enough since ACT_TOPO is smaller than the BIN_TOPO it replaces.
 		struct nvmeibt_big_msg *msg = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*msg) + req->msg_len + req->data_len + act_topo_headroom);
 		struct raft_msg *out_r_msg = (typeof(out_r_msg))msg->data;
 		const uint32_t my_uuid = LE_SWAP32((uint32_t)in_r_msg->dst_node_id.ll[0]);
@@ -1058,9 +1073,8 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 				ln->n_total_msmgs_sent.vote_rep++;
 				break;
 			case RAFT_MSG_APPEND_ENTRIES: {
-				const int in_band_leader_topo_len = LE_SWAP32(in_r_msg->persist_and_wire_buf.topo_ctx.tlv_len);
-				const unsigned long long leader_echoed_ser_ver = LE_SWAP64(in_r_msg->local_serialization_version);
 				bool is_ready_and_different;
+				struct nvmeibt_persist_and_wire_buf *wire_buf = &out_r_msg->persist_and_wire_buf;
 				out_r_msg->msg_type = LE_SWAP32(RAFT_MSG_APPEND_ENTRIES_REP);
 				out_r_msg->is_vote_granted = true;			// Relevant for Node which joins already existing quorum with leader
 				if (peer->ignore_append_entries) {
@@ -1069,51 +1083,24 @@ int nvmeibt_nm_queue_srm_req(struct nvmeibt_nm_local_node *ln, struct nvmeibt_no
 				}
 				// Ingest any BIN_TOPO the leader shipped: update committed_segs[] and seed applied_segs[] with simulated-apply. The helper bumps running_local_serialization_version as needed.
 				if (in_r_msg->is_with_raft_log)
-					peer_toma_simu_upd_committed_from_bin_topo(peer, req->cnst_data, in_band_leader_topo_len);
+					peer_toma_simu_upd_committed_from_bin_topo(peer, req->cnst_data, LE_SWAP32(in_r_msg->persist_and_wire_buf.topo_ctx.tlv_len));
 				// Path 1 gate mirrors is_applied_topo_ready_and_different(): emit ACT_TOPO when our running ser_ver differs from what the leader echoed. Must use != not >: before any exchange the leader echoes NVMEIBT_NOT_INITIALIZED_SER_VER (0xFFFF...FFFF) and any bumped running value would compare "less than" numerically.
-				is_ready_and_different = (peer->running_local_serialization_version != leader_echoed_ser_ver) && (peer->n_segs > 0);
+				is_ready_and_different = (peer->running_local_serialization_version != LE_SWAP64(in_r_msg->local_serialization_version)) && (peer->n_segs > 0);
 				if (is_ready_and_different) {
-					struct nvmeibt_active_topo_header *f_topo = (typeof(f_topo))out_r_msg->persist_and_wire_buf.data;
+					struct nvmeibt_active_topo_header *f_topo = (typeof(f_topo))wire_buf->data;
 					const int out_buf_size = (int)req->data_len + act_topo_headroom;
 					const int act_topo_len = peer_toma_simu_build_act_topo_reply(peer, (char*)f_topo, out_buf_size);
-					struct nvmeibt_wire_type_len_value *out_topo_ctx = &out_r_msg->persist_and_wire_buf.topo_ctx;
-					// Real follower REPs only carry ACT_TOPO -- zero the three non-topo TLV descriptors copied from the incoming AE header, then recompute each TLV CRC so is_tlv_crc_ok accepts the REP.
-					struct nvmeibt_wire_type_len_value *empty_tlvs[] = {
-						&out_r_msg->persist_and_wire_buf.topo_config_ctx,
-						&out_r_msg->persist_and_wire_buf.kafka_mgmt_config_ctx,
-						&out_r_msg->persist_and_wire_buf.raft_members_ctx,
-					};
-					for (unsigned i = 0; i < ARRAY_SIZE(empty_tlvs); i++) {
-						empty_tlvs[i]->tlv_len = 0;
-						empty_tlvs[i]->tlv_crc = 0;
-						empty_tlvs[i]->tlv_crc = LE_SWAP32(crc32(0, empty_tlvs[i], sizeof(*empty_tlvs[i])));
-					}
-					// Update topo TLV: length and CRC (CRC covers TLV header + data)
-					out_topo_ctx->tlv_len = LE_SWAP32(act_topo_len);
-					out_topo_ctx->tlv_crc = 0;
-					{
-						uint32_t crc = crc32(0, out_topo_ctx, sizeof(*out_topo_ctx));
-						crc = crc32(crc, f_topo, (size_t)act_topo_len);
-						out_topo_ctx->tlv_crc = LE_SWAP32(crc);
-					}
-					// Total body = ACT_TOPO only. persist_and_wire_buf_validate_len asserts total == sizeof(buf) + sum(tlv_lens).
-					out_r_msg->persist_and_wire_buf.persist_and_wire_total_len = LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf) + act_topo_len);
+					// Real follower REPs only carry ACT_TOPO -- zero the three non-topo TLV descriptors copied from the incoming header, then recompute each TLV CRC so is_tlv_crc_ok accepts the REP.
+					struct nvmeibt_wire_type_len_value *empty_tlvs[] = { &wire_buf->topo_config_ctx, &wire_buf->kafka_mgmt_config_ctx, &wire_buf->raft_members_ctx, };
+					__remove_sections_from_raft_follower_reply(empty_tlvs, (unsigned)ARRAY_SIZE(empty_tlvs));
+					__calc_crc_of_wire_buf_section(&wire_buf->topo_ctx, (const void*)f_topo, act_topo_len);
+					wire_buf->persist_and_wire_total_len = LE_SWAP32((int)sizeof(*wire_buf) + act_topo_len);
 					msg->data_len = req->msg_len + act_topo_len;
 					out_r_msg->is_with_raft_log = true;		// On REP direction the flag means "carries ACT_TOPO body" (observed in ~/logs/evict2/: is_with_raft_log=1 <=> data_len>0)
-				} else {
-					// Nothing new to report -- empty REP body. Zero all four TLV descriptors copied from the incoming AE (leader reuses persist_and_wire_buf across sends, so its descriptors can carry stale non-zero lengths even on heartbeat AEs). Recompute CRC for each zeroed descriptor.
-					struct nvmeibt_wire_type_len_value *empty_tlvs[] = {
-						&out_r_msg->persist_and_wire_buf.topo_ctx,
-						&out_r_msg->persist_and_wire_buf.topo_config_ctx,
-						&out_r_msg->persist_and_wire_buf.kafka_mgmt_config_ctx,
-						&out_r_msg->persist_and_wire_buf.raft_members_ctx,
-					};
-					for (unsigned i = 0; i < ARRAY_SIZE(empty_tlvs); i++) {
-						empty_tlvs[i]->tlv_len = 0;
-						empty_tlvs[i]->tlv_crc = 0;
-						empty_tlvs[i]->tlv_crc = LE_SWAP32(crc32(0, empty_tlvs[i], sizeof(*empty_tlvs[i])));
-					}
-					out_r_msg->persist_and_wire_buf.persist_and_wire_total_len = LE_SWAP32((int)sizeof(struct nvmeibt_persist_and_wire_buf));
+				} else {	// Nothing new to report -- empty REP body. Zero all four TLV descriptors copied from the incoming AE (leader reuses persist_and_wire_buf across sends, so its descriptors can carry stale non-zero lengths even on heartbeat AEs). Recompute CRC for each zeroed descriptor.
+					struct nvmeibt_wire_type_len_value *empty_tlvs[] = { &wire_buf->topo_ctx, &wire_buf->topo_config_ctx, &wire_buf->kafka_mgmt_config_ctx, &wire_buf->raft_members_ctx };
+					__remove_sections_from_raft_follower_reply(empty_tlvs, (unsigned)ARRAY_SIZE(empty_tlvs));
+					wire_buf->persist_and_wire_total_len = LE_SWAP32((int)sizeof(*wire_buf));
 					msg->data_len = req->msg_len;
 					out_r_msg->is_with_raft_log = false;
 				}

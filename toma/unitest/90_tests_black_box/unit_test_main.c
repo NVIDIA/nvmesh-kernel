@@ -183,45 +183,19 @@ void scenario_attach_good_path_io_on_volume(int v) {
 	}
 }
 
-/* Phase-2 verification: toma has promoted seg[3] and reports the evicted slot
- * as deprecated + the replacement as "replacement" in the latest V_R1 report.
- * Cluster topo's per-seg status is set by __mongodb_insert_praid_seg on every
- * parsed pRaidReport; observing dep+rep here implies the latest report carried
- * updateVolume v2's effects. */
-static bool evict_replacement_reported(uint32_t evicted_uuid, uint32_t replacement_uuid) {
-	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
-	return sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, evicted_uuid    )->status == mdb_seg_dep
-		&& sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, replacement_uuid)->status == mdb_seg_rep;
-}
-
-/* Phase-4 verification: toma reported at least one segment as "under_recovery"
- * at some point since the last reset -- proves the praid reached SWITCH_TOPO_U.
- * The latch lives on the v_r1_report snapshot because cluster topo only carries
- * the latest per-seg status, not "was ever in this state". */
-static bool evict_under_recovery(void) {
-	return mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed;
-}
-
-/* Phase-6 verification: recovery actually happened AND every non-evicted seg in
- * the praid (D+P surviving slots + 1 replacement) converged back to "normal"
- * (mdb_seg_RW). Slots whose latest status is mdb_seg_dep are the evicted ones --
- * cluster topo retains that status because reports after Phase 3 omit them and
- * there is no mgmt_sim writer that clears stale per-uuid status -- so we skip
- * those rather than fail. */
-static bool evict_rebuild_complete(const struct sb_praid_conf *pr) {
-	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
+static bool evict_rebuild_complete(const struct sb_praid_conf *pr, const struct sb_praid_topo *tp, int seg_idx_from) {
 	if (!mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed) return false;
 	for (int i = 0; i < (int)(pr->D + pr->P + 1); i++) {
-		const enum seg_topo_state st = sb_cluster_get_topo_seg_ptr_from_uuid_n(cfg, pr->segs[i].uuid)->status;
-		if (st == mdb_seg_dep) continue;
-		if (st != mdb_seg_RW) return false;
+		const enum seg_topo_state expected_status = (i == seg_idx_from) ? mdb_seg_dep : mdb_seg_RW;		// Every non evicted segment is normal
+		if (tp->segs[i].status != expected_status) return false;
 	}
 	return true;
 }
 
 static void scenario_evict_rebuild_r1(void) {
 	struct sb_cluster_conf *cfg = sb_cluster_get_conf();
-	struct sb_praid_conf *pr = &cfg->vols[1].chunks[0].raids[0];			// Going to replace segs of this praid, todo: Consider for loop on praids/vols/segs
+	struct sb_praid_conf *pr = &cfg->vols[1].chunks[     0].raids[0];		// Going to replace segs of this praid, todo: Consider for loop on praids/vols/segs
+	struct sb_praid_topo *tp = &cfg->vols[1].topo_chunks[0].raids[0];
 	const int seg_idx_from = 0, seg_idx_to = 3;								// Replace seg[0] by new seg[3]. Todo: All indices should be properly controlled via for loop
 	const struct mgmt_sim_vol_seg_update evict_segs[] = {					// D+P+1 array size - all initialized initialize to normal, idx_to/idx_from initialize differently
 		{ .seg_idx = 0, .praid_idx = 0, .status = "markedForRebuild_old" },
@@ -245,7 +219,7 @@ static void scenario_evict_rebuild_r1(void) {
 	mgmt_sim_send_leader_keep_alive();
 
 	// PHASE 2 -- Toma reports replacement topology; verify
-	WAIT_UNTIL(evict_replacement_reported(pr->segs[seg_idx_from].uuid, pr->segs[seg_idx_to].uuid));
+	WAIT_UNTIL((tp->segs[seg_idx_from].status == mdb_seg_dep) && (tp->segs[seg_idx_to].status == mdb_seg_rep));
 
 	// PHASE 3 -- Management removes the deprecated segment
 	SCENARIO_PRINT(__AUTOID__, "Phase 3: updateVolume v3 removing the deprecated segment");
@@ -254,14 +228,14 @@ static void scenario_evict_rebuild_r1(void) {
 	mgmt_sim_send_leader_keep_alive();
 
 	// PHASE 4 -- Toma enters under_recovery; praid sync_cmd: STABLE -> RESET_REGISTRANTS -> SWITCH_TOPO_I -> SWITCH_TOPO_W -> SWITCH_TOPO_U ->In SWITCH_TOPO_U: {Live segmentds = OWNER_RECOVERER, seg_idx_to == UNDER_RECOVERY_R}
-	WAIT_UNTIL(evict_under_recovery());
+	WAIT_UNTIL(mgmt_sim_get_v_r1_report()->was_under_recovery_witnessed);
 
 	// PHASE 5 -- Sandbox marks node 1 peer recoverers done
 	SCENARIO_PRINT(__AUTOID__, "Phase 5: forcing OWNER_RECOVERER_DONE on node 1's surviving mirrors");
-	BUG_ON(peer_toma_simu_complete_all_recoveries(sb_cluster_get_conf()->nodes[1].peer) <= 0);
+	BUG_ON(peer_toma_simu_complete_all_recoveries(cfg->nodes[1].peer) <= 0);
 
 	// PHASE 6 -- Rebuild complete; verify replacement topology
-	WAIT_UNTIL(evict_rebuild_complete(pr));
+	WAIT_UNTIL(evict_rebuild_complete(pr, tp, seg_idx_from));
 	SCENARIO_PRINT(__AUTOID__, "Phase 6: V_R1 segment replacement rebuild complete");
 }
 
