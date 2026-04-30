@@ -84,10 +84,10 @@ void nvmeibt_praid_print_leader_wire_topo(int (*printf_fn)(void *ctx, const char
 
 	nvmeibt_praid_convert_topo_le_be(praid_wire_topo, &serialized);
 	praid_uuid = nvmeibt_union_uuid_to_urn_uuid(&(serialized.uuid));
-	(*printf_fn)(printf_ctx, "praid=%s ver=(%x,%x) sync_cmd=%s is_sync=%d act=%d n_seg=%d topo_ver=%"PRIx64"\n",
+	(*printf_fn)(printf_ctx, "praid=%s ver=(%x,%x) sync_cmd=%s is_sync=%d act=%d n_seg=%d topo_ver=%"PRIx32"\n",
 				 praid_uuid.str, serialized.praid_version_major, serialized.praid_version_minor,
 				 praid_registrants_sync_cmd_str(serialized.registrants_sync_cmd), serialized.leader_did_all_segs_sync_registrants,
-				 serialized.is_activated, serialized.segs_num, nvmeibt_praid_serialized_get_topo_idx_updated(&serialized));
+				 serialized.is_activated, serialized.segs_num, serialized.topo_idx_updated);
 }
 
 void nvmeibt_praid_convert_topo_le_be(const struct nvmeibt_praid_serialized_topo *src_ptr, struct nvmeibt_praid_serialized_topo *dst_ptr)
@@ -101,9 +101,9 @@ void nvmeibt_praid_convert_topo_le_be(const struct nvmeibt_praid_serialized_topo
 	COPY_SWAP32_STR_BITFIELD(src_ptr, dst_ptr, registrants_sync_cmd);
 	COPY_SWAP8_STR_FIELD(src_ptr, dst_ptr, is_activated);
 	COPY_SWAP8_STR_FIELD(src_ptr, dst_ptr, segs_num);
-	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, topo_idx_updated_hi);
-	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, topo_idx_updated_lo);
-	dst_ptr->res_3 = 0;
+	dst_ptr->res_1 = 0;
+	COPY_SWAP32_STR_FIELD(src_ptr, dst_ptr, topo_idx_updated);
+	dst_ptr->res_2 = 0;
 }
 
 	/* -------------------- TOPO --------------------*/
@@ -233,10 +233,10 @@ void serialize_praid_topo_to_JSON(struct nvmeibt_praid_serialized_topo *t, struc
 	urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&(t->uuid));
 	nvmeibt_Str_sprintf(JSON_output,
 						"\n\t{\"eyecatcher\":\"%.4s\", \"uuid\":\"%s\", \"praid_version_major\":%d, \"praid_version_minor\":%d, "
-						"\"topo_idx_updated\":%"PRId64", "
+						"\"topo_idx_updated\":%"PRId32", "
 						"\"leader_did_all_segs_sync_registrants\":%d, \"registrants_sync_cmd\":\"%s\", \"is_activated\":%d, \"segs_num\":%d, \"segments\":[",
 						t->eyecatcher, urn_uuid.str, t->praid_version_major, t->praid_version_minor,
-						nvmeibt_praid_serialized_get_topo_idx_updated(t),
+						t->topo_idx_updated,
 						t->leader_did_all_segs_sync_registrants,
 						praid_registrants_sync_cmd_str(t->registrants_sync_cmd), t->is_activated, t->segs_num);
 out:;

@@ -19,7 +19,7 @@ extern void TEST_set_nm_remote_nodes_connected(bool is_connected);
 
 /* Praid hash — nvmeibt_praid.c */
 extern void TEST_init_praids_hash(void);
-extern void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_updated,
+extern void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int32_t topo_idx_updated,
 								   int praid_version_major, int praid_version_minor);
 extern void TEST_set_praid_conf_corrupted(const union nvmeib_uuid *uuid);
 

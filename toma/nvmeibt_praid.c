@@ -716,7 +716,7 @@ void nvmeibt_serialize_praid_lot_topo_to_wire(struct nvmeibt_praid_lot *praid_lo
 	serialized_praid.leader_did_all_segs_sync_registrants = praid_topo->leader_did_all_segs_sync_registrants;
 	serialized_praid.is_activated = praid_topo->is_activated;
 	serialized_praid.segs_num = n_segs;
-	nvmeibt_praid_serialized_set_topo_idx_updated(&serialized_praid, praid_topo->topo_idx_updated);
+	serialized_praid.topo_idx_updated = praid_topo->topo_idx_updated;
 
 	// Serialize disk_segments
 	seg_wire_topo_ptr = (struct nvmeibt_serialized_seg_leader_topo *)out_segs_wire_topo_buf;
@@ -923,12 +923,12 @@ enum nvmeibt_add_rv nvmeibt_praid_upd_committed_topo(struct nvmeibt_praid_serial
 		rv = NVMEIBT_ADD_ALREADY_UP_TO_DATE;
 		goto out_ok;
 	}
-	N_Tf(nhy76cw, "praid=@UUID_LE praid_version=@PRAID_VERSION,@PRAID_VERSION(@PRAID_VERSION,@PRAID_VERSION) is_activated=@IS_ACTIVATED(@IS_ACTIVATED) topo_idx_updated=@INT64_TX(@INT64_TX)",
+	N_Tf(nhy76cw, "praid=@UUID_LE praid_version=@PRAID_VERSION,@PRAID_VERSION(@PRAID_VERSION,@PRAID_VERSION) is_activated=@IS_ACTIVATED(@IS_ACTIVATED) topo_idx_updated=@X(@X)",
 		nvmeibt_praid_UUID(praid),
 		praid_topo_ptr->praid_version_major, praid_topo_ptr->praid_version_minor,
 		committed_topo->praid_version_major, committed_topo->praid_version_minor,
 		praid_topo_ptr->is_activated, committed_topo->is_activated,
-		nvmeibt_praid_serialized_get_topo_idx_updated(praid_topo_ptr), committed_topo->topo_idx_updated);
+		praid_topo_ptr->topo_idx_updated, committed_topo->topo_idx_updated);
 
 	memset(committed_topo, 0, sizeof(*committed_topo));
 	committed_topo->praid_version_major = praid_topo_ptr->praid_version_major;
@@ -936,7 +936,7 @@ enum nvmeibt_add_rv nvmeibt_praid_upd_committed_topo(struct nvmeibt_praid_serial
 	committed_topo->registrants_sync_cmd = praid_topo_ptr->registrants_sync_cmd;
 	committed_topo->leader_did_all_segs_sync_registrants = praid_topo_ptr->leader_did_all_segs_sync_registrants;
 	committed_topo->is_activated = praid_topo_ptr->is_activated;
-	committed_topo->topo_idx_updated = nvmeibt_praid_serialized_get_topo_idx_updated(praid_topo_ptr);
+	committed_topo->topo_idx_updated = praid_topo_ptr->topo_idx_updated;
 	praid->was_praid_ever_activated |= praid_topo_ptr->is_activated;
 
 	rv = NVMEIBT_ADD_MODIFIED;
@@ -1034,7 +1034,17 @@ void nvmeibt_praid_reset_due_to_convert_to_leader(struct nvmeibt_praid *praid)
 	NFOUT;
 }
 
-static void increase_praid_topo_version(struct nvmeibt_praid_topo_ctx *praid_topo, BOOL is_clients_synchronization_required)
+static void praid_set_topo_idx_updated_to_next_version(struct nvmeibt_praid_topo_ctx *praid_topo, const union nvmeib_uuid *praid_uuid)
+{
+	const int32_t	new_val = extract_lower_32_bits_idx(leader_get_next_topology_version());
+	if (praid_topo->topo_idx_updated != (int32_t)nvmeibt_offset_and_idx_uninitialized && new_val < praid_topo->topo_idx_updated) {
+		// Log as error to catch future bugs that would break the global-monotonicity invariant the lower-32-bit comparison relies on.
+		N_Ef(praid_topo_idx_backward, "praid=@UUID_LE topo_idx_updated went backward old=@X new=@X", praid_uuid, praid_topo->topo_idx_updated, new_val);
+	}
+	praid_topo->topo_idx_updated = new_val;
+}
+
+static void increase_praid_topo_version(struct nvmeibt_praid *praid, struct nvmeibt_praid_topo_ctx *praid_topo, BOOL is_clients_synchronization_required)
 {
 	NFIN;
 	if (is_clients_synchronization_required) {
@@ -1044,7 +1054,7 @@ static void increase_praid_topo_version(struct nvmeibt_praid_topo_ctx *praid_top
 	else {
 		++(praid_topo->praid_version_minor);	// Increase praid_version_minor
 	}
-	praid_topo->topo_idx_updated = leader_get_next_topology_version();	// Increased praid version will generate a new baseline, and trigger serialization in which TOPO leader_calculated will be updated to leader_get_next_topology_version(). That value will be the version of this new baseline.
+	praid_set_topo_idx_updated_to_next_version(praid_topo, nvmeibt_praid_UUID(praid));
 	NFOUT;
 }
 
@@ -1241,7 +1251,7 @@ calc_synchronizers:
 				calculated_praid_lot->topo_seg_lots[i]->seg_topo.is_registrants_synchronizer = 0;
 			}
 		}
-		increase_praid_topo_version(calculated_praid_topo, is_clients_synchronization_required);
+		increase_praid_topo_version(praid, calculated_praid_topo, is_clients_synchronization_required);
 
 #ifdef TOMA_DEBUG
 		if (	calculated_praid_topo->is_activated &&
@@ -2354,7 +2364,7 @@ out_not_activated:
 		calculated_praid_topo->is_activated = 0;
 
 		++(calculated_praid_topo->praid_version_minor);	// Increase praid_version_minor, allow distribution
-		calculated_praid_topo->topo_idx_updated = leader_get_next_topology_version();
+		praid_set_topo_idx_updated_to_next_version(calculated_praid_topo, nvmeibt_praid_UUID(praid));
 		XDLIST_FOREACH(calculated_seg_lot, &(calculated_praid_lot->all_seg_lot_list)) {
 			calculated_seg_lot->seg_topo.seg_praid_version_minor = calculated_praid_topo->praid_version_minor;
 		}
@@ -2808,7 +2818,7 @@ int nvmeibt_praid_dump_praid_status_line(int (*printf_fn)(void *ctx, const char 
 	} else {
 		(*printf_fn)(printf_ctx, "\t\t\t- ");
 	}
-	(*printf_fn)(printf_ctx, "praid_ver=%x.%x sync_cmd=%s are_reg_sync=%d is_activated=%d topo_idx_updated=%"PRIx64"%s%s\n",
+	(*printf_fn)(printf_ctx, "praid_ver=%x.%x sync_cmd=%s are_reg_sync=%d is_activated=%d topo_idx_updated=%"PRIx32"%s%s\n",
 			praid_ctx->praid_version_major, praid_ctx->praid_version_minor,
 			praid_registrants_sync_cmd_str(praid_ctx->registrants_sync_cmd),
 			praid_ctx->leader_did_all_segs_sync_registrants,
@@ -2938,7 +2948,7 @@ void nvmeibt_praid_lot_duplicate_content(struct nvmeibt_praid_lot *praid_lot_dst
 		 praid_lot_src->topo_ctx.praid_version_minor,
 		 praid_lot_dst->topo_ctx.praid_version_major,
 		 praid_lot_dst->topo_ctx.praid_version_minor);
-	N_Tf(uuuax01, "src topo_idx_updated=@INT64_TX dst topo_idx_updated=@INT64_TX",
+	N_Tf(uuuax01, "src topo_idx_updated=@X dst topo_idx_updated=@X",
 		praid_lot_src->topo_ctx.topo_idx_updated,
 		praid_lot_dst->topo_ctx.topo_idx_updated);
 	praid_lot_dst->topo_ctx = praid_lot_src->topo_ctx;
@@ -3147,7 +3157,7 @@ void TEST_init_praids_hash(void)
 			(HASH_MIN_LOG2_OF_N_ARR_ENTRIES + 4), "praids_hash", 16, 0);
 }
 
-void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_updated,
+void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int32_t topo_idx_updated,
 							int praid_version_major, int praid_version_minor)
 {
 	struct nvmeibt_praid *praid = NALLOCATE_PRAID(test_praid);
@@ -3161,7 +3171,7 @@ void TEST_add_praid_to_hash(const union nvmeib_uuid *uuid, int64_t topo_idx_upda
 	praid->praid_follower.committed_praid_lot.topo_ctx.is_activated = 1;
 	praid->praid_follower.committed_praid_lot.from_config.id = *uuid;
 	praid->praid_follower.committed_praid_lot.from_config.version = praid_version_major;
-	praid->praid_follower.committed_praid_lot.from_config.topo_config_idx_updated = topo_idx_updated;
+	praid->praid_follower.committed_praid_lot.from_config.topo_config_idx_updated = topo_idx_updated;	// implicit widening to int64
 	praid->praid_follower.is_serialized_in_incremental_merge = false;
 
 	nvmeib_hash_add_uuid(nvmeibt_global_get_global()->praids_hash_by_uuid, uuid, praid);

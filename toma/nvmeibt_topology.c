@@ -1055,9 +1055,9 @@ static inline bool omit_praid_in_serialized_topo(struct nvmeibt_praid *praid, bo
 		// If we are generating an incremental topo, in addition to conditions above, we also need to omit praids that were not updated in the past NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX topology versions.
 		// Incremental topo doesn't include outdated praids either. They on followers will be garbage collected when followers receive full topo config.
 		// Use lower 32 bits for comparison - they are monotonic across term changes
-		int64_t inc_window_start = extract_lower_32_bits_idx(RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_calculated));
+		int32_t inc_window_start = extract_lower_32_bits_idx(RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_calculated));
 		inc_window_start = inc_window_start > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX? inc_window_start - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX : 0;
-		omit_this_praid = omit_this_praid || (extract_lower_32_bits_idx(praid->praid_leader.baseline_praid_lot.topo_ctx.topo_idx_updated) < inc_window_start);
+		omit_this_praid = omit_this_praid || (praid->praid_leader.baseline_praid_lot.topo_ctx.topo_idx_updated < inc_window_start);
 	}
 	return omit_this_praid;
 }

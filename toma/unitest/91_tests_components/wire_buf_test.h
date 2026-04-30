@@ -46,7 +46,7 @@ extern void persist_and_wire_buf_validate_len(const struct nvmeibt_persist_and_w
 struct test_praid_spec {
 	union nvmeib_uuid	uuid;
 	int					segs_num;
-	int64_t				topo_idx_updated;
+	int32_t				topo_idx_updated;
 	int					praid_version_major;
 	int					praid_version_minor;
 };
@@ -65,8 +65,6 @@ struct section_merge_test_ctx {
 // X-macro test list: X(func_name, "Test Name", "Description")
 //
 #define WIRE_BUF_TEST_LIST \
-	/************************* Serialized struct helpers ****************/ \
-	X(topo_idx_updated_getter_setter,				"topo_idx_updated getter/setter round-trip",	"Verifies split-field get/set for zero, positive, negative, and high-bit values") \
 	/************************* Complete merges *************************/ \
 	/* -- Complete: topo -- */ \
 	X(complete_topo_replaces,						"Complete topo replaces old",				"Old complete + new complete => output == new") \

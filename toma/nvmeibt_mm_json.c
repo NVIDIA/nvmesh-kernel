@@ -1804,16 +1804,16 @@ int apply_json_topo_praids_committed(struct mm_json_array *arr)
 			JSON_ASSIGN_PLAIN(mks93nf, "registrants_sync_cmd", topo.registrants_sync_cmd, praid_registrants_sync_cmd_str_to_enum(kv->value->str));
 			JSON_ASSIGN_PLAIN(cosl4ls, "is_activated", topo.is_activated, kv->value->num);
 			JSON_ASSIGN_PLAIN(lme9len, "segs_num", topo.segs_num, kv->value->num);
-			JSON_ASSIGN_CALL(lme9le1, "topo_idx_updated", nvmeibt_praid_serialized_set_topo_idx_updated, &topo, kv->value->num);
+			JSON_ASSIGN_PLAIN(lme9le1, "topo_idx_updated", topo.topo_idx_updated, kv->value->num);
 			JSON_ASSIGN_CALL(i6chrwe, "segments", apply_json_topo_segs_committed, &(kv->value->array));
 			JSON_LOOP_ITERATION_END(5vs92lr, kv->key);
 		}
 		JSON_ASSIGN_AND_CALL_VALIDATE(jsol3oc);
 		N_Tf(imcr5nb, "eyecatcher=@STR uuid=@UUID_LE praid_version_major=@INT praid_version_minor=@INT "
-			 "leader_did_all_segs_sync_registrants=@BOOL registrants_sync_cmd=@INT is_activated=@BOOL segs_num=@INT topo_idx_updated=@INT64_TX",
+			 "leader_did_all_segs_sync_registrants=@BOOL registrants_sync_cmd=@INT is_activated=@BOOL segs_num=@INT topo_idx_updated=@X",
 			 topo.eyecatcher, &(topo.uuid), topo.praid_version_major, topo.praid_version_minor,
 			 topo.leader_did_all_segs_sync_registrants, topo.registrants_sync_cmd, topo.is_activated, topo.segs_num,
-			 nvmeibt_praid_serialized_get_topo_idx_updated(&topo));
+			 topo.topo_idx_updated);
 		nvmeibt_praid_upd_committed_topo(&topo);
 	}
 	NFOUT;

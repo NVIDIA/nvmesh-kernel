@@ -1253,7 +1253,7 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
 		struct nvmeibt_praid_serialized_topo	new_serialized_praid;
 		int										new_praid_segs_num = 0;
 		int										new_praid_total_size = 0;
-		int64_t									old_topo_idx_updated = 0;
+		int32_t									old_topo_idx_updated = 0;
 
 		nvmeibt_praid_convert_topo_le_be(new_praid_ptr, &new_serialized_praid);
 		new_praid_segs_num = LE_SWAP8(new_praid_ptr->segs_num);
@@ -1275,7 +1275,7 @@ static int merge_topo_incremental(struct nvmeibt_wire_type_len_value *dst_wire_c
 		}
 
 		// Compare versions: use newer incremental or re-serialize from committed hash state
-		if (old_topo_idx_updated < nvmeibt_praid_serialized_get_topo_idx_updated(&new_serialized_praid)) {
+		if (old_topo_idx_updated < new_serialized_praid.topo_idx_updated) {
 			// Incremental is newer: copy from wire buffer
 			if (dst_data_ptr) {
 				memcpy(*dst_data_ptr, new_praid_ptr, new_praid_total_size);
@@ -1493,7 +1493,7 @@ void TEST_remove_raft_member_from_hash(const union nvmeib_uuid *uuid)
 
 bool compute_is_topo_incremental(int64_t peer_topo_idx, int64_t leader_topo_to_commit)
 {
-	int64_t inc_window_start = extract_lower_32_bits_idx(leader_topo_to_commit);
+	int32_t inc_window_start = extract_lower_32_bits_idx(leader_topo_to_commit); // Lower-32 only: lifecycle counter is globally monotonic across term changes, so incremental stays valid after leader transitions (avoids forcing complete bufs on every term change).
 	inc_window_start = (inc_window_start > NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX ? inc_window_start - NVMEIBT_INCREMENTAL_WINDOW_SIZE_TOPO_IDX : 0);
 	return (extract_lower_32_bits_idx(peer_topo_idx) >= inc_window_start);
 }

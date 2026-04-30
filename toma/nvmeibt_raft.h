@@ -237,10 +237,9 @@ static inline int64_t leader_get_next_topology_version(void)
 	return ((int64_t)nvmeibt_raft_get_current_term() << 32) | (((RAFT_COMMIT_LIFECYCLE_VAL(TOPO, leader_to_commit) + 1) & 0xffffffff));
 }
 
-static inline int64_t extract_lower_32_bits_idx(int64_t version)
+static inline int32_t extract_lower_32_bits_idx(int64_t version)
 {
-	int32_t lower_32_bits = (int32_t)version; // This extracts the lower 32 bits of the version while preserving the sign, so that it remains -1 when it's uninitialized
-	return (int64_t)lower_32_bits;
+	return (int32_t)version; // Sign-preserving truncation; -1 stays -1 for the uninitialized sentinel.
 }
 
 #define SET_RAFT_LEADER_NEXT_TOPOLOGY_VERSION(name) ({ \
