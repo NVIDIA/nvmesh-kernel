@@ -550,7 +550,8 @@ int _HW_managementConfiguration_from_json(struct HW_mgmt_conf *conf, struct mm_j
 		JSON_ASSIGN_PLAIN_OPTIONAL(mk0ih5b, "stopSendingKeepaliveToken", conf->stopSendingKeepaliveToken, kv->value->num);	// MGMT sometime sends (Dec24)
 		JSON_ASSIGN_OPTIONAL(38sbftw, "isUnavailable");	// MGMT sometime sends (Dec24)
 		JSON_ASSIGN_PLAIN(zihrsk3, "dbUUID", conf->dbUUID, *GET_UNION_UUID_OF_URN_UUID_STR(kv->value->str));
-		JSON_ASSIGN_OPTIONAL(ryuajnj, "lastReceivedLeaderKeepAlive");	// MGMT sometime sends (Dec24)
+		JSON_ASSIGN_OPTIONAL(ryuajnj, "lastReceivedLeaderKeepAlive");	// Internal management field, sent directly from DB without filtering
+		JSON_ASSIGN_OPTIONAL(ryuajnk, "lastSentConfigurationVersion");	// Internal management field, sent directly from DB without filtering
 		JSON_LOOP_ITERATION_END(5b28l5i, kv->key);
 	}
 	JSON_ASSIGN_AND_CALL_VALIDATE(vmsi29f);
