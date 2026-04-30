@@ -247,11 +247,8 @@ struct nvmeibt_serialized_seg_leader_topo {
 	int			 							res_1;
 	union nvmeib_uuid						uuid;
 	unsigned long long						res_2;
-	//union nvmeib_uuid						owner_seg_uuid;
-	//union nvmeib_uuid						secondary_owner_seg_uuid;
 	int										praid_version_major;
 	int										praid_version_minor;
-    // int										active_seg_ser_ver;	// Removed in disk_segment.h
 	union {
 		struct nvmeibt_leader_seg_flags		leader_seg_flags;
 		int									leader_seg_flags_int;
