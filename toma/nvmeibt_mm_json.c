@@ -186,19 +186,15 @@ u32 nvmeibt_raid0_config_decode_ssize(const struct nvmeibt_raid0_config *r0)
 	if (r0->stripe_size_encoded & 0x80)
 		return (u32)(r0->stripe_size_encoded & 0x7F) * 32; 	// Version 3.5.0+ Encoding If the highest bit is 1, encoded in units of blocksets (32 blocks)
 	else
-		return r0->stripe_size_encoded;						// Old encoding, direct value in units of blocks.
+		return r0->stripe_size_encoded;						// Old encoding, pre 3.4.0, direct value in units of blocks. Striping of more than EC 7+N creates buffer overflow  as 8*32 > 256
 }
 
 void nvmeibt_raid0_config_encode(struct nvmeibt_raid0_config*r0, u32 stripe_size, u32 stripe_width)
 {
-	if (stripe_size > 0x7F) {					// Cannot be encoded in 7bits in units of blocks.
-		if ((stripe_size/32) > 0x7F)
-			goto _crash;
-		r0->stripe_size_encoded = (stripe_size/32);
-		r0->stripe_size_encoded |= 0x80;
-	} else {
-		r0->stripe_size_encoded = stripe_size;
-	}
+	if ((stripe_size/32) > 0x7F)							// Cannot be encoded at all. 7bits in units of blocks.
+		goto _crash;
+	r0->stripe_size_encoded = (stripe_size/32);				// Encode only in new format (but knows to decode both)
+	r0->stripe_size_encoded |= 0x80;
 	if (stripe_width > NVMEIBT_MAX_STRIPE_WIDTH_PER_CHUNK)
 		goto _crash;
 	r0->stripe_width = stripe_width;
@@ -219,7 +215,6 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 
 	NFIN;
 	memset(vol, 0, sizeof(struct mm_vol_conf));
-	vol->r0 = nvmeibt_raid0_config_constructor();	// default, as it could be null
 	vol->kafka_offset_or_idx = kafka_offset;		// Default, If arrives from Kafka then use it. From JSON file it is overriden
 	nvmeibt_strlcpy(vol->eyecatcher, "VOL", sizeof(vol->eyecatcher));
 	if (elem->type != JSON_E_DICT)
@@ -246,8 +241,8 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 			JSON_ASSIGN_PLAIN(cujs03p, "relativeRebuildPriority", vol->relativeRebuildPriority, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(og7xne3, "enableCrcCheck", vol->enableCrcCheck, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(bnmc903, "use_debug_di", vol->use_debug_di, kv->value->num);
-			JSON_ASSIGN_PLAIN(byxbdoe, "stripeWidth", stripeWidth, kv->value->num);
-			JSON_ASSIGN_PLAIN(92locla, "stripeSize",  stripeSize,  kv->value->num);
+			JSON_ASSIGN_PLAIN_OPTIONAL(byxbdoe, "stripeWidth", stripeWidth, kv->value->num);
+			JSON_ASSIGN_PLAIN_OPTIONAL(92locla, "stripeSize",  stripeSize,  kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(bnjkx93, "kafka_offset_or_idx", vol->kafka_offset_or_idx, kv->value->num);	// Exists in persistence->JSON
 			JSON_ASSIGN_PLAIN(7xj30ls, "action", vol->action, ((!strcmp(s, "markedForDeletion") || s[0] == 'X') ? 'X' : 'N'));
 			JSON_ASSIGN_PLAIN(zkw94j2, "RAIDLevel", vol->raidType, (!strcmp(s, "Mirrored RAID-1") ? 1 :
@@ -266,8 +261,9 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 			JSON_LOOP_ITERATION_END(4gt67sk, kv->key);
 		}
 	}
-	if (is_new_or_upd)
-		nvmeibt_raid0_config_encode(&vol->r0, stripeSize, stripeWidth);
+	if (stripeSize  == ~0U) stripeSize = 32;				// Default, as it could be null (for jbods). Not OK, mgmt bug can lead to data corruption!
+	if (stripeWidth == ~0U) stripeWidth = 1;				// Default, as it could be null (for jbods). Not OK!
+	nvmeibt_raid0_config_encode(&vol->r0, stripeSize, stripeWidth);
 	JSON_ASSIGN_AND_CALL_VALIDATE(rvh39al);
 	NFOUT;
 }

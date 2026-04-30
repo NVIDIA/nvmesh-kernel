@@ -67,7 +67,6 @@ struct nvmeibt_raid0_config {			// Attributes of Striping Raid-0, implemented on
 } __attribute__((__packed__));
 u32  nvmeibt_raid0_config_decode_ssize(const struct nvmeibt_raid0_config*);
 void nvmeibt_raid0_config_encode(            struct nvmeibt_raid0_config*, u32 stripe_size_in_units_of_blocks, u32 stripe_width);
-#define nvmeibt_raid0_config_constructor()		(struct nvmeibt_raid0_config){32, 1}
 
 struct mm_vol_conf {
 	char eyecatcher[4];					// 4
