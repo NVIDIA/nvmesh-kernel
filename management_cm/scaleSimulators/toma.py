@@ -40,7 +40,7 @@ class TOMA(Component):
 		self.allVolumeSegments = {}
 		self.target = None
 		self.cachedInitState = None
-		self.featureCompatibilityVersion = '1'
+		self.featureCompatibilityVersion = '3'
 		self.tomaSoftwareVersion = '784'
 		self.encryptionResult = 1
 		# This should be increased whenever leader is being changed.
