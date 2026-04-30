@@ -42,7 +42,7 @@ static inline enum NVMEIBT_MEM_TBL_INIT_MODE __init_mode_normalized(enum NVMEIBT
 		return NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE;
 	}
 	if (seg_state == NVMEIBT_SEG_DIRTY_BITS_STATE_DEAD) {	// For Dead seg, just clean the RAM, no instruction how.
-		BUG_ON(m != NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);
+		BUG_ON(m != NVMEIBT_MEM_TBL_INIT_MODE_INIT_REQUIRED);		// Do nothing, Leader has to give proper instruction
 		return m;
 	}
 	BUG_ON((m & do_nothing) == 0);		// Invalid enum value sent
@@ -60,17 +60,16 @@ void peer_toma_simu_upd_committed_from_bin_topo(struct peer_toma_simu *peer, con
 typedef void (*peer_seg_visit_fn)(void *ctx, const struct nvmeibt_serialized_seg_leader_topo *seg, const struct sb_seg_conf *sb_seg);
 
 /* Walk the peer's owned segs in the cached BIN_TOPO and call visit() for each one. */
-static void peer_for_each_owned_seg(struct peer_toma_simu *peer, peer_seg_visit_fn visit, void *ctx) {
+static void peer_for_each_local_seg(struct peer_toma_simu *peer, peer_seg_visit_fn visit, void *ctx) {
 	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
 	const int my_node_idx = (int)(peer->node - cfg->nodes);
 	char tmp[PEER_TOMA_SIMU_BIN_TOPO_MAX];
 	struct nvmeibt_topology_serialized_topo_header hdr;
-	struct nvmeibt_praid_serialized_topo *wire_praid;
+	struct nvmeibt_praid_serialized_topo *wire_praid = (typeof(wire_praid))&tmp[sizeof(hdr)];
 
 	if (peer->latest_bin_topo_len == 0) return;
 	memcpy(tmp, peer->latest_bin_topo, (size_t)peer->latest_bin_topo_len);	// *_convert_*_le_be helpers swap in place; walk the throwaway copy so the cached buffer stays pristine
 	nvmeibt_topology_convert_header_le_be((typeof(&hdr))tmp, &hdr);
-	wire_praid = (typeof(wire_praid))&tmp[sizeof(hdr)];
 
 	for (int p = 0; p < hdr.praids_num; p++) {
 		struct nvmeibt_praid_serialized_topo ld_praid;
@@ -81,9 +80,8 @@ static void peer_for_each_owned_seg(struct peer_toma_simu *peer, peer_seg_visit_
 			const struct sb_seg_conf *sb_seg;
 			nvmeibt_disk_segment_convert_topo_le_be(&wire_seg[s], &ld_seg);
 			sb_seg = sb_cluster_get_seg_ptr_from_uuid(cfg, (uint32_t)ld_seg.uuid.ll[0]);
-			if (sb_cluster_get_node_idx_from_disk_uuid(sb_seg->disk_uuid) != my_node_idx)
-				continue;
-			visit(ctx, &ld_seg, sb_seg);
+			if (sb_cluster_get_node_idx_from_disk_uuid(sb_seg->disk_uuid) == my_node_idx)
+				visit(ctx, &ld_seg, sb_seg);
 		}
 		wire_praid = (typeof(wire_praid))&wire_seg[ld_praid.segs_num];
 	}
@@ -133,7 +131,7 @@ static void __recovery_visit(void *ctxp, const struct nvmeibt_serialized_seg_lea
 
 int peer_toma_simu_complete_all_recoveries(struct peer_toma_simu *peer) {
 	struct __recovery_visit_ctx ctx = { .peer = peer, .n = 0 };
-	peer_for_each_owned_seg(peer, __recovery_visit, &ctx);
+	peer_for_each_local_seg(peer, __recovery_visit, &ctx);
 	return ctx.n;
 }
 
@@ -170,7 +168,7 @@ int peer_toma_simu_build_act_topo_reply(struct peer_toma_simu *peer, char *out_b
 	struct nvmeibt_act_topo_builder builder;
 	struct __act_topo_ctx ctx = { .peer = peer, .builder = &builder };
 	nvmeibt_act_topo_builder_init(&builder, out_buf, out_buf_size);
-	peer_for_each_owned_seg(peer, __act_topo_visit, &ctx);
+	peer_for_each_local_seg(peer, __act_topo_visit, &ctx);
 	nvmeibt_act_topo_builder_to_wire(&builder);
 	return builder.topo_len;
 }
