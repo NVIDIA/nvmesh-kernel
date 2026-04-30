@@ -55,6 +55,18 @@ void peer_toma_simu_upd_committed_from_bin_topo(struct peer_toma_simu *peer, con
 	memcpy(peer->latest_bin_topo, bin_topo_buf, (size_t)bin_topo_len);
 	peer->latest_bin_topo_len = bin_topo_len;
 	peer->running_local_serialization_version++;	// Next AE handler's is_applied_topo_ready_and_different gate will see running != leader_echoed.
+	if (peer->latest_bin_topo_len != 0) {			// Convert everything to little endian for easy debugging.
+		struct nvmeibt_topology_serialized_topo_header *hdr = (typeof(hdr))peer->latest_bin_topo;
+		struct nvmeibt_praid_serialized_topo *wire_praid = (typeof(wire_praid))&hdr[1];
+		nvmeibt_topology_convert_header_le_be(hdr, hdr);
+		for (int p = 0; p < hdr->praids_num; p++) {
+			struct nvmeibt_serialized_seg_leader_topo *wire_seg = (typeof(wire_seg))(&wire_praid[1]);
+			nvmeibt_praid_convert_topo_le_be(wire_praid, wire_praid);
+			for (int s = 0; s < wire_praid->segs_num; s++, wire_seg++)
+				nvmeibt_disk_segment_convert_topo_le_be(wire_seg, wire_seg);
+			wire_praid = (typeof(wire_praid))wire_seg;
+		}
+	}
 }
 
 typedef void (*peer_seg_visit_fn)(void *ctx, const struct nvmeibt_serialized_seg_leader_topo *seg, const struct sb_seg_conf *sb_seg);
@@ -63,27 +75,17 @@ typedef void (*peer_seg_visit_fn)(void *ctx, const struct nvmeibt_serialized_seg
 static void peer_for_each_local_seg(struct peer_toma_simu *peer, peer_seg_visit_fn visit, void *ctx) {
 	const struct sb_cluster_conf *cfg = sb_cluster_get_const_conf();
 	const int my_node_idx = (int)(peer->node - cfg->nodes);
-	char tmp[PEER_TOMA_SIMU_BIN_TOPO_MAX];
-	struct nvmeibt_topology_serialized_topo_header hdr;
-	struct nvmeibt_praid_serialized_topo *wire_praid = (typeof(wire_praid))&tmp[sizeof(hdr)];
-
+	const struct nvmeibt_topology_serialized_topo_header *hdr = (typeof(hdr))peer->latest_bin_topo;
+	const struct nvmeibt_praid_serialized_topo *wire_praid = (typeof(wire_praid))&hdr[1];
 	if (peer->latest_bin_topo_len == 0) return;
-	memcpy(tmp, peer->latest_bin_topo, (size_t)peer->latest_bin_topo_len);	// *_convert_*_le_be helpers swap in place; walk the throwaway copy so the cached buffer stays pristine
-	nvmeibt_topology_convert_header_le_be((typeof(&hdr))tmp, &hdr);
-
-	for (int p = 0; p < hdr.praids_num; p++) {
-		struct nvmeibt_praid_serialized_topo ld_praid;
-		struct nvmeibt_serialized_seg_leader_topo *wire_seg = (typeof(wire_seg))(&wire_praid[1]);
-		nvmeibt_praid_convert_topo_le_be(wire_praid, &ld_praid);
-		for (int s = 0; s < ld_praid.segs_num; s++) {
-			struct nvmeibt_serialized_seg_leader_topo ld_seg;
-			const struct sb_seg_conf *sb_seg;
-			nvmeibt_disk_segment_convert_topo_le_be(&wire_seg[s], &ld_seg);
-			sb_seg = sb_cluster_get_seg_ptr_from_uuid(cfg, (uint32_t)ld_seg.uuid.ll[0]);
+	for (int p = 0; p < hdr->praids_num; p++) {
+		const struct nvmeibt_serialized_seg_leader_topo *wire_seg = (typeof(wire_seg))(&wire_praid[1]);
+			for (int s = 0; s < wire_praid->segs_num; s++, wire_seg++) {
+			const struct sb_seg_conf *sb_seg = sb_cluster_get_seg_ptr_from_uuid(cfg, (uint32_t)wire_seg->uuid.ll[0]);
 			if (sb_cluster_get_node_idx_from_disk_uuid(sb_seg->disk_uuid) == my_node_idx)
-				visit(ctx, &ld_seg, sb_seg);
+				visit(ctx, wire_seg, sb_seg);
 		}
-		wire_praid = (typeof(wire_praid))&wire_seg[ld_praid.segs_num];
+		wire_praid = (typeof(wire_praid))wire_seg;
 	}
 }
 

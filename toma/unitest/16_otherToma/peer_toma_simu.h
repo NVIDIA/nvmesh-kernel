@@ -22,7 +22,7 @@ struct peer_toma_simu {
 	bool ignore_append_entries;							// Emulates infinitely slow local disk response time, does not commit raft leaders topo, Much like real Toma 'enum raft_pause_mode_enm'
 	unsigned long long ser_ver_per_seg_counter;			// Incrementing ACT_TOPO serialization version (per-seg wire field)
 	unsigned long long running_local_serialization_version;	// Mirrors real nvmeibt_topology::running_local_serialization_version. Bumped on BIN_TOPO ingest and override changes; compared against the leader's echoed "known_to_leader" to gate ACT_TOPO attachment on REPs.
-	char latest_bin_topo[PEER_TOMA_SIMU_BIN_TOPO_MAX];	// Last BIN_TOPO from the leader, stored raw; ACT_TOPO emission walks this on demand
+	char latest_bin_topo[PEER_TOMA_SIMU_BIN_TOPO_MAX];	// Last BIN_TOPO from the leader, stored in little endian; ACT_TOPO emission walks this on demand
 	int  latest_bin_topo_len;
 
 	struct peer_toma_simu_seg_override overrides[PEER_TOMA_SIMU_MAX_SEGS];
