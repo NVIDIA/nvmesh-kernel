@@ -118,6 +118,7 @@ struct section_merge_test_ctx {
 	/********** Leader incremental selection: deletion forces complete ***********/ \
 	X(deletion_guard_forces_complete_configs,		"Vol deletion forces complete configs",		"Peer in window but last_delete_kafka > peer offset => complete") \
 	X(deletion_guard_no_effect_when_peer_caught_up,	"Caught-up peer still gets incremental",	"Peer kafka offset >= last_delete => incremental allowed") \
+	X(selection_uninitialized_leader_allows_incremental, "Uninitialized leader => incremental",	"Leader has no commits in a section (-1) => peer matching -1 still eligible for incremental") \
 	X(selection_topo_window_boundary,				"Topo window boundary",						"Peer just below topo window => complete, at boundary => incremental") \
 	X(selection_topo_config_window_boundary,		"Topo config window boundary",				"Peer just below topo_config window => complete, at boundary => incremental") \
 	X(selection_kafka_window_boundary,				"Kafka window boundary",					"Peer just below kafka window => complete, at boundary => incremental") \

@@ -2592,6 +2592,43 @@ out:
 	return rv;
 }
 
+/*
+ * Scenario: leader has no commits yet for some sections (leader_to_commit == -1).
+ * Peer also has -1 in the matching sections (trivially in sync, nothing committed by leader).
+ * Expected: incremental allowed -- the incremental wire buf carries an empty section, no need
+ * to fall back to complete.
+ */
+DEFINE_TEST(selection_uninitialized_leader_allows_incremental)
+{
+	int		rv = -1;
+	int		result;
+
+	(void)_ctx;
+
+	/* All config sections uninitialized on leader; peer matches with -1. */
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(1, 1),
+		/* peer */    nvmeibt_offset_and_idx_uninitialized, nvmeibt_offset_and_idx_uninitialized,
+					  nvmeibt_offset_and_idx_uninitialized, nvmeibt_offset_and_idx_uninitialized,
+		/* leader */  nvmeibt_offset_and_idx_uninitialized, nvmeibt_offset_and_idx_uninitialized,
+					  nvmeibt_offset_and_idx_uninitialized,
+		/* deletes */ nvmeibt_offset_and_idx_uninitialized, nvmeibt_offset_and_idx_uninitialized);
+	TEST_ASSERT_EQ(result, 1);
+
+	/* Mixed: TOPO_CONFIG/KAFKA_MGMT_CONFIG uninitialized, raft_members has real values within window. */
+	/* Mirrors the scenario of (TOPO_CONFIG=-1, KAFKA_MGMT_CONFIG=-1, RAFT_MEMBERS_SEQ_NO=4). */
+	result = compute_is_configs_and_raft_members_incremental(
+		compute_is_topo_incremental(1, 1),
+		/* peer */    nvmeibt_offset_and_idx_uninitialized, nvmeibt_offset_and_idx_uninitialized, 4, 3,
+		/* leader */  nvmeibt_offset_and_idx_uninitialized, nvmeibt_offset_and_idx_uninitialized, 4,
+		/* deletes */ nvmeibt_offset_and_idx_uninitialized, nvmeibt_offset_and_idx_uninitialized);
+	TEST_ASSERT_EQ(result, 1);
+
+	rv = 0;
+out:
+	return rv;
+}
+
 DEFINE_TEST(selection_topo_window_boundary)
 {
 	int			rv = -1;
