@@ -246,8 +246,8 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 			JSON_ASSIGN_PLAIN(cujs03p, "relativeRebuildPriority", vol->relativeRebuildPriority, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(og7xne3, "enableCrcCheck", vol->enableCrcCheck, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(bnmc903, "use_debug_di", vol->use_debug_di, kv->value->num);
-			JSON_ASSIGN_PLAIN_OPTIONAL(byxbdoe, "stripeWidth", stripeWidth, kv->value->num);
-			JSON_ASSIGN_PLAIN_OPTIONAL(92locla, "stripeSize",  stripeSize,  kv->value->num);
+			JSON_ASSIGN_PLAIN(byxbdoe, "stripeWidth", stripeWidth, kv->value->num);
+			JSON_ASSIGN_PLAIN(92locla, "stripeSize",  stripeSize,  kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(bnjkx93, "kafka_offset_or_idx", vol->kafka_offset_or_idx, kv->value->num);	// Exists in persistence->JSON
 			JSON_ASSIGN_PLAIN(7xj30ls, "action", vol->action, ((!strcmp(s, "markedForDeletion") || s[0] == 'X') ? 'X' : 'N'));
 			JSON_ASSIGN_PLAIN(zkw94j2, "RAIDLevel", vol->raidType, (!strcmp(s, "Mirrored RAID-1") ? 1 :
@@ -261,8 +261,8 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 			JSON_ASSIGN_CALL(vimrkts, "chunks", _mm_vol_chunks_from_json, vol, kv->value);
 			JSON_ASSIGN_CALL(1nis0xa, "lockServer", _mm_lockserver_type_from_json, vol, kv->value);
 			JSON_ASSIGN_VALIDATE_STR_OPTIONAL(hsk0xmr, "eyecatcher", "VOL", s);	// Exists in persistence->JSON
-			JSON_ASSIGN_OPTIONAL(0ecdaun, "dataBlocks");	// MGMT sends depending on raidType (Dec 24)
-			JSON_ASSIGN_OPTIONAL(4bs8o4e, "parityBlocks");	// MGMT sends depending on raidType (Dec 24)
+			JSON_ASSIGN_OPTIONAL(0ecdaun, "dataBlocks");
+			JSON_ASSIGN_OPTIONAL(4bs8o4e, "parityBlocks");
 			JSON_LOOP_ITERATION_END(4gt67sk, kv->key);
 		}
 	}
