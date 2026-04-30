@@ -17,8 +17,7 @@ struct nvmeibt_chunk_config {
 	union nvmeib_uuid its_block_device_id;
 	long long		  vlb_s;
 	long long		  vlb_e;
-	int				  stripe_width;	   // n_logical segs in each praid (n_segs - redundancy)
-	int				  stripe_size;	  // n_praids
+	struct nvmeibt_raid0_config r0;
 };
 
 struct nvmeibt_praid;

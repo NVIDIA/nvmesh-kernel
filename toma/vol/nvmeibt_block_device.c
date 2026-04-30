@@ -104,8 +104,7 @@ enum nvmeibt_add_rv nvmeibt_block_device_add(struct mm_vol_conf *vol, int config
 	}
 	f->enableCrcCheck = vol->enableCrcCheck;
 	f->use_debug_di = vol->use_debug_di;
-	f->stripe_size = vol->stripeSize;
-	f->stripe_width = vol->stripeWidth;
+	f->r0 = vol->r0;
 
 	rv = NNVMEIBT_HASH_ADD_OBJ_new(ti98dju,
 							   nvmeibt_global_get_global()->block_devices_hash_by_uuid,

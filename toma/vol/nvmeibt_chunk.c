@@ -65,14 +65,7 @@ enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt
 	f->vlb_s = conf->vlbs;
 	f->vlb_e = conf->vlbe;
 	f->its_block_device_id = blkdev->from_config.id;
-	f->stripe_size = blkdev->from_config.stripe_size;
-	f->stripe_width = blkdev->from_config.stripe_width;
-
-	if (f->stripe_width > NVMEIBT_MAX_STRIPE_WIDTH_PER_CHUNK) {
-		N_Ef(error_chunk_nvmeibt_chunk_add, "stripe_width=@STRIPE_WIDTH too big", f->stripe_width);
-		rv = NVMEIBT_ADD_FAILED;
-		goto out;
-	}
+	f->r0 = blkdev->from_config.r0;
 
 	rv = NNVMEIBT_HASH_ADD_OBJ_new(tcgcby2, nvmeibt_global_get_global()->chunks_hash_by_uuid, new_chunk,
 					config_tag, NVMEIBT_MAX_N_CHUNKS, chunk, chunk);
@@ -81,7 +74,7 @@ enum nvmeibt_add_rv nvmeibt_chunk_add(struct mm_chunk_conf *conf, struct nvmeibt
 
 	// In any case, update the following config-driven fields
 	chunk->its_mm_chunk_conf = *conf;
-	chunk->n_praids = f->stripe_width;
+	chunk->n_praids = f->r0.stripe_width;
 	chunk->its_block_device = blkdev;
 	chunk->its_idx_in_block_device = idx_in_vol;
 	blkdev->chunks[idx_in_vol] = chunk;

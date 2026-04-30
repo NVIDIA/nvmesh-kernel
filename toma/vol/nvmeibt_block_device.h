@@ -32,8 +32,7 @@ struct nvmeibt_block_device_config {
 	struct nvmeibt_block_device_atributes attr;
 	bool						enableCrcCheck;
 	bool						use_debug_di;
-	uint8_t 					stripe_size;
-	uint8_t 					stripe_width;
+	struct nvmeibt_raid0_config r0;
 };
 
 struct run_exec_on_blkdev_ctx;

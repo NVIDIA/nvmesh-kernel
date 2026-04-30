@@ -16937,15 +16937,6 @@
             "%d": 58
         }
     },
-    "@STRIPE_WIDTH": {
-        "size": 32,
-        "type": "s32",
-        "fmt": "%d",
-        "final": true,
-        "__histogram": {
-            "%d": 59
-        }
-    },
     "@STRLEN": {
         "size": 64,
         "type": "long",

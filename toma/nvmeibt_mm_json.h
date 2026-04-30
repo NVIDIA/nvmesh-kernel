@@ -61,6 +61,14 @@ struct mm_chunk_conf {
 	char	align[0] __attribute__((aligned(16)));
 } __attribute__((__packed__, aligned(16)));
 
+struct nvmeibt_raid0_config {			// Attributes of Striping Raid-0, implemented on top of protection raid D+P
+	uint8_t stripe_size_encoded;		// Toma encoded values to save space. Decoded(u32) - Amount of sequential data blocks (vlba) in each praid before moving to the next praid in R0.
+	uint8_t stripe_width;				// The amount of disks on which which data is interlaced. (RAID 0) == Amount of praids in chunk, Integer >= 1
+} __attribute__((__packed__));
+u32  nvmeibt_raid0_config_decode_ssize(const struct nvmeibt_raid0_config*);
+void nvmeibt_raid0_config_encode(            struct nvmeibt_raid0_config*, u32 stripe_size_in_units_of_blocks, u32 stripe_width);
+#define nvmeibt_raid0_config_constructor()		(struct nvmeibt_raid0_config){32, 1}
+
 struct mm_vol_conf {
 	char eyecatcher[4];					// 4
 	uint8_t raidType;					// 5
@@ -72,8 +80,7 @@ struct mm_vol_conf {
 	char action;						// 40
 	char res_type;						// 41	// Obsolete Elect
 	uint8_t relativeRebuildPriority;	// 42
-	uint8_t stripeSize;					// 43
-	uint8_t stripeWidth;				// 44
+	struct nvmeibt_raid0_config r0;		// 43
 	uint8_t lockServer_type;			// 45
 	uint8_t lockServer_maxNOwners;		// 46
 	int8_t lockServer_locksetShift;		// 47

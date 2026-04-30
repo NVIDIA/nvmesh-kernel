@@ -181,16 +181,45 @@ static void _mm_lockserver_type_from_json(struct mm_vol_conf *vol, struct mm_jso
 	NFOUT;
 }
 
+u32 nvmeibt_raid0_config_decode_ssize(const struct nvmeibt_raid0_config *r0)
+{
+	if (r0->stripe_size_encoded & 0x80)
+		return (u32)(r0->stripe_size_encoded & 0x7F) * 32; 	// Version 3.5.0+ Encoding If the highest bit is 1, encoded in units of blocksets (32 blocks)
+	else
+		return r0->stripe_size_encoded;						// Old encoding, direct value in units of blocks.
+}
+
+void nvmeibt_raid0_config_encode(struct nvmeibt_raid0_config*r0, u32 stripe_size, u32 stripe_width)
+{
+	if (stripe_size > 0x7F) {					// Cannot be encoded in 7bits in units of blocks.
+		if ((stripe_size/32) > 0x7F)
+			goto _crash;
+		r0->stripe_size_encoded = (stripe_size/32);
+		r0->stripe_size_encoded |= 0x80;
+	} else {
+		r0->stripe_size_encoded = stripe_size;
+	}
+	if (stripe_width > NVMEIBT_MAX_STRIPE_WIDTH_PER_CHUNK)
+		goto _crash;
+	r0->stripe_width = stripe_width;
+	return;
+
+_crash:
+	N_Ef(__AUTOID__, "Wrong config {stripe_width=@X, stripe_size=@X} too large! Crashing to prevent data corruption of Raid-0 volume", stripe_size, stripe_width);
+	nvmeibt_abort(ES_FATAL);
+}
+
 static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem, int64_t kafka_offset, bool is_new_or_upd, bool is_deleteVolumeCompleted)
 {
 	struct mm_json_kv_pair		*kv;
 	struct mm_json_dict			*dict = &(elem->dict);
 	char						*s;
+	u32 stripeSize = ~0, stripeWidth = ~0;
 	JSON_ASSIGN_AND_CALL_INIT();
 
 	NFIN;
 	memset(vol, 0, sizeof(struct mm_vol_conf));
-	vol->stripeWidth = 1;		// default, as it could be null
+	vol->r0 = nvmeibt_raid0_config_constructor();	// default, as it could be null
 	vol->kafka_offset_or_idx = kafka_offset;		// Default, If arrives from Kafka then use it. From JSON file it is overriden
 	nvmeibt_strlcpy(vol->eyecatcher, "VOL", sizeof(vol->eyecatcher));
 	if (elem->type != JSON_E_DICT)
@@ -217,8 +246,8 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 			JSON_ASSIGN_PLAIN(cujs03p, "relativeRebuildPriority", vol->relativeRebuildPriority, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(og7xne3, "enableCrcCheck", vol->enableCrcCheck, kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(bnmc903, "use_debug_di", vol->use_debug_di, kv->value->num);
-			JSON_ASSIGN_PLAIN_OPTIONAL(byxbdoe, "stripeWidth", vol->stripeWidth, kv->value->num);	// MGMT sends depending on raidType (Dec 24)
-			JSON_ASSIGN_PLAIN_OPTIONAL(92locla, "stripeSize", vol->stripeSize, kv->value->num);
+			JSON_ASSIGN_PLAIN_OPTIONAL(byxbdoe, "stripeWidth", stripeWidth, kv->value->num);
+			JSON_ASSIGN_PLAIN_OPTIONAL(92locla, "stripeSize",  stripeSize,  kv->value->num);
 			JSON_ASSIGN_PLAIN_OPTIONAL(bnjkx93, "kafka_offset_or_idx", vol->kafka_offset_or_idx, kv->value->num);	// Exists in persistence->JSON
 			JSON_ASSIGN_PLAIN(7xj30ls, "action", vol->action, ((!strcmp(s, "markedForDeletion") || s[0] == 'X') ? 'X' : 'N'));
 			JSON_ASSIGN_PLAIN(zkw94j2, "RAIDLevel", vol->raidType, (!strcmp(s, "Mirrored RAID-1") ? 1 :
@@ -237,6 +266,8 @@ static void _mm_vol_from_json(struct mm_vol_conf *vol, struct mm_json_elem *elem
 			JSON_LOOP_ITERATION_END(4gt67sk, kv->key);
 		}
 	}
+	if (is_new_or_upd)
+		nvmeibt_raid0_config_encode(&vol->r0, stripeSize, stripeWidth);
 	JSON_ASSIGN_AND_CALL_VALIDATE(rvh39al);
 	NFOUT;
 }
@@ -624,7 +655,7 @@ void mm_print_vol_conf(struct mm_vol_conf *vol, int (*printf_fn)(void *ctx, cons
 
 	(*printf_fn)(s, "VOL:  %s, n_blks=0x%lx, raidType=%u, version=%d, action=%c k_offset=%ld\n", vol->name, vol->blocks, vol->raidType, vol->version, vol->action, vol->kafka_offset_or_idx);
 	_mm_uuid_binary_to_str(&vol->uuid, uuid);
-	(*printf_fn)(s, "      uuid=%s, stripeWidth=%d, stripeSize=%d, (%s)\n", uuid, vol->stripeWidth, vol->stripeSize, vol->eyecatcher);
+	(*printf_fn)(s, "      uuid=%s, stripeWidth=%u, stripeSize=%u, (%s)\n", uuid, vol->r0.stripe_width, nvmeibt_raid0_config_decode_ssize(&vol->r0), vol->eyecatcher);
 	for (j=0; j<vol->num_chunks; j++) {
 		struct mm_chunk_conf *chunk = &vol->chunks[j];
 		(*printf_fn)(s, "      CHK:  vlbs=0x%lx, vlbe=0x%lx\n", chunk->vlbs, chunk->vlbe);
@@ -745,8 +776,7 @@ struct _packed_mm_vol_conf {
 	char action;							// 14
 	char res_type;							// 15	// Obsolete Elect
 	uint8_t relativeRebuildPriority;		// 16
-	uint8_t stripeSize;						// 17
-	uint8_t stripeWidth;					// 18
+	struct nvmeibt_raid0_config r0;			// 17
 	uint8_t lockServer_type;				// 19
 	uint8_t lockServer_maxNOwners;			// 20
 	int8_t lockServer_locksetShift;			// 21
@@ -860,8 +890,8 @@ uint16_t nvmeibt_vol_convert_config_le_be(void *p, struct mm_vol_conf *src, BOOL
 	COPY_FIELD(name);
 	SWAP8_FIELD(action);
 	SWAP8_FIELD(relativeRebuildPriority);
-	SWAP8_FIELD(stripeSize);
-	SWAP8_FIELD(stripeWidth);
+	SWAP8_FIELD(r0.stripe_size_encoded);
+	SWAP8_FIELD(r0.stripe_width);
 	SWAP8_FIELD(lockServer_type);
 	SWAP8_FIELD(lockServer_maxNOwners);
 	SWAP8_FIELD(lockServer_locksetShift);
@@ -1010,7 +1040,7 @@ void serialize_vol_conf_to_JSON(struct mm_vol_conf *v, struct nvmeibt_Str *JSON_
 						(v->raidType == 0 ? "Concatenated" : v->raidType == 1 ? "Mirrored RAID-1" : v->raidType == 6 ? "Erasure Coding" : "UNKNOWN"),
 						v->blockSize, v->version,
 						nvmeibt_escape_special_characters(v->name).s,
-						v->action, v->relativeRebuildPriority, v->stripeSize, v->stripeWidth, v->lockServer_type,
+						v->action, v->relativeRebuildPriority, nvmeibt_raid0_config_decode_ssize(&v->r0), v->r0.stripe_width, v->lockServer_type,
 						v->lockServer_maxNOwners, v->lockServer_locksetShift, v->enableCrcCheck, v->use_debug_di, urn_uuid.str, v->blocks,
 						v->kafka_offset_or_idx);
 out:;

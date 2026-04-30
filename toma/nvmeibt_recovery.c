@@ -563,13 +563,13 @@ void* serialize_praid_to_nvmeibc(struct nvmeibc_praid_conf *out_p, struct nvmeib
 	return (out_p + sizeof(*out_p));
 }
 
-void* serialize_chunk_to_nvmeibc(struct nvmeibc_chunk_conf *out_p, struct nvmeibt_chunk *chunk, int offset_of_praids)
+static void* serialize_chunk_to_nvmeibc(struct nvmeibc_chunk_conf *out_p, const struct nvmeibt_chunk *chunk, int offset_of_praids)
 {
 	nvmeibt_strlcpy(out_p->uuid, chunk->urn_uuid.str, sizeof(out_p->uuid));
 	out_p->vlbs = chunk->from_config.vlb_s;
 	out_p->vlbe = chunk->from_config.vlb_e;
-	out_p->stripeSize = (chunk->from_config.stripe_size * (chunk->praids[0]->praid_mgmt.n_topo_segs - chunk->praids[0]->from_config.redundancy ));	// Crazy, but be it
-	out_p->stripeWidth = chunk->from_config.stripe_width;
+	out_p->stripeSize = nvmeibt_raid0_config_decode_ssize(&chunk->from_config.r0);
+	out_p->stripeWidth = chunk->from_config.r0.stripe_width;
 	out_p->n_praids = chunk->n_praids;
 	out_p->praids = (void *)(0LL + offset_of_praids);
 	return (out_p + sizeof(*out_p));
@@ -582,7 +582,6 @@ void* serialize_blkdev_to_nvmeibc(struct nvmeibc_volume_conf *out_p, struct atta
 
 	nvmeibt_strlcpy(out_p->uuid, nvmeibt_union_uuid_to_urn_uuid(vol_uuid).str, min(sizeof(out_p->uuid), sizeof(struct nvmeibt_urn_uuid)));
 	nvmeibt_strlcpy(out_p->name, vol_name, sizeof(out_p->name));
-	out_p->stripeWidth = blkdev->from_config.stripe_width;
 //	out_p-> = blkdev->from_config.attr;
 	out_p->blockSize = blkdev->from_config.blk_size_bytes;
 	out_p->RAIDLevel = -1;	// (blkdev->chunks[0]->praids[0]->praid_mgmt.type ?) The client can calculate it based on other info
@@ -593,7 +592,8 @@ void* serialize_blkdev_to_nvmeibc(struct nvmeibc_volume_conf *out_p, struct atta
 //	out_p-> = blkdev->from_config.attr.relative_rebuild_priority;
 	out_p->version = blkdev->from_config.attr.version;
 	out_p->numberOfMirrors = blkdev->chunks[0]->praids[0]->from_config.redundancy;
-	out_p->stripeSize = blkdev->from_config.stripe_size;
+	out_p->stripeSize = nvmeibt_raid0_config_decode_ssize(&blkdev->from_config.r0);
+	out_p->stripeWidth = blkdev->from_config.r0.stripe_width;
 	//
 	// Reservation_mode is don't care for toma attach
 	out_p->reservation.version = RESERVATION_MODE_IRRELEVANT;
@@ -978,10 +978,9 @@ static struct nvmeibt_block_device *create_vol_and_chunk_for_single_praid(struct
 	blkdev_n_4kblk = (praid->praid_mgmt.n_topo_segs - praid->from_config.redundancy) *
 		(seg_mgmt->lb_e - seg_mgmt->lb_s + 1);
 	new_chunk->from_config.vlb_e = blkdev_n_4kblk - 1;
-	new_chunk->from_config.stripe_width = 1;
-	new_chunk->from_config.stripe_size = origin_chunk->from_config.stripe_size;
+	new_chunk->from_config.r0 = origin_chunk->from_config.r0;
+	new_chunk->n_praids = new_chunk->from_config.r0.stripe_width = 1;
 	new_chunk->praids[0] = praid;
-	new_chunk->n_praids = 1;
 
 	new_vol = NNVMEIBT_TOMA_CALLOC(i9990nw, 1, sizeof(struct nvmeibt_block_device));
 	new_vol->from_config = origin_vol->from_config;
@@ -989,7 +988,7 @@ static struct nvmeibt_block_device *create_vol_and_chunk_for_single_praid(struct
 					praid->vol_name_for_recovery,
 					sizeof(new_vol->from_config.client_blkdev_name));
 	new_vol->from_config.id = praid->vol_uuid_for_recovery;
-	new_vol->from_config.stripe_width = 1;
+	new_vol->from_config.r0 = new_chunk->from_config.r0;
 	new_vol->from_config.size_lblks = blkdev_n_4kblk;
 	new_vol->chunks[0] = new_chunk;
 	new_vol->n_chunks = 1;
