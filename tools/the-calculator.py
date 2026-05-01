@@ -70,6 +70,7 @@ From interractive shell:
     > lba = RLBA(chunk('tv-61128-1', 0, 0), 233)
     > lba = CLBA(chunk('tv-61128-1', 0), 233)
     > lba = VLBA(volume('tv-61128-1'), 233)
+    > lba = VLBA(b'tv-61128-1', 233)   # same after --procdir / --umvolume (bytes volume keys)
     > print (lba.rlba)
     > print (lba.rlba.blockset)
     > print (lba.clba)
@@ -202,7 +203,7 @@ class Raid:
     def is_ec(self):
         return self.slice_size > 1
 
-    @property 
+    @property
     def is_jbod(self):
         return self.replicas == 1
 
@@ -287,7 +288,9 @@ class Seg:
 
 class VLBA:
     def __init__(self, vol, vlba):
-        if type(vol) == str:
+        # Proc-loaded volumes use bytes keys in `volumes`; UM loader same. Passing a bare
+        # `b'volname'` must resolve through volume(), not be stored as raw bytes (no `.v`).
+        if isinstance(vol, (str, bytes)):
             self.vol = volume(vol)
         else:
             self.vol = vol
@@ -494,11 +497,19 @@ class RLBA:
         return self.blockset * self.raid.slice_size * 32
 
     def enumerate_slice_slbas(self):
+        """Yield SLBAs covering this RLBA slice: data path, then redundancy.
+
+        EC: yields P and Q parity SLBAs. Mirror: yields every other replica at the
+        same slice offset (N-way mirror, not only the first non-primary leg).
+        """
         start = self.slba.srlba
         for i in range(self.raid.slice_size):
             yield (start + i).slba
         if self.raid.is_mirror:
-            yield self.p_slba
+            for s in range(self.raid.replicas):
+                if s == self.seg.s:
+                    continue
+                yield SLBA(seg(self.raid.v, self.raid.c, self.raid.r, s), self.slba.lba)
         elif self.raid.is_ec:
             yield self.p_slba
             yield self.q_slba
@@ -751,7 +762,7 @@ def parse_um_volume_file(um_volume_fpath):
     for line in lines:
         record = json.loads(line.encode('utf-8'))
         if 'VOLUME_PTR' in record:
-            volume = record 
+            volume = record
         elif 'CHUNK_PTR' in record:
             chunks.append(record)
         elif 'PRAID_PTR' in record:
