@@ -174,13 +174,9 @@ int nvmeibt_global_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...
 enum nvmeibt_add_rv nvmeibt_global_parse_MGMT_CONFIG_VERSION(struct mm_mgmt_conf *conf, bool is_updating_leader);
 
 #define NVMEIBT_GLOBAL_INC_N_TASKS_COUNTER(name, _counter_name) do {		\
-	int max_counter_threshold = XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->disk_segments_hash);	\
 	int	*p_counter = &(nvmeibt_global_get_global()->_counter_name);			\
 	(*p_counter)++;															\
 	N_Tf(name ## _trace, #_counter_name"=@INT", *p_counter);				\
-	if (*p_counter > max_counter_threshold) {								\
-		N_Wf(name ## _warning, #_counter_name" goes beyond total seg count @INT", max_counter_threshold);	\
-	}																		\
 } while (0)
 
 #define NVMEIBT_GLOBAL_DEC_N_TASKS_COUNTER(name, _counter_name) do {		\

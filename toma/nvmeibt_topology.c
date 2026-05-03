@@ -1509,13 +1509,13 @@ static void leader_remove_node_disks_whose_segs_are_not_in_remote_applied(struct
 					remote_node->raft_ctx.last_local_serialization_version);
 */
 				// We didn't get it in this report
-				nvmeibt_seg_remote_reset(&(disk_segment->seg_leader.remote_seg_topo), disk_segment);
-				NVMEIBT_PRAID_MARK_TOPO_RECALC_REQUIRED(cjcf55q, praid);
-				seg_leader->is_removed_from_remote_applied = 1;
 				if (	(!nvmeibt_disk_segment_is_x_done(&seg_leader->baseline_seg_lot.seg_topo) &&
 						 !nvmeibt_disk_segment_is_mem_tbl_init_FIRST_USE_EVER(&seg_leader->baseline_seg_lot.seg_topo))) {
 					N_Tf(t_03_toma_nirap, "seg=@UUID_8 is not X_DONE nor FIRST_USE_EVER and missing from ldisk=@STR",
 						 nvmeibt_seg_UUID_8(disk_segment), nvmeibt_disk_get_ldisk_id_str(disk));
+					nvmeibt_seg_remote_reset(&(disk_segment->seg_leader.remote_seg_topo), disk_segment);
+					NVMEIBT_PRAID_MARK_TOPO_RECALC_REQUIRED(cjcf55q, praid);
+					seg_leader->is_removed_from_remote_applied = 1;
 /*
 					N_Wf(t_13_toma_nirap, "vol=@VOL praid=@PRAID disk_segment=@UUID_8 "
 						 "last_remote_applied_node_local_serialization_version=@INT last_local_serialization_version=@INT",
