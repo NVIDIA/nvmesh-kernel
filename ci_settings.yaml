@@ -16,5 +16,5 @@
 suite: "gitlab-ci-ec"
 phases: ["IB", "ROCE", "TCP", "NVMESHUM"]
 build-with:
-  management: "master"
+  management: "3.5.0"
   nvmeshum: "master"
