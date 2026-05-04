@@ -45,14 +45,14 @@ if ! command -v poetry >/dev/null 2>&1; then
 	echo "poetry not found, skip PET dictionary build"
 fi
 
-if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ] && command -v poetry >/dev/null 2>&1; then
+function build_pet_dictionary() {
 	poetry_remove_nvidia_source_if_unreachable
 	PET_DICT="${PET_DIR}/dict.${COMMIT_ID#0x}.json"
 	# In case there are multiple python versions installed, use the one specified by PY.
 	if [[ -n "$PY" ]]; then
 		if ! poetry env use "$PY"; then
-			echo "Failed to use Python version $PY"
-			exit 1
+			echo "Failed to use Python version $PY, skip PET dictionary build"
+			return 0
 		fi
 		echo "Poetry configured to use Python version $PY"
 	fi
@@ -61,10 +61,16 @@ if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ] && command -v poetry >/dev/null 
 	# Take the poetry.lock file as the source of truth, regenerate if it is not up-to-date.
 	if ! poetry lock --no-update; then
 		echo "Warning: poetry.lock out of sync, regenerating with dependency updates..."
-		poetry lock
+		if ! poetry lock; then
+			echo "Warning: could not regenerate poetry.lock, skip PET dictionary build"
+			return 0
+		fi
 	fi
 
-	poetry install --no-root --only pet
+	if ! poetry install --no-root --only pet; then
+		echo "Warning: could not install required packages, skip PET dictionary build"
+		return 0
+	fi
 	echo "poetry verifies required packages in $((SECONDS - start)) seconds"
 
 	# Use the Python version specified by PY, or default to python3
@@ -77,8 +83,13 @@ if [ -n "$PET_MODULE" ] && [ -f "$PET_MODULE" ] && command -v poetry >/dev/null 
 	else
 		rm -f "$PET_DICT"
 		echo "Warning: could not build PET dictionary from ${PET_MODULE}"
-		exit 1
+		return 1
 	fi
+	return 0
+}
+
+if [[ -n "$PET_MODULE" ]] && [[ -f "$PET_MODULE" ]] && command -v poetry >/dev/null 2>&1 && ! build_pet_dictionary; then
+	echo "Warning: PET dictionary build failed for ${PET_MODULE}"
 fi
 
 # EPOCH used by compilator to have determinstic timestamps in tar.
