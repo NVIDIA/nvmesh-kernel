@@ -157,6 +157,7 @@ test.pet
 io_pet_messages.binlog
 io_pet_messages.txtlog
 error_tags_run_end.json
+common/pet/.venv-py3/
 common/pet/build/
 !azure/modprobe.d
 !clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o
