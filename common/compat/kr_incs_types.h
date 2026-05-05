@@ -84,6 +84,7 @@
 
 	// /linux/export.h
 	#define EXPORT_SYMBOL(sym)
+	#define EXPORT_SYMBOL_GPL(sym)
 
 	// include/linux/err.h
 	#define MAX_ERRNO	4095
