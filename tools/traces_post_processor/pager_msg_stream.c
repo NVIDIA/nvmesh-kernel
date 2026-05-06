@@ -92,15 +92,15 @@ int _read_next_message(buf_stream_read_state_t *state) {
 	int trace_len;
 	if (!state->read_pos) {
 		int newstream = (state->buf_descr == NULL);
-		int exp_serial = 0;
-		int old_serial = 0;
+		uint32_t exp_serial = 0;
+		uint32_t old_serial = 0;
 		timestamp_t old_ts = 0;
 		state->head_msg.ts = 0; // When reading new buffer, expect long timestamp
 
 		if (!newstream) {/* Buffer serial we expect to read */
-			exp_serial = (state->buf_descr->meta.hdr.serial + 1) & 0xffffff;
-			old_serial = state->buf_descr->meta.hdr.serial;
-			old_ts = state->buf_descr->meta.comp.ts;
+			exp_serial = (state->buf_descr->meta.hdr.serial_bi + 1) & 0xffffff;
+			old_serial =  state->buf_descr->meta.hdr.serial_bi;
+			old_ts =      state->buf_descr->meta.comp.ts;
 		}
 
 		// Need to fetch a new buffer
@@ -129,16 +129,16 @@ int _read_next_message(buf_stream_read_state_t *state) {
 			state->head_msg.ts = tsc_to_ns(state->tsc_ts, state->buf_descr->meta.hdr.khz);
 			return _write_greeting_message(state, state->buf_descr->meta.src_pos, "Data for CPU %llu start here",
 			                               state->head_msg.cpu_id);
-		} else if (state->buf_descr->meta.hdr.serial == old_serial && state->buf_descr->meta.comp.ts == old_ts) { /*Duplicate buffer*/
+		} else if (state->buf_descr->meta.hdr.serial_bi == old_serial && state->buf_descr->meta.comp.ts == old_ts) { /*Duplicate buffer*/
 			state->read_pos = NULL; /*Drop this buffer, Next read will fetch a new buffer*/
 			return _write_system_message(state, state->buf_descr->meta.src_pos,
 				                         "Duplicate buffer detected");
-		} else if (exp_serial != state->buf_descr->meta.hdr.serial) { // Lost buffers
+		} else if (exp_serial != state->buf_descr->meta.hdr.serial_bi) { // Lost buffers
 			state->tsc_ts      = read_timestamp(state->read_pos, state->tsc_ts);
 			state->head_msg.ts = tsc_to_ns(state->tsc_ts, state->buf_descr->meta.hdr.khz);
 			return _write_system_message(state, state->buf_descr->meta.src_pos,
 			                             "Buffer serial jumped, an indication of traces loss: expected %u, got %u",
-			                              exp_serial, state->buf_descr->meta.hdr.serial);
+			                              exp_serial, state->buf_descr->meta.hdr.serial_bi);
 		}
 	}
 	state->head_msg.entry = lazy_compile_entry(state->buf_descr->meta.comp.dict, bs_ctx(state)->is, state->read_pos, 0);
@@ -185,7 +185,7 @@ void attach_buf_stream(msg_stream_t *ms, buf_stream_per_cpu_t *bs) {
 	while (1) {
 		rv = _read_next_message(state);
 		if (rv == -EAGAIN) continue;
-		if (rv != 0) 
+		if (rv != 0)
 			free(state); // We tried. No data. End of stream.
 		else
 			heap_add(&ms->heap, state->head_msg.ts, state);
@@ -216,7 +216,7 @@ int pop_next_msg(msg_stream_t *ms) {
 		while (1) {
 			rv = _read_next_message(state);
 			if (rv == -EAGAIN) continue;
-			if (rv != 0) 
+			if (rv != 0)
 				free(state); // We tried. No data. End of stream.
 			else
 				heap_add(&ms->heap, state->head_msg.ts, state);

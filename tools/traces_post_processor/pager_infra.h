@@ -94,9 +94,9 @@ typedef struct buf_pos {
  * Standard buffer header up to the first message
  */
 typedef struct buf_header {
-	int serial : 24;
-	unsigned int flags : 8;
-	unsigned int khz : 32;
+	uint32_t serial_bi : 24;			// Serial buffer index, may be overrun
+	uint32_t flags : 8;
+	uint32_t khz : 32;
 	cksum_t cksum : 32;
 } __attribute__((packed)) buf_header_t;
 
@@ -117,7 +117,7 @@ typedef struct channel_ctx {
 	immutable_string_t *hostname;
 
 	file_stats_store_t stats_store[MAX_CPUS]; // Stats store used to quickly navigate between buffers
-	
+
 	struct dict_pool_t_ht dicts; // Hash table containing all dictionaries available by checksum as a key
 	void *payload; // Additional info attached to pager ctx
 	int force_success; // Indicates whether we should fail on algorithm breaking errors or simply brute force return

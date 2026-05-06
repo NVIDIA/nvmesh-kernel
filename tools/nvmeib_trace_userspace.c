@@ -40,9 +40,8 @@ struct trace_channel {
 	int active_buf; // Buffer we currently write to
 	int next_flush; // Next buffer to be flushed
 
-	// Meta data saved per buffer
-	int buf_seq;
-	int flags;
+	uint32_t buf_seq;				// Meta data saved per buffer, 24 bits
+	uint32_t flags;					// Meta data saved per buffer,  8 bits
 
 	pthread_mutex_t active_guard;  // Protects active buffer only
 	pthread_mutex_t history_guard; // Protects complete buffers
@@ -132,7 +131,7 @@ static inline char *write_pos(const struct trace_channel *ch) { return ch->bufs[
  * @note Assume empty buffer
  * @note Assume locked history or init stage
  */
-void _write_initial_header(struct trace_channel *ch) {
+void _write_initial_header(struct trace_channel *ch) {	// Will be read in pager via `read_buf_header(void *buf, buf_header_t *hdr)`. Equivalent to kernel __write_buffer_first_header
 	ch->offset = 0;
 	*(uint32_t *)write_pos(ch) = ((++ch->buf_seq & 0xffffff) | ch->flags << 24);
 	ch->offset = 4;
