@@ -4313,6 +4313,22 @@ static int load_disk_nordda(struct nvmeibc_ib_admin_channel *ch, u64 tag,
 				_NE(error_ib_admin_channel_load_disk_nordda, "OOM: Fail to allocate nordda channels");
 				goto out;
 			}
+			/* Pre-init plist nodes so nvmeibc_ib_nordda_channel_free is safe
+			 * if connect_access_map (which calls nvmeibc_ib_nordda_channel_create
+			 * to fully init each NRCH) is skipped due to an earlier failure
+			 * (e.g. read_lock_mems timeout). Without this, kzalloc leaves
+			 * node_list.next == NULL and plist_node_empty() returns false,
+			 * tripping WARN_ON in nvmeibc_ib_nordda_channel_free during the
+			 * disk release path.
+			 */
+			{
+				int i;
+				for (i = 0; i < n_nr_qps; i++) {
+					struct nvmeibc_ib_nordda_channel *ch = &lionic->nr_channels[i];
+					plist_node_init(&ch->available_link, 0);
+					plist_node_init(&ch->per_numa_node_link, 0);
+				}
+			}
 			lionic->n_nr_qps = n_nr_qps;
 			if (nvmeibc_disk_prefix_priority_masks_len) {
 				/* This lionic is mapped to 1 rionic (1 to 1) so this is the place to update prefix prio */
