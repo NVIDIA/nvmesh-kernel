@@ -667,9 +667,7 @@ static void serialize_seg_lot_topo_to_wire(struct nvmeibt_praid_topo_ctx *praid_
 	struct nvmeibt_disk_segment_topo_ctx			*seg_topo;
 
 	NFIN;
-	if (!nvmeibt_seg_lot_is_config_OK(seg_lot) && !nvmeibt_seg_lot_is_deleted_in_config(seg_lot)) {
-		goto out;
-	}
+
 	seg_topo = &seg_lot->seg_topo;
 	nvmeibt_strlcpy(serialized.eyecatcher, "STO", sizeof(serialized.eyecatcher));
 	serialized.uuid = *nvmeibt_seg_UUID(seg_lot->my_seg);
@@ -689,7 +687,6 @@ static void serialize_seg_lot_topo_to_wire(struct nvmeibt_praid_topo_ctx *praid_
 	// send_topo_ptr->res_2 = 0;
 	nvmeibt_disk_segment_convert_topo_le_be(&serialized, wire_topo_ptr);
 
-out:
 	NFOUT;
 }
 
