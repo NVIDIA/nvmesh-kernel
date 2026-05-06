@@ -264,7 +264,8 @@ static void add_seg_lot_to_praid_lot(struct nvmeibt_seg_lot *seg_lot)
 	}																					\
 })
 
-int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is_updating_leader)
+int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is_updating_leader,
+											  int64_t delete_completed_kafka_offset)
 {
 	int								i, j, k;
 	struct nvmeibt_block_device		*blkdev;
@@ -281,6 +282,9 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 		goto out;
 	}
 	old_last_delete_kafka_mgmt_config_offset = nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset;
+	// NVMESH-8698: force complete configs for peers behind the VOL_DEL_COMPLETED event itself.
+	nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset =
+		max(nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset, delete_completed_kafka_offset);
 	for (i = 0; i < conf->num_vols; i++) {
 		struct mm_vol_conf *vol = &conf->volumes[i];
 		blkdev = nvmeibt_block_device_get_block_device_by_id(&(vol->uuid));
@@ -293,7 +297,6 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(f6iso6m, TOPO,        leader_calculated, RAFT_COMMIT_LIFECYCLE_VAL(TOPO,        leader_to_commit) + 1);
 		SET_RAFT_COMMIT_LIFECYCLE_VAL(mv0djui, TOPO_CONFIG, leader_calculated, RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, leader_to_commit) + 1);
 		nvmeibt_topology_leader_mark_recalc_required();
-		nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_calculated);
 
 		// mark MGMT_TRIM for all blkdev objects
 		nvmeibt_block_device_trim_specific_block_device(blkdev, CONFIG_TRIM_MGMT);

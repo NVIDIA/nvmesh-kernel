@@ -2443,7 +2443,7 @@ static void toma_incremental_vol_update_handler(struct mm_mgmt_conf *mgmt_conf, 
 	} else if (event_type == KAFKA_EVENT_TYPE_VOL_DEL) {
 		nvmeibt_read_config_vol_mark_vol_and_segs_for_removal(mgmt_conf, 1);	// Naturally, comming from mgmt (leader's role)
 	} else if (event_type == KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED) {
-		nvmeibt_read_config_vol_removed_from_mgmt(mgmt_conf, 1);	// Naturally, comming from mgmt (leader's role)
+		nvmeibt_read_config_vol_removed_from_mgmt(mgmt_conf, 1, kafka_offset);	// Naturally, comming from mgmt (leader's role)
 	} else {
 		N_Ef(rcsvsau, "Unknown event_type=@STR", kafka_event_type_str(event_type));
 	}
