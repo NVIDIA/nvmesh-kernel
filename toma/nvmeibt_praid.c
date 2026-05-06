@@ -518,8 +518,7 @@ static int leader_validate_registrants_sync_cmd(struct nvmeibt_praid *praid,
 	case PRAID_REGISTRANTS_SYNC_CMD_SW_TOPO_STABLE_SAFE:
 		is_legal = (!!(baseline_sync_cmd &
 					   (PRAID_REGISTRANTS_SYNC_CMD_SW_TOPO_STABLE_UNSAFE | PRAID_REGISTRANTS_SYNC_CMD_STABLE_I |
-						PRAID_REGISTRANTS_SYNC_CMD_STABLE)) ||
-					(baseline_sync_cmd == PRAID_REGISTRANTS_SYNC_CMD_RESET_REGISTRANTS && n->x));	// Replacement seg is X_DONE
+						PRAID_REGISTRANTS_SYNC_CMD_STABLE | PRAID_REGISTRANTS_SYNC_CMD_RESET_REGISTRANTS)));
 		break;
 	case PRAID_REGISTRANTS_SYNC_CMD_STABLE:
 		is_legal =
