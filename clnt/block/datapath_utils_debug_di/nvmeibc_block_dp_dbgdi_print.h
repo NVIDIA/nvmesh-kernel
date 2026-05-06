@@ -169,6 +169,8 @@ static void data_analysis_init(data_analysis* a, const data_blk *s)
 			__data_analysis_init(a, e);
 		}
 		loc = dbgdi_log_iter_next(log, loc);
+		if (loc < 0)
+			break;
 	} while ((u32)loc != log->header.head);
 
 	a->block_restored = (a->writer_restore && (a->r_exists || a->reader_poison));	// Injected in memory or Restored from NVMe Drive
@@ -763,6 +765,8 @@ static inline void print_dbgdi_log_records(const struct dbgdi_log *log, data_ana
 			dump_dbgdi_log_record(e, an, buf, len, cnt);
 		}
 		loc = dbgdi_log_iter_next(log, loc);
+		if (loc < 0)
+			break;
 	} while ((u32)loc != log->header.head);
 }
 

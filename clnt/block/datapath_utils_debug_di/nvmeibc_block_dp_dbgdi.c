@@ -8,6 +8,12 @@
 	int dp_dbgdi_get_sizeof_injected_data(void){ return 0; }
 	void dp_dbgdi_mark_edic(void *data, enum edic_result pass, u32 read_edic, u32 calc_edic, u64 rlba) { (void)data; (void)pass;(void)read_edic;(void)calc_edic;(void)rlba; }
 #else
+
+#if defined(BLKDEV_SIMULATOR)
+unsigned long dp_ut_dbgdi_sync_copy_calls;
+unsigned long dp_ut_dbgdi_sync_clear_calls;
+#endif
+
 #include "nvmeibc_block_dp_dbgdi_blk.h"
 #include "nvmeibc_block_dp_dbgdi_print.h"
 #include "../nvmeibc_block_common.h"
@@ -369,6 +375,10 @@ void dp_dbgdi_clear_sync_overwritten(struct nvmeibc_block_command *cmd)
 	unsigned int nlbas = cmd->nlbas;
 	struct t_db_who_mark mark = {.dbg_di_magic = 0}; // init required for dbg_di_magic value, log entry e is set in add_rec
 
+#if defined(BLKDEV_SIMULATOR)
+	dp_ut_dbgdi_sync_clear_calls++;
+#endif
+
 	BUG_ON(!nvmeib_block_io_op_is_write(cmd->iocmd->reqs1.op));
 
 	if (unlikely(sizeof(data_blk) > NVMEIBC_SECTOR_SIZE))
@@ -389,6 +399,10 @@ void dp_dbgdi_copy_sync_overwritten(struct nvmeibc_block_command *dst, const str
 	unsigned int nlbas = src->nlbas;
 	struct t_db_who_writer w; // Used to init all structs to 0, however, w is copied from other block, init is not required
 	int rc;
+
+#if defined(BLKDEV_SIMULATOR)
+	dp_ut_dbgdi_sync_copy_calls++;
+#endif
 
 	BUG_ON((!nvmeib_block_io_op_is_write(dst->iocmd->reqs1.op)) || (src->iocmd->reqs1.op != NVMEIB_BLOCK_IO_OP_READ));
 	BUG_ON(dst->nlbas != src->nlbas);

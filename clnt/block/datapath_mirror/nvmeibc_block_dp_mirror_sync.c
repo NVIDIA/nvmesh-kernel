@@ -682,3 +682,10 @@ void dp_mirror_sync_resume_op(struct recovery_sync_op *so)
 	}
 }
 
+#if defined(BLKDEV_SIMULATOR)
+void dp_mirror_ut_inject_debug_di_sync_info(struct recovery_sync_op *so, int n_cmds_to_do)
+{
+	__inject_debug_di_with_sync_info(so, n_cmds_to_do);
+}
+#endif
+

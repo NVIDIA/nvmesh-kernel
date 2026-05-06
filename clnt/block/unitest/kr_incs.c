@@ -360,17 +360,6 @@ void* kmalloc(size_t size, gfp_t flags){
 	return p;
 }
 
-struct page *virt_to_page(const void* user_addr) {
-	const struct __kmem_canary_prefix* prefix = user_addr - sizeof(struct __kmem_canary_prefix);
-	const int n_pages = (1 << (prefix->flags.page_order));
-	struct page *pages = (void*)prefix - (sizeof(struct page)*n_pages);
-	if (prefix->flags.is_alloced_with_page_struct) {
-		return (void*)pages;
-	} else {
-		return NULL;							// Page not mapped. Allocated with kmalloc()
-	}
-}
-
 // Linker symbols defined in the linker script
 extern char _etext; // End of the text segment
 extern char _edata; // End of the data segment
@@ -390,6 +379,25 @@ static bool __is_global(void *ptr)
 		return true; // Pointer is in the .bss segment (global)
 	}
 	return false; // Pointer is not in global segments
+}
+
+struct page *virt_to_page(const void* user_addr) {
+	/* kmalloc returns a user pointer with a canary prefix just below it; static/stack
+	 * buffers do not — subtracting sizeof(prefix) would read unrelated memory (ASan abort). */
+	const struct __kmem_canary_prefix* prefix;
+	int n_pages;
+	struct page *pages;
+
+	if (__is_global((void *)(uintptr_t)user_addr))
+		return NULL;
+	prefix = user_addr - sizeof(struct __kmem_canary_prefix);
+	n_pages = (1 << (prefix->flags.page_order));
+	pages = (void*)prefix - (sizeof(struct page)*n_pages);
+	if (prefix->flags.is_alloced_with_page_struct) {
+		return (void*)pages;
+	} else {
+		return NULL;							// Page not mapped. Allocated with kmalloc()
+	}
 }
 
 // to indicate that the memory is allocated "per_cpu" we use the 1st bit of the pointer
@@ -536,11 +544,11 @@ void get_page(struct page *page) {
 
 void put_page(struct page *page) {
 	struct page *head = PageHead(page);
-	
+
 	if (page->split.is_pinned) {
 		page->split.is_pinned = false;
 	}
-	
+
 	BUG_ON(head->split.n_refs == 0);
 	head->split.n_refs--;
 }

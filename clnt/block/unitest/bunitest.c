@@ -40,6 +40,7 @@
 #include "memmgr_metrics_tests.h"
 #include "metrics_test.h"
 #include "safe_casting_tests.h"
+#include "nvmeibc_block_dp_dbgdi_tests.h"
 #include "wq_metrics_tests.h"
 #include "clnt/nvmeibc_wq_metrics.h"
 #include "error_tags_tests.h"
@@ -7653,6 +7654,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 	}
 
 	test_safe_casting();
+	test_nvmeibc_block_dp_dbgdi();
 	test_metrics();
 	test_wq_metrics();
 	test_memmgr_metrics();

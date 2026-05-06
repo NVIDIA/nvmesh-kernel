@@ -31,6 +31,10 @@ void dbgdi_log_print_records(struct dbgdi_log *log)
 			printf("offset %.4d type %d size %d\n", loc, e->type, e->size);
 		}
 		loc = dbgdi_log_iter_next(log, loc);
+		if (loc < 0) {
+			printf("%s - iter_next failed (corrupt log?)\n", __func__);
+			break;
+		}
 	} while (loc != (int)log->header.head);
 }
 

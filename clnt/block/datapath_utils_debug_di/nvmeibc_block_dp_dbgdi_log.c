@@ -60,6 +60,21 @@ static bool dbgdi_log_empty(const struct dbgdi_log *log)
 	return (log->header.head == log->header.tail && !log->header.full);
 }
 
+/* NVMESH-8666 defensive check. The log lives in user-data pages that previous builds (or torn
+ * concurrent writes) may have left structurally insane. Callers that walk the log MUST gate on
+ * this — without it, a corrupt size/head/tail can drive get_record_by_type into an unbounded
+ * stride loop, which is what hard-locked CPU 1 in the original incident. */
+static bool __dbgdi_log_header_sane(const struct dbgdi_log *log)
+{
+	/* Use sizeof(log->buf): ring indices address buf[] only; DBG_DI_INJ_SPACE can disagree
+	 * across TU/feature flags while the struct layout stays consistent. */
+	return log->header.magic == DB_LOG_MAGIC &&
+	       log->header.size > sizeof(struct dbgdi_log_entry) &&
+	       log->header.size <= sizeof(log->buf) &&
+	       log->header.head < log->header.size &&
+	       log->header.tail < log->header.size;
+}
+
 int dbgdi_log_free_space(const struct dbgdi_log *log)
 {
 	u32 free_space;
@@ -83,7 +98,7 @@ int dbgdi_log_occupancy(const struct dbgdi_log *log)
 	return (log->header.size - dbgdi_log_free_space(log));
 }
 
-static void __attr_no_alignment_sanity __dbgdi_log_get_entry(const struct dbgdi_log *log, int loc, struct dbgdi_log_entry *entry)
+static int __attr_no_alignment_sanity __dbgdi_log_get_entry(const struct dbgdi_log *log, int loc, struct dbgdi_log_entry *entry)
 {
 	const void *p = &log->buf[loc];
 	u32 s1, s2, entry_size;
@@ -91,6 +106,8 @@ static void __attr_no_alignment_sanity __dbgdi_log_get_entry(const struct dbgdi_
 
 	entry_size = sizeof(struct dbgdi_log_entry);
 
+	/* Populate *entry first; the size sanity check below validates what we just read,
+	 * not the caller's uninitialized stack value. */
 	if(p + entry_size <= (void *)log->buf + log->header.size)
 		*entry = *db_entry(p);
 	else { // wraparound
@@ -101,6 +118,13 @@ static void __attr_no_alignment_sanity __dbgdi_log_get_entry(const struct dbgdi_
 		memcpy(e, p, s1);
 		memcpy(e + s1, &log->buf[0], s2);
 	}
+
+	if (entry->size < sizeof(struct dbgdi_log_entry) || entry->size > log->header.size) {
+		DBGDI_LOG_ERROR("corrupt dbgdi log entry size " FMT_INT, entry->size);
+		return -1;
+	}
+
+	return 0;
 }
 
 static void __dbgdi_log_consume(struct dbgdi_log *log, int req_size)
@@ -119,7 +143,10 @@ static void __dbgdi_log_consume(struct dbgdi_log *log, int req_size)
 	needed_space = req_size - free_space;
 	/* clear records from the tail to have room for a record with this size */
 	do {
-		__dbgdi_log_get_entry(log, log->header.tail, &tail_ent);
+		if (__dbgdi_log_get_entry(log, log->header.tail, &tail_ent) < 0) {
+			DBGDI_LOG_ERROR("dbgdi_log_consume: invalid entry at tail " FMT_INT, log->header.tail);
+			break;
+		}
 		freed_space += tail_ent.size;
 		log->header.tail = (log->header.tail + tail_ent.size) % log->header.size;
 	} while (freed_space < needed_space);
@@ -172,12 +199,15 @@ int dbgdi_log_get_rec(const struct dbgdi_log *log, int loc, void *buf, int buf_s
 	struct dbgdi_log_entry entry;
 	u16 s1, s2;
 
-	if (!dbgdi_log_initialized(log)) {
+	if (!dbgdi_log_initialized(log) || !__dbgdi_log_header_sane(log)) {
 		DBGDI_LOG_ERROR("log is not initialized - can't get record");
 		return -1;
 	}
 
-	__dbgdi_log_get_entry(log, loc, &entry);
+	if (__dbgdi_log_get_entry(log, loc, &entry) < 0) {
+		DBGDI_LOG_ERROR("dbgdi_log_get_rec: invalid entry at loc " FMT_INT, loc);
+		return -1;
+	}
 
 	if (entry.size > buf_size) {
 		DBGDI_LOG_ERROR("buffer too small (" FMT_INT ") to contain record (" FMT_INT " " FMT_INT ")", buf_size, entry.type, entry.size);
@@ -227,7 +257,7 @@ int dbgdi_log_add_rec(struct dbgdi_log *log, void *buf, u16 type, u16 size)
 
 int dbgdi_log_iter_init(const struct dbgdi_log *log)
 {
-	if(!dbgdi_log_initialized(log)) {
+	if (!dbgdi_log_initialized(log) || !__dbgdi_log_header_sane(log)) {
 		DBGDI_LOG_ERROR("log is not initialized - can't iterate");
 		return -1;
 	}
@@ -245,7 +275,10 @@ int dbgdi_log_iter_next(const struct dbgdi_log *log, int iter)
 	int loc = iter;
 	struct dbgdi_log_entry entry;
 
-	__dbgdi_log_get_entry(log, loc, &entry);
+	if (__dbgdi_log_get_entry(log, loc, &entry) < 0) {
+		DBGDI_LOG_ERROR("invalid dbgdi log entry during iter_next");
+		return -1;
+	}
 
 	loc = (loc + entry.size) % log->header.size;
 
@@ -254,8 +287,19 @@ int dbgdi_log_iter_next(const struct dbgdi_log *log, int iter)
 
 int dbgdi_log_get_record_by_type(const struct dbgdi_log *log, int type, void *buf, int buf_size)
 {
-	int loc = dbgdi_log_iter_init(log);
+	int loc;
 	struct dbgdi_log_entry entry;
+	int max_iters;
+
+	if (!__dbgdi_log_header_sane(log)) {
+		DBGDI_LOG_ERROR("log header inconsistent - can't search by type");
+		return -1;
+	}
+
+	/* Each hop consumes at least sizeof(dbgdi_log_entry) bytes once corrupt sizes are rejected */
+	max_iters = (int)(log->header.size / sizeof(struct dbgdi_log_entry));
+	BUG_ON(max_iters < 1);
+	loc = dbgdi_log_iter_init(log);
 
 	if (loc == -1) {
 		DBGDI_LOG_ERROR("can't init log iterator");
@@ -263,19 +307,26 @@ int dbgdi_log_get_record_by_type(const struct dbgdi_log *log, int type, void *bu
 	}
 
 	do {
-		__dbgdi_log_get_entry(log, loc, &entry);
+		if (__dbgdi_log_get_entry(log, loc, &entry) < 0) {
+			DBGDI_LOG_ERROR("dbgdi_log_get_record_by_type: invalid entry at loc " FMT_INT, loc);
+			return -1;
+		}
 		if (entry.type == type) {
 			if (entry.size <= buf_size) {
 				DBGDI_LOG_DEBUG(FMT_PTR " rec type " FMT_INT " size " FMT_INT " found at loc " FMT_INT, LOG_ADDR(log), entry.type, entry.size, loc);
 				dbgdi_log_get_rec(log, loc, buf, entry.size);
 				return 0;
 			}
-			else {
-				DBGDI_LOG_ERROR("rec type " FMT_INT " size " FMT_INT " bigger than the provided size " FMT_INT, entry.type, entry.size, buf_size);
-				return -1;
-			}
+			DBGDI_LOG_ERROR("rec type " FMT_INT " size " FMT_INT " bigger than the provided size " FMT_INT, entry.type, entry.size, buf_size);
+			return -1;
 		}
 		loc = dbgdi_log_iter_next(log, loc);
+		if (loc < 0)
+			return -1;
+		if (--max_iters <= 0) {
+			DBGDI_LOG_ERROR("dbgdi log traversal exceeded iteration bound");
+			return -1;
+		}
 	} while ((u32)loc != log->header.head);
 
 	DBGDI_LOG_DEBUG("rec type " FMT_INT " was not found", type);

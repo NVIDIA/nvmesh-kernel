@@ -80,6 +80,10 @@ struct t_core_dbgdi_params_post;
 struct nvmeibc_block_command;
 bool dp_dbgdi_can_mutate_shared_buf(const struct nvmeibc_block_command *cmd);
 bool dp_dbgdi_should_add_info_core(  struct nvmeibc_disk_io_command *iocmd);
+#if defined(BLKDEV_SIMULATOR)
+extern unsigned long dp_ut_dbgdi_sync_copy_calls;
+extern unsigned long dp_ut_dbgdi_sync_clear_calls;
+#endif
 void dp_dbgdi_do_add_info_core_pre( struct nvmeibc_block_io_req *req, struct t_core_dbgdi_params_pre  * p);
 int  dp_dbgdi_do_add_info_core_post(struct nvmeibc_block_io_req *req, struct t_core_dbgdi_params_post * p);
 
