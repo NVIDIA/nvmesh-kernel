@@ -608,7 +608,7 @@ stop_toma() {
 			proc_running=true
 		fi
 		local lock_held=false
-		if [ -f "$tomaLockFile" ]; then
+		if [ -f "$tomaLockFile" ] && ! flock -n "$tomaLockFile" true 2>/dev/null; then
 			lock_held=true
 		fi
 		if ! $proc_running && ! $lock_held; then
@@ -617,7 +617,7 @@ stop_toma() {
 		if $proc_running; then
 			echo "Waiting for Toma to stop, PID: $PID ..."
 		elif $lock_held; then
-			echo "Waiting for Toma lock file to be removed ($tomaLockFile) ..."
+			echo "Waiting for Toma to release lock ($tomaLockFile) ..."
 		fi
 		sleep 1
 	done
@@ -626,8 +626,8 @@ stop_toma() {
 		echo "ERROR: TOMA did not exit within ${TOMA_STOP_TIMEOUT_SEC:-300}s"
 		return 1
 	fi
-	if [ -f "$tomaLockFile" ]; then
-		echo "ERROR: Toma lock file still present: $tomaLockFile"
+	if [ -f "$tomaLockFile" ] && ! flock -n "$tomaLockFile" true 2>/dev/null; then
+		echo "ERROR: Toma lock file still held: $tomaLockFile"
 		return 1
 	fi
 
