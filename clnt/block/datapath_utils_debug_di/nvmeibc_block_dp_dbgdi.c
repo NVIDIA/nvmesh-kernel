@@ -13,6 +13,7 @@
 #include "../nvmeibc_block_common.h"
 #include "../datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "../recovery/nvmeibc_block_dp_sync_common.h"
+#include "../datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.h"
 #include "common/nvmeib_str.h"
 
 #ifndef UM_APP
@@ -148,6 +149,26 @@ static void t_db_who_cmd_core_cell(struct t_core_dbgdi *s, const struct nvmeibc_
 	const bool is_mirrored = !nvmeibc_raid_is_ec(r1) && !nvmeibc_raid_is_jbod(r1);
 	const int cell = is_mirrored ? c->ds->toma_reg->seg % CORE_DBGDI_WR_MAX_MIRROR : 0;
 	strncpy(s->wr[cell].disk_name, c->ds->disk->ops.get_name(c->ds->disk), sizeof(s->wr[cell].disk_name));
+}
+
+/*
+ * NVMESH-8666: returns true when this command's dbgdi may safely mutate its data page.
+ *
+ * "Safe" = the data page is private to this leg, or there is only one leg. Mirror writes
+ * intentionally share one data page across all legs (a correctness requirement), and the
+ * "first leg only" gate is not sufficient: logical-first and physical-first can diverge when
+ * the logical-first cmd is do_not_send, fails synchronously and is retried later, or in
+ * layered RAID (RAID-50/60) where the same rldr serves multiple stages. CPU memory barriers
+ * cannot fence DMA, so once any of those scenarios are possible, the only sound invariant
+ * is "do not mutate the shared mirror buffer at all." The cost is that mirror writes lose
+ * their dbgdi diagnostics; reads (per-leg buffers) and EC/JBOD writes (per-leg or single-leg)
+ * keep theirs. See clnt/block/documentation/dbgdi.md §5 for the full reasoning.
+ */
+bool dp_dbgdi_can_mutate_shared_buf(const struct nvmeibc_block_command *cmd)
+{
+	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(cmd->ds);
+
+	return nvmeibc_raid_is_ec(pr) || nvmeibc_raid_is_jbod(pr);
 }
 
 static void t_db_who_jcmd_and_md_fill(struct t_db_who_writer *s,
@@ -484,15 +505,9 @@ static void __data_blk_fill_for_write(data_blk *d, const void *md,
 	const struct nvmeibc_block_command *cmd, int sgi, int j_in_sgi, int cum_len)
 {
 	const struct nvmeibc_raid1 *pr = nvmeibc_disk_segment_get_praid(cmd->ds);
-	struct nvmeibc_block_command *rldr = dp_cmd_get_raid_leader((void *)cmd);
 	const struct operation *o = cmd->o;
 	struct t_db_who_writer s = {.dbg_di_magic = 0};	// Non-journal EC write doesn't set data_md so init is required - TODO fix, jrnl might not be full set
-	/* NVMESH-4505 - for mirror, the io buffer is shared between all disk commands --> FIFO MD corruption
-	 * may take place if one command fills the writer record while another command is DMA-ed. To address that
-	 * we inject writer record for only the first write command. */
-	if (!nvmeibc_raid_is_ec(pr) && cmd != &rldr[dp_cmds_get_first_cmd_of_stage(rldr, E_CMDS_STAGE_DO_IO_AND_PAR)]) {
-		return;
-	}
+	/* Mirror shared-buffer gating is in data_blk_fill_for_write() via dp_dbgdi_can_mutate_shared_buf(). */
 
 	__data_blk_clear_all_history(d);
 
@@ -528,6 +543,10 @@ static void data_blk_fill_for_write(data_blk *d, const void *md,
 {
 	const struct operation *o = cmd->o;
 	const enum nvmeib_block_io_op op = o->op;
+
+	if (!dp_dbgdi_can_mutate_shared_buf(cmd))
+		return;
+
 	t_db_who_cmd_core_cell(&d->core, cmd);
 
 	switch (op) {
@@ -554,7 +573,24 @@ static void data_blk_fill_for_write(data_blk *d, const void *md,
 bool dp_dbgdi_should_add_info_core(struct nvmeibc_disk_io_command *iocmd)
 {
 	const struct nvmeibc_block_command *cmd = iocmd->comp.cmd;
-	return !iocmd->reqs1.do_512b_sub_block_x && unlikely(dbg_di_enabled(cmd->o) && (iocmd->reqs1.op <= NVMEIB_BLOCK_IO_OP_WRITE));
+	const enum nvmeib_block_io_op op = iocmd->reqs1.op;
+
+	/* Sub-512B IO doesn't have room for a stamp at all. */
+	if (iocmd->reqs1.do_512b_sub_block_x)
+		return false;
+	/* Production hot path: debug DI is off. */
+	if (likely(!dbg_di_enabled(cmd->o)))
+		return false;
+	/* Only stamp R/W (op <= WRITE = NOP/READ/WRITE). DISCARD/sync/recovery ops have no use for
+	 * a per-IO core stamp and may not have a valid SG layout for it. */
+	if (op > NVMEIB_BLOCK_IO_OP_WRITE)
+		return false;
+	/* NVMESH-8666: mirror writes share one data page across all legs; any CPU mutation races
+	 * the device's DMA on the same page. Reads keep per-leg buffers — safe to stamp. */
+	if (nvmeib_block_io_op_is_write(op) && !dp_dbgdi_can_mutate_shared_buf(cmd))
+		return false;
+
+	return true;
 }
 
 static void __dbgdi_do_add_info(struct nvmeibc_block_command *cmd)

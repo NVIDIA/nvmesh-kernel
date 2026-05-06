@@ -53,6 +53,7 @@
 	static inline void dp_dbgdi_do_rdr_info(        struct nvmeibc_block_command *cmd)                       { (void)cmd; }
 	static inline void dp_dbgdi_clear_destroyed_block_history(void *d) { (void)d; }
 	static inline void dp_dbgdi_do_add_info_unitest(          void *d, const char *seg_uuid){ (void)d; (void)seg_uuid; }
+	static inline bool dp_dbgdi_can_mutate_shared_buf(const struct nvmeibc_block_command *cmd) { (void)cmd; return false; }
 	static inline bool dp_dbgdi_should_add_info_core(  struct nvmeibc_disk_io_command *iocmd) { (void)iocmd; return false; }
 	#define            dp_dbgdi_do_add_info_core_pre( req, p)
 	#define            dp_dbgdi_do_add_info_core_post(req, p)   (0)
@@ -76,6 +77,8 @@ void dp_dbgdi_do_add_info_unitest(          void *d, const char *seg_uuid);
 /* core injection */
 struct t_core_dbgdi_params_pre;
 struct t_core_dbgdi_params_post;
+struct nvmeibc_block_command;
+bool dp_dbgdi_can_mutate_shared_buf(const struct nvmeibc_block_command *cmd);
 bool dp_dbgdi_should_add_info_core(  struct nvmeibc_disk_io_command *iocmd);
 void dp_dbgdi_do_add_info_core_pre( struct nvmeibc_block_io_req *req, struct t_core_dbgdi_params_pre  * p);
 int  dp_dbgdi_do_add_info_core_post(struct nvmeibc_block_io_req *req, struct t_core_dbgdi_params_post * p);

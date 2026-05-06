@@ -34,18 +34,30 @@ static bool __cant_trust_data(const struct recovery_sync_op *so, const int i)
 
 static void __inject_debug_di_with_sync_info(struct recovery_sync_op *so, int n_cmds_to_do)
 {
-	if (so->cmds->o->nd->dp.enable_di_debug_mode) {
-		int ir, iw, n_writes = n_cmds_to_do;
-		for (iw = n_read_cmds(so); (n_writes>0); iw++) {
-			if (so->cmds[iw].do_not_send)
-				continue;				// No need to execute write, already identical or segment is dead
-			ir = iw - n_read_cmds(so);
-			if (dp_sync_cmd_is_valid_read_source(so, ir))
-				dp_dbgdi_copy_sync_overwritten(&so->cmds[iw], &so->cmds[ir]);
-			else
-				dp_dbgdi_clear_sync_overwritten(&so->cmds[iw]);
-			--n_writes;
-		}
+	int ir, iw;
+	const int w0 = n_read_cmds(so);
+	const int w_end = w0 + n_write_cmds(so);
+
+	if (!so->cmds->o->nd->dp.enable_di_debug_mode)
+		return;
+	BUG_ON(n_cmds_to_do < 0 || n_cmds_to_do > n_write_cmds(so));
+
+	/* NVMESH-8666: mirror sync write legs share one NDB (see __set_write_buffer_to_valid_source).
+	 * The "first leg only" approach is unsafe because logical-first and physical-first can
+	 * diverge (do_not_send, retries, layered RAID stages); see dbgdi.md §5.1. Skip dbgdi
+	 * mutation entirely on multi-leg-mirror sync; EC sync still injects per leg (per-leg
+	 * buffers, no race). */
+	if (w0 < w_end && !dp_dbgdi_can_mutate_shared_buf(&so->cmds[w0]))
+		return;
+
+	for (iw = w0; iw < w_end; iw++) {
+		if (so->cmds[iw].do_not_send)
+			continue;
+		ir = iw - w0;
+		if (dp_sync_cmd_is_valid_read_source(so, ir))
+			dp_dbgdi_copy_sync_overwritten(&so->cmds[iw], &so->cmds[ir]);
+		else
+			dp_dbgdi_clear_sync_overwritten(&so->cmds[iw]);
 	}
 }
 
@@ -669,3 +681,4 @@ void dp_mirror_sync_resume_op(struct recovery_sync_op *so)
 		WARN(1, "nvmeibc bug! so=" PRI_SO_NAME ", stage=%d, op=0x%x\n", PRI_SO_NAME_ARGS(so), so->stage, so->o->op);
 	}
 }
+
