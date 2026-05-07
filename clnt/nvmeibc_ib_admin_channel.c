@@ -4324,9 +4324,9 @@ static int load_disk_nordda(struct nvmeibc_ib_admin_channel *ch, u64 tag,
 			{
 				int i;
 				for (i = 0; i < n_nr_qps; i++) {
-					struct nvmeibc_ib_nordda_channel *ch = &lionic->nr_channels[i];
-					plist_node_init(&ch->available_link, 0);
-					plist_node_init(&ch->per_numa_node_link, 0);
+					struct nvmeibc_ib_nordda_channel *nrch = &lionic->nr_channels[i];
+					plist_node_init(&nrch->available_link, 0);
+					plist_node_init(&nrch->per_numa_node_link, 0);
 				}
 			}
 			lionic->n_nr_qps = n_nr_qps;
