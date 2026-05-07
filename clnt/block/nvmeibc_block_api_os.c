@@ -1235,18 +1235,14 @@ static void __request_queue_set_default_params(struct request_queue *q, const ch
 #if !KS_HAS_NEW_BLK_ALLOC_QUEUE && KS_REQUEST_QUEUE_HAS_REQUEST_FN
 	blk_queue_make_request(q, nvmeibc_b_req_make);	// make_request_fn = nvmeibc_b_req_make, + set default queue limits
 #endif
-#if KS_BLK_ALLOC_DISK_2PARAMS
-	q->limits.logical_block_size = logical_block_size;
-	q->limits.physical_block_size = logical_block_size;
-	q->limits.io_min = logical_block_size;
-	q->limits.io_opt = BYTES_IN_LOCKSET * params.slice_size;
-	q->limits.dma_alignment = logical_block_size - 1;
-#else
+#if !KS_BLK_ALLOC_DISK_2PARAMS
 	blk_queue_logical_block_size( q, logical_block_size);
 	blk_queue_physical_block_size(q, logical_block_size);
 	blk_queue_io_min(   		  q, logical_block_size);
 	blk_queue_io_opt(   		  q, (BYTES_IN_LOCKSET * params.slice_size));
 	blk_queue_dma_alignment(q, logical_block_size - 1);
+#else
+	/* Limit fields already initialised via __build_queue_limits() / blk_alloc_disk() */
 #endif
 	__set_max_rw_io(              q, dev_name, params.slice_size);
 
@@ -1300,18 +1296,39 @@ static inline void block_api_os_destroy_on_init_error_io_never_started(struct nv
 	}
 }
 
-static struct request_queue * __alloc_disk_and_maybe_queue(struct nvmeiba_atom_os_api *atom, bool should_add_q)
+#if KS_BLK_ALLOC_DISK_2PARAMS
+static struct queue_limits __build_queue_limits(const request_queue_params params)
+{
+	const unsigned int lbs = params.is_512B_IO_allowed ? (1 << KERNEL_SECTOR_SHIFT) : NVMEIBC_SECTOR_SIZE;
+	const struct queue_limits lim = {
+		.logical_block_size  = lbs,
+		.physical_block_size = lbs,
+		.io_min              = lbs,
+		.io_opt              = BYTES_IN_LOCKSET * params.slice_size,
+		.dma_alignment       = lbs - 1,
+		.max_hw_sectors      = NVMEIBS_MAX_IO_CHANNEL_MSGS * params.slice_size << KERNEL_SECTOR_TO_SECTOR_SHIFT,
+		.discard_alignment   = NVMEIBC_SECTOR_SIZE,
+		.discard_granularity = NVMEIBC_SECTOR_SIZE,
+		.max_discard_sectors = to_kenrel_sects(max_trim_size_non_mirrored),
+	};
+	return lim;
+}
+#endif
+
+static struct request_queue * __alloc_disk_and_maybe_queue(struct nvmeiba_atom_os_api *atom, bool should_add_q, const struct queue_limits *lim)
 {
 	#if KS_HAS_BLK_ALLOC_DISK
 		#if KS_BLK_ALLOC_DISK_2PARAMS
-			atom->disk = blk_alloc_disk(NULL, NUMA_NO_NODE);
+			atom->disk = blk_alloc_disk(lim, NUMA_NO_NODE);
 		#else
+			(void)lim;
 			atom->disk = blk_alloc_disk(NUMA_NO_NODE);
 		#endif
 		BUG_ON(!should_add_q);					// Todo: disk is added with queue, free the queue and only let disk remain
 		atom->queue = atom->disk->queue;
 		atom->disk->queue = NULL;
 	#else
+		(void)lim;
 		/* Yoav Cohen: on newer kernel versions will just use BLOCK_EXT_MAJOR, actually
 		this what eventully happens for other kernels due to GENHD_FL_EXT_DEVT
 		We may really support our own major but doesn't seems urgent */
@@ -1363,13 +1380,20 @@ int block_api_os_init(struct nvmeibc_os_api *os, bio_exec_fn *fn, ulong size,
 	}
 
 	/************** Below, initialization of atom ************/
-	q = __alloc_disk_and_maybe_queue(atom, true);
-	if (unlikely(!q || !atom->disk)) {
-		rv = -ENOMEM | 0x3000;
-		goto _out;
+	{
+		const request_queue_params params = __init_request_queue_params(os);
+		const struct queue_limits *lim = NULL;
+#if KS_BLK_ALLOC_DISK_2PARAMS
+		struct queue_limits lim_built = __build_queue_limits(params);
+		lim = &lim_built;
+#endif
+		q = __alloc_disk_and_maybe_queue(atom, true, lim);
+		if (unlikely(!q || !atom->disk)) {
+			rv = -ENOMEM | 0x3000;
+			goto _out;
+		}
+		__request_queue_set_default_params(q, atom->dev_name, params);
 	}
-
-	__request_queue_set_default_params(q, atom->dev_name, __init_request_queue_params(os));
 	atom->conf.enforce_readonly = true;		// Default is true
 	disk = atom->disk;			/* Just for short writing */
 	disk->major = nvmeibc_use_block_external_major ? 0 : c->drv_ver.nvmeibc_major;	// In kernel 5.15+ setting major without minors is illegal: https://elixir.bootlin.com/linux/v5.15.165/source/block/genhd.c#L416
