@@ -1240,11 +1240,13 @@ static void __request_queue_set_default_params(struct request_queue *q, const ch
 	q->limits.physical_block_size = logical_block_size;
 	q->limits.io_min = logical_block_size;
 	q->limits.io_opt = BYTES_IN_LOCKSET * params.slice_size;
+	q->limits.dma_alignment = logical_block_size - 1;
 #else
 	blk_queue_logical_block_size( q, logical_block_size);
 	blk_queue_physical_block_size(q, logical_block_size);
 	blk_queue_io_min(   		  q, logical_block_size);
 	blk_queue_io_opt(   		  q, (BYTES_IN_LOCKSET * params.slice_size));
+	blk_queue_dma_alignment(q, logical_block_size - 1);
 #endif
 	__set_max_rw_io(              q, dev_name, params.slice_size);
 
@@ -1261,9 +1263,6 @@ static void __request_queue_set_default_params(struct request_queue *q, const ch
 	if (params.is_trim_disabled) blk_queue_flag_clear(QUEUE_FLAG_DISCARD, q);
 	else						 blk_queue_flag_set(  QUEUE_FLAG_DISCARD, q);
 #endif
-
-	/* Tell that we only support block-size aligned memory buffers */
-	blk_queue_dma_alignment(q, logical_block_size - 1);
 }
 
 static inline void ALLERT_NAME_TRUNCATION(bool cond, const char *src, const char *dst)
