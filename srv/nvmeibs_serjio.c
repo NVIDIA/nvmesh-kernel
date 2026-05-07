@@ -4843,6 +4843,28 @@ out:
 	return rv;
 }
 
+static void seg_tree_entry_unlink_clean_list(
+	struct nvmeibs_serjio_disk_private_data *serjio_pd,
+	struct seg_tree_entry *seg_ent)
+{
+	int rv;
+
+	if (list_empty(&seg_ent->cln_link))
+		return;
+
+	list_del_init(&seg_ent->cln_link);
+
+	_NWs(warn_serjio_seg_tree_entry_unlink_clean_list_report_toma, serjio_pd,
+		"Forcing TOMA clean report for segment @SEG_UUID_STR from clean state @CLN_SEG_STATE",
+		seg_ent->seg_uuid_str, seg_ent->cln_state);
+	if ((rv = nvmeibs_toma_report_event_serjio_disk_range_cleaned(
+		serjio_pd->di, seg_ent->seg_uuid_str))) {
+		_NEs(error_serjio_seg_tree_entry_unlink_clean_list_report_toma, serjio_pd,
+			"Failed (@RV) to report clean segment @SEG_UUID_STR to TOMA",
+			rv, seg_ent->seg_uuid_str);
+	}
+}
+
 static void clr_seg_tree_hash(struct nvmeibs_serjio_disk_private_data *serjio_pd)
 {
 	/* Clear the jrnl segment tree and hash tables */
@@ -4854,14 +4876,14 @@ static void clr_seg_tree_hash(struct nvmeibs_serjio_disk_private_data *serjio_pd
 	__hash_for_each_safe__(serjio_pd->jrnl_seg_tbl, i, t_node, h_node, iter, link) {
 		hash_del(&iter->link);
 		seg_tree_remove(iter, &serjio_pd->jrnl_seg_rb_root);
-		list_del(&iter->cln_link);
+		seg_tree_entry_unlink_clean_list(serjio_pd, iter);
 		radix_tree_delete(&serjio_pd->jrnl_seg_radix_root, iter->gpt_idx);
 		kfree(iter);
 	}
 	__hash_for_each_safe__(serjio_pd->del_seg_tbl, i, t_node, h_node, iter, link) {
 		hash_del(&iter->link);
 		seg_tree_remove(iter, &serjio_pd->del_seg_rb_root);
-		list_del(&iter->cln_link);
+		seg_tree_entry_unlink_clean_list(serjio_pd, iter);
 		kfree(iter);
 	}
 #if KS_RB_ROOT_CACHED
@@ -5392,13 +5414,14 @@ static void clear_all_gpt_jrnl_segs(struct nvmeibs_serjio_disk_private_data *ser
 	hash_for_each_safe(serjio_pd->jrnl_seg_tbl, i, tmp, seg_ent_iter, link) {
 		seg_tree_remove(seg_ent_iter, &serjio_pd->jrnl_seg_rb_root);
 		hash_del(&seg_ent_iter->link);
+		seg_tree_entry_unlink_clean_list(serjio_pd, seg_ent_iter);
 		radix_tree_delete(&serjio_pd->jrnl_seg_radix_root, seg_ent_iter->gpt_idx);
 		kfree(seg_ent_iter);
 	}
 	hash_for_each_safe(serjio_pd->del_seg_tbl, i, tmp, seg_ent_iter, link) {
-		seg_tree_remove(seg_ent_iter, &serjio_pd->jrnl_seg_rb_root);
+		seg_tree_remove(seg_ent_iter, &serjio_pd->del_seg_rb_root);
 		hash_del(&seg_ent_iter->link);
-		radix_tree_delete(&serjio_pd->jrnl_seg_radix_root, seg_ent_iter->gpt_idx);
+		seg_tree_entry_unlink_clean_list(serjio_pd, seg_ent_iter);
 		kfree(seg_ent_iter);
 	}
 }
