@@ -268,9 +268,6 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 											  int64_t delete_completed_kafka_offset)
 {
 	int								i, j, k;
-	struct nvmeibt_block_device		*blkdev;
-	struct nvmeibt_chunk			*chunk;
-	struct nvmeibt_praid			*praid;
 	struct nvmeibt_disk_segment		*seg;
 	int64_t 						old_last_delete_kafka_mgmt_config_offset;
 
@@ -286,8 +283,8 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 	nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset =
 		max(nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset, delete_completed_kafka_offset);
 	for (i = 0; i < conf->num_vols; i++) {
-		struct mm_vol_conf *vol = &conf->volumes[i];
-		blkdev = nvmeibt_block_device_get_block_device_by_id(&(vol->uuid));
+		const struct mm_vol_conf *vol = &conf->volumes[i];
+		struct nvmeibt_block_device	*blkdev = nvmeibt_block_device_get_block_device_by_id(&(vol->uuid));
 		if (!blkdev) {
 			N_Wf(cvakeo4, "Could not find blkdev=@UUID_LE", &(vol->uuid));
 			continue;
@@ -301,10 +298,10 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 		// mark MGMT_TRIM for all blkdev objects
 		nvmeibt_block_device_trim_specific_block_device(blkdev, CONFIG_TRIM_MGMT);
 		for (j = 0; j < blkdev->n_chunks; j++) {
-			chunk = blkdev->chunks[j];
+			struct nvmeibt_chunk *chunk = blkdev->chunks[j];
 			nvmeibt_chunk_trim_specific_chunk(chunk, CONFIG_TRIM_MGMT);
 			for (k = 0; k < chunk->n_praids; k++) {
-				praid = chunk->praids[k];
+				struct nvmeibt_praid *praid = chunk->praids[k];
 				nvmeibt_praid_trim_specific_praid(praid, CONFIG_TRIM_MGMT);
 				XDLIST_FOREACH_SAFE(seg, &(praid->praid_mgmt.all_segs_list)) {
 					nvmeibt_disk_segment_trim_specific_seg(seg, CONFIG_TRIM_MGMT);
@@ -313,7 +310,7 @@ int nvmeibt_read_config_vol_removed_from_mgmt(struct mm_mgmt_conf *conf, bool is
 		}
 	}
 	if (old_last_delete_kafka_mgmt_config_offset != nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset) {
-		N_Tf(vol_del_upd_last_delete, "VOL_DEL_COMPLETED: updated last_delete_kafka_mgmt_config_offset=@INT64_TD from @INT64_TD",
+		N_Tf(vol_del_upd_last_delete, "VOL_DEL_COMPLETED: updated last_delete_@KAFKA_OFST from prev_@KAFKA_OFST",
 			 nvmeibt_raft_get_my_raft()->last_delete_kafka_mgmt_config_offset, old_last_delete_kafka_mgmt_config_offset);
 	}
 out:
