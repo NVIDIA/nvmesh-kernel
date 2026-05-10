@@ -1315,7 +1315,7 @@ static struct queue_limits __build_queue_limits(const request_queue_params param
 }
 #endif
 
-static struct request_queue * __alloc_disk_and_maybe_queue(struct nvmeiba_atom_os_api *atom, bool should_add_q, const struct queue_limits *lim)
+static struct request_queue * __alloc_disk_and_maybe_queue(struct nvmeiba_atom_os_api *atom, bool should_add_q, struct queue_limits *lim)
 {
 	#if KS_HAS_BLK_ALLOC_DISK
 		#if KS_BLK_ALLOC_DISK_2PARAMS
@@ -1382,7 +1382,7 @@ int block_api_os_init(struct nvmeibc_os_api *os, bio_exec_fn *fn, ulong size,
 	/************** Below, initialization of atom ************/
 	{
 		const request_queue_params params = __init_request_queue_params(os);
-		const struct queue_limits *lim = NULL;
+		struct queue_limits *lim = NULL;
 #if KS_BLK_ALLOC_DISK_2PARAMS
 		struct queue_limits lim_built = __build_queue_limits(params);
 		lim = &lim_built;
