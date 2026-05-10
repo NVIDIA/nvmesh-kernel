@@ -36,6 +36,11 @@
 	module_param(nvmeibc_io_pet_verbose, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_verbose, "A non-zero value will allow IO per-entity trace buffers to provide even more information such as the first 8 bytes and metadata for every block. This may hurt performance and the buffer size should be taken into account.");
 
+	unsigned nvmeibc_io_pet_disable = 0;
+	module_param(nvmeibc_io_pet_disable, uint, 0644);
+	MODULE_PARM_DESC(nvmeibc_io_pet_disable, "A non-zero value will disable IO per-entity trace functionality.");
+
+
 	NVMEIBC_MEMMGR_METRIC(io_pet_buffers, "component=raid.io.pet.buffers");
 
 	struct io_pet_controller{
@@ -50,9 +55,10 @@
 	static struct iovec __io_pet_controller_get_buffer(struct nvmeib_pet_base_controller const* base)
 	{
 		__auto_type self = (struct io_pet_controller*)(base);
+		const bool io_pet_enable = !nvmeibc_io_pet_disable; 
 		BUILD_BUG_ON(offsetof(struct io_pet_controller, base) != 0);
 
-		if (self->cfg.pet_buffer_size && self->writer){
+		if (io_pet_enable && self->cfg.pet_buffer_size && self->writer){
 			struct msgloop_msg* msg = nvmeib_msgloop_alloc_msg(self->cfg.msg_allocation_size, GFP_NOIO);
 			nvmesh_memmgr_metric_on_alloc_update(io_pet_buffers, self->cfg.msg_allocation_size, msg);
 			if (msg) {
