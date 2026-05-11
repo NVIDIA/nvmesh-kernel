@@ -415,7 +415,11 @@ static void drain_qp(struct nvmeibs_net *net, bool drep_rcvd)
 
 	__NFIN;
 	WARN_ON_ONCE(irqs_disabled());
-	nvmeibs_remove_cm_id(&net->cm_id);
+	if (drep_rcvd) {
+		_NT(trace_net_drain_qp_drep_rcvd, 
+			"drep_rcvd, removing cm_id net=@NET, cm=@CM_ID", net, &net->cm_id);
+		nvmeibs_remove_cm_id(&net->cm_id);
+	}
 	nvmeibs_net_spin_lock_irqsave(net, &flags);
 
 	_NT(trace_0_net_drain_qp,
