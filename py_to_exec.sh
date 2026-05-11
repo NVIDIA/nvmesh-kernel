@@ -2,10 +2,10 @@
 
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-source pypi_sources.sh
 set -e
 
 SPEC_PATH=${SPEC_PATH:-$(dirname $(readlink -e $0))}
+source "$SPEC_PATH/pypi_sources.sh"
 # TODO: no need for infra dir under mgmt dir since we removed the SDK dependency.
 # One day we will need to change this. Today is not that day.
 export PATH=$PATH:~/.local/bin

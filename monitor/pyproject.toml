@@ -5,13 +5,13 @@ description = ""
 authors = ["Kobi Shpak <kobi@nvidia.com>"]
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.13"
+python = ">=3.9,<3.11"
 pyyaml = "^6.0.2"
 requests = "^2.32.3"
 jmespath = "0.10.0"
 prometheus-client = "0.23.1"
 logbook = "1.5.3"
-nvmesh-infra = {path = "../../infrastructure"}
+nvmesh-utils = {path = "../../nvmesh-utils"}
 
 [tool.poetry.group.compile]
 optional = true
