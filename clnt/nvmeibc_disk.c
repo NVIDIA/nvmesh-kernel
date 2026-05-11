@@ -290,6 +290,10 @@ bool nvmeibc_disk_local_use_system_pcpu_wq = false;
 module_param_named(disk_local_use_system_pcpu_wq, nvmeibc_disk_local_use_system_pcpu_wq, bool, 0644);
 MODULE_PARM_DESC(disk_local_use_system_pcpu_wq, "Determines whether local IO uses the system per-cpu workqueue for requests.");
 
+uint nvmeibc_disk_ioch_drained_timeout_sec = 10;
+module_param_named(ioch_drained_timeout_sec, nvmeibc_disk_ioch_drained_timeout_sec, uint, 0644);
+MODULE_PARM_DESC(ioch_drained_timeout_sec, "The timeout in milliseconds for the IOCH drained event before disconnecting disk");
+
 struct nvmeib_cpu_mask_info_node {
 	struct nvmeib_cpu_mask_info mask_info;
 	struct radix_tree_node node;
@@ -9308,11 +9312,12 @@ static bool ioch_drained_on_timer_(struct nvmeibc_disk *disk)
 {
 	struct ioch_bailed_cmds *b;
 	struct nvmeibc_channel *ch;
+	uint ioch_drained_timeout_jif = READ_ONCE(nvmeibc_disk_ioch_drained_timeout_sec) * HZ;
 	NFIN;
 
 	if ((b = list_first_entry_or_null(&disk->ioch_drained_pending_list,
 									  struct ioch_bailed_cmds, link)) &&
-		 time_after(jiffies, b->arm_jif + MAX_WAIT_IOCH_DRAINED)) {
+		 time_after(jiffies, b->arm_jif + ioch_drained_timeout_jif)) {
 		ch = container_of(b, struct nvmeibc_channel, bailed_cmds);
 		_NTch(trace_0_ioch_drained_on_timer_, ch, "timeout");
 		return true;
