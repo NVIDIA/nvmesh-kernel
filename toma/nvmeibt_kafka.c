@@ -2695,7 +2695,7 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksAddKey " LUKS_ARGS " --key-slot=%d", CMD_params->enc.slot);
 		commit_now = start_encrypt_action(CMD_params, "add_pass", encrypt_args, CMD_params->enc.passphrase, CMD_params->enc.newPassphrase, kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "testPassphrase") == 0) {
-		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "open --verbose --test-passphrase /dev/nvmesh/d_<vol_name>");
+		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "open --verbose --test-passphrase");
 		commit_now = start_encrypt_action(CMD_params, "test_pass", encrypt_args, CMD_params->enc.passphrase, "", kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "encryptionRequestResponse") == 0) {
 		commit_now = encrypt_command_request_response(CMD_params);
