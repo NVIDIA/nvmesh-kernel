@@ -856,7 +856,7 @@ int nvmeibt_topology_relate_hardware_probe_to_config(void)
 	return rv;
 }
 
-static int check_local_segments_validity(void)
+static int check_local_segments_validity_when_config_changed_in_applied_topo(void)
 {
 	struct nvmeibt_local_disk	*local_disk;
 	struct nvmeibt_disk			*disk;
@@ -871,7 +871,7 @@ static int check_local_segments_validity(void)
 			N_Tf(hu299sn, "local_disk=@STR didn't revive its segs yet, skipping", nvmeibt_local_disk_display(local_disk));
 			continue;
 		}
-		disk = NNVMEIBT_LOCAL_DISK_GET_DISK(check_local_segments_validity, local_disk);
+		disk = NNVMEIBT_LOCAL_DISK_GET_DISK(uu88bb1, local_disk);
 		if (!disk) {
 			continue;
 		}
@@ -896,9 +896,9 @@ static int check_local_segments_validity(void)
 					continue;
 
 				is_overlap |= nvmeibt_do_ranges_overlap(m0->lb_s, m0->lb_e, m1->lb_s, m1->lb_e);
-				if (is_overlap) {
-					bool	is_0_x_done = nvmeibt_disk_segment_is_x_done(nvmeibt_seg_active_get_active_seg_topo(nvmeibt_disk_segment_get_seg_active(seg0)));
-					bool	is_1_x_done = nvmeibt_disk_segment_is_x_done(nvmeibt_seg_active_get_active_seg_topo(nvmeibt_disk_segment_get_seg_active(seg1)));
+				if (is_overlap) {	// Importnat!!!!! Proper check should be on applied topology, not commited! New leader might not know that follower already commited this topo (X_DONE) and request zeroing again, so there will be IO on this seg and overlapping can create data corruption)! But this function is called just before topology is going to be applied anyways, and functions after the validity check already look on conf_corrupted flag.
+					bool	is_0_x_done = nvmeibt_disk_segment_is_x_done(&seg0->seg_follower.committed_seg_lot.seg_topo);
+					bool	is_1_x_done = nvmeibt_disk_segment_is_x_done(&seg1->seg_follower.committed_seg_lot.seg_topo);
 					if (is_0_x_done || is_1_x_done) {
 						N_Tf(tcvajwi, "Overlap ignored seg0=@UUID_8 is_x_done=@BOOL lb_s=@LLX lb_e=@LLX, seg1=@UUID_8 is_x_done=@BOOL lb_s=@LLX lb_e=@LLX",
 							 nvmeibt_seg_UUID_8(seg0), is_0_x_done, m0->lb_s, m0->lb_e, nvmeibt_seg_UUID_8(seg1), is_1_x_done, m1->lb_s, m1->lb_e);
@@ -956,8 +956,6 @@ int nvmeibt_topology_setup_relationships(void)
 	if (nvmeibt_topology_relate_hardware_probe_to_config() < 0)
 		goto skip;
 	if (nvmeibt_praid_validate_praids_config() < 0)
-		goto skip;
-	if (check_local_segments_validity() < 0)
 		goto skip;
 	if (trim_stale_gpt_entries_from_local_disks_gpt() < 0)
 		goto skip;
@@ -1405,6 +1403,8 @@ void nvmeibt_topology_apply_the_latest_committed_config_and_topo(void)
 		// Ignore topology_changes
 		goto out;
 	}
+	if (RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_applied) != RAFT_COMMIT_LIFECYCLE_VAL(TOPO_CONFIG, follower_committed))
+		check_local_segments_validity_when_config_changed_in_applied_topo();
 	update_applied_topology();
 	nvmeibt_seg_active_generate_all_segs_topo_for_clients();
 	nvmeibt_global_call_all_seg_active_post_update_actions();
