@@ -39,6 +39,10 @@ bool nvmeibc_nordda_wq_unbound = false;
 module_param_named(nordda_wq_unbound, nvmeibc_nordda_wq_unbound, bool, 0444);
 MODULE_PARM_DESC(nordda_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibc_nordda (true) or a bound one (false). Relevant only if nr_defer_recv_comps_use_kwq is set to true");
 
+uint nvmeibc_nr_max_wrs_per_req = 0;
+module_param_named(nr_max_wrs_per_req, nvmeibc_nr_max_wrs_per_req, int, 0644);
+MODULE_PARM_DESC(nr_max_wrs_per_req, "The maximum number of WRs (RDMA work requests) per IO channel request, used for a write operation. For 0, use system's default.");
+
 NVMEIBC_MEMMGR_METRIC(c_nordda_srq_info, "component=client.nordda.srq_info");
 
 /* Kernel workqueue for nordda channel operations */
@@ -965,17 +969,21 @@ static int calc_nr_sq_size(struct nvmeibc_ib_nordda_channel *ch, int n_sges)
 	int max_wr_io = NVMEIBC_NR_CH_N_WR_CTRL + NVMEIBC_NR_CH_RDMA_WRITE_JMDC_PB;
 	int rv;
 
-	if (use_fr_fmr) {
+	if (use_fr_fmr && !nvmeibc_nr_max_wrs_per_req) {
 		max_wr_io += NVMEIBC_NR_CH_N_WR_FR + /* The SG list for IO is collapsed into an FR */
 		!!(disk->md_size > 0); /* And one for the sep MD (if present) */
 	}
-	else {
+	else if (!nvmeibc_nr_max_wrs_per_req) {
 		/* We cannot use an FR - Either the NIC doesn't support it or the disk has inline MD */
 		/* So we need (max sectors x (1 for no MD, 2 for MD) / n_sges) WRs */
 		max_wr_io += DIV_ROUND_UP(
 			(disk->max_request_size_bytes >> NVMEIBC_SECTOR_SHIFT) *
 			(1 + !!(disk->md_size > 0)), n_sges);
+	} else {
+		max_wr_io += nvmeibc_nr_max_wrs_per_req + !!(disk->md_size > 0);
 	}
+	_NT(trace_ib_nordda_channel_calc_nr_sq_size, "nrch @BASE_NAME (@CH_PTR), n_sges=@INT, max_wr_io=@INT",
+		ch->base.name, ch, n_sges, max_wr_io);
 	rv = max_wr_io * ch->base.disk->nrch_ioreq_num + NVMEIBC_NR_CH_N_WR_IO_KA;
 	return rv;
 }
