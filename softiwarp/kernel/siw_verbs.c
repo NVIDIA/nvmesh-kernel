@@ -380,7 +380,15 @@ int siw_query_device(struct ib_device *ofa_dev, struct ib_device_attr *attr,
 
 	attr->atomic_cap = SIW_ATOMIC_CAP;
 
-	attr->page_size_cap = PAGE_SIZE;
+	/*
+	 * page_size_cap is a bitmask of supported MR page sizes, not a
+	 * single value. SIW currently requires every PBL entry to be at
+	 * least one system page (the TX path walks pages with a
+	 * PAGE_SIZE-bounded stride and ignores per-PBE size), so the
+	 * smallest page size we can honestly advertise is PAGE_SIZE.
+	 * Express that as the standard "PAGE_SIZE and up" mask.
+	 */
+	attr->page_size_cap = ~((u64)PAGE_SIZE - 1);
 
 	/*
 	 * TODO: understand what of the following should
