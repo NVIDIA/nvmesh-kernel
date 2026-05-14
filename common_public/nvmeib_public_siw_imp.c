@@ -65,7 +65,7 @@ static int siw_alloc_n_map(struct nvmeib_alloc_n_map *mem)
 	mr->device = pd->device;
 
 	/* MRs with huge-pages are not supported */
-	BUG_ON(mr->page_size != PAGE_SIZE);
+	mr->page_size = PAGE_SIZE;
 	siw_mr = siw_mr_ofa2siw(mr);
 	siw_mr->pbl->pbe_fixed_shift = PAGE_SHIFT;
 	pble = siw_mr->pbl->pbe;
@@ -85,6 +85,17 @@ static int siw_alloc_n_map(struct nvmeib_alloc_n_map *mem)
 	mr->iova = ioaddr;
 	mr->length = mem->n_pages * PAGE_SIZE;
 	mr->page_size = PAGE_SIZE;
+
+	/*
+	 * Mirror what siw_map_mr() / siw_map_mr_sg() do: propagate the
+	 * caller's iova/length into siw_mr->mem so that siw_check_mem()'s
+	 * bounds check ([mem.va, mem.va + mem.len)) is correct. Without
+	 * this, mem.va/mem.len remain at the (now-zero) placeholder values
+	 * set by __siw_alloc_mr() and any inbound RDMA WRITE / RREAD-RESP
+	 * targeting this MR fails with -EINVAL.
+	 */
+	siw_mr->mem.va = mr->iova;
+	siw_mr->mem.len = mr->length;
 
 	if ((rv = siw_mr_enable(mr, access)) < 0) {
 		_NE(error_3_nvmeib_public_siw_imp_siw_alloc_n_map, "Fail to enable memory region @RV", rv);
