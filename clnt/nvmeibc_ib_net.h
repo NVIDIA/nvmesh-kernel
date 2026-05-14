@@ -95,6 +95,17 @@ struct nvmeibc_map_state {
 	int unmapped_index;
 	dma_addr_t unmapped_addr;
 	bool allow_dma_key;
+	/*
+	 * Bytes consumed in pages[npages-1] (the slot currently being
+	 * filled). Range (0, mr_page_size] when npages>0; 0 when npages==0.
+	 * Used to decide whether a new sg entry can extend the in-progress
+	 * MR by checking against the page's physical end, rather than
+	 * relying on a linear VA projection (unmapped_addr + dma_len)
+	 * which is invalid for MRs whose PBL slots are physically
+	 * discontiguous - the case SIW hits because its dma_map_sg is a
+	 * no-op stub and 4K-chunked sg entries leak through unchanged.
+	 */
+	u32 last_page_used;
 };
 
 struct ib_pool_fmr;
