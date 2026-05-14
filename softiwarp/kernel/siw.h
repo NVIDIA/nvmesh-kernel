@@ -106,6 +106,13 @@ enum siw_if_type {
 #define SIW_MAX_SRQ_WR		(SIW_MAX_QP_WR * 10)
 #define SIW_MAX_CONTEXT		SIW_MAX_PD
 
+/*
+ * Smallest MR page size SIW knows how to drive. Used both to size the
+ * advertised page_size_cap bitmask and to bound per-PBE iteration in the
+ * TX path so it works on kernels with PAGE_SIZE > SIW_MR_MIN_PAGE_SIZE.
+ */
+#define SIW_MR_MIN_PAGE_SIZE	4096
+
 #define SENDPAGE_THRESH		PAGE_SIZE /* min bytes for using sendpage() */
 #define SQ_USER_MAXBURST	100 //was 10
 
@@ -795,6 +802,65 @@ enum siw_iwarp_tx_in_use_flags {
 	SIW_IWARP_TX_REQ_RESCHED = (1 << 1),
 };
 
+/*
+ * Per-QP debug ring buffer that records the state of every siw_tx_hdt()
+ * inner-loop iteration. We use it to triage zero-copy TX bugs where
+ * page_array[]/page_len[] disagree with what siw_tcp_sendpages() expects
+ * (e.g. NULL page_array[i] entries, page_len[i] > PAGE_SIZE, etc.).
+ *
+ * The trace is inspected post-mortem from a crash dump -- walk back from
+ * tx_ctx.hdt_trace_head to see the last SIW_TX_HDT_TRACE_ENTRIES iterations,
+ * then cross-check page_array[]/page_len[] on the stack of siw_tx_hdt /
+ * siw_tcp_sendpages.
+ *
+ * Costs ~SIW_TX_HDT_TRACE_ENTRIES * sizeof(siw_tx_hdt_dbg_entry) bytes per
+ * QP, so it's compile-time gated by SIW_TX_HDT_TRACE -- comment out the
+ * #define below to disable.
+ */
+#define SIW_TX_HDT_TRACE 1
+
+#ifdef SIW_TX_HDT_TRACE
+
+#define SIW_TX_HDT_TRACE_ENTRIES 64u
+
+#define SIW_TX_HDT_TRACE_FL_MERGED		(1u << 0)
+#define SIW_TX_HDT_TRACE_FL_IS_KVA		(1u << 1)
+#define SIW_TX_HDT_TRACE_FL_IS_KVA_VM		(1u << 2)
+#define SIW_TX_HDT_TRACE_FL_IS_PBL		(1u << 3)
+#define SIW_TX_HDT_TRACE_FL_USE_SENDPAGE	(1u << 4)
+#define SIW_TX_HDT_TRACE_FL_INTRA_OFF_OK	(1u << 5)  /* intra_off == prev_page_off + decode(prev page_len) */
+#define SIW_TX_HDT_TRACE_FL_SAME_PAGE		(1u << 6)  /* p == page_array[seg-1] */
+
+struct siw_tx_hdt_dbg_entry {
+	u64	sge_laddr;	/* sge->laddr for this iter's SGE */
+	u64	p;		/* struct page * returned by lookup (cast) */
+	u64	prev_page;	/* page_array[seg-1] at decision time, 0 if N/A */
+
+	u32	sge_off;	/* sge_off BEFORE this iter consumed plen */
+	u32	sge_len;	/* sge_len BEFORE this iter consumed plen */
+	u32	bytes_unsent;	/* c_tx->bytes_unsent at iter start */
+	u32	data_len;	/* siw_tx_hdt's data_len at iter start */
+
+	u32	jif;		/* (u32)jiffies, for timestamp */
+	u32	pbl_idx;	/* PBL index hint after siw_pbl_get_paddr() */
+	u32	pbe_remaining;	/* bytes remaining in current PBE */
+
+	u16	intra_off;	/* paddr & ~PAGE_MASK for PBL, virt for kva/umem */
+	u16	plen;		/* bytes this iter contributes */
+	u16	seg_before;	/* page_array[] index BEFORE the merge/new action */
+	u16	seg_at_sge_start; /* seg captured at the start of this SGE */
+	u16	prev_page_len;	/* page_len[seg-1] BEFORE the action (raw u16) */
+	u16	page_len_after;	/* page_len[updated_idx] AFTER the action (raw u16) */
+	u16	prev_page_off;	/* page_off[seg-1] BEFORE the action (raw u16) */
+	u16	page_off_after;	/* page_off[updated_idx] AFTER the action (raw u16) */
+
+	u8	sge_idx;	/* SGE index within the WQE */
+	u8	flags;		/* SIW_TX_HDT_TRACE_FL_* */
+	u8	pad[2];
+};
+
+#endif /* SIW_TX_HDT_TRACE */
+
 struct siw_iwarp_tx {
 	union {
 		union iwarp_hdrs		hdr;
@@ -896,6 +962,20 @@ struct siw_iwarp_tx {
 	union siw_iwarp_tx_sent_fpdu_notify sent_fpdu_notify;
 	atomic_t n_completed_fpdus;
 	int n_completed_fpdus_in_list;
+#endif
+
+#ifdef SIW_TX_HDT_TRACE
+	/*
+	 * Circular log of siw_tx_hdt() inner-loop iterations, see the
+	 * struct siw_tx_hdt_dbg_entry comment above for details.
+	 *
+	 * Producer-only (the TX path holds the qp tx-in-use flag), so no
+	 * locking needed. Readers (i.e. someone poking around in a crash
+	 * dump) should treat hdt_trace_head as the *next* slot to write,
+	 * i.e. the most recent entry is hdt_trace[(head-1) & (N-1)].
+	 */
+	struct siw_tx_hdt_dbg_entry	hdt_trace[SIW_TX_HDT_TRACE_ENTRIES];
+	u32				hdt_trace_head;
 #endif
 };
 

@@ -116,8 +116,31 @@ struct siw_iwarp_tx_fpdu {
 };
 #endif
 
-static inline struct page *siw_get_pblpage(struct siw_mr *mr,
-					   u64 addr, int *idx)
+/*
+ * Resolve @addr in @mr to the kernel virtual address of the matching
+ * PBE byte (siw_pbl_get_buffer() returns @pble->addr + intra-PBE
+ * offset, and SIW's pble->addr is always a kernel virtual address --
+ * see siw_dma_mapping_ops / siw_get_dma_mr() comment). Returns 0 when
+ * @addr falls outside the registered region.
+ *
+ * Callers that walk multiple pages of a PBL MR MUST also collect the
+ * per-PBE remainder (@pbe_remaining): when an MR is registered with a
+ * page size smaller than the kernel PAGE_SIZE (see mr_min_page_4k),
+ * adjacent PBEs may live in entirely different system pages, so the
+ * usual `PAGE_SIZE - off` bound would read past the registered region.
+ *
+ * **The intra-page offset of the returned address is NOT the intra-page
+ * offset of the SGE virtual address.** With sub-PAGE_SIZE PBEs the
+ * mapping from sge->laddr to the underlying physical 4 KiB chunks
+ * doesn't preserve the (laddr & ~PAGE_MASK) low bits -- two iterations
+ * walking the same SGE can hit chunks at different intra-page offsets
+ * within different system pages. Callers that touch page contents
+ * (CRC, kmap+memcpy, tcp_sendpage) MUST therefore use
+ * (paddr & ~PAGE_MASK), NOT (laddr & ~PAGE_MASK), to index into the
+ * struct page.
+ */
+static inline u64 siw_pbl_get_paddr(struct siw_mr *mr, u64 addr,
+				    int *idx, int *pbe_remaining)
 {
 	struct siw_pbl *pbl = mr->pbl;
 	u64 offset = addr - mr->mem.va;
@@ -127,15 +150,57 @@ static inline struct page *siw_get_pblpage(struct siw_mr *mr,
 		"krping: lookup addr=%llx (mr->mem.va=%llx, offset=%llx)\n",
 		addr, mr->mem.va, offset);
 
-	paddr = siw_pbl_get_buffer(pbl, offset, NULL, idx);
+	paddr = siw_pbl_get_buffer(pbl, offset, pbe_remaining, idx);
 
 	dprint(DBG_MM,
 		"krping: lookup resolved to paddr=%llx)\n",
 		paddr);
 
+	return paddr;
+}
+
+/*
+ * Same as siw_pbl_get_paddr() but returns the struct page directly.
+ * Use this when only the page is needed (the intra-page offset is
+ * provided externally by an already-known paddr); see siw_pbl_get_paddr
+ * for the (laddr vs. paddr) intra-page-offset gotcha.
+ *
+ * @pbe_remaining may be NULL for callers that already know the PBE is
+ * large enough (e.g. siw_try_1seg's short-copy bypass).
+ */
+static inline struct page *siw_get_pblpage_len(struct siw_mr *mr,
+					       u64 addr, int *idx,
+					       int *pbe_remaining)
+{
+	u64 paddr = siw_pbl_get_paddr(mr, addr, idx, pbe_remaining);
+
 	if (paddr)
 		return virt_to_page(paddr);
 	return NULL;
+}
+
+static inline struct page *siw_get_pblpage(struct siw_mr *mr,
+					   u64 addr, int *idx)
+{
+	return siw_get_pblpage_len(mr, addr, idx, NULL);
+}
+
+/*
+ * The 0-copy TX path stores per-page byte counts as u16 to keep
+ * siw_tx_hdt()'s stack frame within the kernel's 1 KiB
+ * -Wframe-larger-than budget. Every entry holds at least one byte,
+ * so 0 is a free sentinel for "full PAGE_SIZE" -- the only value u16
+ * can't represent natively (PAGE_SIZE == 65536 on 64 KiB-page
+ * kernels). On smaller-page kernels the encoder is a no-op at
+ * runtime because PAGE_SIZE never reaches the sentinel.
+ */
+static inline u16 siw_encode_page_len(unsigned int v)
+{
+	return (v == PAGE_SIZE) ? 0 : (u16)v;
+}
+static inline unsigned int siw_decode_page_len(u16 v)
+{
+	return v ? v : PAGE_SIZE;
 }
 
 /*
@@ -187,40 +252,101 @@ static int siw_try_1seg(struct siw_iwarp_tx *c_tx, char *payload)
 				return -1;
 			}
 		} else {
-			unsigned int off =  sge->laddr & ~PAGE_MASK;
+			unsigned int off;
 			struct page *p;
 			char *buffer;
 			int index = 0;
+			int pbe_remaining = 0;
+			unsigned int first_chunk;
 
-			if (!mr->mem.is_pbl)
+			if (!mr->mem.is_pbl) {
+				/*
+				 * umem entries always cover one full system
+				 * page, so the SGE's intra-page offset
+				 * matches the resolved page's intra-page
+				 * offset.
+				 */
 				p = siw_get_upage(mr->umem, sge->laddr);
-			else
-				p = siw_get_pblpage(mr, sge->laddr, &index);
+				off = sge->laddr & ~PAGE_MASK;
+				first_chunk = PAGE_SIZE - off;
+			} else {
+				/*
+				 * For PBL MRs the intra-page offset must be
+				 * read from the resolved paddr, not from
+				 * sge->laddr: with sub-PAGE_SIZE PBEs (see
+				 * mr_min_page_4k) the SGE virtual range can
+				 * map to physical chunks at an intra-page
+				 * offset that doesn't match
+				 * (sge->laddr & ~PAGE_MASK).
+				 */
+				u64 paddr = siw_pbl_get_paddr(mr, sge->laddr,
+							      &index,
+							      &pbe_remaining);
+				BUG_ON(!paddr);
+				p = virt_to_page(paddr);
+				off = paddr & ~PAGE_MASK;
+				/*
+				 * A PBE may map less than PAGE_SIZE
+				 * (sub-PAGE_SIZE MRs on 64 KiB-page kernels),
+				 * so the first-kmap chunk is bounded by both
+				 * the system page and the PBE remainder.
+				 */
+				first_chunk = min_t(unsigned int,
+						    PAGE_SIZE - off,
+						    pbe_remaining);
+			}
 
 			BUG_ON(!p);
 			buffer = kmap_atomic(p);
 
-			if (likely(PAGE_SIZE - off >= bytes)) {
+			if (likely(first_chunk >= bytes)) {
 				memcpy(payload, buffer + off, bytes);
 				kunmap_atomic(buffer);
 			} else {
-				unsigned long part = bytes - (PAGE_SIZE - off);
+				unsigned long part = first_chunk;
+				unsigned int tail_off;
 
 				memcpy(payload, buffer + off, part);
 				kunmap_atomic(buffer);
 				payload += part;
 
-				if (!mr->mem.is_pbl)
+				if (!mr->mem.is_pbl) {
 					p = siw_get_upage(mr->umem,
 							  sge->laddr + part);
-				else
-					p = siw_get_pblpage(mr,
-							    sge->laddr + part,
-							    &index);
+					/*
+					 * Crossing a umem boundary always
+					 * lands on the next page (part ==
+					 * PAGE_SIZE - off), so the tail
+					 * starts at intra-page offset 0.
+					 */
+					tail_off = 0;
+				} else {
+					/*
+					 * For a sub-PAGE_SIZE PBE we may
+					 * have stopped short of the system
+					 * page boundary, so the tail starts
+					 * wherever the next PBE's paddr
+					 * lands in its system page. The
+					 * remaining bytes must fit in the
+					 * new PBE -- MAX_HDR_INLINE is far
+					 * below SIW_MR_MIN_PAGE_SIZE so two
+					 * PBEs are always enough.
+					 */
+					u64 paddr = siw_pbl_get_paddr(mr,
+							sge->laddr + part,
+							&index,
+							&pbe_remaining);
+					BUG_ON(!paddr);
+					p = virt_to_page(paddr);
+					tail_off = paddr & ~PAGE_MASK;
+					BUG_ON(pbe_remaining <
+					       (int)(bytes - part));
+				}
 				BUG_ON(!p);
 
 				buffer = kmap_atomic(p);
-				memcpy(payload, buffer, bytes - part);
+				memcpy(payload, buffer + tail_off,
+				       bytes - part);
 				kunmap_atomic(buffer);
 			}
 		}
@@ -608,37 +734,52 @@ static int tcp_sendpage(struct socket *sock, struct page *page,
  * Push page array page by page or in one shot.
  * Pushing the whole page array requires the inner do_tcp_sendpages
  * function to be exported by the kernel.
+ *
+ * Each entry @i is described by an independent (page, off, len) tuple:
+ * @page[i] is the struct page, @page_off[i] is the intra-page offset
+ * where this entry's bytes start, and @page_len[i] is the number of
+ * bytes (encoded with the PAGE_SIZE-as-0 sentinel). Per-entry offsets
+ * are required because, with sub-PAGE_SIZE PBL entries (see
+ * SIW_MR_MIN_PAGE_SIZE), the bytes of a single SGE can map to
+ * non-contiguous physical chunks across one or more system pages, so
+ * the old "first entry has a virtual offset, all subsequent entries
+ * start at offset 0 in their page" assumption is wrong.
  */
 static int siw_tcp_sendpages(struct socket *s, struct page **page,
-			     int offset, size_t size, int last_flags)
+			     const u16 *page_off,
+			     const u16 *page_len,
+			     size_t size, int last_flags)
 {
 	int i, rv = 0;
 	size_t todo = size;
 
 	for (i = 0; size > 0; i++) {
-		size_t bytes = min_t(size_t, PAGE_SIZE - offset, size);
+		size_t bytes = min_t(size_t,
+				     siw_decode_page_len(page_len[i]),
+				     size);
 		int flags;
 
 		if (tx_flags_from_upstream) {
 			flags = MSG_DONTWAIT | MSG_MORE | MSG_SENDPAGE_NOTLAST;
-			//if (bytes < size) flags = MSG_MORE | MSG_DONTWAIT | (tx_flags_use_eor ? MSG_EOR : 0);
-			//if (size <= PAGE_SIZE) flags = MSG_MORE | MSG_DONTWAIT | (tx_flags_use_eor ? MSG_EOR : 0);
-			//if (size <= PAGE_SIZE) flags = MSG_DONTWAIT | (tx_flags_use_eor ? MSG_EOR : 0);
-			if (size <= PAGE_SIZE)
+			/*
+			 * Last iteration of this call -- after this send,
+			 * size will be 0. Switch to caller-supplied flags
+			 * (which may carry MSG_EOR / clear MSG_MORE).
+			 */
+			if (bytes == size)
 				flags = last_flags;
 		}
 		else {
 			flags = MSG_DONTWAIT | MSG_MORE;
-			//if (bytes < size) flags |= MSG_MORE;
-			if (bytes <= size)
+			if (bytes >= size)
 				flags = last_flags;
 		}
 
 		BUG_ON(page_count(page[i]) < 1);
 #if KS_HAS_TCP_SENDPAGE
-		rv = tcp_sendpage(s->sk, page[i], offset, bytes, flags);
+		rv = tcp_sendpage(s->sk, page[i], page_off[i], bytes, flags);
 #else
-		rv = tcp_sendpage(s, page[i], offset, bytes, flags);
+		rv = tcp_sendpage(s, page[i], page_off[i], bytes, flags);
 #endif
 		if (rv <= 0)
 			break;
@@ -647,8 +788,6 @@ static int siw_tcp_sendpages(struct socket *s, struct page **page,
 
 		if (rv != bytes)
 			break;
-
-		offset = 0;
 	}
 	if (rv >= 0 || rv == -EAGAIN)
 		rv = todo - size;
@@ -657,19 +796,58 @@ static int siw_tcp_sendpages(struct socket *s, struct page **page,
 }
 
 /*
+ * Count how many page_array entries an SGE of @sge_bytes consumes
+ * given the parallel @page_len array. Mirrors the byte-walking that
+ * siw_tcp_sendpages does so siw_0copy_tx can advance its index between
+ * SGEs without recomputing from PAGE_ALIGN >> PAGE_SHIFT (which only
+ * worked when every entry was a full system page). Per-entry offsets
+ * are now baked into page_off[]/page_len[] so we don't need a separate
+ * first-page offset.
+ */
+static int siw_pages_for_bytes(const u16 *page_len, unsigned int sge_bytes)
+{
+	int n = 0;
+
+	while (sge_bytes > 0) {
+		unsigned int taken = min_t(unsigned int,
+					   siw_decode_page_len(page_len[n]),
+					   sge_bytes);
+
+		sge_bytes -= taken;
+		n++;
+	}
+	return n;
+}
+
+/*
  * siw_0copy_tx()
  *
  * Pushes list of pages to TCP socket. If pages from multiple
  * SGE's, all referenced pages of each SGE are pushed in one
  * shot.
+ *
+ * @first_sge_off is the byte offset into @sge that has already been
+ * sent in earlier passes (c_tx->sge_off); it's only used to clamp the
+ * first SGE's transfer size, NOT to compute an intra-page offset --
+ * intra-page offsets are stored per-entry in @page_off and were set
+ * correctly by siw_tx_hdt() from the resolved paddr.
  */
 static int siw_0copy_tx(struct socket *s, struct page **page,
-			struct siw_sge *sge, unsigned int offset,
-			unsigned int size, struct page *trl_page, 
+			const u16 *page_off,
+			const u16 *page_len,
+			struct siw_sge *sge, unsigned int first_sge_off,
+			unsigned int size, struct page *trl_page,
 			unsigned int trl_page_len, int new_tcpseg)
 {
+	/*
+	 * Trailer is a single page handed to siw_tcp_sendpages via one-
+	 * element u16 arrays. Caller supplies the size as unsigned int
+	 * (CRC trailer, ~4 B), so the encode is just for the type match.
+	 */
+	u16 trl_page_off_enc = 0;
+	u16 trl_page_len_enc = siw_encode_page_len(trl_page_len);
 	int i = 0, sent = 0, rv;
-	int sge_bytes = min(sge->length - offset, size);
+	int sge_bytes = min(sge->length - first_sge_off, size);
 	/* Flags for the last page of siw_tcp_sendpages - We have to send the trailer, so set MSG_MORE and dont set MSG_EOR. If we are using siw_tcp_sendpages for the trailer, also set MSG_SENDPAGE_NOTLAST */
 	int sp_last_pg_flags = MSG_DONTWAIT | MSG_MORE | 
 		(tx_flags_from_upstream ? MSG_SENDPAGE_NOTLAST : 0);
@@ -686,20 +864,19 @@ static int siw_0copy_tx(struct socket *s, struct page **page,
 			trl_flags |= MSG_EOR;
 	}
 
-	offset  = (sge->laddr + offset) & ~PAGE_MASK;
-
 	while (sent != size) {
 
-		rv = siw_tcp_sendpages(s, &page[i], offset, sge_bytes, sp_last_pg_flags);
+		rv = siw_tcp_sendpages(s, &page[i], &page_off[i],
+				       &page_len[i], sge_bytes,
+				       sp_last_pg_flags);
 		if (rv >= 0) {
 			sent += rv;
 			if (size == sent || sge_bytes > rv)
 				break;
 
-			i += PAGE_ALIGN(sge_bytes + offset) >> PAGE_SHIFT;
+			i += siw_pages_for_bytes(&page_len[i], sge_bytes);
 			sge++;
 			sge_bytes = min(sge->length, size - sent);
-			offset = sge->laddr & ~PAGE_MASK;
 		} else {
 			sent = rv;
 			break;
@@ -707,7 +884,9 @@ static int siw_0copy_tx(struct socket *s, struct page **page,
 	}
 	if (size == sent && trl_page) {
 		/* Sending trailer using tcp_sendpage to prevent starting a new segment just for the trailer */
-		rv = siw_tcp_sendpages(s, &trl_page, 0, trl_page_len, trl_flags);
+		rv = siw_tcp_sendpages(s, &trl_page, &trl_page_off_enc,
+				       &trl_page_len_enc, trl_page_len,
+				       trl_flags);
 		if (rv >= 0)
 			sent += rv;
 		else
@@ -724,10 +903,65 @@ static int siw_0copy_tx(struct socket *s, struct page **page,
  * For the data portion, each involved page must be referenced by
  * one extra element. All sge's data can be non-aligned to page
  * boundaries. Two more elements are referencing iWARP header
- * and trailer:
- * MAX_ARRAY = 64KB/PAGE_SIZE + 1 + (2 * (SIW_MAX_SGE - 1) + HDR + TRL
+ * and trailer.
+ *
+ * Sizing uses SIW_MR_MIN_PAGE_SIZE rather than PAGE_SIZE so that an
+ * MR registered with sub-PAGE_SIZE pages (see mr_min_page_4k) on a
+ * large-page kernel still fits: the worst case is one array entry
+ * per minimum-sized PBL entry across a 64 KiB FPDU.
+ *
+ * MAX_ARRAY = 64KB/SIW_MR_MIN_PAGE_SIZE + 1 +
+ *             (2 * (SIW_MAX_SGE - 1) + HDR + TRL)
  */
-#define MAX_ARRAY ((0xffff / PAGE_SIZE) + 1 + (2 * (SIW_MAX_SGE - 1) + 2))
+#define MAX_ARRAY ((0xffff / SIW_MR_MIN_PAGE_SIZE) + 1 + \
+		   (2 * (SIW_MAX_SGE - 1) + 2))
+
+#ifdef SIW_TX_HDT_TRACE
+/*
+ * Record one inner-loop iteration into the per-QP ring buffer. Called from
+ * siw_tx_hdt() *after* the merge / new-entry decision has been made and
+ * page_array[]/page_len[] have been updated, so @page_len_after reflects
+ * the post-action value of whichever entry was touched.
+ *
+ * Producer-only: caller (the TX path) holds the qp tx-in-use flag, so no
+ * locking is needed.
+ */
+static inline void
+siw_tx_hdt_trace_iter(struct siw_iwarp_tx *c_tx,
+		      u64 sge_laddr, u32 sge_off, u32 sge_len, u32 data_len,
+		      struct page *p, struct page *prev_page,
+		      unsigned int intra_off, size_t plen,
+		      int pbl_idx, int pbe_remaining,
+		      int seg_before, int seg_at_sge_start,
+		      u16 prev_page_off, u16 prev_page_len,
+		      u16 page_off_after, u16 page_len_after,
+		      int sge_idx, u8 flags)
+{
+	u32 idx = c_tx->hdt_trace_head++ & (SIW_TX_HDT_TRACE_ENTRIES - 1);
+	struct siw_tx_hdt_dbg_entry *e = &c_tx->hdt_trace[idx];
+
+	e->sge_laddr = sge_laddr;
+	e->p = (u64)(uintptr_t)p;
+	e->prev_page = (u64)(uintptr_t)prev_page;
+	e->sge_off = sge_off;
+	e->sge_len = sge_len;
+	e->bytes_unsent = (u32)c_tx->bytes_unsent;
+	e->data_len = data_len;
+	e->jif = (u32)jiffies;
+	e->pbl_idx = (u32)pbl_idx;
+	e->pbe_remaining = (u32)pbe_remaining;
+	e->intra_off = (u16)intra_off;
+	e->plen = (u16)plen;
+	e->seg_before = (u16)seg_before;
+	e->seg_at_sge_start = (u16)seg_at_sge_start;
+	e->prev_page_len = prev_page_len;
+	e->page_len_after = page_len_after;
+	e->prev_page_off = prev_page_off;
+	e->page_off_after = page_off_after;
+	e->sge_idx = (u8)sge_idx;
+	e->flags = flags;
+}
+#endif /* SIW_TX_HDT_TRACE */
 
 /*
  * Write out iov referencing hdr, data and trailer of current FPDU.
@@ -747,6 +981,27 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 
 	struct kvec		iov[MAX_ARRAY];
 	struct page		*page_array[MAX_ARRAY];
+	/*
+	 * Per-entry (offset, len) tuple for the 0-copy (sendpage) path.
+	 *
+	 * page_off[i] is the intra-page offset where this entry's bytes
+	 * start in page_array[i]; page_len[i] is the number of bytes
+	 * (encoded with the PAGE_SIZE-as-0 sentinel below). The pair is
+	 * required because, with sub-PAGE_SIZE PBL entries (see
+	 * mr_min_page_4k), the bytes of a single SGE can map to physical
+	 * chunks at non-zero intra-page offsets even past the first
+	 * entry, so the historical "first entry has an offset, every
+	 * subsequent entry starts at offset 0" assumption is wrong.
+	 *
+	 * Both stored as u16 to keep the stack frame within the kernel's
+	 * 1 KiB -Wframe-larger-than budget. A page_array[] entry always
+	 * holds at least 1 byte, so 0 is a free sentinel for the only
+	 * value u16 can't represent: PAGE_SIZE == 65536 on 64 KiB-page
+	 * kernels. page_off[] is in [0, PAGE_SIZE) and fits u16 directly
+	 * even on 64 KiB-page kernels (max value PAGE_SIZE - 1 = 0xffff).
+	 */
+	u16			page_off[MAX_ARRAY];
+	u16			page_len[MAX_ARRAY];
 	struct msghdr		msg = {.msg_flags = MSG_DONTWAIT};
 
 	int			seg = 0, do_crc = c_tx->do_crc, is_kva = 0, rv, is_kva_vm = 0;
@@ -783,7 +1038,16 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 
 	while (data_len) { /* walk the list of SGE's */
 		unsigned int	sge_len = min(sge->length - sge_off, data_len);
-		unsigned int	fp_off = (sge->laddr + sge_off) & ~PAGE_MASK;
+		/*
+		 * Where this SGE's first page_array entry lives. Used to
+		 * gate the merge-with-prev predicate: we only fold a new
+		 * inner-loop chunk into page_array[seg-1] when seg-1 was
+		 * also produced by *this* SGE. Across SGEs we always emit
+		 * a fresh entry so siw_0copy_tx / siw_pages_for_bytes can
+		 * recover SGE boundaries from the page_off / page_len
+		 * arrays.
+		 */
+		int seg_at_sge_start = seg;
 		int pbl_idx = 0;
 
 		BUG_ON(!sge_len);
@@ -817,59 +1081,251 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 			is_kva_vm = is_vmalloc_addr((const void *)sge->laddr);
 
 		while (sge_len) {
-			size_t plen = min((int)PAGE_SIZE - fp_off, sge_len);
+			/*
+			 * Resolve this iteration's struct page and the
+			 * intra-page offset of its first byte.
+			 *
+			 * For PBL MRs the offset MUST come from the resolved
+			 * paddr (siw_pbl_get_paddr), NOT from sge->laddr.
+			 * With sub-PAGE_SIZE PBEs (mr_min_page_4k=Y) the SGE
+			 * virtual range can map to physical chunks at any
+			 * intra-page offset within their backing struct
+			 * pages, so deriving the offset from sge->laddr (or
+			 * from any iteration count) would silently corrupt
+			 * outgoing data: siw_crc_page / kmap / tcp_sendpage
+			 * would index into the wrong bytes of the right
+			 * struct page.
+			 *
+			 * For umem and kva paths the SGE virtual address is
+			 * the kernel/user virtual address that backs the
+			 * struct page directly, so the intra-page offset of
+			 * (sge->laddr + sge_off) is also the intra-page
+			 * offset within p.
+			 */
+			unsigned int intra_off;
+			size_t plen;
+			int pbe_remaining = 0;
+			struct page *p;
+			bool merge_with_prev;
 
-			BUG_ON(plen <= 0);
 			if (!is_kva) {
-				struct page *p;
-				if (mr->mem.is_pbl)
-					p = siw_get_pblpage(mr,
+				if (mr->mem.is_pbl) {
+					u64 paddr = siw_pbl_get_paddr(mr,
 						sge->laddr + sge_off,
-						&pbl_idx);
-				else
-					p = siw_get_upage(mr->umem, sge->laddr
-							  + sge_off);
-				BUG_ON(!p);
-				page_array[seg] = p;
-
-				if (!c_tx->use_sendpage) {
-					iov[seg].iov_base = kmap(p) + fp_off;
-					iov[seg].iov_len = plen;
-				}
-				if (do_crc)
-					siw_crc_page(c_tx->mpa_crc_hd, p,
-						     fp_off, plen);
-			} else {
-				if (!is_kva_vm) {
-					u64 pa = ((sge->laddr + sge_off) & PAGE_MASK);
-					page_array[seg] = virt_to_page(pa);
+						&pbl_idx,
+						&pbe_remaining);
+					BUG_ON(!paddr);
+					p = virt_to_page(paddr);
+					intra_off = paddr & ~PAGE_MASK;
+					/*
+					 * A single PBE can be smaller than
+					 * one system page on kernels where
+					 * PAGE_SIZE > SIW_MR_MIN_PAGE_SIZE.
+					 * Clamp the chunk by both the system
+					 * page (from paddr's intra-page
+					 * offset) and the PBE remainder so
+					 * neither siw_crc_page nor the
+					 * sendpage stride below over-reads
+					 * into adjacent (non-registered)
+					 * memory.
+					 */
+					plen = min_t(size_t,
+						     PAGE_SIZE - intra_off,
+						     sge_len);
+					plen = min_t(size_t, plen,
+						     pbe_remaining);
 				} else {
-					page_array[seg] = vmalloc_to_page((const void *)(sge->laddr + sge_off));
+					p = siw_get_upage(mr->umem,
+						sge->laddr + sge_off);
+					intra_off = (sge->laddr + sge_off)
+						    & ~PAGE_MASK;
+					plen = min_t(size_t,
+						     PAGE_SIZE - intra_off,
+						     sge_len);
 				}
-				if (do_crc)
+				BUG_ON(!p);
+			} else {
+				intra_off = (sge->laddr + sge_off)
+					    & ~PAGE_MASK;
+				plen = min_t(size_t, PAGE_SIZE - intra_off,
+					     sge_len);
+				if (!is_kva_vm) {
+					u64 pa = ((sge->laddr + sge_off)
+						  & PAGE_MASK);
+					p = virt_to_page(pa);
+				} else {
+					p = vmalloc_to_page(
+						(const void *)
+						(sge->laddr + sge_off));
+				}
+			}
+			BUG_ON(plen <= 0);
+
+			if (do_crc) {
+				if (!is_kva)
+					siw_crc_page(c_tx->mpa_crc_hd, p,
+						     intra_off, plen);
+				else
 					siw_crc_array(c_tx->mpa_crc_hd,
-						(void *)(sge->laddr + sge_off),
+						(void *)(sge->laddr +
+							 sge_off),
 						plen);
 			}
 
-			sge_len -= plen;
-			sge_off += plen;
-			data_len -= plen;
-			fp_off = 0;
+		/*
+		 * If a sub-PAGE_SIZE PBE caused us to land inside the same
+		 * system page we already emitted for this SGE *and* the new
+		 * chunk starts exactly where the previous chunk ended,
+		 * extend the existing page_array entry. The end-aligned
+		 * check guards against the page_array[seg - 1] == p pointer
+		 * comparison spuriously firing when the merge isn't
+		 * physically safe -- e.g. a PBL that aliases two PBEs to
+		 * different intra-page offsets within the same compound
+		 * head, or any other path where two inner-loop iterations
+		 * land in the same struct page at non-contiguous offsets.
+		 * Without it we'd grow page_len[seg - 1] past the next PBE
+		 * boundary and read past the end of registered memory in
+		 * siw_tcp_sendpages.
+		 */
+#ifdef SIW_TX_HDT_TRACE
+		/*
+		 * Snapshot pre-action state for the trace. We have to
+		 * read page_array[seg-1] / page_off[seg-1] / page_len[seg-1]
+		 * now because the merge branch below mutates page_len[seg-1]
+		 * in place, and the new-entry branch advances seg.
+		 */
+		int trace_seg_before = seg;
+		struct page *trace_prev_page = (seg > seg_at_sge_start)
+			? page_array[seg - 1] : NULL;
+		u16 trace_prev_pl = (seg > seg_at_sge_start)
+			? page_len[seg - 1] : 0;
+		u16 trace_prev_po = (seg > seg_at_sge_start)
+			? page_off[seg - 1] : 0;
+		unsigned int trace_prev_end = (seg > seg_at_sge_start)
+			? (unsigned int)trace_prev_po +
+			  siw_decode_page_len(trace_prev_pl)
+			: 0;
+		bool trace_same_page = trace_prev_page == p;
+		bool trace_intra_off_ok = (seg > seg_at_sge_start) &&
+			(intra_off == trace_prev_end);
+#endif
 
-			if (++seg > (int)MAX_ARRAY) {
-				dprint(DBG_ON, "(QP%d): Too many fragments\n",
-				       TX_QPID(c_tx));
+		merge_with_prev = (seg > seg_at_sge_start) &&
+				  (page_array[seg - 1] == p) &&
+				  (intra_off ==
+				   (unsigned int)page_off[seg - 1] +
+				    siw_decode_page_len(page_len[seg - 1]));
+
+		if (merge_with_prev) {
+			unsigned int extended =
+				siw_decode_page_len(page_len[seg - 1])
+				+ plen;
+			if (WARN_ON_ONCE((unsigned int)page_off[seg - 1] +
+					 extended > PAGE_SIZE)) {
+				/*
+				 * Should be unreachable: the merge guard
+				 * above means page_off[seg-1] + extended
+				 * == intra_off + plen <= PAGE_SIZE. Force
+				 * a clean abort instead of corrupting the
+				 * outgoing FPDU.
+				 */
 				if (!is_kva && !c_tx->use_sendpage) {
-					int i = (hdr_len > 0) ? 1 : 0;
-					seg--;
-					while (i < seg)
-						kunmap(page_array[i++]);
+					int j = (hdr_len > 0) ? 1 : 0;
+					while (j < seg)
+						kunmap(page_array[j++]);
 				}
 				wqe->processed -= c_tx->bytes_unsent;
 				rv = -EMSGSIZE;
 				goto done_crc;
 			}
+			page_len[seg - 1] =
+				siw_encode_page_len(extended);
+			if (!c_tx->use_sendpage)
+				iov[seg - 1].iov_len += plen;
+		} else {
+				page_array[seg] = p;
+				/*
+				 * Per-entry (off, len) tuple: bytes
+				 * [page_off[seg], page_off[seg]+plen) of
+				 * page_array[seg]. siw_tcp_sendpages /
+				 * siw_pages_for_bytes walk this directly --
+				 * no per-SGE first-page offset arithmetic
+				 * needed, so sub-PAGE_SIZE PBEs that cross
+				 * struct-page boundaries with non-zero
+				 * intra-page offsets work correctly.
+				 */
+				page_off[seg] = (u16)intra_off;
+				page_len[seg] = siw_encode_page_len(plen);
+
+				if (!is_kva && !c_tx->use_sendpage) {
+					iov[seg].iov_base = kmap(p) +
+							    intra_off;
+					iov[seg].iov_len = plen;
+				}
+
+				if (++seg > (int)MAX_ARRAY) {
+					dprint(DBG_ON,
+					       "(QP%d): Too many fragments\n",
+					       TX_QPID(c_tx));
+					if (!is_kva && !c_tx->use_sendpage) {
+						int i = (hdr_len > 0) ? 1 : 0;
+						seg--;
+						while (i < seg)
+							kunmap(page_array[i++]);
+					}
+					wqe->processed -= c_tx->bytes_unsent;
+					rv = -EMSGSIZE;
+					goto done_crc;
+				}
+			}
+
+#ifdef SIW_TX_HDT_TRACE
+			{
+				u8 trace_flags = 0;
+				int trace_updated_idx;
+
+				if (merge_with_prev)
+					trace_flags |= SIW_TX_HDT_TRACE_FL_MERGED;
+				if (is_kva) {
+					trace_flags |= SIW_TX_HDT_TRACE_FL_IS_KVA;
+					if (is_kva_vm)
+						trace_flags |= SIW_TX_HDT_TRACE_FL_IS_KVA_VM;
+				}
+				if (!is_kva && mr->mem.is_pbl)
+					trace_flags |= SIW_TX_HDT_TRACE_FL_IS_PBL;
+				if (c_tx->use_sendpage)
+					trace_flags |= SIW_TX_HDT_TRACE_FL_USE_SENDPAGE;
+				if (trace_same_page)
+					trace_flags |= SIW_TX_HDT_TRACE_FL_SAME_PAGE;
+				if (trace_intra_off_ok)
+					trace_flags |= SIW_TX_HDT_TRACE_FL_INTRA_OFF_OK;
+
+				/*
+				 * In the merge branch we mutated
+				 * page_len[seg - 1] (seg unchanged); in
+				 * the new branch we wrote page_len[seg
+				 * - 1] after the ++seg.  Either way the
+				 * updated entry is at seg - 1 by the
+				 * time we get here.
+				 */
+				trace_updated_idx = seg - 1;
+				siw_tx_hdt_trace_iter(c_tx,
+					sge->laddr, sge_off, sge_len,
+					data_len, p, trace_prev_page,
+					intra_off, plen, pbl_idx,
+					pbe_remaining,
+					trace_seg_before,
+					seg_at_sge_start,
+					trace_prev_po, trace_prev_pl,
+					page_off[trace_updated_idx],
+					page_len[trace_updated_idx],
+					sge_idx, trace_flags);
+			}
+#endif
+
+			sge_len -= plen;
+			sge_off += plen;
+			data_len -= plen;
 		}
 sge_done:
 		/* Update SGE variables at end of SGE */
@@ -926,8 +1382,9 @@ sge_done:
 			trl_pg = c_tx->trailer_page;
 			trl_pg_len = sizeof(c_tx->trailer.crc);
 		}
-		rv = siw_0copy_tx(s, page_array, first_sge, c_tx->sge_off,
-				  data_len, trl_pg, trl_pg_len, c_tx->new_tcpseg);
+		rv = siw_0copy_tx(s, page_array, page_off, page_len,
+				  first_sge, c_tx->sge_off, data_len,
+				  trl_pg, trl_pg_len, c_tx->new_tcpseg);
 		if (rv == data_len + trl_pg_len) {
 			if (!trl_pg_len) {
 				dprint(DBG_TX, "(QP%d): sending %d trailer bytes: %*ph from " dprint_ptr_str() "\n",
@@ -1806,11 +2263,30 @@ static void check_sent_fpdu_crc(struct siw_qp *qp, struct siw_iwarp_tx_fpdu *sen
 			int index = 0;
 			void *pg_data;
 			while (data_left_in_sge > 0) {
-				/* Get Page from MR */
-				if (!mr->mem.is_pbl)
-					pg = siw_get_upage(mr->umem, sge->laddr + sge_off);
-				else
-					pg = siw_get_pblpage(mr, sge->laddr + sge_off, &index);
+				int pbe_remaining = 0;
+				u64 paddr;
+
+				/*
+				 * Get Page from MR. For PBL MRs we need
+				 * paddr (not just the struct page) because
+				 * the intra-page offset for sub-PAGE_SIZE
+				 * PBEs comes from paddr & ~PAGE_MASK, NOT
+				 * from sge->laddr & ~PAGE_MASK -- see
+				 * siw_pbl_get_paddr() comment.
+				 */
+				if (!mr->mem.is_pbl) {
+					pg = siw_get_upage(mr->umem,
+						sge->laddr + sge_off);
+					pg_off = (sge->laddr + sge_off)
+						 & ~PAGE_MASK;
+				} else {
+					paddr = siw_pbl_get_paddr(mr,
+						sge->laddr + sge_off,
+						&index, &pbe_remaining);
+					pg = paddr ? virt_to_page(paddr)
+						   : NULL;
+					pg_off = paddr & ~PAGE_MASK;
+				}
 				if (!pg) {
 					pr_err("Failed to get page from sge " dprint_ptr_str() " of sent fpdu " dprint_ptr_str() " qp " dprint_ptr_str() " mr " dprint_ptr_str() " addr %llu index %d is pbl %d\n",
 						   sge, sent_fpdu, qp, mr, sge->laddr + sge_off, index, mr->mem.is_pbl);
@@ -1823,10 +2299,18 @@ static void check_sent_fpdu_crc(struct siw_qp *qp, struct siw_iwarp_tx_fpdu *sen
 						   pg, sge, sent_fpdu, qp);
 					BUG_ON(1);
 				}
-				/* Calculate offset and data in page */
-				pg_off = ((unsigned long)(sge->laddr + sge_off) & ~PAGE_MASK);
 				BUG_ON(pg_off < 0 || pg_off >= PAGE_SIZE);
 				pg_data_len = min_t(int, PAGE_SIZE - pg_off, data_left_in_sge);
+				/*
+				 * For PBL MRs a single PBE may map less than
+				 * one system page (SIW_MR_MIN_PAGE_SIZE on a
+				 * large-page kernel). Clamp to the PBE
+				 * remainder so we only CRC the bytes that are
+				 * actually part of the registered region.
+				 */
+				if (mr->mem.is_pbl)
+					pg_data_len = min_t(int, pg_data_len,
+							    pbe_remaining);
 				BUG_ON(pg_data_len < 0 || pg_data_len > PAGE_SIZE);
 				BUG_ON(pg_off + pg_data_len > ((unsigned long)pg_data & PAGE_MASK) + PAGE_SIZE);
 				pr_debug("#2 - data_len %d data_left_in_sge %d sge_off %d pbl_idx %d page " dprint_ptr_str() " pg_data " dprint_ptr_str() " pg_off %d pg_data_len %d\n",
