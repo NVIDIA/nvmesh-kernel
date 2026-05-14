@@ -3917,6 +3917,7 @@ static int finish_mapping(struct nvmeibc_ib_net *net,
 	if (!rv) {
 		state->npages = 0;
 		state->dma_len = 0;
+		state->last_page_used = 0;
 	}
 
 out:
@@ -3941,7 +3942,6 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 	struct nvmeib_dev *nvdev = P2NV(net->port);
 	dma_addr_t dma_addr = sg_dma_address(sg);
 	unsigned dma_len = sg_dma_len(sg);
-	dma_addr_t last_va_addr;
 	unsigned offset;
 	unsigned len;
 	int rv = 0;
@@ -3986,30 +3986,61 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 	}
 
 	/*
-	 * Append this sg entry if it is:
-	 *  - physically contiguous with prior entry (regardless of offset)
-	 *  - starts on page boundary, with no gap from prior entry.
+	 * Decide whether this sg entry can extend the MR we're currently
+	 * building. An FR/FMR MR is a list of physical page slots, with
+	 * a possible offset into pages[0] and a possibly-partial last
+	 * page; middle pages must be fully consumed (page_size bytes
+	 * each). So we can append iff one of:
 	 *
-	 * The first rule is for ARM with 64k page size; each sg entry is
-	 * 4K, with an offset, but entries are on the same DMA page.
+	 *   1. The new dma_addr continues the last consumed byte
+	 *      (same page slot, or seamless physical continuation that
+	 *      lands at the page boundary).
 	 *
-	 * The second rule is for unrelated pages with no gaps. (x86 & arm)
+	 *   2. The new dma_addr is at offset 0 of a fresh page, AND the
+	 *      previous page slot is fully consumed, AND we have room
+	 *      for another slot (npages < max_pages_per_mr).
 	 *
-	 * map_update_start() sets unmapped_sg, unmapped_addr.
-	 * finish_mapping() sets npages/dma_len to 0.
+	 * Anything else (mid-page jump to a physically non-adjacent
+	 * address, or a new partial-start page while the previous slot
+	 * isn't full) requires a split.
+	 *
+	 * We track the physical end via state->pages[npages-1] +
+	 * last_page_used. Using state->unmapped_addr + state->dma_len
+	 * here would be wrong: that's a *linear* projection that
+	 * assumes all pages in the MR are virtually contiguous, which
+	 * is not true when sg entries come from discontiguous physical
+	 * pages (e.g. SIW, where dma_map_sg is a no-op stub and the
+	 * block layer's 4K-chunked sg list reaches us unchanged).
+	 *
+	 * map_update_start() sets unmapped_sg/unmapped_addr.
+	 * finish_mapping() resets npages/dma_len/last_page_used to 0.
 	 */
-	last_va_addr = state->unmapped_addr + state->dma_len;
-	if ((last_va_addr != dma_addr) &&
-	    ((last_va_addr | dma_addr) & ~nvdev->mr_page_mask)) {
-		_ND(trace_4_ib_net_map_sg_entry, "Finish entry - "
-		    "addr=@DMA_ADDR len=@DMA_LEN dma_addr=@DMA_ADDR",
-		    state->unmapped_addr, state->dma_len, dma_addr);
-		if ((rv = finish_mapping(net, state, key, okey))) {
-			_NT(trace_5_ib_net_map_sg_entry,
-			    "Finish mapping failed - @RV", rv);
-			goto out;
+	if (state->npages) {
+		dma_addr_t last_phys_end =
+		    state->pages[state->npages - 1] + state->last_page_used;
+		bool can_append;
+
+		if (dma_addr == last_phys_end) {
+			can_append = true;
+		} else if ((dma_addr & ~nvdev->mr_page_mask) == 0 &&
+			   state->last_page_used == nvdev->mr_page_size &&
+			   state->npages < nvdev->max_pages_per_mr) {
+			can_append = true;
+		} else {
+			can_append = false;
 		}
-		map_update_start(state, sg, sg_index, dma_addr);
+
+		if (!can_append) {
+			_ND(trace_4_ib_net_map_sg_entry, "Finish entry - "
+			    "addr=@DMA_ADDR len=@DMA_LEN dma_addr=@DMA_ADDR",
+			    state->unmapped_addr, state->dma_len, dma_addr);
+			if ((rv = finish_mapping(net, state, key, okey))) {
+				_NT(trace_5_ib_net_map_sg_entry,
+				    "Finish mapping failed - @RV", rv);
+				goto out;
+			}
+			map_update_start(state, sg, sg_index, dma_addr);
+		}
 	}
 
 	while (dma_len) {
@@ -4052,12 +4083,21 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 
 		if (!state->npages)
 			state->base_dma_addr = dma_addr;
-		if (!state->npages || !offset)
-			state->pages[state->npages++] =
-			    dma_addr & nvdev->mr_page_mask;
+		{
+			bool pushed_page = !state->npages || !offset;
 
-		len = min_t(unsigned, dma_len, nvdev->mr_page_size - offset);
-		state->dma_len += len;
+			if (pushed_page)
+				state->pages[state->npages++] =
+				    dma_addr & nvdev->mr_page_mask;
+
+			len = min_t(unsigned, dma_len,
+				    nvdev->mr_page_size - offset);
+			state->dma_len += len;
+			if (pushed_page)
+				state->last_page_used = offset + len;
+			else
+				state->last_page_used += len;
+		}
 		dma_addr += len;
 		dma_len -= len;
 	}
