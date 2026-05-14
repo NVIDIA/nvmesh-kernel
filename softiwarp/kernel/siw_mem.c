@@ -177,19 +177,36 @@ void siw_pbl_free(struct siw_pbl *pbl)
 	kvfree(pbl);
 }
 
-static bool use_pbe_fixed_size = false;
-module_param(use_pbe_fixed_size, bool, 0644);
-MODULE_PARM_DESC(use_pbe_fixed_size, "Use fixed size buffers.");
-
 //omril: @off is 'addr - mr->mem.va;'
 u64 siw_pbl_get_buffer(struct siw_pbl *pbl, u64 off, int *len, int *idx)
 {
-	int i = idx ? *idx : 0;
+	int i;
 
-	if (use_pbe_fixed_size && i == 0 && pbl->pbe_fixed_shift) {
-		if (off > pbl->pbe[0].size /* && pbl->num_buf > 1 */) {
-			i = ((off - pbl->pbe[0].size) >> pbl->pbe_fixed_shift) + 1;
-		}
+	/*
+	 * When the PBL was built with a fixed page size (siw_map_mr sets
+	 * pbl->pbe_fixed_shift = ilog2(mr->page_size), and disables PBE
+	 * coalescing in that mode), every pbe[k] for k >= 1 has size
+	 * 1 << pbe_fixed_shift = mr_page_size. pbe[0] may be smaller
+	 * because of a non-zero iova offset, and the last pbe may be a
+	 * partial trailing page. So for any @off > pbe[0].size the target
+	 * PBE is at index ((off - pbe[0].size) >> pbe_fixed_shift) + 1.
+	 *
+	 * This makes lookup O(1) regardless of @off (vs. the O(N) linear
+	 * scan below). It matters most when mr_page_size is small relative
+	 * to PAGE_SIZE - e.g. with mr_min_page_4k=1 on 64K-page kernels,
+	 * a 1 MiB MR holds 256 PBEs and otherwise gets scanned linearly
+	 * on every byte-level access.
+	 *
+	 * We override the caller-provided *idx unconditionally because
+	 * @off uniquely identifies the target PBE; callers use *idx only
+	 * as a sequential-access hint, never to filter PBEs.
+	 */
+	if (pbl->pbe_fixed_shift) {
+		i = (off > pbl->pbe[0].size)
+		    ? ((off - pbl->pbe[0].size) >> pbl->pbe_fixed_shift) + 1
+		    : 0;
+	} else {
+		i = idx ? *idx : 0;
 	}
 
 	while (i < pbl->num_buf) {
