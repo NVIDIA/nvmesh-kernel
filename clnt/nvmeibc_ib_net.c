@@ -3436,6 +3436,21 @@ void nvmeibc_ib_net_free(struct nvmeibc_ib_net *net)
 		/* in case net was not fully created/enabled */
 		rcq_kthread_stop(net);
 
+		/*
+		 * [NVMESH-8324] Drain any remaining un-polled CQEs immediately
+		 * before destroying the QP. SIW WARNs at siw_destroy_qp()
+		 * (softiwarp/kernel/siw_verbs.c:1371) if scq/rcq qp_ref_cnt is
+		 * non-zero at destroy time. nvmeibc_ib_net_break_qp() already
+		 * drains in its happy path, but if the LAST_WQE wait times out
+		 * or further CQEs are produced after that drain returns, the
+		 * leftover CQEs trip the WARN. Mirrors the server-side fix in
+		 * srv/nvmeibs_net.c::release_work() that drains CQs for the
+		 * QP_DRAINING / QP_RELEASING states right before the QP is
+		 * destroyed.
+		 */
+		 if (net->qp)
+		 	drain_cqs(net);
+
 		if (net->srq_info) {
 			nvmeib_srq_info_put(net->srq_info, net);
 			net->srq_info = NULL;
