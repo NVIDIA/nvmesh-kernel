@@ -51,8 +51,8 @@ function usage()
 	exit 1
 }
 
-SHORT_OPTIONS="hn" # no args
-SHORT_OPTIONS+="d:q:p:e:b:m:c:r:f:s:x:" # with arg
+SHORT_OPTIONS="hnx" # no args
+SHORT_OPTIONS+="d:q:p:e:b:m:c:r:f:s:" # with arg
 
 LONG_OPTIONS="help,noirq,setrxq,dryrun,clean" # no args
 LONG_OPTIONS+=",device:"
@@ -457,6 +457,22 @@ NIC_N_CPU=0
 #
 # ------------------------------------------------------------------------------
 NIC_NUMA_NODE=$(cat /sys/class/net/$BASE_DEVICE/device/numa_node)
+
+# If the NIC has no NUMA affinity (e.g. virtio/passthrough in a VM), neither
+# pernuma nor persocket has a meaningful answer. Negative array indices in
+# bash silently return the last-written slot, which would pin every IRQ to
+# whatever CPU happens to be in that "socket". Fall back to fullspread so the
+# IRQs at least get distributed.
+if [ "$NIC_NUMA_NODE" -lt 0 ]; then
+	case $AFFINITY_DOMAIN in
+		pernuma|persocket)
+			warn_log "$BASE_DEVICE reports numa_node=$NIC_NUMA_NODE;"\
+			         " falling back from $AFFINITY_DOMAIN to fullspread"
+			AFFINITY_DOMAIN=fullspread
+			;;
+	esac
+fi
+
 NIC_SOCKET=${NUMA_2_SOCK[$NIC_NUMA_NODE]}
 case $AFFINITY_DOMAIN in
 	pernuma)
