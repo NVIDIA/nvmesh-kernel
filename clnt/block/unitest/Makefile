@@ -161,6 +161,7 @@ SOURCES += ./uni_scenarios/uni_scenario_ec_jam.c
 SOURCES += ./uni_scenarios/uni_scenario_ec_serjio.c
 SOURCES += ./uni_scenarios/uni_scenario_common.c
 SOURCES += ./nvmeibc_tracer_unitest.c
+SOURCES += ./nvmeibc_nvmeiba_kapi_sim.c
 
 # Production code: /utils/
 UTILS_DIR := $(SSDA)/utils
