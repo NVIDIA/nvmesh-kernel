@@ -9411,6 +9411,9 @@ static DECLARE_IO_WQ_FN(io_cln_jrnl_disk_rng_fn)
 				int chain_err;
 				if (nvmeib_is_jmd_unused_entry(jmdc_entry))
 					continue;
+				if (jentry_state == JENTRY_IO_ERR) {
+					continue;
+				}
 				if ((chain_err = nvmeibs_serjio_jmd_decode_j2d_chain(jmdc_entry, 1 << jrange->binje_shift, &j2d_start, &j2d_end)) != NVMEIB_JENTRY_CHAIN_OK) {
 					_NWs(warn_serjio_io_cln_jrnl_disk_rng_fn_inv_chain, serjio_pd,
 							"Journal Range @JRNL_RNG_IDX N @BINJE Entry @JRNL_RNG_ENT_IDX has invalid Chain Raw: @RAW Ptr: @PTR Chain Error @ERR_STR Chain Error Block @IDX",
