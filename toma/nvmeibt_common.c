@@ -386,6 +386,7 @@ int nvmeibt_zero_disk_pblks(const struct nvmeibt_ldisk_id_for_srvr_cmd *ldisk,
 	zero_msg->on_done = zero_blks_on_done;
 	zero_msg->ctx = (void *)zero_ctx;
 	zero_msg->len = sizeof(*zero_msg_payload);
+	zero_ctx->rv = -ENOEXEC;
 
 	pt_err = pthread_mutex_init(&zero_ctx->guard_mutex, NULL);
 	if (pt_err != 0) {
