@@ -368,6 +368,16 @@ static int connect_nics_with_nodes(void)
 	return rv;
 }
 
+static bool is_gpt_entry_for_seg_needed(struct nvmeibt_disk_segment *seg)
+{
+	if (nvmeibt_disk_segment_is_x_done(&seg->seg_follower.committed_seg_lot.seg_topo)) {
+		N_Tf(hu889aa, "seg=@UUID_8 is x_done, ses_active and gpt entry not needed", nvmeibt_seg_UUID_8(seg));
+		return 0;
+	} else {
+		return 1;
+	}
+}
+
 int nvmeibt_topology_add_seg_active_to_both_mem_gpts(struct nvmeibt_local_disk *local_disk, struct nvmeibt_seg_active *seg_active)
 {
 	int												rv = -1;
@@ -512,6 +522,7 @@ static int add_segments_to_local_disks_gpt(void)
 static void remove_seg_from_both_mem_gpts_if_eligable(struct nvmeibt_local_disk *local_disk, struct nvmeibt_disk_gpt_partition_entry *cur_gpt_entry)
 {
 	struct nvmeibt_seg_active				*seg_active;
+	struct nvmeibt_disk_segment				*seg;
 
 	// NFIN;
 	seg_active = nvmeibt_find_seg_active_of_specific_local_disk_by_uuid(local_disk, &cur_gpt_entry->partition_guid);
@@ -520,12 +531,11 @@ static void remove_seg_from_both_mem_gpts_if_eligable(struct nvmeibt_local_disk 
 		nvmeibt_abort(ES_FATAL);
 	}
 
-	if (nvmeibt_seg_active_get_disk_segment(seg_active)) {
-		N_Tf(vgd783n, "Skipping functioning seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
+	seg = nvmeibt_seg_active_get_disk_segment(seg_active);
+	if (seg && is_gpt_entry_for_seg_needed(seg))
 		goto out;
-	}
 
-	// Now we know that the seg_active is not a part of config and should be removed
+	// Now we know that the seg_active is not a part of config or already deprecated and should be removed
 	NVMEIBT_SEG_ACTIVE_FREE_MEM_AND_PROCESSES(seg_active);
 	N_Tf(wtdhy43, "Deleting gpt_entry seg=@UUID_LE from disk=@STR", &cur_gpt_entry->partition_guid, nvmeibt_local_disk_display(local_disk));
 	nvmeibt_disk_metadata_remove_entry_from_mem_gpt(&local_disk->main_gpt,     &cur_gpt_entry->partition_guid);
@@ -536,10 +546,9 @@ out:
 	return;
 }
 
-static int trim_stale_gpt_entries_from_local_disks_gpt(void)
+static void trim_stale_gpt_entries_from_local_disks_gpt(void)
 {
 	struct nvmeibt_local_disk	*local_disk;
-	int							rv = 0;
 
 	NFIN;
 	if (nvmeibt_global_get_global()->is_valid_topo_config_received) {
@@ -564,7 +573,6 @@ static int trim_stale_gpt_entries_from_local_disks_gpt(void)
 	}
 
 	NFOUT;
-	return rv;
 }
 
 static int connect_disks_with_disk_segments(void)
@@ -723,6 +731,8 @@ static void connect_local_disk_segments_with_seg_active(void)
 			seg = disk->disk_segments[seg_idx];
 			seg_active = nvmeibt_disk_segment_get_seg_active(seg);
 			if (!seg_active) {
+				if (!is_gpt_entry_for_seg_needed(seg))
+					continue;
 				seg_uuid = *nvmeibt_seg_UUID(seg);
 				seg_active = nvmeibt_find_seg_active_of_specific_local_disk_by_uuid(local_disk, &seg_uuid);
 				if (!seg_active) {	// a new seg
@@ -849,6 +859,7 @@ int nvmeibt_topology_relate_hardware_probe_to_config(void)
 		rv = -1;
 	if (connect_disks_with_disk_segments() < 0)
 		rv = -1;
+	trim_stale_gpt_entries_from_local_disks_gpt();
 	connect_local_disk_segments_with_seg_active();
 	nvmeibt_topology_active_mark_reserialization_required();
 	mark_all_required_cleanups_for_all_local_segs_on_config_changes_as_needed();
@@ -956,8 +967,6 @@ int nvmeibt_topology_setup_relationships(void)
 	if (nvmeibt_topology_relate_hardware_probe_to_config() < 0)
 		goto skip;
 	if (nvmeibt_praid_validate_praids_config() < 0)
-		goto skip;
-	if (trim_stale_gpt_entries_from_local_disks_gpt() < 0)
 		goto skip;
 	if (add_segments_to_local_disks_gpt() < 0)
 		goto skip;
