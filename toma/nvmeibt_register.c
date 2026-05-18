@@ -671,6 +671,7 @@ static void alloc_reg_ctx(struct nvmeibt_registrant_ctx **reg_ctx, struct nvmeib
 	XDLIST_INIT_LINK(&((*reg_ctx)->registrant_on_timeout_link), NULL);
 	XDLIST_INIT_LINK(&((*reg_ctx)->longing_on_invalid_seg_link), NULL);
 	(*reg_ctx)->n_stale_locks = 0;
+	(*reg_ctx)->timeout_time = TIMESPEC_MAX_C99;
 	nvmeibt_client_reg_ctx_ref_added((*reg_ctx)->client, *reg_ctx);
 }
 
