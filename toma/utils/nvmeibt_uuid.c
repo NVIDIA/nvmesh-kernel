@@ -26,7 +26,7 @@ const union nvmeib_uuid nvmeib_uuid_null_val = {.ll = {0, 0}};
 // TODO: include and use "nvmeib_uuid_be.h"
 int nvmeibt_urn_uuid_str_to_union_uuid(union nvmeib_uuid *uuid, const char *urn_uuid_str) {
 	int i,j, k = 0;
-	int	rv = 0;
+	int	rv = 0, digit;
 	union _uuid_swapper *u = (union _uuid_swapper *)uuid;
 	const char *urn_uuid_ptr = urn_uuid_str;
 	for (i=0; i<2; i++) {
@@ -43,12 +43,9 @@ int nvmeibt_urn_uuid_str_to_union_uuid(union nvmeib_uuid *uuid, const char *urn_
 				c = *urn_uuid_ptr++;
 				k++;
 			}
-			if (c>='0' && c<='9')
-				v = (v<<4) | (c - '0');
-			else if (c >= 'a' || c <= 'f')
-				v = (v << 4) | (c - 'a' + 10);
-			else if (c >= 'A' || c <= 'F')
-				v = (v << 4) | (c - 'A' + 10);
+			digit = hex_to_bin(c);
+			if (digit >= 0)
+				v = (v << 4) | digit;
 			else {
 				// N_Ef(vxrwh82, "Illegal uuid=@STR k=@INT c=@CHAR", urn_uuid_str, k, c);
 				rv = -1;
@@ -141,4 +138,3 @@ void generate_random_uuid(union nvmeib_uuid *uuid) {
 		noisy_tv_nsec ^= ts.tv_nsec;
 	}
 }
-
