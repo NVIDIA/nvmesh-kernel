@@ -264,6 +264,7 @@ const char *nvmeibt_zeroing_state_str(enum NVMEIBT_ZEROING_STATE s)
 	case NVMEIBT_ZEROING_STATE_IN_WORK:			return "IN_WORK";
 	case NVMEIBT_ZEROING_STATE_DONE:			return "DONE";
 	case NVMEIBT_ZEROING_STATE_NOT_NEEDED:		return "NOT_NEEDED";
+	case NVMEIBT_ZEROING_STATE_IN_WORK_CANCELLING: return "CANCELLING";
 	default :									return "???";
 	}
 }
