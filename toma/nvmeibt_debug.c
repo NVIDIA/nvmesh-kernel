@@ -130,6 +130,7 @@ void read_rpc_config_from_persist(bool is_initial_read)
 	struct stat					config_stat;
 	uint32_t					params_encode_ver = 0;
 	FILE						*f = 0;
+	int							n_matches;
 	__MEASURE_TOOK_INIT();
 
 	if (stat(config_params.full_path, &config_stat))
@@ -159,15 +160,10 @@ void read_rpc_config_from_persist(bool is_initial_read)
 
 	nvmeibt_disk_flow_params_reset_models_before_new_scan();
 	while (fgets(config, sizeof(config), f)) {
-		int		n_matches = 0;
-		size_t	line_len;
-
 continue_reading:
-		if (config[0] == '#')
-			continue; /* Ignore comments */
-		line_len = SANITIZE_STR_END(config);
-		if (!line_len)
-			continue;
+		n_matches = 0;
+		if ((config[0] == '#') || (!SANITIZE_STR_END(config)))
+			continue; /* Ignore comments and empty lines */
 		N_Tf(hsuk35n, "@STR", config);
 
 		if (nvmeibt_disk_flow_params_try_read_from_config_line(config + 2, &n_matches)) {
@@ -225,6 +221,8 @@ void update_traces(void) {
 	struct stat				config_stat;
 	uint32_t				params_encode_ver = 0;
 	static bool				is_initial_read;
+	int						n_matches;
+	size_t					line_len;
 
 	__MEASURE_TOOK_INIT();
 	NFIN;
@@ -265,10 +263,8 @@ void update_traces(void) {
 	}
 
 	while (fgets(config, sizeof(config), f)) {
-		int					n_matches = 0;
-		size_t				line_len;
-
 continue_reading:
+		n_matches = 0;
 		if (config[0] == '#')
 			continue; /* Ignore comments */
 		line_len = SANITIZE_STR_END(config);
