@@ -646,6 +646,7 @@ static void terminate_toma(int rv)
 	// Once we get here, there is no way back, and naturally, no work in TOMA's main loop (the events handler)
 
 	//nvmeibt_ib_close_all_listeners();
+	nvmeibt_global_set_raft_pause_mode(RAFT_IN_PAUSED | RAFT_OUT_PAUSED);
 	nvmeibt_nm_done(nw_node);
 	nvmeibt_udev_destroy();
 
