@@ -645,9 +645,9 @@ static void terminate_toma(int rv)
 	NFIN;
 	// Once we get here, there is no way back, and naturally, no work in TOMA's main loop (the events handler)
 
-	//nvmeibt_ib_close_all_listeners();
 	nvmeibt_global_set_raft_pause_mode(RAFT_IN_PAUSED | RAFT_OUT_PAUSED);
 	nvmeibt_nm_done(nw_node);
+	nw_node = NULL;			// Prevent use after free
 	nvmeibt_udev_destroy();
 
 	// Must drain all WQ to avoid having any threads in the air that might try to access the mem_tbls of some disk,
@@ -1388,7 +1388,7 @@ void nvmeibt_topology_set_mgmt_updates_pause_state(int is_paused)
 void nvmeibt_toma_init_mesh(void)
 {
 	struct nvmeibt_nic		*nic;
-
+	if (unlikely(!nw_node)) return;
 	NFIN;
 	NVMEIB_HASH_FOREACH(nic, nvmeibt_global_get_global()->nics_hash_by_uuid) {
 		// IB & RoCE: we connect also to loopback for locking
@@ -1811,7 +1811,7 @@ void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn
 			nvmeibt_disk_print_disks_status(printf_fn, printf_ctx);
 	}
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_IB)
-		nvmeibt_nm_print_status(nw_node, printf_fn, printf_ctx);
+		if (nw_node) nvmeibt_nm_print_status(nw_node, printf_fn, printf_ctx);
 	// if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_RTM)
 	// 	nvmeibt_rtm_print_status(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_RECOVER)
@@ -1838,7 +1838,7 @@ void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_KAFKA_INFO)
 		nvmeibt_kafka_print_status(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_NM_JSON)
-		nvmeibt_nm_print_status_json(nw_node, printf_fn, printf_ctx);
+		if (nw_node) nvmeibt_nm_print_status_json(nw_node, printf_fn, printf_ctx);
 
 	if (print_headers)
 		(*printf_fn)(printf_ctx,
@@ -2580,7 +2580,7 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 					toma_wakeup_udev_event();
 					break;
 				case NVMEIBT_TOMA_FD_TYPE_FIFO_COMM:
-					nvmeibt_nm_rsrm_faults_handle_fifo_com(nvmeibt_get_nw_node());
+					if (nw_node) nvmeibt_nm_rsrm_faults_handle_fifo_com(nw_node);
 					break;
 				default:
 					N_Ef(trace_17_toma_run, "Unsupported FD type: @FD_TYPE", trigger_fd->fd_type);

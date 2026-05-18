@@ -3631,11 +3631,12 @@ static void raft_leader_reset_all_members_raft_ctx(void)
 static int get_n_connected_members(void)
 {
 	int									n_connected_members = 0;
-	struct nvmeibt_nm_local_node		*local_node = nvmeibt_get_nw_node();
+	struct nvmeibt_nm_local_node		*nw_node = nvmeibt_get_nw_node();
 	struct nvmeibt_raft_member			*member;
-
-	NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
-		n_connected_members += nvmeibt_nm_is_remote_node_connected(local_node, member->its_node);
+	if (nw_node) {
+		NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
+			n_connected_members += nvmeibt_nm_is_remote_node_connected(nw_node, member->its_node);
+		}
 	}
 	return n_connected_members;
 }
@@ -4977,7 +4978,7 @@ void nvmeibt_raft_get_real_time_errors_str(struct nvmeibt_Str *out)
 {
 	struct nvmeibt_raft_member		*peer_member = NULL;
 	const int64_t					now_sec = nvmeibt_global_get_cur_event_start_time().tv_sec;
-	struct nvmeibt_nm_local_node	*local_node = NULL;
+	struct nvmeibt_nm_local_node	*nw_node = nvmeibt_get_nw_node();
 
 	if (!raft_do_we_have_a_stable_leader()) {
 		nvmeibt_Str_sprintf(out, "Err=7001, No leader for %d[sec],\n", nvmeibt_raft_get_time_without_leader_sec());
@@ -4988,12 +4989,11 @@ void nvmeibt_raft_get_real_time_errors_str(struct nvmeibt_Str *out)
 				my_raft_global.n_persist_failures, (now_sec - my_raft_global.last_persist_failure_timestamp_sec));
 	}
 
-	local_node = nvmeibt_get_nw_node();
 	NVMEIB_HASH_FOREACH(peer_member, my_raft_global.raft_members_hash_by_uuid) {
 		if (peer_member->is_me || !peer_member->its_node) {
 			continue;
 		}
-		if (!nvmeibt_nm_is_remote_node_connected(local_node, peer_member->its_node)) {
+		if (!nw_node || !nvmeibt_nm_is_remote_node_connected(nw_node, peer_member->its_node)) {
 			nvmeibt_Str_sprintf(out, "Err=7003, No connection to host %s,\n", nvmeibt_raft_member_name(peer_member));
 		}
 	}

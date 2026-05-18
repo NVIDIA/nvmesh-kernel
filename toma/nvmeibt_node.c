@@ -238,8 +238,10 @@ int conn_state_switch_cb_wrapper(struct nvmeibt_node *node, void *arg,
 
 void nvmeibt_node_trim_unused_entries(int config_tag)
 {
+	struct nvmeibt_nm_local_node *nw_node = nvmeibt_get_nw_node();
 	struct nvmeibt_node		*node;
 
+	if (unlikely(!nw_node)) return;
 	NFIN;
 	NVMEIB_HASH_FOREACH(node, nvmeibt_global_get_global()->nodes_hash_by_uuid) {
 		if (NVMEIBT_OBJ_IS_OLDER(node, config_tag)) {
@@ -249,7 +251,7 @@ void nvmeibt_node_trim_unused_entries(int config_tag)
 			 * - unregister conn's srm-users (under node lock)
 			 * - call registered ncs-cb with ncs_conn_down state (w/o node lock)
 			 */
-			nvmeibt_nm_del_remote_node(nvmeibt_get_nw_node(), node);
+			nvmeibt_nm_del_remote_node(nw_node, node);
 			/* from here on, no one uses this node ... */
 			{
 				int pt_err = pthread_mutex_destroy(&node->guard);
@@ -282,20 +284,25 @@ void nvmeibt_node_free_all_at_exit(void)
 
 void nvmeibt_node_cancel_send(struct nvmeibt_node *node)
 {
+	struct nvmeibt_nm_local_node *nw_node = nvmeibt_get_nw_node();
+	if (unlikely(!nw_node)) return;		// This should never happened, as raft is disabled before networking destructor, but keep it as a last line of defense
 	NFIN;
 	lock(node);
-	nvmeibt_nm_cancel_req_node(nvmeibt_get_nw_node(), node);
+	if (nw_node)
+		nvmeibt_nm_cancel_req_node(nw_node, node);
 	unlock(node);
 	NFOUT;
 }
 
 int nvmeibt_node_send(struct nvmeibt_node *node, struct nvmeibt_msg_request *req)
 {
+	struct nvmeibt_nm_local_node *nw_node = nvmeibt_get_nw_node();
 	int rv = -1;
+	if (unlikely(!nw_node)) return rv;		// This should never happened, as raft is disabled before networking destructor, but keep it as a last line of defense
 
 	NFIN;
 	lock(node);
-	rv = nvmeibt_nm_queue_srm_req(nvmeibt_get_nw_node(), node, req);
+	rv = nvmeibt_nm_queue_srm_req(nw_node, node, req);
 	unlock(node);
 	NFOUT;
 	return rv;
