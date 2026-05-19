@@ -36,12 +36,10 @@ Usage:
 	cat /proc/nvmeibc/wq_metrics_pcpu_info | nvmesh_highres_hist.py
 """
 
-from __future__ import annotations
-
 import json
 import re
 import sys
-from typing import TypedDict
+from typing import Dict, List, Optional, Tuple, TypedDict
 
 MAX_BAR_WIDTH: int = 60
 HIGHRES_HISTOGRAM_SHIFT: int = 7
@@ -57,7 +55,7 @@ RE_METRICS_CPU = re.compile(r'^metrics\.cpu\d+$')
 class Metric(TypedDict):
 	name: str
 	labels: str
-	values: list[int]
+	values: List[int]
 	max_ticks: int
 	tsc_khz: int
 
@@ -78,7 +76,7 @@ def ticks_to_ns(ticks: int, tsc_khz: int) -> float:
 	return float(ticks) * 1_000_000 / tsc_khz
 
 
-def bin_range_ticks(i: int) -> tuple[int, int]:
+def bin_range_ticks(i: int) -> Tuple[int, int]:
 	if i == 0:
 		return (0, (1 << (HIGHRES_HISTOGRAM_SHIFT + 1)) - 1)
 	lo = 1 << (i + HIGHRES_HISTOGRAM_SHIFT)
@@ -86,7 +84,7 @@ def bin_range_ticks(i: int) -> tuple[int, int]:
 	return (lo, hi)
 
 
-def percentile_bin(bins: list[int], total: int, pct: int) -> int:
+def percentile_bin(bins: List[int], total: int, pct: int) -> int:
 	threshold = total * pct / 100.0
 	cumulative = 0
 	for i, count in enumerate(bins):
@@ -96,7 +94,7 @@ def percentile_bin(bins: list[int], total: int, pct: int) -> int:
 	return len(bins) - 1
 
 
-def parse_trace_text_line(line: str) -> Metric | None:
+def parse_trace_text_line(line: str) -> Optional[Metric]:
 	"""Parse a binary trace text line like:
 	16:44:27... name=wq.wait_time, labels=module=nvmeibc;reason=resubmit, tsc_khz=2400013, max=6395522, bins=[0,66,...]
 	"""
@@ -121,7 +119,7 @@ def parse_trace_text_line(line: str) -> Metric | None:
 	}
 
 
-def parse_pager_json(obj: dict[str, str]) -> Metric | None:
+def parse_pager_json(obj: Dict[str, str]) -> Optional[Metric]:
 	"""Parse pager --mode msg-stream-json output like:
 	{"HIGHRES_HISTOGRAM.TSC_KHZ": "2400013", "HIGHRES_HISTOGRAM.HIST_BINS": "[0,66,...]", ...}
 	"""
@@ -161,7 +159,7 @@ def print_histogram(metric: Metric) -> None:
 	if bad_type:
 		raise ValueError(f'metric has invalid field type(s): {", ".join(bad_type)}')
 
-	bins: list[int] = metric['values']
+	bins: List[int] = metric['values']
 	max_ticks: int = metric['max_ticks']
 	tsc_khz: int = metric['tsc_khz']
 
@@ -214,7 +212,7 @@ def print_histogram(metric: Metric) -> None:
 	print()
 
 
-def _try_jdr_json(obj: dict[str, list[Metric]]) -> bool:
+def _try_jdr_json(obj: Dict[str, List[Metric]]) -> bool:
 	"""Try to print histograms from a JDR JSON object. Returns True if handled."""
 	if 'metrics.all_cpus' in obj:
 		for m in obj['metrics.all_cpus']:
