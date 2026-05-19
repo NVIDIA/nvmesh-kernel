@@ -482,7 +482,7 @@ out:
 	return rv;	// rv<0:Fail, rv==0:valid_entry, rv>0:permanent_fail(deleting ...)
 }
 
-#if 1
+#if 0
 static int add_segments_to_local_disks_gpt(void)
 {
 	int								rv = 0;
@@ -967,8 +967,6 @@ int nvmeibt_topology_setup_relationships(void)
 	if (nvmeibt_topology_relate_hardware_probe_to_config() < 0)
 		goto skip;
 	if (nvmeibt_praid_validate_praids_config() < 0)
-		goto skip;
-	if (add_segments_to_local_disks_gpt() < 0)
 		goto skip;
 
 	rv = 0;
