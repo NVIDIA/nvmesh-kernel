@@ -171,6 +171,7 @@ struct nvmeibt_disk_gpt_partition_entry *nvmeibt_disk_metadata_add_mem_gpt_entry
 																				 const char *part_name,
 																				 int part_name_len);
 int nvmeibt_disk_metadata_deprecate_entry_in_mem_gpt(struct nvmeibt_disk_gpt *gpt, const union nvmeib_uuid *uuid);
+void nvmeibt_disk_metadata_free_gpt_entry(struct nvmeibt_disk_gpt *gpt, struct nvmeibt_disk_gpt_partition_entry *gpt_entry);
 int nvmeibt_disk_metadata_remove_entry_from_mem_gpt(struct nvmeibt_disk_gpt *gpt, const union nvmeib_uuid *uuid);
 struct nvmeibt_disk_gpt_partition_entry *nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(struct nvmeibt_disk_gpt *gpt,
 																									 uint64_t req_n_pblks,

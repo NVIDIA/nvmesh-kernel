@@ -660,7 +660,13 @@ out:
 	return rv;
 }
 
-
+void nvmeibt_disk_metadata_free_gpt_entry(struct nvmeibt_disk_gpt *gpt, struct nvmeibt_disk_gpt_partition_entry *gpt_entry)
+{
+	gpt_entry->partition_type_guid = GPT_UNUSED_ENTRY_TYPE_GUID;
+	gpt_entry->pba_s = 0;
+	gpt_entry->pba_e = 0;
+	gpt->n_entries_in_use--;
+}
 /**
  * Removes a disk segment from the GPT stored on the local
  * disk. This function does NOT update the data on the disk,
@@ -690,14 +696,9 @@ int nvmeibt_disk_metadata_remove_entry_from_mem_gpt(struct nvmeibt_disk_gpt *gpt
 		struct nvmeibt_disk_gpt_partition_entry *curr_gpt_entry = &(gpt->entries[entry_idx]);
 		// Check the partition uuid matches the disk segment uuid, and that the partition entry is not marked as unused.
 		if (nvmeibt_disk_metadata_is_gpt_entry_active_and_matching_uuid(uuid, curr_gpt_entry)) {
-			// Found a candidate to delete
 			char16_str_to_str(curr_gpt_entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, part_name);
-
-			curr_gpt_entry->partition_type_guid = GPT_UNUSED_ENTRY_TYPE_GUID;
-			curr_gpt_entry->pba_s = 0;
-			curr_gpt_entry->pba_e = 0;
-			gpt->n_entries_in_use--;
-			N_Tf(trace_1_disk_metadata_nvmeibt_disk_metadata_remove_entry_from_gpt, "Deleted entry=@ENTRY_INT partition name=@NAME from @STR n_active_partitions=@N_ACTIVE_PARTITIONS", entry_idx, part_name, gpt->main_or_metadata, gpt->n_entries_in_use);
+			N_Tf(io009n4, "Deleted entry=@ENTRY_INT partition name=@NAME from @STR n_active_partitions=@N_ACTIVE_PARTITIONS", entry_idx, part_name, gpt->main_or_metadata, gpt->n_entries_in_use);
+			nvmeibt_disk_metadata_free_gpt_entry(gpt, curr_gpt_entry);
 			goto out;
 		}
 	}
