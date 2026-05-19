@@ -25,10 +25,10 @@ TEST_OBJ := $(BUILD_DIR)/test.o
 TEST_DCT := $(BUILD_DIR)/dict.${COMMIT_ID}.json
 TEST_OUT := $(BUILD_DIR)/messages.pet
 
-.PHONY: all clean test dirs demo
+.PHONY: all clean test check dirs demo demo_dict fast_build
 
-# Default target: build PDFs
-all: $(PET_BINFILE_READER) dirs $(TEST_EXE) test demo
+# Default target: build generated sources and test binary.
+all: $(PET_BINFILE_READER) dirs $(TEST_EXE)
 
 $(PET_BINFILE_READER): $(PET_SPEC_FILE)
 	$(KSC) --target python $(PET_SPEC_FILE)
@@ -44,6 +44,8 @@ $(TEST_EXE): $(TEST_OBJ)
 
 test: dirs $(TEST_EXE)
 	./$(TEST_EXE) $(TEST_OUT)
+
+check: test
 
 demo_dict: dirs test $(PET_BINFILE_READER)
 	PY=$(PY) ./pet_messages.sh save-dictionary $(TEST_EXE) test_pet_msgs $(TEST_DCT)
