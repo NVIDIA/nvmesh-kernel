@@ -151,7 +151,8 @@ enum siw_if_type {
 /* If there are SQEs or RQEs waiting to be flushed because the QP is locked,
  * or the CQ is full. Then schedule (or reschedule) the work with this delay (100ms)
  */
-#define SIW_FLUSH_XQES_WORK_DELAY	(HZ / 10)
+//#define SIW_FLUSH_XQES_WORK_DELAY	(HZ / 10)
+#define SIW_FLUSH_XQES_WORK_DELAY	(0)
 
 /* Log CEP activity in a ring buffer inside the CEP */
 #define SIW_CEP_LOG_RING_BUF_SIZE	8192
