@@ -89,7 +89,6 @@ struct timespec nvmeibt_recovery_get_next_timeout_timespec(void);
 
 void nvmeibt_run_exec_on_blkdev(struct run_exec_on_blkdev_ctx *ctx);
 void nvmeibt_attach_vol_for_encryption(struct nvmeibt_block_device *vol, char *shadow_vol_name, struct nvmeibt_encrypt_params *encrypt_params);
-void nvmeibt_detach_vol_for_encryption(struct run_exec_on_blkdev_ctx *exec_ctx);
 void nvmeibt_attach_detach_shadow_vol(char *origin_vol_name, bool is_attach, struct nvmeibt_Str *out);
 
 int nvmeibt_recovery_print_status(

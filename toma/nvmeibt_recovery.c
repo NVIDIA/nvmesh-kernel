@@ -1072,6 +1072,7 @@ static void encrypt_action_end_process(struct nvmeibt_block_device *shadow_vol)
 	NNVMEIBT_TOMA_FREE(u88721s, shadow_vol);
 }
 
+static void nvmeibt_detach_vol_for_encryption(struct run_exec_on_blkdev_ctx *exec_ctx);
 static void attach_shadow_vol_for_encryption_finalize(int attach_detact_rv, struct nvmeibt_block_device *shadow_vol,
 													  __attribute__((__unused__)) enum RECOVERY_ATTACH_CMD attach_cmd) {
 	struct nvmeibt_encrypt_params					*ep = shadow_vol->encrypt_params;
@@ -1088,13 +1089,7 @@ static void attach_shadow_vol_for_encryption_finalize(int attach_detact_rv, stru
 	exec_ctx->child_stdout_buf = NNVMEIBT_STR_ALLOC(vcdsghf);
 	exec_ctx->child_stderr_buf = NNVMEIBT_STR_ALLOC(ik50eln);
 	exec_ctx->timeout_ms = 100000;
-#if 1
 	nvmeibt_run_exec_on_blkdev(exec_ctx);
-#else
-	exec_ctx->toma_rv = 0;
-	exec_ctx->exec_rv = 0;
-	nvmeibt_detach_vol_for_encryption(exec_ctx);
-#endif
 out:
 	NFOUT;
 }
@@ -1243,7 +1238,7 @@ void nvmeibt_attach_vol_for_encryption(struct nvmeibt_block_device *vol, char *s
 							  MAGIC_CONFIG_SHADOW_TOKEN, NORMAL_VOLUME, RECOVERY_ATTACH_CMD_ATTACH);
 }
 
-void nvmeibt_detach_vol_for_encryption(struct run_exec_on_blkdev_ctx *exec_ctx)
+static void nvmeibt_detach_vol_for_encryption(struct run_exec_on_blkdev_ctx *exec_ctx)
 {
 	// struct nvmeibt_encrypt_params					*encrypt_params;
 
@@ -1625,26 +1620,17 @@ out:
 
 /******************        End run_exec_on_blkdev WQ        *******************/
 
-static void recovery_delete_task(struct recovery_task *recovery_task)
+static void recovery_delete_task(struct recovery_task *t)
 {
-	struct nvmeibt_local_disk		*local_disk;
-
-	NFIN;
-	if (recovery_task) {
-		local_disk = nvmeibt_seg_active_get_local_disk(recovery_task->seg_active);	// Before we delete the task
-		N_Tf(trace_recovery_recovery_delete_task, "delete recovery task tid=@TID with state=@RECOVERY_STATE_TO_STR",
-			recovery_task->tid, recovery_state_to_str(recovery_task->state));
-		if (!recovery_task->end_ordered) {
-			N_Ef(error_recovery_recovery_delete_task, "tid=@TID !task->end_ordered", recovery_task->tid);
-			nvmeibt_abort(ES_FATAL);
-		}
-		recovery_task->seg_active = NULL;
-		recovery_task->registrant = NULL;
-		XDLIST_DEL(&recovery_task->link);
-		NNVMEIBT_TOMA_FREE(x5wgw02, recovery_task);
-		nvmeibt_local_disk_munmap_and_rm_if_should_be_removed_and_unused(local_disk);
-	}
-	NFOUT;
+	struct nvmeibt_local_disk *local_disk = nvmeibt_seg_active_get_local_disk(t->seg_active);	// Before we delete the task
+	N_Tf(ttrdt7, "delete recovery task tid=@TID with state=@RECOVERY_STATE_TO_STR", t->tid, recovery_state_to_str(t->state));
+	if (!t->end_ordered)
+		N_Ef(ttrdt8, "@RECOVERY_TYPE_TO_STR tid=@TID !task->end_ordered", nvmeibt_recovery_type_to_str(t->type), t->tid);
+	t->seg_active = NULL;
+	t->registrant = NULL;
+	XDLIST_DEL(&t->link);
+	NNVMEIBT_TOMA_FREE(x5wgw02, t);
+	nvmeibt_local_disk_munmap_and_rm_if_should_be_removed_and_unused(local_disk);
 }
 
 static bool recovery_task_delete_if_ended(struct recovery_task *task)
@@ -2226,25 +2212,23 @@ again:
 	NFOUT;
 }
 
-static void __recovery_on_bdev_attr_change_notify_task(struct recovery_task *toma_task, const struct nvmeibt_client_recovery_generic_header *clnt)
+static void __recovery_on_bdev_attr_change_notify_task(struct recovery_task *t, const struct nvmeibt_client_recovery_generic_header *clnt)
 {
-	bool need_update_effort = false, need_update_batch_size = false;
-	if ((toma_task->state == RECOVERY_STATE_IN_PROGRESS) && !(toma_task->end_ordered)) {	// Just to be safe
-		__recovery_task_fill_effort_params(toma_task);
-		need_update_effort = (toma_task->effort_percents != NVMEIBT_CLIENT_PROTOCOL_EFFORT_PERCENTS_DONT_CARE) && clnt && (toma_task->effort_percents != clnt->effort_percents);
-		need_update_batch_size = !clnt || (toma_task->max_batch_size  != clnt->max_batch_size);
-		if (need_update_effort || need_update_batch_size) {
-			N_Tf(tr_01_attr_chng_notify_task, "tid=@TID, type: @RECOVERY_TYPE_TO_STR, effort:@EFFORT_PERCENTS, clnt_effort=@EFFORT_PERCENTS, batch_size=@UINT, clnt_batch_size=@UINT", toma_task->tid, nvmeibt_recovery_type_to_str(toma_task->type), (u32)toma_task->effort_percents, (u32)clnt->effort_percents, toma_task->max_batch_size, clnt->max_batch_size);
-			recovery_send_ping(toma_task);				// Now send ping: Daniel: If client does not answer pings, a change in rebuild priority cannot be propagated to client
-			// Dont use: recovery_task_state_machine(task); because if client progresses nicely pings would not be sent
-		}
+	if ((t->state != RECOVERY_STATE_IN_PROGRESS) || t->end_ordered)	// Just to be safe
+		return;
+	__recovery_task_fill_effort_params(t);
+	if (!clnt || 	// Explicit params update via rpc
+		((t->effort_percents != clnt->effort_percents) && (t->effort_percents != NVMEIBT_CLIENT_PROTOCOL_EFFORT_PERCENTS_DONT_CARE)) ||
+		 (t->max_batch_size  != clnt->max_batch_size)) {
+		N_Tf(trbacnt0, "tid=@TID, type: @RECOVERY_TYPE_TO_STR, effort:@EFFORT_PERCENTS, batch_size=@UINT", t->tid, nvmeibt_recovery_type_to_str(t->type), (u32)t->effort_percents, t->max_batch_size);
+		recovery_send_ping(t);				// Now send ping: Daniel: If client does not answer pings, a change in rebuild priority cannot be propagated to client
+		// Dont use: recovery_task_state_machine(t); because if client progresses nicely pings would not be sent
 	}
 }
 
 void nvmeibt_recovery_notify_all_dirty_rebuilds_of_params_change(void)
 {
 	struct recovery_task	*task;
-
 	XDLIST_FOREACH_SAFE(task, &recovery_task_list) {	// Expected to have up to 2 running
 		if ((task->type == NVMEIBT_RECOVERY_TYPE_DIRTY_REBUILD) || (task->type == NVMEIBT_RECOVERY_TYPE_SCRUBBING)) {
 			__recovery_on_bdev_attr_change_notify_task(task, NULL);
@@ -2677,8 +2661,7 @@ void nvmeibt_recovery_exit(void)
 	NFIN;
 	N_Tf(trace_recovery_nvmeibt_recovery_exit, "clean up recovery tasks");
 	XDLIST_FOREACH_SAFE(task, &recovery_task_list) {
-		N_Tf(trace_1_recovery_nvmeibt_recovery_exit, "delete recovery task tid=@TID status=@RECOVERY_STATE_TO_STR",
-			task->tid, recovery_state_to_str(task->state));
+		N_Tf(trace_1_recovery_nvmeibt_recovery_exit, "delete recovery task tid=@TID status=@RECOVERY_STATE_TO_STR", task->tid, recovery_state_to_str(task->state));
 		/* delete the task */
 		if (task->seg_active) // task is not finished
 			attach_detach_praid_for_recovery(nvmeibt_seg_active_get_praid(task->seg_active), RECOVERY_ATTACH_CMD_DETACH);  /* better exit clean */
