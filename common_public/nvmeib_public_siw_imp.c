@@ -210,8 +210,8 @@ static int siw_map_mr(struct ib_device *ibdev, struct ib_mr *ofa_mr,
 	}
 
 	first_offset = ofa_mr->iova & (mr_page_size - 1);
-	first_size = mr_page_size - first_offset;
 	if (n_pages > 1) {
+		first_size = mr_page_size - first_offset;
 		last_size = ofa_mr->length - first_size - (n_pages - 2) * mr_page_size;
 		if (last_size <= 0 || last_size > mr_page_size) {
 			_NE(error_1_nvmeib_public_siw_imp_siw_map_mr,
@@ -222,6 +222,21 @@ static int siw_map_mr(struct ib_device *ibdev, struct ib_mr *ofa_mr,
 			goto out;
 		}
 	} else {
+		/* Single-page MR: the entire transfer is contained within one
+		 * mr_page_size-sized page starting at first_offset. The sole
+		 * PBL entry's size is ofa_mr->length, NOT (mr_page_size -
+		 * first_offset); otherwise the pbl_size == length check below
+		 * rejects every sub-page transfer (e.g. a 4 KiB direct-IO on
+		 * a 64 KiB-page ARM client where mr_page_size == 64 KiB).
+		 */
+		if (!ofa_mr->length || ofa_mr->length > mr_page_size - first_offset) {
+			_NE(error_2_nvmeib_public_siw_imp_siw_map_mr,
+				"Bad single-page MR: length=@LENGTH mr_page_size=@MR_PAGE_SIZE first_offset=@OFFSET_INT",
+				(u64)(ofa_mr->length), mr_page_size, (unsigned long)first_offset);
+			rv = -EINVAL;
+			goto out;
+		}
+		first_size = ofa_mr->length;
 		last_size = 0;
 	}
 
