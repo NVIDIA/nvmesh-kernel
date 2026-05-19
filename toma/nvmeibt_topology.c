@@ -531,7 +531,8 @@ static void remove_seg_from_both_mem_gpts_if_eligable(struct nvmeibt_local_disk 
 		nvmeibt_abort(ES_FATAL);
 	}
 
-	seg = nvmeibt_seg_active_get_disk_segment(seg_active);
+	// seg = nvmeibt_seg_active_get_disk_segment(seg_active);
+	seg = nvmeibt_disk_segment_get_disk_segment_by_id(&cur_gpt_entry->partition_guid);
 	if (seg && is_gpt_entry_for_seg_needed(seg))
 		goto out;
 
