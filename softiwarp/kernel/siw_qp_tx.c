@@ -461,14 +461,18 @@ static int siw_qp_prepare_tx(struct siw_iwarp_tx *c_tx)
 		c_tx->ctrl_len += MPA_CRC_SIZE;
 		
 #ifdef SIW_TX_COMP_WAIT_ACK
-		/* New short packet (ie one fpdu per wqe) */
-		BUG_ON(c_tx->fpdu_in_prog);
-		if ((c_tx->fpdu_in_prog = kzalloc(sizeof(*c_tx->fpdu_in_prog), GFP_NOWAIT))) {
-			/* Copy entire short packet */
-			memcpy(c_tx->fpdu_in_prog->short_pkt, &c_tx->pkt, sizeof(c_tx->fpdu_in_prog->short_pkt));
-			c_tx->fpdu_in_prog->wqe = *wqe;
-			c_tx->fpdu_in_prog->is_short_pkt = true;
-		}
+		/* New short packet (ie one fpdu per wqe).
+		 *
+		 * fpdu_in_prog must have been pre-allocated by the caller
+		 * (siw_qp_sq_proc_tx) before any protocol-state mutation.
+		 * This guarantees we never silently lose WAIT_ACK bookkeeping
+		 * under memory pressure: the caller bails with -EAGAIN long
+		 * before we get here, and siw_run_sq reschedules the QP.
+		 */
+		BUG_ON(!c_tx->fpdu_in_prog);
+		memcpy(c_tx->fpdu_in_prog->short_pkt, &c_tx->pkt, sizeof(c_tx->fpdu_in_prog->short_pkt));
+		c_tx->fpdu_in_prog->wqe = *wqe;
+		c_tx->fpdu_in_prog->is_short_pkt = true;
 #endif
 		return PKT_COMPLETE;
 	}
@@ -1145,17 +1149,21 @@ static int siw_prepare_fpdu(struct siw_qp *qp, struct siw_wqe *wqe)
 	}
 
 #ifdef SIW_TX_COMP_WAIT_ACK
-	BUG_ON(c_tx->fpdu_in_prog);
-	if ((c_tx->fpdu_in_prog = kzalloc(sizeof(*c_tx->fpdu_in_prog), GFP_NOWAIT))) {
+	/* fpdu_in_prog must have been pre-allocated by the caller
+	 * (siw_qp_sq_proc_tx) before any protocol-state mutation; see
+	 * companion comment in siw_qp_prepare_tx().
+	 */
+	{
 		struct socket *s = qp->attrs.llp_stream_handle;
 		struct tcp_sock *tp = tcp_sk(s->sk);
-		/* Copy header, and sges */
+
+		BUG_ON(!c_tx->fpdu_in_prog);
 		c_tx->fpdu_in_prog->hdr = c_tx->pkt.hdr;
 		c_tx->fpdu_in_prog->wqe = *wqe;
 		c_tx->fpdu_in_prog->sge_idx = c_tx->sge_idx;
 		c_tx->fpdu_in_prog->sge_off = c_tx->sge_off;
 		c_tx->fpdu_in_prog->send_seq = tp->write_seq;
-		c_tx->fpdu_in_prog->end_seq = tp->write_seq + 
+		c_tx->fpdu_in_prog->end_seq = tp->write_seq +
 			c_tx->ctrl_len + c_tx->bytes_unsent + c_tx->pad + MPA_CRC_SIZE - 1;
 	}
 #endif
@@ -1291,6 +1299,26 @@ static int siw_qp_sq_proc_tx(struct siw_qp *qp, struct siw_wqe *wqe, bool inline
 	if (wqe->wr_status == SR_WR_QUEUED) {
 		dprint(DBG_TX, "SR_WR_QUEUED\n");
 
+#ifdef SIW_TX_COMP_WAIT_ACK
+		/* Pre-allocate the per-FPDU WAIT_ACK tracking struct *before*
+		 * any protocol-state mutation (siw_check_sgl_tx mem-refs,
+		 * wqe->wr_status, siw_qp_prepare_tx's ddp_msn++). GFP_NOWAIT
+		 * is allowed to fail under memory pressure; bail with -EAGAIN
+		 * so siw_run_sq reschedules the QP for a clean retry. By
+		 * pulling the allocation up here we keep the call to
+		 * siw_qp_prepare_tx() side-effect-clean on failure, and avoid
+		 * the previous footgun where a failed kzalloc inside that
+		 * function left c_tx->fpdu_in_prog NULL and oopsed
+		 * qp_tx_thread/N in the short-FPDU success branch.
+		 */
+		BUG_ON(c_tx->fpdu_in_prog);
+		c_tx->fpdu_in_prog = kzalloc(sizeof(*c_tx->fpdu_in_prog), GFP_NOWAIT);
+		if (unlikely(!c_tx->fpdu_in_prog)) {
+			rv = -EAGAIN;
+			goto tx_done;
+		}
+#endif
+
 		if (!(wqe->sqe.flags & SIW_WQE_INLINE)) {
 			dprint(DBG_TX, "--- Not INLINE\n");
 			if (tx_type(wqe) == SIW_OP_READ_RESPONSE ||
@@ -1317,7 +1345,7 @@ static int siw_qp_sq_proc_tx(struct siw_qp *qp, struct siw_wqe *wqe, bool inline
 					SR_MEM_RATOMIC);
 				if (rv < 0) {
 					dprint(DBG_TX, "(QP%d):\n", QP_ID(qp));
-					return rv;
+					goto tx_done;
 				}
 				dprint(DBG_TX, "<--- check-sgl, wqe->mem[0].obj=" dprint_ptr_str() "\n", wqe->mem[0].obj);
 
@@ -1331,7 +1359,8 @@ static int siw_qp_sq_proc_tx(struct siw_qp *qp, struct siw_wqe *wqe, bool inline
 			if (!qp->kernel_verbs) {
 				if (wqe->bytes > SIW_MAX_INLINE) {
 					dprint(DBG_TX, "(QP%d):\n", QP_ID(qp));
-					return -EINVAL;
+					rv = -EINVAL;
+					goto tx_done;
 				}
 				wqe->sqe.sge[0].laddr = (u64)&wqe->sqe.sge[1];
 			}
@@ -1543,12 +1572,51 @@ next_segment:
 
 		siw_calculate_tcpseg(c_tx, s);
 
+#ifdef SIW_TX_COMP_WAIT_ACK
+		/* Pre-allocate for the *next* fragmented FPDU; the previous
+		 * one was just added to sent_fpdus and c_tx->fpdu_in_prog
+		 * cleared. No protocol state has been mutated since, so
+		 * -EAGAIN here is safe to retry: siw_run_sq will reschedule
+		 * the QP and we will re-enter at next_segment with the same
+		 * wqe state (SR_WR_INPROGRESS, partial progress).
+		 */
+		BUG_ON(c_tx->fpdu_in_prog);
+		c_tx->fpdu_in_prog = kzalloc(sizeof(*c_tx->fpdu_in_prog), GFP_NOWAIT);
+		if (unlikely(!c_tx->fpdu_in_prog)) {
+			rv = -EAGAIN;
+			goto tx_done;
+		}
+#endif
+
 		rv = siw_prepare_fpdu(qp, wqe);
 		if (unlikely(rv < 0))
 			goto tx_done;
 		goto next_segment;
 	}
 tx_done:
+	/* NOTE: we deliberately do NOT kfree(c_tx->fpdu_in_prog) here.
+	 *
+	 * fpdu_in_prog tracks an FPDU that may be only partially sent on
+	 * the wire (e.g. siw_tx_ctrl()/siw_tx_hdt() returned -EAGAIN from
+	 * the TCP socket, or we hit -EINPROGRESS at next_segment because
+	 * the per-QP burst was exhausted). In those cases siw_run_sq will
+	 * reschedule this QP and re-enter siw_qp_sq_proc_tx() with
+	 * wqe->wr_status == SR_WR_INPROGRESS, skipping Site A and resuming
+	 * transmission via c_tx->state (SIW_SEND_SHORT_FPDU / SIW_SEND_HDR
+	 * / next_segment). That resume path *needs* the existing
+	 * c_tx->fpdu_in_prog: it's the only place where the per-FPDU
+	 * TCP seq, hdr/wqe copy and DDP/MPA framing for the in-flight
+	 * packet live.
+	 *
+	 * Cleanup paths that actually need to release fpdu_in_prog:
+	 *  - Site A / Site B kzalloc returned NULL: fpdu_in_prog is
+	 *    already NULL; nothing to do.
+	 *  - Successful FPDU transmission: bookkeeping branches above
+	 *    move it onto c_tx->sent_fpdus and clear the pointer.
+	 *  - Catastrophic error (rv < 0 and not -EAGAIN/-EINPROGRESS):
+	 *    siw_qp_sq_process()'s else-arm at siw_qp_tx.c:2199-2202
+	 *    frees fpdu_in_prog as part of QP teardown.
+	 */
 	qp->tx_ctx.burst = burst_len;
 	dprint(DBG_TX, "(QP%d): <--\n", QP_ID(qp));
 	return rv;
