@@ -558,21 +558,23 @@ __apply_trace_system_conf(struct nvmeib_trace_system *trace_system,
  * Read the user config and apply it
  * @warning Must be called either from init or under lock
  */
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wframe-larger-than"
-#endif
 DBG_STATIC bool __reconf_trace_system(struct nvmeib_trace_system *trace_system,
                                       const char *config_param) {
-	struct nvmeib_trace_system_conf user_conf = trace_system->default_conf;
-	__parse_config(config_param, &user_conf, trace_system->names);
-	if (!__is_valid_config(&user_conf)) return false;
-	__apply_trace_system_conf(trace_system, &user_conf);
-	return true;
+	struct nvmeib_trace_system_conf *user_conf;
+	bool ok = false;
+
+	user_conf = kmalloc(sizeof(*user_conf), GFP_KERNEL);
+	if (!user_conf) return false;
+
+	*user_conf = trace_system->default_conf;
+	__parse_config(config_param, user_conf, trace_system->names);
+	if (__is_valid_config(user_conf)) {
+		__apply_trace_system_conf(trace_system, user_conf);
+		ok = true;
+	}
+	kfree(user_conf);
+	return ok;
 }
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
 
 /***************************/
 /* Buffer writing routines */
