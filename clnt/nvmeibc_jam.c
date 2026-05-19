@@ -3203,7 +3203,7 @@ int nvmeibc_jam_disk_add(struct nvmeibc_disk *disk,
 	struct nvmeibc_jam_disk *jam_disk = NULL;
 	struct nvmeibc_jam_jidx *jidx_pool = NULL;
 	struct workq_struct *jwq = NULL;
-	struct nvmeibc_jam_disk_percpu_cnts *pcpu = NULL;
+	struct nvmeibc_jam_disk_percpu_cnts __percpu *pcpu = NULL;
 	struct nvmeibc_jam_disk *jdisk;
 	unsigned i;
 	ulong flags;

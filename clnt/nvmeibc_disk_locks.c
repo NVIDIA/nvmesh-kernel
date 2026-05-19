@@ -1465,7 +1465,7 @@ choose_locks_channel(struct nvmeibc_locks_channel *primary_ch, enum nvmeibc_disk
 	if (primary_ch->_2nd_ch_coremask) {
 		struct nvmeibc_disk *disk = primary_ch->base.disk;
 		int submit_cpu = get_cpu();
-		struct nvmeibc_disk_coremask_pcpu_stats __percpu *disk_pcpu_stats = nvmeibc_disk_get_coremask_stats_this_cpu(disk);
+		struct nvmeibc_disk_coremask_pcpu_stats *disk_pcpu_stats = nvmeibc_disk_get_coremask_stats_this_cpu(disk);
 		unsigned coremask_weight;
 		u64 chosen_ch_mask_uid;
 		unsigned long flags;

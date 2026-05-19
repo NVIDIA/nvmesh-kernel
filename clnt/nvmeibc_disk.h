@@ -627,7 +627,7 @@ struct nvmeibc_disk {
 	__concurrent_access volatile bool should_pause; 		// Upon stop request, set should_pause and wait until the pause_preventers is 0. Transition to pausing state
 	__concurrent_access volatile bool pausing;  			// In pausing state (all cpu's), when all the operations being transferred have completed, we can send back the pause callback and stop the disk
 	         bool pausing_no_transfers;	// Pausing state + block layer already gave the callback (see above)
-	struct disk_percpu *percpu; 		// Array with length as the number of CPU's in the system
+	struct disk_percpu __percpu *percpu; 		// Array with length as the number of CPU's in the system
 
 #ifdef DEBUG_SUM
 	atomic_t in_transfers;  			// Just for debug, represents the sum of 'in_transfers' of all cpu's
@@ -1816,7 +1816,7 @@ struct nvmeibc_disk_coremask_pcpu_stats {
 	(_cinfo)->_stat = max_t(typeof(_max), (_cinfo)->_stat, _max);\
 } while(0)
 
-struct nvmeibc_disk_coremask_pcpu_stats __percpu *nvmeibc_disk_get_coremask_stats_this_cpu(struct nvmeibc_disk *disk);
+struct nvmeibc_disk_coremask_pcpu_stats *nvmeibc_disk_get_coremask_stats_this_cpu(struct nvmeibc_disk *disk);
 int nvmeibc_disk_notify_coremask_update(struct nvmeibc_idisk *disk);
 
 extern ulong nvmeibc_disk_lock_channel_periodic_timer_interval;

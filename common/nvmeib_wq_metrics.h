@@ -51,7 +51,7 @@ void nvmeib_wq_metric_counters_merge(struct nvmeib_wq_metric_counters *dst,
  */
 struct nvmeib_wq_metrics {
 	char const *const labels;
-	struct nvmeib_wq_metric_counters *__percpu counters;
+	struct nvmeib_wq_metric_counters __percpu *counters;
 };
 
 /**

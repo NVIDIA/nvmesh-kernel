@@ -7059,7 +7059,7 @@ EXPORT_SYMBOL(nvmeib_vmap);
 /* -------------------------------------------------------------------------- */
 /* QP statistics                                                              */
 /* -------------------------------------------------------------------------- */
-struct nvmeib_qp_stats_pcpu * nvmeib_qp_stats_alloc(void)
+struct nvmeib_qp_stats_pcpu __percpu * nvmeib_qp_stats_alloc(void)
 {
 	struct nvmeib_qp_stats_pcpu __percpu *s;
 	NFIN;
@@ -7072,7 +7072,7 @@ struct nvmeib_qp_stats_pcpu * nvmeib_qp_stats_alloc(void)
 }
 EXPORT_SYMBOL(nvmeib_qp_stats_alloc);
 
-void nvmeib_qp_stats_free(struct nvmeib_qp_stats_pcpu *s)
+void nvmeib_qp_stats_free(struct nvmeib_qp_stats_pcpu __percpu *s)
 {
 	NFIN;
 
@@ -7092,11 +7092,11 @@ EXPORT_SYMBOL(nvmeib_alloc_percpu_pool_counts);
 
 #define BUF_ADD(...)	count += scnprintf(buf+count, len-count, __VA_ARGS__)
 
-ssize_t nvmeib_qp_stats_fill(struct nvmeib_qp_stats_pcpu *s, char *buf, size_t len)
+ssize_t nvmeib_qp_stats_fill(struct nvmeib_qp_stats_pcpu __percpu *s, char *buf, size_t len)
 {
 #define BUF_ADD_STAT(__s, __stat_member)																	\
 	do {																										\
-		struct nvmeib_qp_stats_pcpu __percpu *__p;																\
+		struct nvmeib_qp_stats_pcpu *__p;																		\
 		int __cpu;																								\
 		BUF_ADD("%-*s: ",  QPS_STATS_PAD_BLANKS_LEN_LINE_NUM + QPS_STATS_PAD_BLANKS_LEN_NAME, #__stat_member);	\
 		for_each_online_cpu(__cpu) {																			\

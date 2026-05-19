@@ -60,7 +60,7 @@ struct nvmeibc_pages_alloc_stats {
 	} per_order[NVMEIBC_PAGES_ALLOC_STATS_NUM_ORDERS];
 };
 
-struct __percpu nvmeibc_pages_alloc_stats_percpu {
+struct nvmeibc_pages_alloc_stats_percpu {
 	struct nvmeibc_pages_alloc_stats success;
 	struct nvmeibc_pages_alloc_stats failure;
 };

@@ -1268,7 +1268,7 @@ static int arnic_status_fill_buf(struct nvmeibc_admin_rnic *arnic, void *args, b
 #undef BUF_ADD
 }
 
-static u64 get_max_per_cpu64(u64 *per_cpu64)
+static u64 get_max_per_cpu64(u64 __percpu *per_cpu64)
 {
 	u64 max64 = 0, cpu64;
 	int cpu;
@@ -1280,7 +1280,7 @@ static u64 get_max_per_cpu64(u64 *per_cpu64)
 	return max64;
 }
 
-static inline u64 last_max_jif_to_ms_int(u64 *per_cpu64)
+static inline u64 last_max_jif_to_ms_int(u64 __percpu *per_cpu64)
 {
 	return (1000 * (jiffies - get_max_per_cpu64(per_cpu64)) / HZ);
 }
@@ -2234,7 +2234,7 @@ static struct nvmeibc_disk_coremask_info *alloc_coremask_info(struct nvmeibc_dis
 		goto err;
 	}
 	for_each_possible_cpu(cpu) {
-		struct nvmeibc_disk_coremask_pcpu_stats __percpu *pcpu_ptr = per_cpu_ptr(
+		struct nvmeibc_disk_coremask_pcpu_stats *pcpu_ptr = per_cpu_ptr(
 			coremask_info->pcpu_stats, cpu);
 		memset(pcpu_ptr, 0, sizeof(*pcpu_ptr));
 	}
@@ -2292,9 +2292,9 @@ static void free_coremask_info(struct nvmeibc_disk_coremask_info *cinfo)
 	}
 }
 
-struct nvmeibc_disk_coremask_pcpu_stats __percpu *nvmeibc_disk_get_coremask_stats_this_cpu(struct nvmeibc_disk *disk)
+struct nvmeibc_disk_coremask_pcpu_stats *nvmeibc_disk_get_coremask_stats_this_cpu(struct nvmeibc_disk *disk)
 {
-	struct nvmeibc_disk_coremask_pcpu_stats __percpu *ret = NULL;
+	struct nvmeibc_disk_coremask_pcpu_stats *ret = NULL;
 
 	__NFIND;
 
@@ -12638,7 +12638,7 @@ static void write_ioch_json_buf(struct write_status_buf_data *data)
 static void __reset_coremask_stats_pcpu_fn(void *ctx)
 {
 	struct nvmeibc_disk_coremask_info *cinfo = ctx;
-	struct nvmeibc_disk_coremask_pcpu_stats __percpu *this_cpu_stats = get_cpu_ptr(cinfo->pcpu_stats); 
+	struct nvmeibc_disk_coremask_pcpu_stats *this_cpu_stats = get_cpu_ptr(cinfo->pcpu_stats);
 	memset(this_cpu_stats, 0, sizeof(*this_cpu_stats));
 	put_cpu_ptr(cinfo->pcpu_stats);
 }
@@ -13766,7 +13766,7 @@ static int nvmeibc_disk_net_intrs_stats_fill(struct nvmeibc_disk *disk,
 {
 	int cnt = 0;
 	struct nvmeibc_disk_percpu_intr_stats __percpu *pcpu_intr_stats = disk->pcpu_intr_stats;
-	struct nvmeibc_disk_percpu_intr_stats __percpu *pcpu;
+	struct nvmeibc_disk_percpu_intr_stats *pcpu;
 	int i;
 
 	#define BUF_ADD(...) ({ \
@@ -15132,7 +15132,7 @@ struct sum_coremask_stats_pcpu_ctx {
 static void __sum_coremask_stats_pcpu_fn(void *ctx)
 {
 	struct sum_coremask_stats_pcpu_ctx *pcpu_ctx = ctx;
-	struct nvmeibc_disk_coremask_pcpu_stats __percpu *this_cpu_stats = this_cpu_ptr(pcpu_ctx->cinfo->pcpu_stats);
+	struct nvmeibc_disk_coremask_pcpu_stats *this_cpu_stats = this_cpu_ptr(pcpu_ctx->cinfo->pcpu_stats);
 	unsigned long flags;
 	
 	spin_lock_irqsave(&pcpu_ctx->lock, flags);
@@ -15694,7 +15694,7 @@ static int pcpu_nrch_get_coremask_channel(struct nvmeibc_disk *disk,
 	struct nvmeibc_disk_coremask_chs *coremask_chs;
 	struct nvmeibc_ib_nordda_channel *nrch;
 	struct nvmeibc_volume_req_info *ri;
-	struct nvmeibc_disk_coremask_pcpu_stats __percpu *disk_pcpu_stats;
+	struct nvmeibc_disk_coremask_pcpu_stats *disk_pcpu_stats;
 	unsigned long flags;
 	bool found = false;
 	int cpu = NVMEIB_CPU_MASK_NEXT(-1, cmd_coremask_info->mask);
@@ -15817,7 +15817,7 @@ static int pcpu_nrch_get_channel(struct nvmeibc_disk *disk,
 		}
 		else {
 			/* Increment counter for not coremask io */
-			struct nvmeibc_disk_coremask_pcpu_stats __percpu *disk_pcpu_stats;
+			struct nvmeibc_disk_coremask_pcpu_stats *disk_pcpu_stats;
 			unsigned long flags;
 
 			local_irq_save(flags);
@@ -15892,7 +15892,7 @@ static struct nvmeibc_disk_command *pcpu_nrch_coremask_pending_cmd_get(
 {
 	struct nvmeibc_disk_coremask_chs *coremask_chs;
 	struct nvmeibc_disk_command *disk_cmd = NULL;
-	struct nvmeibc_disk_coremask_pcpu_stats __percpu *disk_pcpu_stats;
+	struct nvmeibc_disk_coremask_pcpu_stats *disk_pcpu_stats;
 	unsigned long flags;
 
 	__NFIND;

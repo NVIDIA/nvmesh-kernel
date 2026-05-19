@@ -25,7 +25,7 @@ void nvmesh_memmgr_metric_counters_merge(struct nvmesh_memmgr_metric_counters *d
 
 struct nvmesh_memmgr_metrics {
 	char const * const labels; /* module=(nvmeib|nvmeibc|nvmeibs);component=(datapath|preread|...) */
-	struct nvmesh_memmgr_metric_counters *__percpu counters;
+	struct nvmesh_memmgr_metric_counters __percpu *counters;
 };
 
 static inline void nvmesh_memmgr_metric_on_alloc_update(struct nvmesh_memmgr_metrics *mgr, size_t size, bool success)

@@ -2020,8 +2020,8 @@ struct nvmeib_qp_stats_pcpu {
 #define QPS_STATS_PAD_BLANKS_LEN_NAME		(64)
 #define QPS_STATS_PAD_BLANKS_LEN_CNT 		(8)
 
-struct nvmeib_qp_stats_pcpu *nvmeib_qp_stats_alloc(void);
-void nvmeib_qp_stats_free(struct nvmeib_qp_stats_pcpu *s);
+struct nvmeib_qp_stats_pcpu __percpu *nvmeib_qp_stats_alloc(void);
+void nvmeib_qp_stats_free(struct nvmeib_qp_stats_pcpu __percpu *s);
 
 struct nvmeib_pool_percpu_counts __percpu *nvmeib_alloc_percpu_pool_counts(void);
 
@@ -2083,7 +2083,7 @@ struct nvmeib_pool_percpu_counts __percpu *nvmeib_alloc_percpu_pool_counts(void)
 #define nvmeib_qp_stats_on_rearm(__s)
 
 ssize_t nvmeib_qp_stats_header_fill(void *arg, char *buf, size_t len);
-ssize_t nvmeib_qp_stats_fill(struct nvmeib_qp_stats_pcpu *s, char *buf, size_t len);
+ssize_t nvmeib_qp_stats_fill(struct nvmeib_qp_stats_pcpu __percpu *s, char *buf, size_t len);
 #define nvmeib_qp_stats_reset(_s) nvmeib_public_zero_percpu(_s);
 
 #else /* NVMEIB_QP_STATS */
