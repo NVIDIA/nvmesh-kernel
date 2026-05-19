@@ -746,28 +746,19 @@ struct nvmeibt_disk_gpt_partition_entry *nvmeibt_disk_metadata_add_mem_gpt_entry
 	N_Tf(ycnwmx7, "Checking overlap with @N_ACTIVE_PARTITIONS active partitions in the @STR:@STR", gpt->n_entries_in_use, gpt->ldisk_id.str, gpt->main_or_metadata);
 	for (entry_idx = 0; entry_idx < gpt->max_n_entries; entry_idx++) {
 		struct nvmeibt_disk_gpt_partition_entry *curr_gpt_entry = &(gpt->entries[entry_idx]);
-		if (ARE_UUID_EQ(uuid, &curr_gpt_entry->partition_guid)) {
-			if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(curr_gpt_entry)) {
-				N_Ef(nvfdui, "Unused partition with uuid=@UUID_LE, was found on @STR:@STR while attempting to add a new partition with the same UUID.", uuid, gpt->ldisk_id.str, gpt->main_or_metadata);
-			}
-			else {	// No harm, but unexpected!
+		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(curr_gpt_entry)) {
+			if (!gpt_entry)
 				gpt_entry = curr_gpt_entry;
-				N_Ef(bfsuey2, "Partition with uuid=@UUID_LE, is already part of the @STR:@STR, it won't be added again.", uuid, gpt->ldisk_id.str, gpt->main_or_metadata);
-				goto out;
-			}
+			continue;
 		}
-		if (	nvmeibt_disk_metadata_is_gpt_entry_in_use(curr_gpt_entry) &&
-				nvmeibt_do_ranges_overlap(pba_s, pba_e, curr_gpt_entry->pba_s, curr_gpt_entry->pba_e)) {
+		if (ARE_UUID_EQ(uuid, &curr_gpt_entry->partition_guid)) { // No harm, but unexpected!
+			gpt_entry = curr_gpt_entry;
+			N_Wf(bfsuey2, "Partition with uuid=@UUID_LE, is already part of the @STR:@STR, it won't be added again.", uuid, gpt->ldisk_id.str, gpt->main_or_metadata);
+			goto out;
+		}
+		if (nvmeibt_do_ranges_overlap(pba_s, pba_e, curr_gpt_entry->pba_s, curr_gpt_entry->pba_e)) {
 			N_Wf(brguys7, "@STR-GPT new entry @UUID_LE [pba_s=@PBA_S,pba_e=@PBA_E] @STR overlaps entry=@ENTRY_INT. Probably already deleted from config",
 				 gpt->main_or_metadata, uuid, pba_s, pba_e, gpt->ldisk_id.str, entry_idx);
-		}
-	}
-	for (entry_idx = 0; entry_idx < gpt->max_n_entries; entry_idx++) {
-		struct nvmeibt_disk_gpt_partition_entry *curr_gpt_entry = &(gpt->entries[entry_idx]);
-		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(curr_gpt_entry)) {
-			N_Tf(btuydbu, "Found empty slot in @STR:@STR at index=@INDEX pba_s=@PBA_S pba_e=@PBA_E", gpt->ldisk_id.str, gpt->main_or_metadata, entry_idx, pba_s, pba_e);
-			gpt_entry = curr_gpt_entry;
-			break;
 		}
 	}
 	if (gpt_entry) {
