@@ -1390,13 +1390,10 @@ out:
 
 static uint64_t get_nvmesh_vol_size(char *vol_path)	// From DHS
 {
-	int				fd = -1;
 	uint64_t		size = 0;
 	int				rv0;
-	int				rv1;
 	struct stat		sb;
-
-	fd = open(vol_path, O_RDONLY | O_LARGEFILE);
+	const int fd = open(vol_path, O_RDONLY | O_LARGEFILE);
 	if (fd < 0) {
 		N_Wf(ctgycf4, "Failed to open @STR @AUTO_ERRNO", vol_path);
 		goto out;
@@ -1409,17 +1406,15 @@ static uint64_t get_nvmesh_vol_size(char *vol_path)	// From DHS
 	if (sb.st_size) {
 		size = sb.st_size;
 	} else { // Note: sometimes (sb.st_size == 0), so we need the ioctl
-		rv1 = ioctl(fd, BLKGETSIZE64, &size);
+		const int rv1 = ioctl(fd, BLKGETSIZE64, &size);
 		if (rv1 < 0) {
-			N_Wf(bvg9365, "ioctl(@STR, BLKGETSIZE64)=@INT @AUTO_ERRNO", vol_path, rv0);
+			N_Wf(bvg9365, "ioctl(@STR, BLKGETSIZE64)=@INT @AUTO_ERRNO", vol_path, rv1);
 			size = 0;
-			goto out;
 		}
 	}
 out:
-	if (fd >= 0) {
+	if (fd >= 0)
 		close(fd);
-	}
 	return size;
 }
 
