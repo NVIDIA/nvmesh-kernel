@@ -2334,6 +2334,7 @@ int nvmeibt_raft_read_persistence_and_upd_committed(const char *persistence_file
 	char						*section_buf;
 	int							section_buf_len;
 	size_t						persistency_ctx_len;
+	int							parse_config_res;
 
 	NFIN;
 	is_cache_dir_writeable = !access(NVMEIBT_PERSISTENCY_CACHE_DIR, W_OK);
@@ -2420,9 +2421,12 @@ int nvmeibt_raft_read_persistence_and_upd_committed(const char *persistence_file
 		if (JSON_output) nvmeibt_Str_strcat(JSON_output, "\"KAFKA_MGMT_CONFIG_FULL\" : {}");
 	}
 	serialize_tlv_JSON(JSON_output, "FULL_TOPO_CONFIG_VOLUMES", &(my_raft_global.follower_to_commit_persist_and_wire_buf_full->topo_config_ctx));
-	if (nvmeibt_topology_parse_a_config(NVMEIBT_CSV_TYPE_FULL_TOPO_CONFIG_VOLUMES, JSON_output) < 0) {
+	parse_config_res = nvmeibt_topology_parse_a_config(NVMEIBT_CSV_TYPE_FULL_TOPO_CONFIG_VOLUMES, JSON_output);
+	if (parse_config_res < 0)
 		goto out;
-	}
+	if (parse_config_res == 1)
+		nvmeibt_topology_setup_relationships();
+
 	if ((JSON_output) && (nvmeibt_Str_end(JSON_output)[-1] == ',')) {	// Missing FULL_TOPO_CONFIG object finishing with ','  Todo: Fix me properly in the above func
 		nvmeibt_Str_strcat(JSON_output, "\"FULL_TOPO_CONFIG\" : {}");
 	}

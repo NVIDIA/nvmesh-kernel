@@ -1312,7 +1312,7 @@ int nvmeibt_topology_parse_committed_topology(void) {
 
 int nvmeibt_topology_parse_a_config(enum NVMEIBT_CSV_TYPE content_type, struct nvmeibt_Str *JSON_output)
 {
-	int			rv = -1;
+	int			rv;
 	char		*config_buf;
 	int			config_buf_len;
 
@@ -1327,19 +1327,14 @@ int nvmeibt_topology_parse_a_config(enum NVMEIBT_CSV_TYPE content_type, struct n
 	}
 	if (nvmeibt_parse_buf(config_buf, config_buf_len, 0, NVMEIBT_NOT_INITIALIZED_SER_VER, NULL, content_type, JSON_output) < 0) {
 		N_Ef(aass324, "failed to parse management configuration");
+		rv = -1;
 		goto out;
 	}
 
 	/* dumper: log this change-of-configuration event */
 	nvmeibt_dumper_event_mgmt_config();
 
-	if (nvmeibt_topology_setup_relationships() < 0)
-		goto out;
-
-	/* Post config update actions */
-	nvmeibt_seg_active_stop_all_recoveries_and_registrations_on_deleted_segs();
-
-	rv = 0;
+	rv = 1;
 out:
 	NFOUT;
 	return rv;
@@ -2322,6 +2317,7 @@ static void store_config_and_topo_and_gpt_on_disk_finalize(struct nvmeibt_wq_ent
 	bool								is_new_RAFT_MEMBERS;
 	bool								is_new_RAFT_MEMBERS_SEQ_NO;
 	bool								is_new_current_raft_TERM;
+	bool								is_new_config = 0;
 
 	NFIN;
 	persistency_entry = container_of(wq_entry, struct nvmeibt_persistency_wq_entry, wq_entry);
@@ -2349,13 +2345,17 @@ static void store_config_and_topo_and_gpt_on_disk_finalize(struct nvmeibt_wq_ent
 		// Parse the committed content into committed
 		TODO(Unite with nvmeibt_raft_read_persistence_and_upd_committed());
 		if (is_new_KAFKA_MGMT_CONFIG) {
-			nvmeibt_topology_parse_a_config(NVMEIBT_CSV_TYPE_FULL_KAFKA_MGMT_CONFIG_VOLUMES, NULL);
+			is_new_config = (nvmeibt_topology_parse_a_config(NVMEIBT_CSV_TYPE_FULL_KAFKA_MGMT_CONFIG_VOLUMES, NULL) == 1) || is_new_config;
 		}
 		if (is_new_TOPO_CONFIG) {
-			nvmeibt_topology_parse_a_config(NVMEIBT_CSV_TYPE_FULL_TOPO_CONFIG_VOLUMES, NULL);
+			is_new_config = (nvmeibt_topology_parse_a_config(NVMEIBT_CSV_TYPE_FULL_TOPO_CONFIG_VOLUMES, NULL) == 1) || is_new_config;
 		}
 		if (is_new_TOPO || is_new_TOPO_CONFIG) {
 			nvmeibt_topology_parse_committed_topology();
+		}
+		if (is_new_config) {
+			nvmeibt_topology_setup_relationships();
+			nvmeibt_seg_active_stop_all_recoveries_and_registrations_on_deleted_segs();
 		}
 		//
 		nvmeibt_topology_active_mark_reserialization_required();	// some "follower committed" values changed, and need to get to the leader.
