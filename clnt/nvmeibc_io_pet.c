@@ -59,7 +59,15 @@
 		BUILD_BUG_ON(offsetof(struct io_pet_controller, base) != 0);
 
 		if (io_pet_enable && self->cfg.pet_buffer_size && self->writer){
-			struct msgloop_msg* msg = nvmeib_msgloop_alloc_msg(self->cfg.msg_allocation_size, GFP_NOIO);
+			/* This callback can run from atomic context (IRQs disabled) -
+			 * notably from the recv-CQ poll path which holds the channel
+			 * spinlock with irqsave across journal/recovery callbacks
+			 * (see __init_so -> nvmeibc_io_pet_journal_make).
+			 * Use GFP_NOWAIT so allocation never sleeps and __GFP_NOWARN
+			 * so a best-effort trace allocation failure stays quiet
+			 * (callers tolerate NULL: the journal is just not activated).
+			 */
+			struct msgloop_msg* msg = nvmeib_msgloop_alloc_msg(self->cfg.msg_allocation_size, GFP_NOWAIT | __GFP_NOWARN);
 			nvmesh_memmgr_metric_on_alloc_update(io_pet_buffers, self->cfg.msg_allocation_size, msg);
 			if (msg) {
 				_ND(__io_pet_controller_get_buffer, "msg=@PTR, msg->data=@PTR", msg, msg->data);
