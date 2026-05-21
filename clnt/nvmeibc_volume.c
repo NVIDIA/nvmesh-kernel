@@ -672,8 +672,26 @@ static void __ref_ids_verify_and_copy(struct nvmeibc_volume_header *hdr, const s
 static int __update_only_volume_ref_ids(struct nvmeibc_volume_header *hdr, const struct nvmeibc_volume_conf *conf, int attachment_version, bool verbose)
 {
 	int rv = 0;
-
 	unsigned long flags = 0;
+	struct nvmeibc_reference_id *new_buf = NULL;
+
+	/* Pre-allocate the (worst-case) grow buffer OUTSIDE the spinlock:
+	 * kmalloc(GFP_KERNEL) may sleep, which is illegal under
+	 * spin_lock_irqsave(&hdr->ext_blob_modify_guard). The new buffer
+	 * size depends only on @conf (stable input), so it's safe to
+	 * decide on the allocation before taking the lock. If the locked
+	 * section ends up not needing the buffer (equal/shrink branches),
+	 * we just free it after releasing the lock.
+	 */
+	if (conf->attachment.n_ref_ids > 0) {
+		const int n_bytes = nvmeibc_volume_ext_blob_size(conf->attachment.n_ref_ids);
+		new_buf = (struct nvmeibc_reference_id *)kmalloc(n_bytes, GFP_KERNEL);
+		if (!new_buf) {
+			rv = -ENOMEM;
+			goto out;
+		}
+	}
+
 	spin_lock_irqsave(&hdr->ext_blob_modify_guard, flags);
 
 	hdr->attachment_version = attachment_version;
@@ -695,10 +713,10 @@ static int __update_only_volume_ref_ids(struct nvmeibc_volume_header *hdr, const
 			nvmeibc_volume_header_destroy(hdr, NVMEIBC_VOLUME_HEADER_DESTROY_REF_IDS);									// Clean all ref strings
 		}
 	} else {																	// Blob becomes bigger
-		const int n_bytes = nvmeibc_volume_ext_blob_size(conf->attachment.n_ref_ids);
 		BUG_ON(conf->attachment.n_ref_ids <= 0);
 		nvmeibc_volume_header_destroy(hdr, NVMEIBC_VOLUME_HEADER_DESTROY_REF_IDS);
-		hdr->ext_blob.referenceIDs = (struct nvmeibc_reference_id *)kmalloc(n_bytes, GFP_KERNEL);
+		hdr->ext_blob.referenceIDs = new_buf;
+		new_buf = NULL; /* ownership transferred to hdr */
 		if (hdr->ext_blob.referenceIDs) {
 			__ref_ids_verify_and_copy(hdr, conf);
 		} else {
@@ -706,6 +724,10 @@ static int __update_only_volume_ref_ids(struct nvmeibc_volume_header *hdr, const
 		}
 	}
 	spin_unlock_irqrestore(&hdr->ext_blob_modify_guard, flags);
+
+	/* Free the speculative buffer if the equal/shrink branch was taken. */
+	kfree(new_buf);
+out:
 	return rv;
 }
 
