@@ -2161,21 +2161,35 @@ int siw_qp_sq_flush_sent_fpdus(struct siw_qp *qp)
 	
 		if (sent_fpdu->hdr.ctrl.ddp_rdmap_ctrl & DDP_FLAG_LAST) {
 			if (tx_flags(wqe) & SIW_WQE_VALID) {
-				/* The rest are completed by ORQ flush */
-				if (((tx_type(wqe) == SIW_OP_WRITE &&
-					!(sent_fpdu->hdr.ctrl.ddp_rdmap_ctrl & DDP_FLAG_WR_ACK)) ||
+				if (tx_type(wqe) == SIW_OP_WRITE ||
 					tx_type(wqe) == SIW_OP_SEND ||
 					tx_type(wqe) == SIW_OP_SEND_REMOTE_INV ||
-					tx_type(wqe) == SIW_OP_SEND_WITH_IMM)) {
+					tx_type(wqe) == SIW_OP_SEND_WITH_IMM) {
 
-					/* Put the ref-count for the WQE MRs */
+					/*
+					 * Release the WQE MR refs that were transferred to
+					 * sent_fpdu->wqe.mem[] when this FPDU was queued on
+					 * sent_fpdus. WRITE+WR_ACK is included here on purpose:
+					 * WR_ACK only delegates the CQ completion to the inbound
+					 * WRITE_RESPONSE path (handled by the ORQ flush), it does
+					 * not change which loop owns the mem ref - this one does.
+					 * Mirrors siw_tx_complete_ack_seq().
+					 */
 					siw_wqe_put_mem(&sent_fpdu->wqe, tx_type(&sent_fpdu->wqe));
 
-					dprint(DBG_OL, "(QP%d): TXTX: call siw_sqe_complete, tx_type=%x, with SIW_WC_WR_FLUSH_ERR\n",
-						QP_ID(qp), tx_type(wqe));
-					
-					siw_sqe_complete(qp, &wqe->sqe, NULL, wqe->bytes, SIW_WC_WR_FLUSH_ERR, 0);
-					rv++;
+					/*
+					 * Skip CQ completion for WRITE+WR_ACK: that completion
+					 * is delivered by the ORQ flush via WRITE_RESPONSE.
+					 */
+					if (!(tx_type(wqe) == SIW_OP_WRITE &&
+						(sent_fpdu->hdr.ctrl.ddp_rdmap_ctrl & DDP_FLAG_WR_ACK))) {
+
+						dprint(DBG_OL, "(QP%d): TXTX: call siw_sqe_complete, tx_type=%x, with SIW_WC_WR_FLUSH_ERR\n",
+							QP_ID(qp), tx_type(wqe));
+
+						siw_sqe_complete(qp, &wqe->sqe, NULL, wqe->bytes, SIW_WC_WR_FLUSH_ERR, 0);
+						rv++;
+					}
 				}
 			}
 		}
