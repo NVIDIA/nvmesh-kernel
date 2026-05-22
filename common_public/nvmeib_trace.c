@@ -11,6 +11,7 @@
 #include "nvmeib_rsc_pool.h"
 #include "nvmeib_trace_api.h"
 #include "nvmeib_trace_stress_test.h"
+#include <linux/math64.h>
 #include <linux/timer.h>
 
 /* clang-format off */
@@ -166,6 +167,8 @@ struct nvmeib_trace_system {
 	                        to list all capuches in the system. */
 
 } glob_trace_system;
+
+static void nvmeib_trace_tsc_cache_seed(u32 cpu_tsc_khz, u64 tsc_offset_ticks);
 
 /**
  * CPU/channel pair, tracing system main actor
@@ -1404,6 +1407,9 @@ __init_tracer_md_header(struct nvmeib_trace_system *trace_system) {
 	    MUL_X_DIV_Y(1000000000L * ts.tv_sec + ts.tv_nsec,
 	                trace_system->md.tsc_khz, 1000000L) -
 	    cyc;
+
+	nvmeib_trace_tsc_cache_seed(trace_system->md.tsc_khz,
+	                            (u64)trace_system->md.tsc_offset);
 }
 
 static struct nvmeib_capuch *
@@ -1899,6 +1905,23 @@ unsigned long nvmeib_trace_tsc_to_ns(unsigned long timestamp) {
 	                                          */
 }
 EXPORT_SYMBOL(nvmeib_trace_tsc_to_ns);
+
+/*
+ * Inline-friendly tsc->ns cache for trace hot paths. The precision contract is
+ * documented next to nvmeib_trace_get_time_ns().
+ */
+u64 nvmeib_trace_tsc_offset_ticks;
+u32 nvmeib_trace_tsc_ns_mul;
+EXPORT_SYMBOL(nvmeib_trace_tsc_offset_ticks);
+EXPORT_SYMBOL(nvmeib_trace_tsc_ns_mul);
+
+static void nvmeib_trace_tsc_cache_seed(u32 cpu_tsc_khz, u64 tsc_offset_ticks)
+{
+	nvmeib_trace_tsc_offset_ticks = tsc_offset_ticks;
+	nvmeib_trace_tsc_ns_mul = cpu_tsc_khz
+		? (u32)div_u64(1000000ULL << NVMEIB_TRACE_TSC_TO_NS_SHIFT, cpu_tsc_khz)
+		: 0;
+}
 
 nvmeib_public_save_stack_trace_t nvmeib_public_save_stack_trace_ptr;
 EXPORT_SYMBOL(nvmeib_public_save_stack_trace_ptr);

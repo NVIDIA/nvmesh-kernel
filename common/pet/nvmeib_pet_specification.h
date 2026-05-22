@@ -20,16 +20,20 @@
 
 //{{{ OS integration
 
-static inline u64 nvmeib_pet_get_trace_time_ns(void)
-{
-	#ifdef __KERNEL__
-		extern unsigned long nvmeib_trace_tsc_to_ns(unsigned long timestamp);
-		return nvmeib_trace_tsc_to_ns(nvmeib_public_rdtsc());
-	#else
+#if defined(__KERNEL__)
+	#include "nvmeib_trace.h"
+
+	static inline u64 nvmeib_pet_get_trace_time_ns(void)
+	{
+		return nvmeib_trace_get_time_ns();
+	}
+#else
+	static inline u64 nvmeib_pet_get_trace_time_ns(void)
+	{
 		u64 ticks = nvmeib_public_rdtsc() + tsc_offset;
 		return MUL_X_DIV_Y(ticks, 1000000ULL, (u64)tsc_khz);
-	#endif
-}
+	}
+#endif
 
 enum nvmeib_pet_severity{
 	NVMEIB_PET_SEVERITY_NORMAL   = 0, //periodic dump to see what is going on

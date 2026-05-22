@@ -47,6 +47,7 @@
 	#include <limits.h>
 	#include "gen_events.h"
 #else	/* production kernel code */
+	#include <linux/math64.h>
 	#include "nvmeib_trace_macro_utils.h"
 	#include "nvmeib_public.h"
 	#include "nvmeib_public_mmap.h"
@@ -79,6 +80,26 @@
 	extern int nvmeib_stack_trace_strcpy(char *dest, void *addr, int len);
 
 	extern unsigned long nvmeib_trace_tsc_to_ns(unsigned long timestamp);
+	enum { NVMEIB_TRACE_TSC_TO_NS_SHIFT = 30 };
+	extern u64 nvmeib_trace_tsc_offset_ticks;
+	extern u32 nvmeib_trace_tsc_ns_mul;
+
+	/*
+	 * Fast inline tsc->ns conversion for hot paths. The precise
+	 * nvmeib_trace_tsc_to_ns() path performs two 64-bit divisions per call;
+	 * this helper uses the trace-system reciprocal seeded during bringup.
+	 *
+	 * Precision contract (SHIFT=30):
+	 *  - Per-tick floor-truncation error: <= 1/(1<<30) ns/tick.
+	 *  - Short timestamp deltas have sub-ns error at typical TSC rates.
+	 *  - Absolute timestamps can drift by hundreds of us/day.
+	 */
+	static inline u64 nvmeib_trace_get_time_ns(void)
+	{
+		u64 ticks = nvmeib_public_rdtsc() + nvmeib_trace_tsc_offset_ticks;
+		return mul_u64_u32_shr(ticks, nvmeib_trace_tsc_ns_mul,
+		                       NVMEIB_TRACE_TSC_TO_NS_SHIFT);
+	}
 
 	struct proc_dir_entry;
 	int nvmeib_init_traces(struct proc_dir_entry *proc_dir);
