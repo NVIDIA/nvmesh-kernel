@@ -126,10 +126,13 @@ static inline struct nvmeibc_profiler *__raid_gp_profile_for_rwt_op_locks(const 
 __attribute__((nonnull(2)))
 void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
 {
-	struct nvmeibc_d_rdma_comp const *rdma_comp = &lock->comp;
-	if (!o){
+	struct nvmeibc_d_rdma_comp const *rdma_comp;
+
+	if (!o || !nvmeib_pet_journal_is_activated(&o->journal)){
 		return;
 	}
+
+	rdma_comp = &lock->comp;
 
 	if (rdma_comp->opr == NVMEIBC_LOCK_READ){
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
@@ -175,12 +178,16 @@ void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct 
 __attribute__((nonnull(2)))
 void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
 {
-	struct nvmeibc_d_rdma_comp const *rdma_comp = &lock->comp;
-	enum nvmeib_pet_severity const severity = NCL_is_request_failed(rdma_comp->lock_status)
-									   	      ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL;
-	if (!o){
+	struct nvmeibc_d_rdma_comp const *rdma_comp;
+	enum nvmeib_pet_severity severity;
+
+	if (!o || !nvmeib_pet_journal_is_activated(&o->journal)){
 		return;
 	}
+
+	rdma_comp = &lock->comp;
+	severity = NCL_is_request_failed(rdma_comp->lock_status)
+		   ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL;
 
 	if (rdma_comp->opr == NVMEIBC_LOCK_BLKSET_INFO_WRITE){
 		//we don't call this function on lock release - mainly because the operation already does not exist

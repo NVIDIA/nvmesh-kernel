@@ -249,43 +249,55 @@ void dp_cmds_add_readlock_to_rldr(struct nvmeibc_block_command *rldr)
 
 static bool __nvmeibc_cmd_data_and_metadata_pet_should_describe(struct nvmeibc_block_command const *bcmd, bool is_completion)
 {
-	const struct nvmeibc_raid1* r = nvmeibc_disk_segment_get_praid(bcmd->ds);
-	struct nvmeibc_disk_io_command const* disk_io_cmd =  bcmd->iocmd;
-	if (nvmeib_pet_journal_is_verbose(&bcmd->o->journal) == false){
+	struct nvmeib_pet_journal const *journal = &bcmd->o->journal;
+	struct nvmeibc_disk_io_command const* disk_io_cmd;
+	const struct nvmeibc_raid1* r;
+
+	if (!nvmeib_pet_journal_is_activated(journal)){
 		return false;
 	}
+	if (!nvmeib_pet_journal_is_verbose(journal)){
+		return false;
+	}
+
+	disk_io_cmd = bcmd->iocmd;
 	if (disk_io_cmd->reqs1.op != NVMEIB_BLOCK_IO_OP_READ && disk_io_cmd->reqs1.op != NVMEIB_BLOCK_IO_OP_WRITE){
 		return false;
 	}
-	if (disk_io_cmd->reqs1.op == NVMEIB_BLOCK_IO_OP_READ && is_completion == false){ //sending read request
+	if (disk_io_cmd->reqs1.op == NVMEIB_BLOCK_IO_OP_READ && !is_completion){
 		return false;
 	}
-	if (disk_io_cmd->reqs1.op == NVMEIB_BLOCK_IO_OP_WRITE && is_completion == true){ //receiving write response
+	if (disk_io_cmd->reqs1.op == NVMEIB_BLOCK_IO_OP_WRITE && is_completion){
 		return false;
 	}
-	if (!nvmeibc_raid_is_ec(r) && !nvmeibc_raid_is_mirror(r)) {
-		return false;
-	}
-	return true;
+
+	r = nvmeibc_disk_segment_get_praid(bcmd->ds);
+	return nvmeibc_raid_is_ec(r) || nvmeibc_raid_is_mirror(r);
 }
 
 static void __nvmeibc_cmd_data_and_metadata_pet_describe(struct nvmeibc_block_command const *bcmd, bool is_completion)
 {
-	struct nvmeibc_disk_io_command *disk_io_cmd =  bcmd->iocmd;
-	struct nvmeib_data_buffer *ndb = disk_io_cmd->reqs1.ndb;
-	struct nvmeib_pet_journal* journal = &bcmd->o->journal;
-	bool const enable_edic_check = bcmd->o->nd->dp.enable_edic_check;
+	struct nvmeibc_disk_io_command *disk_io_cmd;
+	struct nvmeib_data_buffer *ndb;
+	struct nvmeib_pet_journal* journal;
+	bool enable_edic_check;
 
 	u64 *data_first_content;
 	struct nvmeib_scatterlist_block_iter it;
 	union nvmeibc_block_dp_ec_data_block_md *md, *md_start;
-	const u32 md_size = nvmeibc_sgmnt_sw_md_size(bcmd->ds);
-	const struct nvmeibc_raid1* r = nvmeibc_disk_segment_get_praid(bcmd->ds);
+	u32 md_size;
+	const struct nvmeibc_raid1* r;
 
-	bool const should_trace = __nvmeibc_cmd_data_and_metadata_pet_should_describe(bcmd, is_completion);
-	if(should_trace == false){
+	if (!__nvmeibc_cmd_data_and_metadata_pet_should_describe(bcmd, is_completion)) {
 		return;
 	}
+
+	disk_io_cmd = bcmd->iocmd;
+	ndb = disk_io_cmd->reqs1.ndb;
+	journal = &bcmd->o->journal;
+	enable_edic_check = bcmd->o->nd->dp.enable_edic_check;
+	md_size = nvmeibc_sgmnt_sw_md_size(bcmd->ds);
+	r = nvmeibc_disk_segment_get_praid(bcmd->ds);
 
 	BUG_ON(ndb->length & (NVMEIBC_SECTOR_SIZE - 1)); // ndb->length is not a multiple of sector size
 	md_start = (union nvmeibc_block_dp_ec_data_block_md *)disk_io_cmd->reqs1.md;
@@ -723,13 +735,21 @@ static void __finish_cmds_comp_oper(struct operation *o)
 
 void nvmeibc_operation_compressed_op_pet_dump_bio(const struct operation *o)
 {
-	const struct nvmeibc_block_command *rldr = o->cmds;		// For now print info of first rldr only
-	const u64 topo = (u64)o->topo->debug_unique_index;
-	const struct nvmeibc_raid1* raid = nvmeibc_disk_segment_get_praid(rldr->ds);
-	const union nvmeibc_raid1_io_pet_status topo_status = nvmeibc_raid1_io_pet_describe_state(raid);
+	const struct nvmeibc_block_command *rldr;
+	u64 topo;
+	const struct nvmeibc_raid1* raid;
+	union nvmeibc_raid1_io_pet_status topo_status;
+
+	if (!nvmeib_pet_journal_is_activated(&o->journal)) {
+		return;
+	}
+
+	rldr = o->cmds;
+	topo = (u64)o->topo->debug_unique_index;
+	raid = nvmeibc_disk_segment_get_praid(rldr->ds);
+	topo_status = nvmeibc_raid1_io_pet_describe_state(raid);
 
 	if (o->nd->dp.enable_care_about_txid && o->op == NVMEIB_BLOCK_IO_OP_WRITE) {
-		//TODO PET: assign dbg_id when operation is created;
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,
 									"operation.execute(dbg_id=%u, topology=(index=%llu, status=%llu<union nvmeibc_raid1_io_pet_status>) binfo=0x%x<union nvmeib_blkset_info> dbg_cntrs=0x%llx<union operation_dbg_cntrs>)",
 									o->dbg_id, topo, topo_status.all, rldr->rld.pre.all, o->dbg_cntrs.raw);
@@ -870,6 +890,9 @@ static void __nvmeibc_cmd_piggyback_response_pet_describe(struct operation *o, s
 
 void nvmeibc_cmd_disk_io_complete_response_pet_describe(struct operation *o, struct nvmeibc_block_command *cmd)
 {
+	if (!nvmeib_pet_journal_is_activated(&o->journal))
+		return;
+
 	NVMEIBC_IO_PET_MSG(&o->journal,
 		"disk_io.response(sgmnt=%hhu, o_rv=%d, comp_code=%d)",
 		cmd->o_rv ? NVMEIB_PET_SEVERITY_WARNING : NVMEIB_PET_SEVERITY_NORMAL,
