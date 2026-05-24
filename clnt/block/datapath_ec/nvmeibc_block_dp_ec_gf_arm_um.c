@@ -72,11 +72,19 @@
  * already corrupted a V reg; only the caller-side `target` attribute can
  * stop that. The rstr asm does declare V0..V31 as clobbers so the compiler
  * can't keep a live value across the call.
+ *
+ * Belt-and-suspenders: the helpers themselves are also marked
+ * __always_inline + NVMEIBC_ARM_GF_ENTRY. __always_inline guarantees they
+ * fold into their caller (where the caller's -mgeneral-regs-only attribute
+ * dominates), and NVMEIBC_ARM_GF_ENTRY ensures that even if a future
+ * caller ever forgets the attribute, the helper bodies themselves still
+ * cannot be emitted out-of-line with a V-reg-using prologue.
  */
 #define NVMEIBC_ARM_GF_ENTRY \
 	__attribute__((target("general-regs-only")))
 
-static void nvmeibc_arm_save_regs(struct user_fpsimd_state *save_buf)
+static __always_inline NVMEIBC_ARM_GF_ENTRY
+void nvmeibc_arm_save_regs(struct user_fpsimd_state *save_buf)
 {
 	uint64_t tmp;
 	__asm__ volatile(
@@ -109,7 +117,8 @@ static void nvmeibc_arm_save_regs(struct user_fpsimd_state *save_buf)
 	);
 }
 
-static void nvmeibc_arm_rstr_regs(struct user_fpsimd_state *save_buf)
+static __always_inline NVMEIBC_ARM_GF_ENTRY
+void nvmeibc_arm_rstr_regs(struct user_fpsimd_state *save_buf)
 {
 	uint32_t tmp;
 	uint32_t save_fpcr;
