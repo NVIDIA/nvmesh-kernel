@@ -68,7 +68,7 @@ bool mr_min_page_4k = true;
 module_param(mr_min_page_4k, bool, 0644);
 MODULE_PARM_DESC(mr_min_page_4k,
 	"Advertise 4 KiB as the minimum MR page size in page_size_cap, "
-	"even when the kernel PAGE_SIZE is larger (bool, default false).");
+	"even when the kernel PAGE_SIZE is larger (bool, default true).");
 
 static int ib_qp_state_to_siw_qp_state[IB_QPS_ERR+1] = {
 	[IB_QPS_RESET]	= SIW_QP_STATE_IDLE,
