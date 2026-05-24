@@ -187,12 +187,14 @@ static inline struct page *siw_get_pblpage(struct siw_mr *mr,
 
 /*
  * The 0-copy TX path stores per-page byte counts as u16 to keep
- * siw_tx_hdt()'s stack frame within the kernel's 1 KiB
- * -Wframe-larger-than budget. Every entry holds at least one byte,
- * so 0 is a free sentinel for "full PAGE_SIZE" -- the only value u16
- * can't represent natively (PAGE_SIZE == 65536 on 64 KiB-page
- * kernels). On smaller-page kernels the encoder is a no-op at
- * runtime because PAGE_SIZE never reaches the sentinel.
+ * struct siw_iwarp_tx's per-QP scratch arrays (page_off_scratch[],
+ * page_len_scratch[]) compact -- the unsigned-int alternative would
+ * cost an extra 96 B per QP × MAX_ARRAY for each of the two arrays.
+ * Every entry holds at least one byte, so 0 is a free sentinel for
+ * "full PAGE_SIZE" -- the only value u16 can't represent natively
+ * (PAGE_SIZE == 65536 on 64 KiB-page kernels). On smaller-page
+ * kernels the encoder is a no-op at runtime because PAGE_SIZE never
+ * reaches the sentinel.
  */
 static inline u16 siw_encode_page_len(unsigned int v)
 {
@@ -905,16 +907,11 @@ static int siw_0copy_tx(struct socket *s, struct page **page,
  * boundaries. Two more elements are referencing iWARP header
  * and trailer.
  *
- * Sizing uses SIW_MR_MIN_PAGE_SIZE rather than PAGE_SIZE so that an
- * MR registered with sub-PAGE_SIZE pages (see mr_min_page_4k) on a
- * large-page kernel still fits: the worst case is one array entry
- * per minimum-sized PBL entry across a 64 KiB FPDU.
- *
- * MAX_ARRAY = 64KB/SIW_MR_MIN_PAGE_SIZE + 1 +
- *             (2 * (SIW_MAX_SGE - 1) + HDR + TRL)
+ * MAX_ARRAY is the local alias for SIW_TX_HDT_MAX_FRAGS (declared in
+ * siw.h, where it also sizes the per-QP scratch arrays in
+ * struct siw_iwarp_tx). See that header for the sizing rationale.
  */
-#define MAX_ARRAY ((0xffff / SIW_MR_MIN_PAGE_SIZE) + 1 + \
-		   (2 * (SIW_MAX_SGE - 1) + 2))
+#define MAX_ARRAY SIW_TX_HDT_MAX_FRAGS
 
 #ifdef SIW_TX_HDT_TRACE
 /*
@@ -967,13 +964,6 @@ siw_tx_hdt_trace_iter(struct siw_iwarp_tx *c_tx,
  * Write out iov referencing hdr, data and trailer of current FPDU.
  * Update transmit state dependent on write return status
  */
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wframe-larger-than"
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wframe-larger-than="
-#endif
 static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 {
 	struct siw_wqe		*wqe = &c_tx->wqe_active;
@@ -982,31 +972,27 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 	union siw_mem_resolved	*mem = &wqe->mem[c_tx->sge_idx];
 	struct siw_mr		*mr = NULL;
 
-	struct kvec		iov[MAX_ARRAY];
-	struct page		*page_array[MAX_ARRAY];
 	/*
-	 * Per-entry (offset, len) tuple for the 0-copy (sendpage) path.
+	 * Per-FPDU scratch lives in tx_ctx (gated by tx_ctx.in_use) rather
+	 * than the stack frame; see the comment on the scratch fields in
+	 * struct siw_iwarp_tx. These locals are pointer aliases so the rest
+	 * of the function reads as before.
 	 *
 	 * page_off[i] is the intra-page offset where this entry's bytes
 	 * start in page_array[i]; page_len[i] is the number of bytes
-	 * (encoded with the PAGE_SIZE-as-0 sentinel below). The pair is
-	 * required because, with sub-PAGE_SIZE PBL entries (see
-	 * mr_min_page_4k), the bytes of a single SGE can map to physical
-	 * chunks at non-zero intra-page offsets even past the first
-	 * entry, so the historical "first entry has an offset, every
-	 * subsequent entry starts at offset 0" assumption is wrong.
-	 *
-	 * Both stored as u16 to keep the stack frame within the kernel's
-	 * 1 KiB -Wframe-larger-than budget. A page_array[] entry always
-	 * holds at least 1 byte, so 0 is a free sentinel for the only
-	 * value u16 can't represent: PAGE_SIZE == 65536 on 64 KiB-page
-	 * kernels. page_off[] is in [0, PAGE_SIZE) and fits u16 directly
-	 * even on 64 KiB-page kernels (max value PAGE_SIZE - 1 = 0xffff).
+	 * (encoded with the PAGE_SIZE-as-0 sentinel: see
+	 * siw_encode_page_len()). The pair is required because, with
+	 * sub-PAGE_SIZE PBL entries (see mr_min_page_4k), the bytes of a
+	 * single SGE can map to physical chunks at non-zero intra-page
+	 * offsets even past the first entry, so the historical "first
+	 * entry has an offset, every subsequent entry starts at offset 0"
+	 * assumption is wrong.
 	 */
-	u16			page_off[MAX_ARRAY];
-	u16			page_len[MAX_ARRAY];
+	struct kvec		*iov        = c_tx->iov_scratch;
+	struct page		**page_array = c_tx->page_array_scratch;
+	u16			*page_off   = c_tx->page_off_scratch;
+	u16			*page_len   = c_tx->page_len_scratch;
 	struct msghdr		msg = {.msg_flags = MSG_DONTWAIT};
-
 	int			seg = 0, do_crc = c_tx->do_crc, is_kva = 0, rv, is_kva_vm = 0;
 	unsigned int		data_len = c_tx->bytes_unsent,
 				hdr_len = 0,
@@ -1014,6 +1000,11 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 				sge_off = c_tx->sge_off,
 				sge_idx = c_tx->sge_idx;
 	unsigned long		start_send_jif, sent_jif;
+
+	BUILD_BUG_ON(ARRAY_SIZE(c_tx->iov_scratch)        != MAX_ARRAY);
+	BUILD_BUG_ON(ARRAY_SIZE(c_tx->page_array_scratch) != MAX_ARRAY);
+	BUILD_BUG_ON(ARRAY_SIZE(c_tx->page_off_scratch)   != MAX_ARRAY);
+	BUILD_BUG_ON(ARRAY_SIZE(c_tx->page_len_scratch)   != MAX_ARRAY);
 
 	if (tx_flags_from_upstream && siw_sq_empty(TX_QP(c_tx)) && !tx_more_wqe(TX_QP(c_tx), wqe))
 		msg.msg_flags |= MSG_EOR;
@@ -1507,11 +1498,6 @@ done_crc:
 done:
 	return rv;
 }
-#ifdef __clang__
-#pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
 
 static void siw_calculate_tcpseg(struct siw_iwarp_tx *c_tx, struct socket *s)
 {

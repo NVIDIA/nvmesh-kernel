@@ -113,6 +113,21 @@ enum siw_if_type {
  */
 #define SIW_MR_MIN_PAGE_SIZE	4096
 
+/*
+ * Upper bound on the number of fragments siw_tx_hdt() may build for one
+ * FPDU: up to one slot per SIW_MR_MIN_PAGE_SIZE-sized chunk of the
+ * 64 KiB max payload, plus room for SGE-boundary unsharing and the
+ * iWARP header / trailer. Used to size both the per-iteration counter
+ * (MAX_ARRAY in siw_qp_tx.c) and the per-QP scratch arrays in
+ * struct siw_iwarp_tx (iov_scratch[], page_array_scratch[], etc.).
+ *
+ * Sizing uses SIW_MR_MIN_PAGE_SIZE rather than PAGE_SIZE so an MR
+ * registered with sub-PAGE_SIZE pages (see mr_min_page_4k) on a
+ * large-page kernel still fits.
+ */
+#define SIW_TX_HDT_MAX_FRAGS	((0xffff / SIW_MR_MIN_PAGE_SIZE) + 1 + \
+				 (2 * (SIW_MAX_SGE - 1) + 2))
+
 #define SENDPAGE_THRESH		PAGE_SIZE /* min bytes for using sendpage() */
 #define SQ_USER_MAXBURST	100 //was 10
 
@@ -970,6 +985,37 @@ struct siw_iwarp_tx {
 	atomic_t n_completed_fpdus;
 	int n_completed_fpdus_in_list;
 #endif
+
+	/*
+	 * Per-FPDU scratch built up by siw_tx_hdt()'s inner loop. Hoisted
+	 * out of the function's stack frame to:
+	 *   (a) keep the frame within the kernel's 1 KiB
+	 *       -Wframe-larger-than budget without #pragma suppression;
+	 *   (b) save ~800 B on top of the deep kernel_sendmsg ->
+	 *       tcp_sendmsg_locked -> ip_xmit call chain;
+	 *   (c) make the *last-written* TX fragment layout inspectable
+	 *       post-mortem from a saved siw_qp even when
+	 *       SIW_TX_HDT_TRACE is compiled out (the trace below
+	 *       records the *history* of mutations -- these fields
+	 *       preserve the most recent value of what was mutated).
+	 *
+	 * Producer-only: valid only while tx_ctx.in_use != 0 (gated by
+	 * the atomic_cmpxchg in siw_qp_sq_process()). The local `seg`
+	 * counter on the siw_tx_hdt() stack bounds the live region:
+	 * entries [0, seg) reflect the FPDU currently being assembled;
+	 * entries [seg, SIW_TX_HDT_MAX_FRAGS) are stale leftovers from a
+	 * previous call. siw_tx_hdt() always writes a slot before it
+	 * reads it within the loop, so no zero-init is needed.
+	 *
+	 * page_off / page_len use the u16 PAGE_SIZE-as-0 sentinel
+	 * encoding (see siw_encode_page_len()) so 64 KiB-page kernels
+	 * still fit; page_off is in [0, PAGE_SIZE) and fits u16
+	 * directly.
+	 */
+	struct kvec	iov_scratch[SIW_TX_HDT_MAX_FRAGS];
+	struct page	*page_array_scratch[SIW_TX_HDT_MAX_FRAGS];
+	u16		page_off_scratch[SIW_TX_HDT_MAX_FRAGS];
+	u16		page_len_scratch[SIW_TX_HDT_MAX_FRAGS];
 
 #ifdef SIW_TX_HDT_TRACE
 	/*
