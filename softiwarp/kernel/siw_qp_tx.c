@@ -1785,16 +1785,24 @@ static int siw_qp_sq_proc_tx(struct siw_qp *qp, struct siw_wqe *wqe, bool inline
 		 * any protocol-state mutation (siw_check_sgl_tx mem-refs,
 		 * wqe->wr_status, siw_qp_prepare_tx's ddp_msn++). GFP_NOWAIT
 		 * is allowed to fail under memory pressure; bail with -EAGAIN
-		 * so siw_run_sq reschedules the QP for a clean retry. By
-		 * pulling the allocation up here we keep the call to
-		 * siw_qp_prepare_tx() side-effect-clean on failure, and avoid
-		 * the previous footgun where a failed kzalloc inside that
-		 * function left c_tx->fpdu_in_prog NULL and oopsed
-		 * qp_tx_thread/N in the short-FPDU success branch.
+		 * so we get a clean retry. By pulling the allocation up here
+		 * we keep the call to siw_qp_prepare_tx() side-effect-clean
+		 * on failure, and avoid the previous footgun where a failed
+		 * kzalloc inside that function left c_tx->fpdu_in_prog NULL
+		 * and oopsed qp_tx_thread/N in the short-FPDU success branch.
+		 *
+		 * NOTE: siw_qp_sq_process() converts our -EAGAIN to rv = 0
+		 * (it assumes -EAGAIN means TCP nospace, which is re-armed
+		 * by the sk_write_space callback). That assumption doesn't
+		 * hold for kzalloc failure -- no socket event will fire on
+		 * memory-pressure relief -- so explicitly re-enqueue the QP
+		 * on the same CPU (avoid cache thrash) before bailing.
 		 */
 		BUG_ON(c_tx->fpdu_in_prog);
 		c_tx->fpdu_in_prog = kzalloc(sizeof(*c_tx->fpdu_in_prog), GFP_NOWAIT);
 		if (unlikely(!c_tx->fpdu_in_prog)) {
+			siw_sq_queue_work(TX_QP(c_tx),
+					  SIW_TX_CTX_PREF_SAME_CPU);
 			rv = -EAGAIN;
 			goto tx_done;
 		}
@@ -2057,13 +2065,20 @@ next_segment:
 		/* Pre-allocate for the *next* fragmented FPDU; the previous
 		 * one was just added to sent_fpdus and c_tx->fpdu_in_prog
 		 * cleared. No protocol state has been mutated since, so
-		 * -EAGAIN here is safe to retry: siw_run_sq will reschedule
-		 * the QP and we will re-enter at next_segment with the same
-		 * wqe state (SR_WR_INPROGRESS, partial progress).
+		 * -EAGAIN here is safe to retry; we will re-enter at
+		 * next_segment with the same wqe state (SR_WR_INPROGRESS,
+		 * partial progress).
+		 *
+		 * Same caveat as the Site A allocation: siw_qp_sq_process()
+		 * swallows -EAGAIN assuming the sk_write_space callback will
+		 * re-arm us, which is not true for kzalloc failure -- so
+		 * explicitly re-enqueue the QP on the same CPU.
 		 */
 		BUG_ON(c_tx->fpdu_in_prog);
 		c_tx->fpdu_in_prog = kzalloc(sizeof(*c_tx->fpdu_in_prog), GFP_NOWAIT);
 		if (unlikely(!c_tx->fpdu_in_prog)) {
+			siw_sq_queue_work(TX_QP(c_tx),
+					  SIW_TX_CTX_PREF_SAME_CPU);
 			rv = -EAGAIN;
 			goto tx_done;
 		}
