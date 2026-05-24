@@ -1068,6 +1068,18 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 			 * tx from kernel virtual address: either inline data
 			 * or memory region with assigned kernel buffer
 			 */
+			if (seg >= (int)MAX_ARRAY - 1) {
+				/*
+				 * Reserve one slot for the trailer iov[]
+				 * written after this loop.
+				 */
+				dprint(DBG_ON,
+				       "(QP%d): Too many fragments (kva)\n",
+				       TX_QPID(c_tx));
+				wqe->processed -= c_tx->bytes_unsent;
+				rv = -EMSGSIZE;
+				goto done_crc;
+			}
 			iov[seg].iov_base = (void *)(sge->laddr + sge_off);
 			iov[seg].iov_len = sge_len;
 
@@ -1246,6 +1258,28 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 			if (!c_tx->use_sendpage)
 				iov[seg - 1].iov_len += plen;
 		} else {
+				/*
+				 * Bound-check before writing the new slot:
+				 * we need iov[seg]/page_array[seg]/etc. for
+				 * this entry AND one more slot for the
+				 * trailer iov[] written after this loop.
+				 * The old check ran post-write so any seg
+				 * value >= MAX_ARRAY here already OOB'd
+				 * before we got a chance to bail.
+				 */
+				if (seg >= (int)MAX_ARRAY - 1) {
+					dprint(DBG_ON,
+					       "(QP%d): Too many fragments\n",
+					       TX_QPID(c_tx));
+					if (!is_kva && !c_tx->use_sendpage) {
+						int i = (hdr_len > 0) ? 1 : 0;
+						while (i < seg)
+							kunmap(page_array[i++]);
+					}
+					wqe->processed -= c_tx->bytes_unsent;
+					rv = -EMSGSIZE;
+					goto done_crc;
+				}
 				page_array[seg] = p;
 				/*
 				 * Per-entry (off, len) tuple: bytes
@@ -1265,21 +1299,7 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 							    intra_off;
 					iov[seg].iov_len = plen;
 				}
-
-				if (++seg > (int)MAX_ARRAY) {
-					dprint(DBG_ON,
-					       "(QP%d): Too many fragments\n",
-					       TX_QPID(c_tx));
-					if (!is_kva && !c_tx->use_sendpage) {
-						int i = (hdr_len > 0) ? 1 : 0;
-						seg--;
-						while (i < seg)
-							kunmap(page_array[i++]);
-					}
-					wqe->processed -= c_tx->bytes_unsent;
-					rv = -EMSGSIZE;
-					goto done_crc;
-				}
+				seg++;
 			}
 
 #ifdef SIW_TX_HDT_TRACE
