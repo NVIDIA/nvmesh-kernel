@@ -469,7 +469,7 @@ NIC_NUMA_NODE=$(cat /sys/class/net/$BASE_DEVICE/device/numa_node)
 # IRQs at least get distributed.
 if [ "$NIC_NUMA_NODE" -lt 0 ]; then
 	case $AFFINITY_DOMAIN in
-		pernuma|persocket)
+		pernuma|persocket|pernuma_thread0|persocket_thread0)
 			warn_log "$BASE_DEVICE reports numa_node=$NIC_NUMA_NODE;"\
 			         " falling back from $AFFINITY_DOMAIN to fullspread"
 			AFFINITY_DOMAIN=fullspread
