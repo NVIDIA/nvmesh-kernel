@@ -160,11 +160,24 @@ static inline void nvmeibc_update_roles_bmps_flags(struct nvmeibc_roles_bmps* bm
 	bmps->reserved = 0;
 }
 
+/*a small helper struct to describe current topology for IO PET journals*/
+union nvmeibc_raid1_io_pet_status{
+	struct{
+		u8 n_sgmnts;
+		struct {
+			u8 sgmnt;
+			enum NVMEIBTC_DS_MODE mode : 8;
+		} __attribute__((packed)) dgrd_sgmnts[2];
+	} info;
+	u64 all;
+};
+
 // Container for various data that can be calculated on based raid level topology data for future reuse
 struct nvmeibc_raid1_calculated_data {
 	struct nvmeibc_roles_bmps roles_bmps[N_MAX_RAID_SLICE_LEN];	// Precalculated nvmeibc_roles_bmps data structure held for each possible roles shift
 	enum nvmeib_io_type_permission final_io_perm;				// Final io_perm <= r1->toma.io_perm
 	struct dp_topology_traits topo_traits;			// Topology description for the raid1
+	union nvmeibc_raid1_io_pet_status topo_state_for_io_pet;
 };
 
 /* Data protection raid struct: Supports D+P: 1+{0..3}, {2..8}+{1..2} */
@@ -243,21 +256,6 @@ struct nvmeibc_raid1 const* __nvmeibc_disk_segment_get_praid_impl(struct nvmeibc
 	__builtin_choose_expr(__builtin_types_compatible_p(__typeof__(self), const struct nvmeibc_disk_segment*),	\
 		__nvmeibc_disk_segment_get_praid_impl(self),															\
 		(struct nvmeibc_raid1*)__nvmeibc_disk_segment_get_praid_impl(self)) 								\
-
-
-union nvmeibc_raid1_io_pet_status{
-	struct{
-		u8 n_sgmnts;
-		struct {
-			u8 sgmnt;
-			enum NVMEIBTC_DS_MODE mode : 8;
-		} __attribute__((packed)) dgrd_sgmnts[2];
-	} info;
-	u64 all;
-};
-
-__attribute__((nonnull(1)))
-union nvmeibc_raid1_io_pet_status nvmeibc_raid1_io_pet_describe_state(struct nvmeibc_raid1 const* raid);
 
 #define raid1_for_each_seg(r1, seg, si) \
 	for (si = 0, seg = r1 ? (r1)->segments : 0; \

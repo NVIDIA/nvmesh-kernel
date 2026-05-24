@@ -747,7 +747,7 @@ void nvmeibc_operation_compressed_op_pet_dump_bio(const struct operation *o)
 	rldr = o->cmds;
 	topo = (u64)o->topo->debug_unique_index;
 	raid = nvmeibc_disk_segment_get_praid(rldr->ds);
-	topo_status = nvmeibc_raid1_io_pet_describe_state(raid);
+	topo_status = raid->calculated_data.topo_state_for_io_pet;
 
 	if (o->nd->dp.enable_care_about_txid && o->op == NVMEIB_BLOCK_IO_OP_WRITE) {
 		NVMEIBC_IO_PET_MSG_NORM(&o->journal,

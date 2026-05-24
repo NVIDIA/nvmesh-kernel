@@ -34,8 +34,8 @@ struct nvmeibc_raid1 const* __nvmeibc_disk_segment_get_praid_impl(struct nvmeibc
 	return NULL;
 }
 
-union nvmeibc_raid1_io_pet_status
-nvmeibc_raid1_io_pet_describe_state(struct nvmeibc_raid1 const* raid)
+static union nvmeibc_raid1_io_pet_status
+__nvmeibc_raid1_io_pet_describe_state(struct nvmeibc_raid1 const* raid)
 {
 	u8 idx = 0;
 	enum NVMEIBTC_DS_MODE acms[2] = {NVMEIBTC_DS_MODE_RW, NVMEIBTC_DS_MODE_RW};
@@ -156,6 +156,7 @@ static void nvmeibc_raid1_fill_calculated_data(struct nvmeibc_raid1 *r1)
 		for (si = 0; si < r1->replicas; ++si)
 			r1->segments[si].is_safe_for_view_lock = can_view_lock;
 	}
+	r1->calculated_data.topo_state_for_io_pet = __nvmeibc_raid1_io_pet_describe_state(r1);
 }
 
 void nvmeibc_topology_fill_all_topo_raids_calculated_data(struct nvmeibc_topology *t)
