@@ -292,7 +292,7 @@ MODULE_PARM_DESC(disk_local_use_system_pcpu_wq, "Determines whether local IO use
 
 uint nvmeibc_disk_ioch_drained_timeout_sec = 10;
 module_param_named(ioch_drained_timeout_sec, nvmeibc_disk_ioch_drained_timeout_sec, uint, 0644);
-MODULE_PARM_DESC(ioch_drained_timeout_sec, "The timeout in milliseconds for the IOCH drained event before disconnecting disk");
+MODULE_PARM_DESC(ioch_drained_timeout_sec, "The timeout in seconds for the IOCH drained event before disconnecting disk");
 
 struct nvmeib_cpu_mask_info_node {
 	struct nvmeib_cpu_mask_info mask_info;
