@@ -12,6 +12,7 @@
 struct nvmeibc_io_pet_controller {
 	struct nvmeib_pet_base_controller base;
 	size_t buffer_size;
+	bool verbose;
 	struct {
 		pthread_rwlock_t lock;
 		int fd;
@@ -58,7 +59,12 @@ NVMEIBC_MEMMGR_METRIC(io_pet_buffers, "component=raid.io.pet.buffers");
 struct iovec __io_pet_controller_get_buffer(struct nvmeib_pet_base_controller const* base)
 {
 	__auto_type self = (struct nvmeibc_io_pet_controller*)(base);
-	void* ptr = kmalloc(self->buffer_size, GFP_KERNEL);
+	void* ptr;
+
+	if (!self->buffer_size) {
+		return (struct iovec){0};
+	}
+	ptr = kmalloc(self->buffer_size, GFP_KERNEL);
 	nvmesh_memmgr_metric_on_alloc_update(io_pet_buffers, ptr? ksize(ptr): self->buffer_size, ptr);
 	return (struct iovec){.iov_base = ptr, .iov_len = ptr ? self->buffer_size : 0};
 }
@@ -79,6 +85,7 @@ struct nvmeibc_io_pet_controller io_pet_controller = {
 		.put_buffer = __io_pet_controller_put_buffer
 	},
 	.buffer_size = 4096,
+	.verbose = true,
 	.output.lock = PTHREAD_RWLOCK_INITIALIZER,
 	.output.fd = -1
 };
@@ -105,6 +112,31 @@ static void __attribute__ ((destructor)) io_pet_controller_fini(void)
 struct nvmeib_pet_base_controller* sim_get_io_pet_controller(void)
 {
 	return &io_pet_controller.base;
+}
+
+void sim_io_pet_controller_set_buffer_size(size_t buffer_size)
+{
+	io_pet_controller.buffer_size = buffer_size;
+}
+
+size_t sim_io_pet_controller_get_buffer_size(void)
+{
+	return io_pet_controller.buffer_size;
+}
+
+void sim_io_pet_controller_set_verbose(bool verbose)
+{
+	io_pet_controller.verbose = verbose;
+}
+
+bool sim_io_pet_controller_get_verbose(void)
+{
+	return io_pet_controller.verbose;
+}
+
+struct nvmeib_pet_journal __wrap_nvmeibc_io_pet_journal_make(struct nvmeib_pet_base_controller* controller)
+{
+	return nvmeib_pet_journal_make(controller, sim_io_pet_controller_get_verbose());
 }
 
 void sim_io_pet_controller_rotate(char const* test_id)

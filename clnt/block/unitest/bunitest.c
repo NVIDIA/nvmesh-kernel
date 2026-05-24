@@ -526,6 +526,121 @@ TEST_FUNC int unitest_GoodPathIO(struct NVMeshSystem *sys){
 	return rv;
 }
 
+#define UNITEST_MIRROR_MT_IO_VOL		3
+#define UNITEST_MIRROR_MT_IO_THREADS	4
+#define UNITEST_MIRROR_MT_IO_RUNTIME_MS	5000
+#define UNITEST_MIRROR_MT_IO_MAX_BLOCKS	8
+
+struct unitest_mirror_mt_io_params {
+	struct NVMeshSystem *sys;
+	struct task_struct *kthread;
+	unsigned long deadline;
+	u64 range_start;
+	u64 range_len;
+	int thread_idx;
+	int n_cycles;
+	int n_ios;
+};
+
+static u64 __unitest_mirror_mt_io_pattern(const struct unitest_mirror_mt_io_params *p, u64 start_block, int len_blocks)
+{
+	return 0x4d4952524f520000ULL ^ ((u64)p->thread_idx << 48) ^ ((u64)p->n_cycles << 16) ^ start_block ^ len_blocks;
+}
+
+static void __unitest_mirror_mt_io_next(struct unitest_mirror_mt_io_params *p, u64 *seed, u64 *start_block, int *len_blocks)
+{
+	*seed = (*seed * 6364136223846793005ULL) + 1;
+	*len_blocks = 1 + (*seed % UNITEST_MIRROR_MT_IO_MAX_BLOCKS);
+	BUG_ON(p->range_len < (u64)*len_blocks);
+
+	*seed = (*seed * 6364136223846793005ULL) + 1;
+	*start_block = p->range_start + (*seed % (p->range_len - *len_blocks + 1));
+}
+
+static int __thread_mirror_volume_io(void *param)
+{
+	struct unitest_mirror_mt_io_params *p = param;
+	struct clientSimulator *client = &p->sys->clients[0];
+	const int volInd = UNITEST_MIRROR_MT_IO_VOL;
+	const int memSize = UNITEST_MIRROR_MT_IO_MAX_BLOCKS * NVMEIBC_SECTOR_SIZE;
+	const u64 trimmed_pattern = __unitest_get_trimmed_u64();
+	u64 seed = 0x9e3779b97f4a7c15ULL ^ ((u64)p->thread_idx << 32) ^ p->range_start;
+	u8 *write_mem = sim_kmalloc(memSize, GFP_KERNEL);
+	u8 *read_mem = sim_kmalloc(memSize, GFP_KERNEL);
+
+	while (!kthread_should_stop() && time_before(jiffies, p->deadline)) {
+		u64 start_block;
+		u64 magic_pattern;
+		int len_blocks;
+		int rv;
+
+		__unitest_mirror_mt_io_next(p, &seed, &start_block, &len_blocks);
+
+		rv = osSimulator_trimWait(&client->OS, volInd, start_block, len_blocks);		BUG_ON(rv);
+		__unitest_fill_blocks_with_pattern(read_mem, len_blocks, ~trimmed_pattern);
+		rv = osSimulator_readArrWait(&client->OS, volInd, start_block, len_blocks, read_mem);	BUG_ON(rv);
+		__unitest_verify_blocks_pattern(read_mem, len_blocks, trimmed_pattern, false);
+
+		magic_pattern = __unitest_mirror_mt_io_pattern(p, start_block, len_blocks);
+		__unitest_fill_blocks_with_pattern(write_mem, len_blocks, magic_pattern);
+		rv = osSimulator_writeArrWait(&client->OS, volInd, start_block, len_blocks, write_mem);	BUG_ON(rv);
+		__unitest_fill_blocks_with_pattern(read_mem, len_blocks, ~magic_pattern);
+		rv = osSimulator_readArrWait(&client->OS, volInd, start_block, len_blocks, read_mem);	BUG_ON(rv);
+		__unitest_verify_blocks_pattern(read_mem, len_blocks, magic_pattern, false);
+
+		p->n_cycles++;
+		p->n_ios += 4;
+	}
+
+	sim_kfree(read_mem);
+	sim_kfree(write_mem);
+	return 0;
+}
+
+TEST_FUNC int unitest_MirrorMultiThreadedIO(struct NVMeshSystem *sys)
+{
+	struct clientSimulator *client = &sys->clients[0];
+	const int volInd = UNITEST_MIRROR_MT_IO_VOL;
+	const int n_threads = UNITEST_MIRROR_MT_IO_THREADS;
+	const unsigned long deadline = jiffies + msecs_to_jiffies(UNITEST_MIRROR_MT_IO_RUNTIME_MS);
+	const u64 vol_size = client->devs[volInd]->size;
+	const u64 range_len = vol_size / n_threads;
+	struct unitest_mirror_mt_io_params p[UNITEST_MIRROR_MT_IO_THREADS] = {{0}};
+	int n_total_cycles = 0, n_total_ios = 0;
+	int i;
+
+	BUG_ON(!tTopoOfVolume_isMirrored(&sys->tcf.vols[volInd]));
+	BUG_ON(tTopoOfVolume_isStriped(&sys->tcf.vols[volInd]));
+	BUG_ON(range_len < UNITEST_MIRROR_MT_IO_MAX_BLOCKS);
+
+	for (i = 0; i < n_threads; i++) {
+		p[i].sys = sys;
+		p[i].deadline = deadline;
+		p[i].range_start = i * range_len;
+		p[i].range_len = (i == n_threads - 1) ? (vol_size - p[i].range_start) : range_len;
+		p[i].thread_idx = i;
+		p[i].kthread = kthread_run(__thread_mirror_volume_io, &p[i], "ut:mirror mt io");
+		BUG_ON(p[i].kthread == NULL);
+	}
+
+	msleep(UNITEST_MIRROR_MT_IO_RUNTIME_MS);
+
+	for (i = 0; i < n_threads; i++)
+		kthread_stop(p[i].kthread);
+	for (i = 0; i < n_threads; i++) {
+		n_total_cycles += p[i].n_cycles;
+		n_total_ios += p[i].n_ios;
+	}
+
+	clientSimulator_wait_for_all_bio_ops(client);
+	tomaSimulator_waitProtoEnd(NULL);
+	BUG_ON(!NVMeshSystem_is_stable(sys));
+
+	unitest_print("*************** Mirror multi threaded IO sent %d IOs in %d cycles over %d[mSec]\n",
+				  n_total_ios, n_total_cycles, UNITEST_MIRROR_MT_IO_RUNTIME_MS);
+	return 0;
+}
+
 TEST_FUNC int unitest_read_mutable_buffer(struct NVMeshSystem *sys, int vol){
 	int rv = 0;
 	struct clientSimulator *client = &sys->clients[0];			// Test via the first client
@@ -7703,6 +7818,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 			rv |= SIMU_RUN_TEST(unitest_missing_few_reconfs, sys);
 			rv |= SIMU_RUN_TEST(unitest_IOonRaid10_without_metadata, sys);
 			rv |= SIMU_RUN_TEST(unitest_GoodPathIO, sys);
+			rv |= SIMU_RUN_TEST(unitest_MirrorMultiThreadedIO, sys);
 			rv |= SIMU_RUN_TEST(unitest_SubBlockIO, sys, false);
 			rv |= SIMU_RUN_TEST(unitest_MetadataGoodPathIO, sys);
 			rv |= SIMU_RUN_TEST(unitest_IOonReadOnlyVols, sys);
