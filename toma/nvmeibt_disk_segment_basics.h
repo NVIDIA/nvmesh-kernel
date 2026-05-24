@@ -488,6 +488,7 @@ static inline bool nvmeibt_disk_segment_leader_is_remote_active_mem_tbl_init_com
 {
 	unsigned int	actionable = (NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON |
 								  NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF |
+								  NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO |
 								  NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST |
 								  NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER);
 	return !!((topo_ctx->dirty_bits_init_mode | topo_ctx->stale_locks_init_mode) & actionable);
@@ -497,6 +498,7 @@ static inline bool nvmeibt_seg_active_is_mem_tbl_init_meaningful(const struct nv
 {
 	unsigned int	actionable = (NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON |
 								  NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF |
+								  NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO |
 								  NVMEIBT_MEM_TBL_INIT_MODE_FIRST_USE_EVER |
 								  NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST |
 								  NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT);
@@ -507,18 +509,6 @@ static inline bool nvmeibt_disk_segment_is_mem_tbl_init_done_fully(const struct 
 {
 	const unsigned int done = (NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE | NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT);
 	return (topo_ctx && (topo_ctx->dirty_bits_init_mode &  done) && (topo_ctx->stale_locks_init_mode & done));
-}
-
-static inline bool nvmeibt_disk_segment_is_init_mode_turning_off(const struct nvmeibt_disk_segment_topo_ctx *topo_ctx)
-{
-	// Explicitly stating which INIT_MODEs are OK, so newly added INIT_MODEs
-	//  modes will fail this test
-	unsigned int preserving_mask = (NVMEIBT_MEM_TBL_INIT_MODE_INIT_DONE |
-									NVMEIBT_MEM_TBL_INIT_MODE_INIT_IRRELEVANT |
-									NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON);
-	return (topo_ctx &&
-			( !(topo_ctx->dirty_bits_init_mode  & preserving_mask) ||
-			  !(topo_ctx->stale_locks_init_mode & preserving_mask)));
 }
 
 #define NVMEIBT_SEG_TOPO_SET_OWNER(name, uuid_8, seg_topo, __owner_seg_lot) do {												\

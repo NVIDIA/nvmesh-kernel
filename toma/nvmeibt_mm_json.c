@@ -1548,6 +1548,7 @@ static enum NVMEIBT_MEM_TBL_INIT_MODE mem_tbl_init_mode_str_to_enum(const char *
 	else if (strcmp(init_mode_str, "FROM_PERSIST") == 0)		rv = NVMEIBT_MEM_TBL_INIT_MODE_FROM_PERSIST;
 	else if (strcmp(init_mode_str, "TURN_ALL_ON") == 0)			rv = NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_ON;
 	else if (strcmp(init_mode_str, "TURN_ALL_OFF") == 0)		rv = NVMEIBT_MEM_TBL_INIT_MODE_TURN_ALL_OFF;
+	else if (strcmp(init_mode_str, "BY_TOPO") == 0)				rv = NVMEIBT_MEM_TBL_INIT_MODE_BY_TOPO;
 	else if (strcmp(init_mode_str, "UNUSED_0") == 0)			rv = NVMEIBT_MEM_TBL_INIT_MODE_UNUSED_0;
 	else if (strcmp(init_mode_str, "UNKNOWN") == 0)				rv = NVMEIBT_MEM_TBL_INIT_MODE_UNKNOWN;
 	else {

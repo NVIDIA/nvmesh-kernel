@@ -2831,28 +2831,6 @@ mark_applied_post_update_actions_required:
 	TODO(Is the following set_registrants_aligned_with_sync_cmd needed? If needed then why not check for real?);
 	nvmeibt_seg_active_set_registrants_aligned_with_sync_cmd(seg_active, (!(applied_topo->is_registrants_synchronizer) ||
 																		  is_accepting_registrations));	// Not registrable --> Need to UNREG all registrants, for evict, and regardless
-	if (nvmeibt_disk_segment_is_competent_owner(&prev_active_topo) && nvmeibt_disk_segment_is_competent_owner(active_topo)) {
-		// I was owner in applied, and owner now. I.e., Keeping the old stale & dirty in mem.
-		// Validate that the init_mode does not erase stale or dirty bits from memory
-		if (nvmeibt_disk_segment_is_init_mode_turning_off(active_topo)) {
-			if (	!is_accepting_registrations &&
-				   /*nvmeibt_praid_is_client_sync_cmd_capable_to_INIT_TURN_OFF_on_owners(praid_topo_ctx->registrants_sync_cmd) &&*/
-					(nvmeibt_disk_segment_is_ec_cold_recoverer(active_topo) ||
-					 nvmeibt_disk_segment_is_init_mode_turning_off(applied_topo))) {
-				// We are good. either EC_cold_recoverer (that should turn off), or
-				//  the prev topo was turning_off (implying no I/O since), so we do not mind turning off again
-			} else {
-				N_Ef(u4h6gsk, "seg=@UUID_8 dirty_bits_state=@DIRTY_BITS_STATE-->@DIRTY_BITS_STATE_STR "
-					"praid_version=@PRAID_VERSION.@PRAID_VERSION "
-					"dirty_bits_init_mode=@DIRTY_BITS_INIT_MODE stale_locks_init_mode=@STALE_LOCKS_INIT_MODE",
-					nvmeibt_seg_active_UUID_8(seg_active),
-					dirty_bits_state_str(prev_active_topo.dirty_bits_state), dirty_bits_state_str(active_topo->dirty_bits_state),
-					active_topo->seg_praid_version_major, active_topo->seg_praid_version_minor,
-					mem_tbl_init_mode_str(active_topo->dirty_bits_init_mode), mem_tbl_init_mode_str(active_topo->stale_locks_init_mode));
-				nvmeibt_abort(ES_FATAL);
-			}
-		}
-	}
 	nvmeibt_seg_active_mark_serialize_active_topo_for_leader_required(seg_active);
 
 out:
