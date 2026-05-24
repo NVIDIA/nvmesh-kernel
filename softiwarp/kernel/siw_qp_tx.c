@@ -970,6 +970,9 @@ siw_tx_hdt_trace_iter(struct siw_iwarp_tx *c_tx,
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wframe-larger-than"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wframe-larger-than="
 #endif
 static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 {
@@ -1486,6 +1489,8 @@ done:
 }
 #ifdef __clang__
 #pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
 #endif
 
 static void siw_calculate_tcpseg(struct siw_iwarp_tx *c_tx, struct socket *s)
