@@ -40,7 +40,7 @@ module_param_named(nordda_wq_unbound, nvmeibc_nordda_wq_unbound, bool, 0444);
 MODULE_PARM_DESC(nordda_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibc_nordda (true) or a bound one (false). Relevant only if nr_defer_recv_comps_use_kwq is set to true");
 
 uint nvmeibc_nr_max_wrs_per_req = 0;
-module_param_named(nr_max_wrs_per_req, nvmeibc_nr_max_wrs_per_req, int, 0644);
+module_param_named(nr_max_wrs_per_req, nvmeibc_nr_max_wrs_per_req, uint, 0644);
 MODULE_PARM_DESC(nr_max_wrs_per_req, "The maximum number of WRs (RDMA work requests) per IO channel request, used for a write operation. For 0, use system's default.");
 
 NVMEIBC_MEMMGR_METRIC(c_nordda_srq_info, "component=client.nordda.srq_info");
