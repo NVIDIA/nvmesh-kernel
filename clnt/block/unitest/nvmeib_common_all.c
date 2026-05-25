@@ -361,16 +361,35 @@ struct msgloop_procfs_ent *nvmeib_msgloop_create(char *name,
 	return p;
 }
 
-struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags)
+enum nvmeib_msgloop_alloc_mode {
+	NVMEIB_MSGLOOP_ALLOC_ZEROED,
+	NVMEIB_MSGLOOP_ALLOC_UNINIT,
+};
+
+static struct msgloop_msg *__nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags,
+						      enum nvmeib_msgloop_alloc_mode alloc_mode)
 {
 	struct msgloop_msg *msg;
 
-	msg = kzalloc(sizeof(*msg) + data_size, flags);
+	if (alloc_mode == NVMEIB_MSGLOOP_ALLOC_ZEROED)
+		msg = kzalloc(sizeof(*msg) + data_size, flags);
+	else
+		msg = kmalloc(sizeof(*msg) + data_size, flags);
 	if (msg) {
 		kref_init(&msg->ref_cnt);
 	}
 
 	return msg;
+}
+
+struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags)
+{
+	return __nvmeib_msgloop_alloc_msg(data_size, flags, NVMEIB_MSGLOOP_ALLOC_ZEROED);
+}
+
+struct msgloop_msg *nvmeib_msgloop_alloc_msg_uninit(size_t data_size, gfp_t flags)
+{
+	return __nvmeib_msgloop_alloc_msg(data_size, flags, NVMEIB_MSGLOOP_ALLOC_UNINIT);
 }
 
 static void msgloop_free_msg(struct kref *kref)

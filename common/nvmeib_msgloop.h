@@ -29,7 +29,31 @@ struct msgloop_procfs_ent *nvmeib_msgloop_create(char *name,
 void nvmeib_msgloop_set_ready_cb(struct msgloop_procfs_ent *p,
 				 void (*ready_cb)(void *));
 
+/**
+ * nvmeib_msgloop_alloc_msg() - allocate a zeroed message for the msgloop.
+ * @data_size: Number of payload bytes to allocate after struct msgloop_msg.
+ * @flags: GFP allocation flags to pass through to kzalloc().
+ *
+ * The returned message has its reference counter initialized and should be
+ * released with msgloop_put_msg().
+ *
+ * Return: A zeroed message on success, or %NULL on allocation failure.
+ */
 struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags);
+
+/**
+ * nvmeib_msgloop_alloc_msg_uninit() - allocate an uninitialized msgloop message.
+ * @data_size: Number of payload bytes to allocate after struct msgloop_msg.
+ * @flags: GFP allocation flags to pass through to kmalloc().
+ *
+ * The returned message has its reference counter initialized and should be
+ * released with msgloop_put_msg(). The message is not zeroed; callers must set
+ * msg->len and initialize every payload byte later exposed through it before
+ * sending the message.
+ *
+ * Return: An uninitialized message on success, or %NULL on allocation failure.
+ */
+struct msgloop_msg *nvmeib_msgloop_alloc_msg_uninit(size_t data_size, gfp_t flags);
 
 void msgloop_get_msg(void *msg);
 void msgloop_put_msg(void *msg);

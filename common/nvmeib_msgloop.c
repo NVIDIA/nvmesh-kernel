@@ -58,24 +58,38 @@ void msgloop_put_msg(void *_msg)
 }
 EXPORT_SYMBOL(msgloop_put_msg);
 
-/*
- * Allocate a message for the msgloop.
- * Note: The 'flags' parameter should be preserved and passed through to kzalloc
- * so that callers can control deferrable allocation behavior (e.g., GFP_ATOMIC
- * vs GFP_NOIO).
- */
-struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags)
+enum nvmeib_msgloop_alloc_mode {
+	NVMEIB_MSGLOOP_ALLOC_ZEROED,
+	NVMEIB_MSGLOOP_ALLOC_UNINIT,
+};
+
+static struct msgloop_msg *__nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags,
+						      enum nvmeib_msgloop_alloc_mode alloc_mode)
 {
 	struct msgloop_msg *msg;
 
-	msg = kzalloc(sizeof(*msg) + data_size, flags);
+	if (alloc_mode == NVMEIB_MSGLOOP_ALLOC_ZEROED)
+		msg = kzalloc(sizeof(*msg) + data_size, flags);
+	else
+		msg = kmalloc(sizeof(*msg) + data_size, flags);
 	if (msg) {
 		kref_init(&msg->ref_cnt);
 	}
 
 	return msg;
 }
+
+struct msgloop_msg *nvmeib_msgloop_alloc_msg(size_t data_size, gfp_t flags)
+{
+	return __nvmeib_msgloop_alloc_msg(data_size, flags, NVMEIB_MSGLOOP_ALLOC_ZEROED);
+}
 EXPORT_SYMBOL(nvmeib_msgloop_alloc_msg);
+
+struct msgloop_msg *nvmeib_msgloop_alloc_msg_uninit(size_t data_size, gfp_t flags)
+{
+	return __nvmeib_msgloop_alloc_msg(data_size, flags, NVMEIB_MSGLOOP_ALLOC_UNINIT);
+}
+EXPORT_SYMBOL(nvmeib_msgloop_alloc_msg_uninit);
 
 static ssize_t msgloop_proc_read(struct file *file, char __user *userbuf,
 				 size_t len, loff_t *offset_p)
