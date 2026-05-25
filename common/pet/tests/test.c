@@ -23,11 +23,14 @@ extern const char __stop_test_pet_msgs[];
 #define PET_MSG(pet_journal, msg, severity,...)   \
 ({																																		\
     u16 __io_pet_msg_written = 0;																										\
-	static const char NVMESH_USED NVMESH_SECTION(TEST_PET_SECTION) __io_pet_msg[] = msg;												\
-    u16 const __io_pet_msg_offset = (u64)(&__io_pet_msg) - (u64)(&__start_test_pet_msgs); 												\
-	struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)(pet_journal); /*droping const*/							\
-	nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__);															\
-	__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, NVMEIB_PET_MSG(__io_pet_msg_offset, __VA_ARGS__)); 	\
+	__auto_type __io_pet_journal_param = (pet_journal);																					\
+	if (nvmeib_pet_journal_is_activated(__io_pet_journal_param)) {																		\
+		static const char NVMESH_USED NVMESH_SECTION(TEST_PET_SECTION) __io_pet_msg[] = msg;												\
+		u16 const __io_pet_msg_offset = (u64)(&__io_pet_msg) - (u64)(&__start_test_pet_msgs); 											\
+		struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)__io_pet_journal_param; /*droping const*/				\
+		if (0) nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__);														\
+		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, NVMEIB_PET_MSG(__io_pet_msg_offset, __VA_ARGS__)); 	\
+	}																																	\
     __io_pet_msg_written;                                                                                                       		\
 })
 
@@ -686,6 +689,66 @@ void test_get_store_type(void)
 	BUG_ON(nvmeib_pet_get_store_type(ssz) != NVMEIB_PET_STORE_TYPE_S_LONG_INT);
 }
 
+static struct nvmeib_pet_journal* test_get_pet_journal(struct nvmeib_pet_journal* journal, unsigned* calls)
+{
+	(*calls)++;
+	return journal;
+}
+
+void test_message_args_are_evaluated_once(void)
+{
+	int arg_count = 0;
+	__auto_type const msg = NVMEIB_PET_MSG(0x1234, ++arg_count);
+
+	BUG_ON(arg_count != 1);
+	BUG_ON(msg.value[1] != 1);
+}
+
+void test_io_pet_macro_args_are_evaluated_once(void)
+{
+	struct perf_test_controller perf_controller = {
+		.base = {
+			.flush = __perf_test_flush,
+			.get_buffer = __perf_test_get_buffer,
+			.put_buffer = __perf_test_put_buffer
+		},
+		.msgs_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE),
+		.memcpy_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE)
+	};
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
+	unsigned journal_get_count = 0;
+	int arg_count = 0;
+	u16 written;
+
+	written = PET_MSG_NORM(
+		test_get_pet_journal(&journal, &journal_get_count),
+		"io_pet_single_eval(arg=%d)", ++arg_count);
+
+	BUG_ON(written == 0);
+	BUG_ON(journal_get_count != 1);
+	BUG_ON(arg_count != 1);
+
+	nvmeib_pet_journal_commit(&journal);
+	free(perf_controller.msgs_buffer.iov_base);
+	free(perf_controller.memcpy_buffer.iov_base);
+}
+
+void test_io_pet_inactive_journal_does_not_evaluate_args(void)
+{
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(NULL, true);
+	unsigned journal_get_count = 0;
+	int arg_count = 0;
+	u16 written;
+
+	written = PET_MSG_NORM(
+		test_get_pet_journal(&journal, &journal_get_count),
+		"io_pet_inactive(arg=%d)", ++arg_count);
+
+	BUG_ON(written != 0);
+	BUG_ON(journal_get_count != 1);
+	BUG_ON(arg_count != 0);
+}
+
 struct nvmeib_pet_variant __load_timestamp(u8 const* msg_start){
 	struct nvmeib_pet_variant variant = {0};
 	variant.type = msg_start[3]; //2 offset + 1 n_args + 1 timestamp type
@@ -1032,6 +1095,9 @@ int main(int argc, char* argv[]){
 
 	{
 		test_get_store_type();
+		test_message_args_are_evaluated_once();
+		test_io_pet_macro_args_are_evaluated_once();
+		test_io_pet_inactive_journal_does_not_evaluate_args();
 		test_message_1();
 		test_message_2();
 		test_message_3();

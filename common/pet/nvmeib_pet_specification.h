@@ -308,111 +308,189 @@ struct nvmeib_pet_message_12{
 
 
 //this is the interface to create message from any supported types
-#define NVMEIB_PET_MSG_1(offset_arg, arg1) 											\
+#define NVMEIB_PET_MSG_1(offset_arg, exp1) 											\
 ({																					\
+	__auto_type __arg1 = (exp1);													\
 	(struct nvmeib_pet_message_1){													\
 		.offset = offset_arg + 1,													\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1)}						\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1)}				\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_2(offset_arg, arg1, arg2) \
+#define NVMEIB_PET_MSG_2(offset_arg, exp1, exp2) \
 ({																														\
+	__auto_type __arg1 = (exp1);																					\
+	__auto_type __arg2 = (exp2);																					\
 	(struct nvmeib_pet_message_2){																						\
 		.offset = offset_arg + 1,																						\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2)},	\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2)}												\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2)},	\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2)}									\
 	}; 																													\
 })
 
-#define NVMEIB_PET_MSG_3(offset_arg, arg1, arg2, arg3) \
+#define NVMEIB_PET_MSG_3(offset_arg, exp1, exp2, exp3) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
 	(struct nvmeib_pet_message_3){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_4(offset_arg, arg1, arg2, arg3, arg4) \
+#define NVMEIB_PET_MSG_4(offset_arg, exp1, exp2, exp3, exp4) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
 	(struct nvmeib_pet_message_4){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_5(offset_arg, arg1, arg2, arg3, arg4, arg5) \
+#define NVMEIB_PET_MSG_5(offset_arg, exp1, exp2, exp3, exp4, exp5) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
+	__auto_type __arg5 = (exp5);												\
 	(struct nvmeib_pet_message_5){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_6(offset_arg, arg1, arg2, arg3, arg4, arg5, arg6) \
+#define NVMEIB_PET_MSG_6(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
+	__auto_type __arg5 = (exp5);												\
+	__auto_type __arg6 = (exp6);												\
 	(struct nvmeib_pet_message_6){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5), nvmeib_pet_get_store_type(arg6)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5), (u64)(arg6)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_7(offset_arg, arg1, arg2, arg3, arg4, arg5, arg6, arg7) \
+#define NVMEIB_PET_MSG_7(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
+	__auto_type __arg5 = (exp5);												\
+	__auto_type __arg6 = (exp6);												\
+	__auto_type __arg7 = (exp7);												\
 	(struct nvmeib_pet_message_7){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5), nvmeib_pet_get_store_type(arg6), nvmeib_pet_get_store_type(arg7)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5), (u64)(arg6), (u64)(arg7)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_8(offset_arg, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) \
+#define NVMEIB_PET_MSG_8(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
+	__auto_type __arg5 = (exp5);												\
+	__auto_type __arg6 = (exp6);												\
+	__auto_type __arg7 = (exp7);												\
+	__auto_type __arg8 = (exp8);												\
 	(struct nvmeib_pet_message_8){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5), nvmeib_pet_get_store_type(arg6), nvmeib_pet_get_store_type(arg7), nvmeib_pet_get_store_type(arg8)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5), (u64)(arg6), (u64)(arg7), (u64)(arg8)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_9(offset_arg, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) \
+#define NVMEIB_PET_MSG_9(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
+	__auto_type __arg5 = (exp5);												\
+	__auto_type __arg6 = (exp6);												\
+	__auto_type __arg7 = (exp7);												\
+	__auto_type __arg8 = (exp8);												\
+	__auto_type __arg9 = (exp9);												\
 	(struct nvmeib_pet_message_9){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5), nvmeib_pet_get_store_type(arg6), nvmeib_pet_get_store_type(arg7), nvmeib_pet_get_store_type(arg8), nvmeib_pet_get_store_type(arg9)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5), (u64)(arg6), (u64)(arg7), (u64)(arg8), (u64)(arg9)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8), nvmeib_pet_get_store_type(__arg9)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8), (u64)(__arg9)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_10(offset_arg, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) \
+#define NVMEIB_PET_MSG_10(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
+	__auto_type __arg5 = (exp5);												\
+	__auto_type __arg6 = (exp6);												\
+	__auto_type __arg7 = (exp7);												\
+	__auto_type __arg8 = (exp8);												\
+	__auto_type __arg9 = (exp9);												\
+	__auto_type __arg10 = (exp10);												\
 	(struct nvmeib_pet_message_10){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5), nvmeib_pet_get_store_type(arg6), nvmeib_pet_get_store_type(arg7), nvmeib_pet_get_store_type(arg8), nvmeib_pet_get_store_type(arg9), nvmeib_pet_get_store_type(arg10)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5), (u64)(arg6), (u64)(arg7), (u64)(arg8), (u64)(arg9), (u64)(arg10)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8), nvmeib_pet_get_store_type(__arg9), nvmeib_pet_get_store_type(__arg10)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8), (u64)(__arg9), (u64)(__arg10)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_11(offset_arg, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11) \
+#define NVMEIB_PET_MSG_11(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
+	__auto_type __arg5 = (exp5);												\
+	__auto_type __arg6 = (exp6);												\
+	__auto_type __arg7 = (exp7);												\
+	__auto_type __arg8 = (exp8);												\
+	__auto_type __arg9 = (exp9);												\
+	__auto_type __arg10 = (exp10);												\
+	__auto_type __arg11 = (exp11);												\
 	(struct nvmeib_pet_message_11){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5), nvmeib_pet_get_store_type(arg6), nvmeib_pet_get_store_type(arg7), nvmeib_pet_get_store_type(arg8), nvmeib_pet_get_store_type(arg9), nvmeib_pet_get_store_type(arg10), nvmeib_pet_get_store_type(arg11)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5), (u64)(arg6), (u64)(arg7), (u64)(arg8), (u64)(arg9), (u64)(arg10), (u64)(arg11)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8), nvmeib_pet_get_store_type(__arg9), nvmeib_pet_get_store_type(__arg10), nvmeib_pet_get_store_type(__arg11)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8), (u64)(__arg9), (u64)(__arg10), (u64)(__arg11)}							\
 	};																				\
 })
 
-#define NVMEIB_PET_MSG_12(offset_arg, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12) \
+#define NVMEIB_PET_MSG_12(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11, exp12) \
 ({																					\
+	__auto_type __arg1 = (exp1);												\
+	__auto_type __arg2 = (exp2);												\
+	__auto_type __arg3 = (exp3);												\
+	__auto_type __arg4 = (exp4);												\
+	__auto_type __arg5 = (exp5);												\
+	__auto_type __arg6 = (exp6);												\
+	__auto_type __arg7 = (exp7);												\
+	__auto_type __arg8 = (exp8);												\
+	__auto_type __arg9 = (exp9);												\
+	__auto_type __arg10 = (exp10);												\
+	__auto_type __arg11 = (exp11);												\
+	__auto_type __arg12 = (exp12);												\
 	(struct nvmeib_pet_message_12){													\
 		.offset = offset_arg + 1,														\
-		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(arg1), nvmeib_pet_get_store_type(arg2), nvmeib_pet_get_store_type(arg3), nvmeib_pet_get_store_type(arg4), nvmeib_pet_get_store_type(arg5), nvmeib_pet_get_store_type(arg6), nvmeib_pet_get_store_type(arg7), nvmeib_pet_get_store_type(arg8), nvmeib_pet_get_store_type(arg9), nvmeib_pet_get_store_type(arg10), nvmeib_pet_get_store_type(arg11), nvmeib_pet_get_store_type(arg12)},\
-		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(arg1), (u64)(arg2), (u64)(arg3), (u64)(arg4), (u64)(arg5), (u64)(arg6), (u64)(arg7), (u64)(arg8), (u64)(arg9), (u64)(arg10), (u64)(arg11), (u64)(arg12)}							\
+		.type = {NVMEIB_PET_STORE_TYPE_U_LONG_INT, nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8), nvmeib_pet_get_store_type(__arg9), nvmeib_pet_get_store_type(__arg10), nvmeib_pet_get_store_type(__arg11), nvmeib_pet_get_store_type(__arg12)},\
+		.value = {nvmeib_pet_get_trace_time_ns(), (u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8), (u64)(__arg9), (u64)(__arg10), (u64)(__arg11), (u64)(__arg12)}							\
 	};																				\
 })
 

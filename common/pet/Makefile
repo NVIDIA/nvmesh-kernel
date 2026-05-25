@@ -1,6 +1,7 @@
 BUILD_DIR := build
 TESTS_DIR := tests
 SHELL := /bin/bash
+NVMESH_SRC_DIR ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 
 #the developer is expected to install it
 KSC = kaitai-struct-compiler

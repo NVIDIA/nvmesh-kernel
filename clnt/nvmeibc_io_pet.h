@@ -15,11 +15,12 @@ extern const char __stop_nvmeibc_io_pet_msgs[];
 #define NVMEIBC_IO_PET_MSG(pet_journal, msg, severity,...)   																				\
 ({																																			\
 	u16 __io_pet_msg_written = 0;																											\
-	if (nvmeib_pet_journal_is_activated(pet_journal)) {																						\
+	__auto_type __io_pet_journal_param = (pet_journal);																						\
+	if (nvmeib_pet_journal_is_activated(__io_pet_journal_param)) {																			\
 		static const char NVMESH_USED NVMESH_SECTION("nvmeibc_io_pet_msgs") __io_pet_msg[] = msg;											\
 		u16 const __io_pet_msg_offset = (u64)(&__io_pet_msg) - (u64)(&__start_nvmeibc_io_pet_msgs); 										\
-		struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)(pet_journal); /*droping const*/							\
-		nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__);															\
+		struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)__io_pet_journal_param; /* droping const */				\
+		if (0) nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__);														\
 		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, NVMEIB_PET_MSG(__io_pet_msg_offset, __VA_ARGS__)); 	\
 	}																																		\
     __io_pet_msg_written;                                                                                                       			\
