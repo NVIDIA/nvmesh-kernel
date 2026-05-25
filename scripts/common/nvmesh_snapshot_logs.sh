@@ -126,11 +126,12 @@ if [[ "_" != "_${files_list}" ]]; then
     done
 fi
 cd ${snapshot_dir}
-link_or_copy_file_to_cwd /opt/nvmesh/common-repo/tools/traces_post_processor/pager
-link_or_copy_file_to_cwd /opt/nvmesh/common-repo/tools/traces_post_processor/cpager
-link_or_copy_file_to_cwd /opt/nvmesh/common-repo/tools/traces_post_processor/pager.py
+common_dir="/opt/nvmesh/common-repo";
+link_or_copy_file_to_cwd ${common_dir}/tools/traces_post_processor/pager
+link_or_copy_file_to_cwd ${common_dir}/tools/traces_post_processor/cpager
+link_or_copy_file_to_cwd ${common_dir}/tools/traces_post_processor/pager.py
 cp --sparse=always /etc/nvmesh/.nvmesh.conf ./
-cp --sparse=always /opt/NVMesh/common-repo/tools/toma_rpc.config ./
+cp --sparse=always ${common_dir}/toma_rpc.config ./
 cp --sparse=always ${nvmesh_log_dir}/toma_trace.config ./
 #
 if ((${is_toma})); then
