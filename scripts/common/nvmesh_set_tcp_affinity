@@ -477,7 +477,6 @@ if [ "$NIC_NUMA_NODE" -lt 0 ]; then
 	esac
 fi
 
-NIC_SOCKET=${NUMA_2_SOCK[$NIC_NUMA_NODE]}
 case $AFFINITY_DOMAIN in
 	pernuma)
 		NIC_N_CPU=${NUM_CPUS_PER_NUMA[$NIC_NUMA_NODE]}
@@ -486,6 +485,7 @@ case $AFFINITY_DOMAIN in
 		done
 		;;
 	persocket)
+		NIC_SOCKET=${NUMA_2_SOCK[$NIC_NUMA_NODE]}
 		NIC_N_CPU=${NUM_CPUS_PER_SOCK[$NIC_SOCKET]}
 		for ((i=0;i<$NIC_N_CPU;i++)); do
 			CPU_ARRAY[$i]=${TBL_CPUS_PER_SOCK[$NIC_SOCKET,$i]}
@@ -498,6 +498,7 @@ case $AFFINITY_DOMAIN in
 		done
 		;;
 	persocket_thread0)
+		NIC_SOCKET=${NUMA_2_SOCK[$NIC_NUMA_NODE]}
 		NIC_N_CPU=${NUM_CPUS_PER_SOCK_THREAD0[$NIC_SOCKET]}
 		for ((i=0;i<$NIC_N_CPU;i++)); do
 			CPU_ARRAY[$i]=${TBL_CPUS_PER_SOCK_THREAD0[$NIC_SOCKET,$i]}
