@@ -1113,6 +1113,16 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 			int pbe_remaining = 0;
 			struct page *p;
 			bool merge_with_prev;
+#ifdef SIW_TX_HDT_TRACE
+			/* Snapshot vars for the trace; see assignment below. */
+			int trace_seg_before;
+			struct page *trace_prev_page;
+			u16 trace_prev_pl;
+			u16 trace_prev_po;
+			unsigned int trace_prev_end;
+			bool trace_same_page;
+			bool trace_intra_off_ok;
+#endif
 
 			if (!is_kva) {
 				if (mr->mem.is_pbl) {
@@ -1200,19 +1210,19 @@ static int siw_tx_hdt(struct siw_iwarp_tx *c_tx, struct socket *s)
 		 * now because the merge branch below mutates page_len[seg-1]
 		 * in place, and the new-entry branch advances seg.
 		 */
-		int trace_seg_before = seg;
-		struct page *trace_prev_page = (seg > seg_at_sge_start)
+		trace_seg_before = seg;
+		trace_prev_page = (seg > seg_at_sge_start)
 			? page_array[seg - 1] : NULL;
-		u16 trace_prev_pl = (seg > seg_at_sge_start)
+		trace_prev_pl = (seg > seg_at_sge_start)
 			? page_len[seg - 1] : 0;
-		u16 trace_prev_po = (seg > seg_at_sge_start)
+		trace_prev_po = (seg > seg_at_sge_start)
 			? page_off[seg - 1] : 0;
-		unsigned int trace_prev_end = (seg > seg_at_sge_start)
+		trace_prev_end = (seg > seg_at_sge_start)
 			? (unsigned int)trace_prev_po +
 			  siw_decode_page_len(trace_prev_pl)
 			: 0;
-		bool trace_same_page = trace_prev_page == p;
-		bool trace_intra_off_ok = (seg > seg_at_sge_start) &&
+		trace_same_page = trace_prev_page == p;
+		trace_intra_off_ok = (seg > seg_at_sge_start) &&
 			(intra_off == trace_prev_end);
 #endif
 
