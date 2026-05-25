@@ -20,8 +20,9 @@ extern const char __stop_nvmeibc_io_pet_msgs[];
 		static const char NVMESH_USED NVMESH_SECTION("nvmeibc_io_pet_msgs") __io_pet_msg[] = msg;											\
 		u16 const __io_pet_msg_offset = (u64)(&__io_pet_msg) - (u64)(&__start_nvmeibc_io_pet_msgs); 										\
 		struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)__io_pet_journal_param; /* droping const */				\
+		__auto_type const __io_pet_msg_instance = NVMEIB_PET_MSG(__io_pet_msg_offset, __VA_ARGS__); 										\
 		if (0) nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__);														\
-		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, NVMEIB_PET_MSG(__io_pet_msg_offset, __VA_ARGS__)); 	\
+		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, &__io_pet_msg_instance); 							\
 	}																																		\
     __io_pet_msg_written;                                                                                                       			\
 })
