@@ -3071,11 +3071,7 @@
     "@DEP": {
         "size": 8,
         "type": "char",
-        "fmt": "%c",
-        "final": true,
-        "__histogram": {
-            "%c": 41
-        }
+        "fmt": "%c"
     },
     "@DEPRECATED": {
         "size": 8,

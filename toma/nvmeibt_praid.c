@@ -1900,12 +1900,11 @@ static bool leader_is_waiting_for_any_remote_seg_to_apply_topo(struct nvmeibt_pr
 out:
 	praid_leader->is_waiting_for_any_remote_seg_to_apply_topo = is_waiting;
 	if (is_waiting) {
-		N_Tf(6bdhdiw, "Awaiting. praid=@UUID_LE nsec=@LLD(max registrable=@LLD non_registrable=@LLD), "
+		N_Tf(6bdhdiw, "Awaiting. praid=@UUID_LE @LLD[msec](max registrable=@LLD non_registrable=@LLD), "
 					  "n_awaited(registrable=@INT + non_registrable=@INT) + n_not_awaited_skipped=@INT >? redundancy=@INT",
-			 nvmeibt_praid_UUID(praid), wait_time_nsec, max_nsec_wait_for_registrable_seg, max_nsec_wait_for_non_registrable_seg,
+			 nvmeibt_praid_UUID(praid), NSEC_TO_MSEC(wait_time_nsec), NSEC_TO_MSEC(max_nsec_wait_for_registrable_seg), NSEC_TO_MSEC(max_nsec_wait_for_non_registrable_seg),
 			 n_awaited_registrable, n_awaited_non_registrable, n_not_awaited_skipped, calculated_praid_lot->from_config.redundancy);
-	}
-	else {
+	} else {
 		praid_leader->did_any_client_report_about_problems = 0;	// Not waiting. Reset before the next topo change, and wait for peer-TOMAs to report
 	}
 
