@@ -174,6 +174,7 @@ enum siw_if_type {
  * or the CQ is full. Then schedule (or reschedule) the work with this delay (100ms)
  */
 //#define SIW_FLUSH_XQES_WORK_DELAY	(HZ / 10)
+/* Update. Delay does not seem to be needed, the rescheduling seems to be enough. */
 #define SIW_FLUSH_XQES_WORK_DELAY	(0)
 
 /* Log CEP activity in a ring buffer inside the CEP */
