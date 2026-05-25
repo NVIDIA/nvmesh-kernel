@@ -185,7 +185,7 @@ get_value_by_key_from_json() {
 	json_content=$1
 	key=$2
 
-	value=$(echo -e "import json\ninfo=json.loads('$json_content')\nprint(info['$key'])" | { python 2>/dev/null || python3; })
+	value=$(echo -e "import json\ninfo=json.loads('$json_content')\nprint(info['$key'])" | { python || python3; })
 
 	if [ $? -ne 0 ]; then
 		echo "ERROR: while trying to read json $json_content"
@@ -921,16 +921,16 @@ read_version_info_file() {
 verify_loaded_kernel_modules_version() {
 	err_msg="WARNING: could not verify if the loaded kernel modules are up to date"
 
-	if [ ! -e $proc_version_file ]; then
+	if [ ! -e "$proc_version_file" ]; then
 		echo "$err_msg"
 		return
 	fi
 
-	module_json_version_content=`cat $proc_version_file`
-	module_version=`get_value_by_key_from_json "$module_json_version_content" "version"`
-	module_release=`get_value_by_key_from_json "$module_json_version_content" "release"`
-	module_distro=`get_value_by_key_from_json "$module_json_version_content" "distro"`
-	module_build_number=`get_value_by_key_from_json "$module_json_version_content" "build_number"`
+        module_json_version_content="$(tr '\n' ' ' < "$proc_version_file")"
+        module_version=$(get_value_by_key_from_json "$module_json_version_content" "version")
+        module_release=$(get_value_by_key_from_json "$module_json_version_content" "release")
+        module_distro=$(get_value_by_key_from_json "$module_json_version_content" "distro")
+        module_build_number=$(get_value_by_key_from_json "$module_json_version_content" "build_number")
 
 
 	if [ -z "$module_version" ] || [ -z "$module_release" ]; then
