@@ -204,9 +204,8 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 		}
 	}
 
-	if ((rv = nvmeibc_volume_header_create_from_msg(&reply_hdr, hdr, msg->attachmentsVersion, false)) < 0) {	// Reply info is taken from the request, no need to print
-		/* Reply hdr is partial (no ref_ids); skip reply and let the
-		 * caller retry/timeout rather than dropping ref_ids silently. */
+	/* reply_hdr is stack-local; on -ENOMEM _out destroys the partial hdr. */
+	if ((rv = nvmeibc_volume_header_create_from_msg(&reply_hdr, hdr, msg->attachmentsVersion, false, NULL)) < 0) {	// Reply info is taken from the request, no need to print
 		_NE(err_main_setup_block_device_reply_hdr_oom, DMESG_PREFIX("@DEV_NAME") ": reply hdr create failed rv=@RV - aborting", hdr->name, rv);
 		goto _out;
 	}

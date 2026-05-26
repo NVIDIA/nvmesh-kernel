@@ -669,21 +669,16 @@ static void __ref_ids_verify_and_copy(struct nvmeibc_volume_header *hdr, const s
 	hdr->ext_blob.n_ref_ids = conf->attachment.n_ref_ids;
 }
 
-static int __update_only_volume_ref_ids(struct nvmeibc_volume_header *hdr, const struct nvmeibc_volume_conf *conf, int attachment_version, bool verbose)
+static int __update_only_volume_ref_ids(struct nvmeibc_volume_header *hdr, const struct nvmeibc_volume_conf *conf, int attachment_version, bool verbose, struct nvmeibc_reference_id *prealloc_ref_ids)
 {
 	int rv = 0;
 	unsigned long flags = 0;
-	struct nvmeibc_reference_id *new_buf = NULL;
+	struct nvmeibc_reference_id *new_buf = prealloc_ref_ids;
 
-	/* Pre-allocate the (worst-case) grow buffer OUTSIDE the spinlock:
-	 * kmalloc(GFP_KERNEL) may sleep, which is illegal under
-	 * spin_lock_irqsave(&hdr->ext_blob_modify_guard). The new buffer
-	 * size depends only on @conf (stable input), so it's safe to
-	 * decide on the allocation before taking the lock. If the locked
-	 * section ends up not needing the buffer (equal/shrink branches),
-	 * we just free it after releasing the lock.
-	 */
-	if (conf->attachment.n_ref_ids > 0) {
+	/* Grow buffer must be ready before the spinlock (kmalloc may sleep).
+	 * Callers that mutate persistent state before this call should pre-
+	 * allocate and pass @prealloc_ref_ids so -ENOMEM is impossible here. */
+	if (!new_buf && conf->attachment.n_ref_ids > 0) {
 		const int n_bytes = nvmeibc_volume_ext_blob_size(conf->attachment.n_ref_ids);
 		new_buf = (struct nvmeibc_reference_id *)kmalloc(n_bytes, GFP_KERNEL);
 		if (!new_buf) {
@@ -725,7 +720,7 @@ static int __update_only_volume_ref_ids(struct nvmeibc_volume_header *hdr, const
 	}
 	spin_unlock_irqrestore(&hdr->ext_blob_modify_guard, flags);
 
-	/* Free the speculative buffer if the equal/shrink branch was taken. */
+	/* Function owns @new_buf: free if equal/shrink didn't consume it. */
 	kfree(new_buf);
 out:
 	return rv;
@@ -734,7 +729,8 @@ out:
 // Used also in setup_block_device
 int nvmeibc_volume_header_create_from_msg(struct nvmeibc_volume_header *hdr,
 										const struct nvmeibc_volume_conf *conf,
-										int attachment_version, bool verbose)
+										int attachment_version, bool verbose,
+										struct nvmeibc_reference_id *prealloc_ref_ids)
 {
 	int rv;
 
@@ -747,7 +743,7 @@ int nvmeibc_volume_header_create_from_msg(struct nvmeibc_volume_header *hdr,
 	}
 	nvmeibc_volume_header_init_0(hdr);								// We dont allow update, but clean allocation because volume update may fail and we need to revert this
 	/* Caller must roll back hdr on failure; ref_ids not installed. */
-	rv = __update_only_volume_ref_ids(hdr, conf, attachment_version, verbose);
+	rv = __update_only_volume_ref_ids(hdr, conf, attachment_version, verbose, prealloc_ref_ids);
 	if (rv < 0)
 		return rv;
 	hdr->last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_NEVER;	// Worst possible
@@ -794,23 +790,40 @@ static int nvmeibc_volume_update(struct nvmeibc_volume *volume,
 		_NT(t05nvlu, "@DEV_NAME: ignore existing configuration @C_VOL_VER, new_@RES_MOD_VER", devname, hdr->version, hdr->reservation.version);
 		rv = -ERROR_VOL_UPDATE_ALREADY_LATEST;
 		if (should_update_ref_ids) {
-			if (__update_only_volume_ref_ids(&volume->hdr, hdr, msg->attachmentsVersion, true) < 0)
+			/* No prior state mutation on this branch; safe to alloc internally. */
+			if (__update_only_volume_ref_ids(&volume->hdr, hdr, msg->attachmentsVersion, true, NULL) < 0)
 				rv = -ENOMEM;
 		} else {
 			_NT(t09nvlu, "@DEV_NAME: n_ref_ids @INT also ignorring, attachment version unchanged @INT", devname, volume->hdr.ext_blob.n_ref_ids, msg->attachmentsVersion);
 		}
 		goto out;
 	}
-	if (__volume_create_from_configuration(volume, msg, true)) {
-		rv = -EINVAL;
-		goto out;
-	}
-	if ((rv = nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true)) < 0) {
-		/* Header was init_0'd but ref_ids not installed; restore previous
-		 * hdr so prev_hdr.ext_blob (its ref_ids) is preserved. */
-		_NE(err_volume_update_hdr_create_oom, DMESG_PREFIX("@DEV_NAME") ": header create failed rv=@RV - rolling back, keeping prev ref_ids", devname, rv);
-		volume->hdr = prev_hdr;
-		goto out;
+	/* Pre-allocate ref_id buffer and hand it down: must precede __vcfc's
+	 * targets/disk_id mutations, which can't be undone with IO in-flight
+	 * (see post-setup_bd rollback comment below). */
+	{
+		struct nvmeibc_reference_id *prealloc_ref_ids = NULL;
+
+		if (hdr->attachment.n_ref_ids > 0) {
+			const int n_bytes = nvmeibc_volume_ext_blob_size(hdr->attachment.n_ref_ids);
+			prealloc_ref_ids = kmalloc(n_bytes, GFP_KERNEL);
+			if (!prealloc_ref_ids) {
+				_NE(err_volume_update_preflight_ref_ids_oom, DMESG_PREFIX("@DEV_NAME") ": ref_id kmalloc failed (n=@INT) - aborting before state mutation", devname, hdr->attachment.n_ref_ids);
+				rv = -ENOMEM;
+				goto out;
+			}
+		}
+		if (__volume_create_from_configuration(volume, msg, true)) {
+			kfree(prealloc_ref_ids);
+			rv = -EINVAL;
+			goto out;
+		}
+		/* Ownership transferred to callee; do not kfree on either path. */
+		if ((rv = nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true, prealloc_ref_ids)) < 0) {
+			_NE(err_volume_update_hdr_create_oom, DMESG_PREFIX("@DEV_NAME") ": header create failed rv=@RV - rolling back, keeping prev ref_ids", devname, rv);
+			volume->hdr = prev_hdr;
+			goto out;
+		}
 	}
 
 	// Mistakenly overwrite the entire header. Rollback back the needed parts
@@ -885,7 +898,8 @@ int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
 	}
 	volume->p = p;
 	volume->services = services;
-	if ((rv = nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true)) < 0) {
+	/* Volume not yet on driver lists; kfree on failure via _free_volume_no_attach. */
+	if ((rv = nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true, NULL)) < 0) {
 		_NE(err_volume_attach_hdr_create_oom, DMESG_PREFIX("@DEV_NAME") ": header create failed rv=@RV - aborting attach", devname, rv);
 		goto _free_volume_no_attach;
 	}

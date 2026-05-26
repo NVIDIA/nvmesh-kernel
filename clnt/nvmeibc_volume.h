@@ -126,10 +126,13 @@ int  nvmeibc_volume_get_max_global_attach_version_ever_seen(const struct nvmeibc
 /* Update/Create volume header from MCS message. Returns 0 on success or
  * -ENOMEM if the ref_id buffer could not be allocated. On failure the
  * caller MUST roll back @hdr (e.g. restore a saved copy) since ref_ids /
- * attachment_version / vat are not installed. */
+ * attachment_version / vat are not installed. If @prealloc_ref_ids is
+ * non-NULL the function takes ownership and never allocates internally
+ * (so -ENOMEM cannot occur); pass NULL to let the function allocate. */
 int nvmeibc_volume_header_create_from_msg(struct nvmeibc_volume_header *hdr,
 										const struct nvmeibc_volume_conf *conf,
-										int attachment_version, bool verbose);
+										int attachment_version, bool verbose,
+										struct nvmeibc_reference_id *prealloc_ref_ids);
 
 static inline const struct nvmeibc_volume_attach_t *nvmeibc_volume_get_attach_t(const struct nvmeibc_volume* v) {
 	return &v->hdr.vat;
