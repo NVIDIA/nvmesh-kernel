@@ -65,17 +65,20 @@ static void __file_pet_controller_flush(struct nvmeib_pet_base_controller const*
 	}
 }
 
-struct iovec __file_pet_controller_get_buffer(struct nvmeib_pet_base_controller const* self)
+struct nvmeib_pet_buffer __file_pet_controller_get_buffer(struct nvmeib_pet_base_controller const *self)
 {
 	void* ptr = malloc(4096);
 	(void)self;
-	return (struct iovec){.iov_base = ptr, .iov_len = ptr ? 4096 : 0};
+	return (struct nvmeib_pet_buffer){
+		.data = { .iov_base = ptr, .iov_len = ptr ? 4096 : 0 },
+		.release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+	};
 }
 
-void __file_pet_controller_put_buffer(struct nvmeib_pet_base_controller const* self, struct iovec data)
+void __file_pet_controller_put_buffer(struct nvmeib_pet_base_controller const *self, struct nvmeib_pet_buffer buffer)
 {
 	(void)self;
-	free(data.iov_base);
+	free(buffer.data.iov_base);
 }
 
 struct file_pet_controller file_pet_controller = {
@@ -93,14 +96,20 @@ struct perf_test_controller {
 	struct iovec memcpy_buffer;
 };
 
-static struct iovec __perf_test_get_buffer(struct nvmeib_pet_base_controller const* base)
+static struct nvmeib_pet_buffer __perf_test_get_buffer(struct nvmeib_pet_base_controller const *base)
 {
 	__auto_type self = (struct perf_test_controller const*)base;
-	return self->msgs_buffer;
+	return (struct nvmeib_pet_buffer){
+		.data = self->msgs_buffer,
+		.release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+	};
 }
 
-static void __perf_test_put_buffer(struct nvmeib_pet_base_controller const* self, struct iovec data)
-{ (void)self; (void)data; }
+static void __perf_test_put_buffer(struct nvmeib_pet_base_controller const *self, struct nvmeib_pet_buffer buffer)
+{
+	(void)self;
+	(void)buffer;
+}
 
 static void __perf_test_flush(struct nvmeib_pet_base_controller const* self, enum nvmeib_pet_severity severity, struct iovec const data)
 {
@@ -751,6 +760,71 @@ void test_io_pet_inactive_journal_does_not_evaluate_args(void)
 	BUG_ON(arg_count != 0);
 }
 
+struct release_cookie_test_controller {
+	struct nvmeib_pet_base_controller base;
+	struct iovec buffer;
+	s16 release_cpu;
+	s16 put_release_cpu;
+	int put_calls;
+};
+
+static struct nvmeib_pet_buffer __release_cookie_test_get_buffer(struct nvmeib_pet_base_controller const *base)
+{
+	struct release_cookie_test_controller *self = (struct release_cookie_test_controller *)base;
+	return (struct nvmeib_pet_buffer){
+		.data = self->buffer,
+		.release_cpu = self->release_cpu,
+	};
+}
+
+static void __release_cookie_test_put_buffer(struct nvmeib_pet_base_controller const *base,
+					     struct nvmeib_pet_buffer buffer)
+{
+	struct release_cookie_test_controller *self = (struct release_cookie_test_controller *)base;
+	self->put_calls++;
+	self->put_release_cpu = buffer.release_cpu;
+}
+
+static void __release_cookie_test_flush(struct nvmeib_pet_base_controller const *base,
+					enum nvmeib_pet_severity severity, struct iovec const data)
+{
+	(void)base;
+	(void)severity;
+	(void)data;
+}
+
+void test_journal_returns_release_cpu_to_controller(void)
+{
+	struct release_cookie_test_controller controller = {
+		.base = {
+			.flush = __release_cookie_test_flush,
+			.get_buffer = __release_cookie_test_get_buffer,
+			.put_buffer = __release_cookie_test_put_buffer,
+		},
+		.buffer = iovec_malloc(256),
+		.release_cpu = 7,
+		.put_release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+	};
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&controller.base, true);
+	__auto_type const msg = NVMEIB_PET_MSG(0x77, (u8)0x11);
+
+	BUG_ON(journal.release_cpu != 7);
+	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, &msg);
+	nvmeib_pet_journal_commit(&journal);
+	BUG_ON(controller.put_calls != 1);
+	BUG_ON(controller.put_release_cpu != 7);
+	free(controller.buffer.iov_base);
+}
+
+void test_inactive_journal_uses_no_release_cpu(void)
+{
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(NULL, true);
+
+	BUG_ON(nvmeib_pet_journal_is_activated(&journal));
+	BUG_ON(journal.release_cpu != NVMEIB_PET_NO_RELEASE_CPU);
+	nvmeib_pet_journal_commit(&journal);
+}
+
 struct nvmeib_pet_variant __load_timestamp(u8 const* msg_start){
 	struct nvmeib_pet_variant variant = {0};
 	variant.type = msg_start[3]; //2 offset + 1 n_args + 1 timestamp type
@@ -1129,6 +1203,8 @@ int main(int argc, char* argv[]){
 		test_message_size_uses_timestamp_variant_type();
 		test_io_pet_macro_args_are_evaluated_once();
 		test_io_pet_inactive_journal_does_not_evaluate_args();
+		test_journal_returns_release_cpu_to_controller();
+		test_inactive_journal_uses_no_release_cpu();
 		test_message_1();
 		test_message_2();
 		test_message_3();

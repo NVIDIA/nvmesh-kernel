@@ -8,6 +8,7 @@ PERF_BIN="/usr/bin/perf"
 TEST_NAME="unitest_MirrorMultiThreadedIO"
 IO_PET_BUFFER_SIZE="${IO_PET_BUFFER_SIZE:-4096}"
 IO_PET_VERBOSE="${IO_PET_VERBOSE:-1}"
+IO_PET_MAX_TRACED_OPS_PER_CPU="${IO_PET_MAX_TRACED_OPS_PER_CPU:-0}"
 
 usage()
 {
@@ -17,13 +18,18 @@ Usage: $0 [options]
 Options:
   --nvmeibc_io_pet_buffer_size N  Set simulator IO PET buffer size in bytes.
   --nvmeibc_io_pet_verbose 0|1    Enable or disable verbose IO PET records.
+  --nvmeibc_io_pet_max_traced_ops_per_cpu N
+                                  Set max concurrently traced IO PET ops per CPU.
   --io-pet-buffer-size N          Alias for --nvmeibc_io_pet_buffer_size.
   --io-pet-verbose 0|1            Alias for --nvmeibc_io_pet_verbose.
+  --io-pet-max-traced-ops-per-cpu N
+                                  Alias for --nvmeibc_io_pet_max_traced_ops_per_cpu.
   -h, --help                      Show this help.
 
 Defaults:
   nvmeibc_io_pet_buffer_size=$IO_PET_BUFFER_SIZE
   nvmeibc_io_pet_verbose=$IO_PET_VERBOSE
+  nvmeibc_io_pet_max_traced_ops_per_cpu=$IO_PET_MAX_TRACED_OPS_PER_CPU
 EOF
 }
 
@@ -43,6 +49,14 @@ while [ $# -gt 0 ]; do
 				exit 1
 			fi
 			IO_PET_VERBOSE="$2"
+			shift 2
+			;;
+		--nvmeibc_io_pet_max_traced_ops_per_cpu|--io-pet-max-traced-ops-per-cpu)
+			if [ $# -lt 2 ]; then
+				echo "Error: $1 requires a value"
+				exit 1
+			fi
+			IO_PET_MAX_TRACED_OPS_PER_CPU="$2"
 			shift 2
 			;;
 		-h|--help)
@@ -68,6 +82,13 @@ case "$IO_PET_VERBOSE" in
 	0|1) ;;
 	*)
 		echo "Error: nvmeibc_io_pet_verbose must be 0 or 1"
+		exit 1
+		;;
+esac
+
+case "$IO_PET_MAX_TRACED_OPS_PER_CPU" in
+	''|*[!0-9]*)
+		echo "Error: nvmeibc_io_pet_max_traced_ops_per_cpu must be a non-negative integer"
 		exit 1
 		;;
 esac
@@ -101,7 +122,7 @@ echo "Building blk_unitest in release mode..."
 make -C "$UNITEST_DIR" -j "$JOBS" write_compilation_cmd all USE_RELEASE=1 BUILD_RELEASE=1 USE_SANITIZERS=0
 
 echo "Recording perf data for $TEST_NAME..."
-echo "IO PET config: nvmeibc_io_pet_buffer_size=$IO_PET_BUFFER_SIZE nvmeibc_io_pet_verbose=$IO_PET_VERBOSE"
+echo "IO PET config: nvmeibc_io_pet_buffer_size=$IO_PET_BUFFER_SIZE nvmeibc_io_pet_verbose=$IO_PET_VERBOSE nvmeibc_io_pet_max_traced_ops_per_cpu=$IO_PET_MAX_TRACED_OPS_PER_CPU"
 
 cd "$UNITEST_DIR"
 "$PERF_BIN" record -F 999 -g --call-graph dwarf -o "$PERF_DATA" -- ./blk_unitest \
@@ -109,6 +130,7 @@ cd "$UNITEST_DIR"
 	-conf "$CONF_FILE" \
 	-nvmeibc_io_pet_buffer_size "$IO_PET_BUFFER_SIZE" \
 	-nvmeibc_io_pet_verbose "$IO_PET_VERBOSE" \
+	-nvmeibc_io_pet_max_traced_ops_per_cpu "$IO_PET_MAX_TRACED_OPS_PER_CPU" \
 	-noTestEras -noTestNrep -noTestRestart
 
 echo "Top PET symbols from perf report:"

@@ -9,6 +9,7 @@
 #if defined(__KERNEL__)
 	#include <linux/string.h>
 #else
+	#include <stddef.h>
 	#include <string.h>
 	#include <sys/uio.h>
 #endif
@@ -52,11 +53,18 @@ static inline bool nvmeib_pet_severity_is_same_or_worse(unsigned base, enum nvme
 		return base <= (unsigned)other;
 }
 
+#define NVMEIB_PET_NO_RELEASE_CPU ((s16) - 1)
+
+struct nvmeib_pet_buffer {
+	struct iovec data;
+	s16 release_cpu;
+};
+
 struct nvmeib_pet_base_controller{
 	//flush should be callable from the "interrupt context"
 	void (*flush)(struct nvmeib_pet_base_controller const* self, enum nvmeib_pet_severity severity, struct iovec const data);
-	struct iovec (*get_buffer)(struct nvmeib_pet_base_controller const* self);
-	void (*put_buffer)(struct nvmeib_pet_base_controller const* self, struct iovec data);
+	struct nvmeib_pet_buffer (*get_buffer)(struct nvmeib_pet_base_controller const *self);
+	void (*put_buffer)(struct nvmeib_pet_base_controller const *self, struct nvmeib_pet_buffer buffer);
 };
 
 //}}}
@@ -718,19 +726,26 @@ struct nvmeib_pet_journal{
 	enum nvmeib_pet_severity worst_severity;
 	bool verbose;
 	u8 concurrent_access_detector; //don't bother to remove it in the production build - we have padding here;
+	s16 release_cpu;
 	u64 prev_timestamp_ns; //with high probability the next message may store delta between times, thus saving space
 };
 
 static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pet_base_controller const* controller, bool verbose)
 {
-	struct iovec const buffer = controller ? controller->get_buffer(controller) : (struct iovec){0};
+	struct nvmeib_pet_buffer const buffer = controller ? controller->get_buffer(controller) :
+							     (struct nvmeib_pet_buffer){
+								     .data = { 0 },
+								     .release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+							     };
+
 	return (struct nvmeib_pet_journal){
-	    .controller = controller,
-	    .stream = nvmeib_pet_stream_make(buffer),
-	    .worst_severity = NVMEIB_PET_SEVERITY_NORMAL,
+		.controller = controller,
+		.stream = nvmeib_pet_stream_make(buffer.data),
+		.worst_severity = NVMEIB_PET_SEVERITY_NORMAL,
 		.verbose = verbose,
 		.concurrent_access_detector = 0,
-	    .prev_timestamp_ns = 0
+		.release_cpu = buffer.release_cpu,
+		.prev_timestamp_ns = 0,
 	};
 }
 
@@ -920,7 +935,10 @@ static inline void nvmeib_pet_journal_commit(struct nvmeib_pet_journal* self)
 			self->controller->flush(self->controller, self->worst_severity, self->stream.data);
 		}
 
-		self->controller->put_buffer(self->controller, self->stream.data);
+		self->controller->put_buffer(self->controller, (struct nvmeib_pet_buffer){
+								       .data = self->stream.data,
+								       .release_cpu = self->release_cpu,
+							       });
 	}
 
 	(*self) = (struct nvmeib_pet_journal){0};

@@ -4,6 +4,7 @@
 */
 
 #include "kr_incs.h"
+#include "nvmeibc_io_pet_admission.h"
 #include "nvmeibc_io_pet.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "common/nvmeib_msgloop.h"
@@ -40,25 +41,34 @@
 	module_param(nvmeibc_io_pet_disable, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_disable, "A non-zero value will disable IO per-entity trace functionality.");
 
+	/* With 256 cores and 1 KiB default journal buffer size we will consume no more than 64 MiB of memory. */
+	unsigned nvmeibc_io_pet_max_traced_ops_per_cpu = 256;
+	module_param(nvmeibc_io_pet_max_traced_ops_per_cpu, uint, 0644);
+	MODULE_PARM_DESC(nvmeibc_io_pet_max_traced_ops_per_cpu,
+			 "Maximum concurrently traced IO PET operations per CPU. 0 = unlimited.");
 
 	NVMEIBC_MEMMGR_METRIC(io_pet_buffers, "component=raid.io.pet.buffers");
 
 	struct io_pet_controller{
 		struct nvmeib_pet_base_controller base;
 		struct msgloop_procfs_ent *writer;
+		struct nvmeibc_io_pet_pcpu_counter __percpu *active_traced_ops;
 		struct {
 		    size_t pet_buffer_size; //memory available for pet buffers
 			size_t msg_allocation_size; //total memory allocated for msgloop message
 		} cfg;
 	};
 
-	static struct iovec __io_pet_controller_get_buffer(struct nvmeib_pet_base_controller const* base)
+	static struct nvmeib_pet_buffer __io_pet_controller_get_buffer(struct nvmeib_pet_base_controller const *base)
 	{
 		__auto_type self = (struct io_pet_controller*)(base);
+		s16 release_cpu = NVMEIB_PET_NO_RELEASE_CPU;
 		const bool io_pet_enable = !nvmeibc_io_pet_disable;
 		BUILD_BUG_ON(offsetof(struct io_pet_controller, base) != 0);
 
-		if (io_pet_enable && self->cfg.pet_buffer_size && self->writer){
+		if (io_pet_enable && self->cfg.pet_buffer_size && self->writer &&
+		    nvmeibc_io_pet_try_acquire_slot(self->active_traced_ops, &nvmeibc_io_pet_max_traced_ops_per_cpu,
+						    &release_cpu)) {
 			/* This callback can run from atomic context (IRQs disabled) -
 			 * notably from the recv-CQ poll path which holds the channel
 			 * spinlock with irqsave across journal/recovery callbacks
@@ -67,20 +77,31 @@
 			 * so a best-effort trace allocation failure stays quiet
 			 * (callers tolerate NULL: the journal is just not activated).
 			 */
-			struct msgloop_msg* msg = nvmeib_msgloop_alloc_msg_uninit(self->cfg.pet_buffer_size, GFP_NOWAIT | __GFP_NOWARN);
+			struct msgloop_msg *msg =
+				nvmeib_msgloop_alloc_msg_uninit(self->cfg.pet_buffer_size, GFP_NOWAIT | __GFP_NOWARN);
 			nvmesh_memmgr_metric_on_alloc_update(io_pet_buffers, self->cfg.msg_allocation_size, msg);
 			if (msg) {
 				_ND(__io_pet_controller_get_buffer, "msg=@PTR, msg->data=@PTR", msg, msg->data);
-				return (struct iovec){.iov_base=msg->data, .iov_len=self->cfg.pet_buffer_size};
+				return (struct nvmeib_pet_buffer){
+					.data = { .iov_base = msg->data, .iov_len = self->cfg.pet_buffer_size },
+					.release_cpu = release_cpu,
+				};
 			}
+			nvmeibc_io_pet_release_slot(self->active_traced_ops, release_cpu);
 		}
-		return (struct iovec){0};
+		return (struct nvmeib_pet_buffer){
+			.data = { 0 },
+			.release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+		};
 	}
 
-	static void __io_pet_controller_put_buffer(struct nvmeib_pet_base_controller const* base, struct iovec data)
+	static void __io_pet_controller_put_buffer(struct nvmeib_pet_base_controller const *base,
+						   struct nvmeib_pet_buffer buffer)
 	{
-		if (data.iov_base){
-			__auto_type self = (struct io_pet_controller*)(base);
+		__auto_type self = (struct io_pet_controller *)(base);
+		struct iovec data = buffer.data;
+
+		if (data.iov_base) {
 			struct msgloop_msg *msg = container_of(data.iov_base, struct msgloop_msg, data);
 
 			BUILD_BUG_ON(offsetof(struct io_pet_controller, base) != 0);
@@ -88,6 +109,7 @@
 			msgloop_put_msg(msg);
 			nvmesh_memmgr_metric_on_free_update(io_pet_buffers, self->cfg.msg_allocation_size);
 		}
+		nvmeibc_io_pet_release_slot(self->active_traced_ops, buffer.release_cpu);
 	}
 
 	static bool __io_pet_controller_should_send(enum nvmeib_pet_severity severity, struct iovec data)
@@ -131,9 +153,16 @@
 		unsigned const msg_allocation_size = nvmeibc_io_pet_buffer_size;
 		bool const is_valid_cfg = min_buffer_size <= msg_allocation_size;
 		struct io_pet_controller* self = kzalloc(sizeof(struct io_pet_controller), GFP_KERNEL);
+		struct nvmeibc_io_pet_pcpu_counter __percpu *active_traced_ops = NULL;
 		extern struct msgloop_procfs_ent* nvmeib_trace_get_io_pet_msgloop(void);
 
 		if (!self){
+			return NULL;
+		}
+
+		active_traced_ops = nvmeib_public_alloc_percpu_zeroed_cacheline(struct nvmeibc_io_pet_pcpu_counter);
+		if (!active_traced_ops) {
+			kfree(self);
 			return NULL;
 		}
 
@@ -143,12 +172,13 @@
 			.base = {
 				.flush = __io_pet_controller_flush,
 				.get_buffer = __io_pet_controller_get_buffer,
-				.put_buffer = __io_pet_controller_put_buffer
+				.put_buffer = __io_pet_controller_put_buffer,
 			},
 			.writer = nvmeib_trace_get_io_pet_msgloop(),
+			.active_traced_ops = active_traced_ops,
 			.cfg = {
 				.pet_buffer_size = is_valid_cfg ? msg_allocation_size - sizeof(struct msgloop_msg) : 0,
-				.msg_allocation_size = msg_allocation_size
+				.msg_allocation_size = msg_allocation_size,
 			}
 		};
 		if (self->writer){
@@ -164,7 +194,27 @@
 	void nvmeibc_io_pet_controller_free(struct nvmeib_pet_base_controller* base)
 	{
 		__auto_type self = (struct io_pet_controller*)(base);
+		unsigned int active_cpus = 0;
+		int active_total = 0;
+		int cpu;
+
 		BUILD_BUG_ON(offsetof(struct io_pet_controller, base) != 0);
+		if (!self) {
+			return;
+		}
+
+		for_each_possible_cpu(cpu) {
+			int const active = atomic_read(nvmeibc_io_pet_active_counter(self->active_traced_ops, cpu));
+
+			if (active) {
+				active_cpus++;
+				active_total += active;
+			}
+		}
+		WARN_ONCE(active_cpus,
+			  "IO PET controller destroyed with %d active buffers on %u CPUs\n",
+			  active_total, active_cpus);
+		nvmeib_public_free_percpu(self->active_traced_ops);
 		kfree(self);
 	}
 
@@ -179,16 +229,20 @@
 		struct nvmeib_pet_base_controller base;
 	};
 
-	static struct iovec __io_pet_controller_get_buffer(struct nvmeib_pet_base_controller const* base)
+	static struct nvmeib_pet_buffer __io_pet_controller_get_buffer(struct nvmeib_pet_base_controller const *base)
 	{
 		(void)base;
-		return (struct iovec){0};
+		return (struct nvmeib_pet_buffer){
+			.data = { 0 },
+			.release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+		};
 	}
 
-	static void __io_pet_controller_put_buffer(struct nvmeib_pet_base_controller const* self, struct iovec data)
+	static void __io_pet_controller_put_buffer(struct nvmeib_pet_base_controller const *self,
+						   struct nvmeib_pet_buffer buffer)
 	{
 		(void)self;
-		(void)data;
+		(void)buffer;
 	}
 
 	static void __io_pet_controller_flush(struct nvmeib_pet_base_controller const* base, enum nvmeib_pet_severity severity, struct iovec data)

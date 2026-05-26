@@ -39,6 +39,7 @@
 #define ARG_DEBUG_DUMP_FUNCS "-debug_dump_funcs"
 #define ARG_IO_PET_BUFFER_SIZE "-nvmeibc_io_pet_buffer_size"
 #define ARG_IO_PET_VERBOSE "-nvmeibc_io_pet_verbose"
+#define ARG_IO_PET_MAX_TRACED_OPS_PER_CPU "-nvmeibc_io_pet_max_traced_ops_per_cpu"
 
 // command arguments to the executable
 #define CMD_VALGRIND    "valgrind --leak-check=yes"
@@ -118,7 +119,8 @@ void ut_conf__print_help(void){
 				"\t[" ARG_PROCFS_DUMP_PATH "           dump procfs to filesystem. Default - no dump]\n"
 				"\t[" ARG_DRAIN_WORKQUEUE_IS_INFINITE " wait for kernel workqueue drain will become infinite; by default - false ]\n");
 	unitest_print("\t[" ARG_IO_PET_BUFFER_SIZE " <bytes> set simulator IO PET buffer size. Default - 4096]\n"
-				"\t[" ARG_IO_PET_VERBOSE " <0|1> set simulator IO PET verbose mode. Default - 1]\n");
+				"\t[" ARG_IO_PET_VERBOSE " <0|1> set simulator IO PET verbose mode. Default - 1]\n"
+				"\t[" ARG_IO_PET_MAX_TRACED_OPS_PER_CPU " <value> set simulator IO PET max traced operations per CPU. Default - 0 (unlimited)]\n");
 	unitest_print("\t---------------------------------------------------------------------------------\n"
 				"\t Find memory leaks use:\t\t" CMD_VALGRIND " " ARG_PROG_NAME " " ARG_NREP " 1\n"
 				"\t Redirect to file  use:\t\t" ARG_PROG_NAME " " ARG_NREP " 1 " ARG_DEBUG " 0 " ARG_TO_FILE "\n"
@@ -165,6 +167,7 @@ void ut_conf__parse_args(int argc, char* argv[]){
 		else if ( !strcmp( argv[i], ARG_DEBUG_DUMP_FUNCS	)){ ut_conf.base.debug_dump_funcs = true; }
 		else if ( !strcmp( argv[i], ARG_IO_PET_BUFFER_SIZE	)){ ++i; if (i<argc) sim_io_pet_controller_set_buffer_size((size_t)strtoull(argv[i], NULL, 0)); }
 		else if ( !strcmp( argv[i], ARG_IO_PET_VERBOSE	)){ ++i; if (i<argc) sim_io_pet_controller_set_verbose(!!atoi(argv[i])); }
+		else if ( !strcmp( argv[i], ARG_IO_PET_MAX_TRACED_OPS_PER_CPU	)){ ++i; if (i<argc) sim_io_pet_controller_set_max_traced_ops_per_cpu((unsigned)strtoul(argv[i], NULL, 0)); }
 		else {
 			unitest_print("Error: Unknown argument %d: \"%s\"\n", i, argv[i] );
 			ut_conf__print_help();
@@ -175,4 +178,3 @@ void ut_conf__parse_args(int argc, char* argv[]){
 
 void ut_conf__platform_io_sync_set(bool is_sync){ut_conf.transport.is_disk_callback_sync = is_sync;}
 bool ut_conf__platform_io_sync_get(void){return ut_conf.transport.is_disk_callback_sync;}
-

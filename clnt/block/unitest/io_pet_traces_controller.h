@@ -17,5 +17,7 @@ void sim_io_pet_controller_set_buffer_size(size_t buffer_size);
 size_t sim_io_pet_controller_get_buffer_size(void);
 void sim_io_pet_controller_set_verbose(bool verbose);
 bool sim_io_pet_controller_get_verbose(void);
+void sim_io_pet_controller_set_max_traced_ops_per_cpu(unsigned value);
+unsigned sim_io_pet_controller_get_max_traced_ops_per_cpu(void);
 
 #endif /* IO_PET_TRACES_CONTROLLER_H */

@@ -6,12 +6,15 @@
 #include "kr_incs.h"
 #include <fcntl.h>
 #include "io_pet_traces_controller.h"
+#include "nvmeibc_io_pet_admission.h"
 #include "common/pet/nvmeib_pet_specification.h"
 #include "nvmeibc_memmgr_metrics.h"
 
 struct nvmeibc_io_pet_controller {
 	struct nvmeib_pet_base_controller base;
 	size_t buffer_size;
+	unsigned max_traced_ops_per_cpu;
+	struct nvmeibc_io_pet_pcpu_counter active_traced_ops[NR_CPUS];
 	bool verbose;
 	struct {
 		pthread_rwlock_t lock;
@@ -56,38 +59,59 @@ static void __io_pet_controller_close_fd_unsafe(struct nvmeibc_io_pet_controller
 
 NVMEIBC_MEMMGR_METRIC(io_pet_buffers, "component=raid.io.pet.buffers");
 
-struct iovec __io_pet_controller_get_buffer(struct nvmeib_pet_base_controller const* base)
+struct nvmeib_pet_buffer __io_pet_controller_get_buffer(struct nvmeib_pet_base_controller const *base)
 {
 	__auto_type self = (struct nvmeibc_io_pet_controller*)(base);
+	s16 release_cpu = NVMEIB_PET_NO_RELEASE_CPU;
 	void* ptr;
 
-	if (!self->buffer_size) {
-		return (struct iovec){0};
+	if (!self->buffer_size ||
+	    !nvmeibc_io_pet_try_acquire_slot(self->active_traced_ops, &self->max_traced_ops_per_cpu, &release_cpu)) {
+		return (struct nvmeib_pet_buffer){
+			.data = { 0 },
+			.release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+		};
 	}
+
 	ptr = kmalloc(self->buffer_size, GFP_KERNEL);
 	nvmesh_memmgr_metric_on_alloc_update(io_pet_buffers, ptr? ksize(ptr): self->buffer_size, ptr);
-	return (struct iovec){.iov_base = ptr, .iov_len = ptr ? self->buffer_size : 0};
+	if (ptr) {
+		return (struct nvmeib_pet_buffer){
+			.data = { .iov_base = ptr, .iov_len = self->buffer_size },
+			.release_cpu = release_cpu,
+		};
+	}
+
+	nvmeibc_io_pet_release_slot(self->active_traced_ops, release_cpu);
+	return (struct nvmeib_pet_buffer){
+		.data = { 0 },
+		.release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+	};
 }
 
-void __io_pet_controller_put_buffer(struct nvmeib_pet_base_controller const* self, struct iovec data)
+void __io_pet_controller_put_buffer(struct nvmeib_pet_base_controller const *base, struct nvmeib_pet_buffer buffer)
 {
-	(void)self;
+	__auto_type self = (struct nvmeibc_io_pet_controller *)(base);
+	struct iovec data = buffer.data;
+
 	if( data.iov_base){
 		nvmesh_memmgr_metric_on_free_update(io_pet_buffers, ksize(data.iov_base));
 		kfree(data.iov_base);
 	}
+	nvmeibc_io_pet_release_slot(self->active_traced_ops, buffer.release_cpu);
 }
 
 struct nvmeibc_io_pet_controller io_pet_controller = {
 	.base = {
 		.flush = __io_pet_controller_flush,
 		.get_buffer = __io_pet_controller_get_buffer,
-		.put_buffer = __io_pet_controller_put_buffer
+		.put_buffer = __io_pet_controller_put_buffer,
 	},
 	.buffer_size = 4096,
+	.max_traced_ops_per_cpu = 0,
 	.verbose = true,
 	.output.lock = PTHREAD_RWLOCK_INITIALIZER,
-	.output.fd = -1
+	.output.fd = -1,
 };
 
 static void __attribute__ ((constructor)) io_pet_controller_init(void)
@@ -122,6 +146,16 @@ void sim_io_pet_controller_set_buffer_size(size_t buffer_size)
 size_t sim_io_pet_controller_get_buffer_size(void)
 {
 	return io_pet_controller.buffer_size;
+}
+
+void sim_io_pet_controller_set_max_traced_ops_per_cpu(unsigned value)
+{
+	io_pet_controller.max_traced_ops_per_cpu = value;
+}
+
+unsigned sim_io_pet_controller_get_max_traced_ops_per_cpu(void)
+{
+	return io_pet_controller.max_traced_ops_per_cpu;
 }
 
 void sim_io_pet_controller_set_verbose(bool verbose)

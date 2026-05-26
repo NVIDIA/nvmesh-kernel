@@ -100,15 +100,22 @@ enum nvmeib_pet_severity{
     NVMEIB_PET_SEVERITY_CRITICAL = 3, //DI problem was found, something unexpected
 };
 
+struct nvmeib_pet_buffer{
+    struct iovec data;
+    s16 release_cpu;
+};
+
 struct nvmeib_pet_base_controller{
     //flush should be callable from the "interrupt context"
     void (*flush)(struct nvmeib_pet_base_controller const* self, enum nvmeib_pet_severity severity, struct iovec const data);
-    struct iovec (*get_buffer)(struct nvmeib_pet_base_controller const* self);
-    void (*put_buffer)(struct nvmeib_pet_base_controller const* self, struct iovec data);
+    struct nvmeib_pet_buffer (*get_buffer)(struct nvmeib_pet_base_controller const* self);
+    void (*put_buffer)(struct nvmeib_pet_base_controller const* self, struct nvmeib_pet_buffer buffer);
 };
 ```
 
 The concrete platform is hidden behind the “`struct nvmeib_pet_base_controller`” interface. 
+
+The `nvmeib_pet_buffer` contains the trace data `iovec` and an optional release token for controllers that need to return accounting to the exact CPU or shard that admitted the buffer.
 
 The “PET” framework does not care about the memory management; The buffer may come from some preallocated memory or allocated just-in-time. The platform should provide the memory. The “PET” should behave correctly, in case there is no memory.
 
@@ -231,4 +238,4 @@ Another area is integration with the pager. The data written into the “io.pet�
 
 The pager must introduce a special treatment to this channel. It will have to sort all messages within “nvmeibc\_io\_pet0.\*” files and only then to show them.
 
-**Note:** regardless of the current project decision, I think we should evaluate Kaitai in other areas too. It is capable of describing Serjio or providing a “plug-in” for our “pager” functionality. 
+**Note:** regardless of the current project decision, I think we should evaluate Kaitai in other areas too. It is capable of describing Serjio or providing a “plug-in” for our “pager” functionality.
