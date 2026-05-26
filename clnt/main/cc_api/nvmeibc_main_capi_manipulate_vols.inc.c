@@ -204,7 +204,12 @@ static int try_setup_block_device(const struct nvmeibc_cinst_params_main* p, con
 		}
 	}
 
-	nvmeibc_volume_header_create_from_msg(&reply_hdr, hdr, msg->attachmentsVersion, false);	// Reply info is taken from the request, no need to print
+	if ((rv = nvmeibc_volume_header_create_from_msg(&reply_hdr, hdr, msg->attachmentsVersion, false)) < 0) {	// Reply info is taken from the request, no need to print
+		/* Reply hdr is partial (no ref_ids); skip reply and let the
+		 * caller retry/timeout rather than dropping ref_ids silently. */
+		_NE(err_main_setup_block_device_reply_hdr_oom, DMESG_PREFIX("@DEV_NAME") ": reply hdr create failed rv=@RV - aborting", hdr->name, rv);
+		goto _out;
+	}
 	{	// Print the incomming cmd - reservation info now in reply_hdr
 		char vat_str[128];
 		struct nvmeib_txt txt = nvmeib_txt_make((struct charvec){.base = vat_str, .len = sizeof(vat_str)});

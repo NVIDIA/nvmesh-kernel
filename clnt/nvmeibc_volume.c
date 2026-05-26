@@ -732,10 +732,12 @@ out:
 }
 
 // Used also in setup_block_device
-void nvmeibc_volume_header_create_from_msg(struct nvmeibc_volume_header *hdr,
+int nvmeibc_volume_header_create_from_msg(struct nvmeibc_volume_header *hdr,
 										const struct nvmeibc_volume_conf *conf,
 										int attachment_version, bool verbose)
 {
+	int rv;
+
 	strlcpy(hdr->devname, conf->name, sizeof(hdr->devname));
 	hdr->type = conf->type;
 	strlcpy(hdr->uuid, conf->uuid, sizeof(hdr->uuid));
@@ -744,9 +746,13 @@ void nvmeibc_volume_header_create_from_msg(struct nvmeibc_volume_header *hdr,
 		_NT(t1dnvlu, "@DEV_NAME: n_ref_ids @INT->0 drop, avpv=@INT64", hdr->devname, hdr->ext_blob.n_ref_ids, conf->attachment.version);
 	}
 	nvmeibc_volume_header_init_0(hdr);								// We dont allow update, but clean allocation because volume update may fail and we need to revert this
-	__update_only_volume_ref_ids(hdr, conf, attachment_version, verbose);
+	/* Caller must roll back hdr on failure; ref_ids not installed. */
+	rv = __update_only_volume_ref_ids(hdr, conf, attachment_version, verbose);
+	if (rv < 0)
+		return rv;
 	hdr->last_sent_io_perm = NVMEIB_C_TO_M_IO_TYPE_PERMIT_NEVER;	// Worst possible
 	nvmeibc_volume_attach_t_init_from_conf(&hdr->vat, conf);
+	return 0;
 }
 
 static int nvmeibc_volume_update(struct nvmeibc_volume *volume,
@@ -799,7 +805,13 @@ static int nvmeibc_volume_update(struct nvmeibc_volume *volume,
 		rv = -EINVAL;
 		goto out;
 	}
-	nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true);
+	if ((rv = nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true)) < 0) {
+		/* Header was init_0'd but ref_ids not installed; restore previous
+		 * hdr so prev_hdr.ext_blob (its ref_ids) is preserved. */
+		_NE(err_volume_update_hdr_create_oom, DMESG_PREFIX("@DEV_NAME") ": header create failed rv=@RV - rolling back, keeping prev ref_ids", devname, rv);
+		volume->hdr = prev_hdr;
+		goto out;
+	}
 
 	// Mistakenly overwrite the entire header. Rollback back the needed parts
 	volume->hdr.last_sent_io_perm = prev_hdr.last_sent_io_perm;
@@ -873,7 +885,10 @@ int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
 	}
 	volume->p = p;
 	volume->services = services;
-	nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true);
+	if ((rv = nvmeibc_volume_header_create_from_msg(&volume->hdr, hdr, msg->attachmentsVersion, true)) < 0) {
+		_NE(err_volume_attach_hdr_create_oom, DMESG_PREFIX("@DEV_NAME") ": header create failed rv=@RV - aborting attach", devname, rv);
+		goto _free_volume_no_attach;
+	}
 
 	spin_lock_init(&volume->spinlock);
 	snprintf(volume->full_name, sizeof(volume->full_name), "%.*s-%.*s",

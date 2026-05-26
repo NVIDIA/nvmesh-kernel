@@ -123,8 +123,11 @@ void nvmeibc_volume_put(struct nvmeibc_volume *volume, unsigned long *flags);
 int  nvmeibc_volume_ioctl_config(const struct nvmeibc_cinst_params_main *p, const char* cmd /*, int len*/);
 int  nvmeibc_volume_get_max_global_attach_version_ever_seen(const struct nvmeibc_cinst_params_main *p);
 
-/* Update/Create volume header from MCS message */
-void nvmeibc_volume_header_create_from_msg(struct nvmeibc_volume_header *hdr,
+/* Update/Create volume header from MCS message. Returns 0 on success or
+ * -ENOMEM if the ref_id buffer could not be allocated. On failure the
+ * caller MUST roll back @hdr (e.g. restore a saved copy) since ref_ids /
+ * attachment_version / vat are not installed. */
+int nvmeibc_volume_header_create_from_msg(struct nvmeibc_volume_header *hdr,
 										const struct nvmeibc_volume_conf *conf,
 										int attachment_version, bool verbose);
 
