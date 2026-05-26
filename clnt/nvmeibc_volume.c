@@ -813,9 +813,8 @@ static int nvmeibc_volume_update(struct nvmeibc_volume *volume,
 				goto out;
 			}
 		}
-		if (__volume_create_from_configuration(volume, msg, true)) {
+		if ((rv = __volume_create_from_configuration(volume, msg, true))) {
 			kfree(prealloc_ref_ids);
-			rv = -EINVAL;
 			goto out;
 		}
 		/* Ownership transferred to callee; do not kfree on either path. */
@@ -960,6 +959,9 @@ _detach_newly_created_volume:
 		goto out;
 	}
 _free_volume_no_attach:
+	/* Release hdr-owned resources (e.g. ext_blob.referenceIDs allocated
+	 * by a successful header_create_from_msg) before freeing @volume. */
+	nvmeibc_volume_header_destroy(&volume->hdr, NVMEIBC_VOLUME_HEADER_DESTROY_TOTAL);
 	kfree(volume);
 	goto out;
 
