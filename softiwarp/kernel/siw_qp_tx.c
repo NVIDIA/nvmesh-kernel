@@ -1711,6 +1711,52 @@ static int siw_check_sgl_tx(struct siw_pd *pd, struct siw_wqe *wqe,
 	return len;
 }
 
+#ifdef SIW_TX_COMP_WAIT_ACK
+/*
+ * Prep the next FPDU within an in-progress WQE: allocate the WAIT_ACK
+ * tracking struct, run the tx_suspend check, recompute tcp_seglen, and
+ * call siw_prepare_fpdu(). Idempotent on -EAGAIN: if the kzalloc fails
+ * c_tx->state is left untouched, fpdu_in_prog stays NULL, and the
+ * fpdu_needs_prepare flag stays set so a later invocation repeats the
+ * same work cleanly. NVMESH-8981: the previous inline version mutated
+ * c_tx->state to SIW_SEND_HDR *before* the alloc, so an alloc failure
+ * left a half-transitioned c_tx that the retry's siw_tx_hdt() walked
+ * past the SGE end (BUG_ON(!sge_len)).
+ */
+static int siw_qp_setup_next_fpdu(struct siw_qp *qp, struct siw_wqe *wqe)
+{
+	struct siw_iwarp_tx *c_tx = &qp->tx_ctx;
+	struct socket *s = qp->attrs.llp_stream_handle;
+	unsigned long flags;
+	int rv;
+
+	BUG_ON(c_tx->fpdu_in_prog);
+	c_tx->fpdu_in_prog = kzalloc(sizeof(*c_tx->fpdu_in_prog), GFP_NOWAIT);
+	if (unlikely(!c_tx->fpdu_in_prog)) {
+		siw_sq_queue_work(qp, SIW_TX_CTX_PREF_SAME_CPU);
+		return -EAGAIN;
+	}
+
+	c_tx->state = SIW_SEND_HDR;
+
+	lock_sq_rxsave(qp, flags);
+	if (unlikely(c_tx->tx_suspend)) {
+		unlock_sq_rxsave(qp, flags);
+		return -ESHUTDOWN;
+	}
+	unlock_sq_rxsave(qp, flags);
+
+	siw_calculate_tcpseg(c_tx, s);
+
+	rv = siw_prepare_fpdu(qp, wqe);
+	if (unlikely(rv < 0))
+		return rv;
+
+	c_tx->fpdu_needs_prepare = false;
+	return 0;
+}
+#endif
+
 /*
  * siw_qp_sq_proc_tx()
  *
@@ -1875,6 +1921,19 @@ static int siw_qp_sq_proc_tx(struct siw_qp *qp, struct siw_wqe *wqe, bool inline
 	}
 	else
 		dprint(DBG_TX, "wqe->wr_status=%d\n", wqe->wr_status);
+
+#ifdef SIW_TX_COMP_WAIT_ACK
+	/* Resume path: a prior invocation committed to building the next
+	 * FPDU but bailed before siw_prepare_fpdu() ran (typically Site B
+	 * kzalloc failure). Retry the prep here so siw_tx_hdt() never sees
+	 * stale c_tx state. See NVMESH-8981.
+	 */
+	if (c_tx->fpdu_needs_prepare) {
+		rv = siw_qp_setup_next_fpdu(qp, wqe);
+		if (unlikely(rv < 0))
+			goto tx_done;
+	}
+#endif
 
 next_segment:
 	if (--burst_len == 0) {
@@ -2042,14 +2101,30 @@ next_segment:
 			dprint(DBG_TX, "(QP%d): WR completed\n", QP_ID(qp));
 			goto tx_done;
 		}
+#ifdef SIW_TX_COMP_WAIT_ACK
+		/* Commit to building the next FPDU. The actual alloc + state
+		 * mutation + siw_prepare_fpdu() is in siw_qp_setup_next_fpdu();
+		 * setting the flag first ensures that if it returns -EAGAIN
+		 * (kzalloc fail), the resume guard before next_segment will
+		 * retry the prep before siw_tx_hdt() runs again. NVMESH-8981.
+		 */
+		c_tx->fpdu_needs_prepare = true;
+		rv = siw_qp_setup_next_fpdu(qp, wqe);
+		if (unlikely(rv < 0)) {
+			if (rv == -ESHUTDOWN)
+				dprint(DBG_ON, "(QP%d): SIW_QP_STATE_CLOSING - Last FPDU: opcode %d, wr_id %llx, fpdu_len %d, wqe_bytes: %u, wqe_processed: %u\n",
+				       QP_ID(qp), wqe->sqe.opcode, wqe->sqe.id, c_tx->fpdu_len, wqe->bytes, wqe->processed);
+			goto tx_done;
+		}
+#else
 		c_tx->state = SIW_SEND_HDR; //omril: is this some kind of reset for next_segment (TCP segment)?
-		
+
 		lock_sq_rxsave(qp, flags);
 		if (unlikely(c_tx->tx_suspend)) {
 			/* QP is closing, now and we've finished the FPDU */
 			unlock_sq_rxsave(qp, flags);
 
-			dprint(DBG_ON, "(QP%d): SIW_QP_STATE_CLOSING - Last FPDU: opcode %d, wr_id %llx, fpdu_len %d, wqe_bytes: %u, wqe_processed: %u\n", 
+			dprint(DBG_ON, "(QP%d): SIW_QP_STATE_CLOSING - Last FPDU: opcode %d, wr_id %llx, fpdu_len %d, wqe_bytes: %u, wqe_processed: %u\n",
 				   QP_ID(qp), wqe->sqe.opcode, wqe->sqe.id, c_tx->fpdu_len, wqe->bytes, wqe->processed);
 			rv = -ESHUTDOWN;
 			goto tx_done;
@@ -2058,32 +2133,10 @@ next_segment:
 
 		siw_calculate_tcpseg(c_tx, s);
 
-#ifdef SIW_TX_COMP_WAIT_ACK
-		/* Pre-allocate for the *next* fragmented FPDU; the previous
-		 * one was just added to sent_fpdus and c_tx->fpdu_in_prog
-		 * cleared. No protocol state has been mutated since, so
-		 * -EAGAIN here is safe to retry; we will re-enter at
-		 * next_segment with the same wqe state (SR_WR_INPROGRESS,
-		 * partial progress).
-		 *
-		 * Same caveat as the Site A allocation: siw_qp_sq_process()
-		 * swallows -EAGAIN assuming the sk_write_space callback will
-		 * re-arm us, which is not true for kzalloc failure -- so
-		 * explicitly re-enqueue the QP on the same CPU.
-		 */
-		BUG_ON(c_tx->fpdu_in_prog);
-		c_tx->fpdu_in_prog = kzalloc(sizeof(*c_tx->fpdu_in_prog), GFP_NOWAIT);
-		if (unlikely(!c_tx->fpdu_in_prog)) {
-			siw_sq_queue_work(TX_QP(c_tx),
-					  SIW_TX_CTX_PREF_SAME_CPU);
-			rv = -EAGAIN;
-			goto tx_done;
-		}
-#endif
-
 		rv = siw_prepare_fpdu(qp, wqe);
 		if (unlikely(rv < 0))
 			goto tx_done;
+#endif
 		goto next_segment;
 	}
 tx_done:
@@ -2188,6 +2241,7 @@ int siw_qp_sq_flush_sent_fpdus(struct siw_qp *qp)
 	list_splice_tail_init(&tctx->completed_fpdus, &completed_fpdus);
 	kfree(tctx->fpdu_in_prog);
 	tctx->fpdu_in_prog = NULL;
+	tctx->fpdu_needs_prepare = false;
 
 	dprint(DBG_OL|DBG_ON, "(QP%d): Start Flushing fpdus\n", QP_ID(qp));
 
@@ -2745,6 +2799,7 @@ next_wqe:
 			kfree(qp->tx_ctx.fpdu_in_prog);
 			qp->tx_ctx.fpdu_in_prog = NULL;
 		}
+		qp->tx_ctx.fpdu_needs_prepare = false;
 #endif
 
 		lock_sq_rxsave(qp, flags);
