@@ -985,6 +985,13 @@ struct siw_iwarp_tx {
 	union siw_iwarp_tx_sent_fpdu_notify sent_fpdu_notify;
 	atomic_t n_completed_fpdus;
 	int n_completed_fpdus_in_list;
+	/* Set when the previous FPDU finished and we committed to building
+	 * the next one, but siw_prepare_fpdu() hasn't completed yet (e.g.
+	 * Site B kzalloc returned NULL). Resume guard before next_segment
+	 * in siw_qp_sq_proc_tx() retries the prep until it succeeds.
+	 * See NVMESH-8981.
+	 */
+	bool fpdu_needs_prepare;
 #endif
 
 	/*

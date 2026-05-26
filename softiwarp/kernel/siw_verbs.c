@@ -968,6 +968,7 @@ struct ib_qp* siw_create_qp(struct ib_pd *ofa_pd,
 	INIT_LIST_HEAD(&qp->tx_ctx.sent_fpdus);
 	atomic_set(&qp->tx_ctx.n_completed_fpdus, 0);
 	INIT_LIST_HEAD(&qp->tx_ctx.completed_fpdus);
+	qp->tx_ctx.fpdu_needs_prepare = false;
 #endif
 
 #if KS_IB_DEVICE_OPS_HAS_QP_SIZE
