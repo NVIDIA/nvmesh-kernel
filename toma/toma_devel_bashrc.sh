@@ -670,7 +670,7 @@ function open_logs_collecteor_all_hosts {
     for i in *_nvmesh_logs_*.tgz; do
 	    host=`echo ${i} | cut -d"_" -f 1 -`;
 	    tar --no-same-owner -xvpSf $i;
-	    logdir=`echo ${host}*/var/log/nvmesh/trace_daemon`; if [[ "_${logdir}" == "_" ]]; then logdir=`echo ${host}*/var/log/NVMesh/trace_daemon`; fi
+	    logdir=`echo ${host}*/var/log/nvmesh/trace_daemon`; if [[ "_${logdir}" == "_" ]]; then logdir=`echo ${host}*/var/log/nvmesh/trace_daemon`; fi
 	    echo "======= host=${host}  logdir=${logdir} ======="=
 	    (cd ${logdir}; ./pager.py --toma > ../../../../../${host}_toma.log) &
 	    (cd ${logdir}; ./pager.py --clnt > ../../../../../${host}_clnt.log) &
