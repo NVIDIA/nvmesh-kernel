@@ -491,6 +491,12 @@ static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync write binfo: PRE: @BINFO POST: @BINFO", _T, goodpath_nvmeibc_syncs, compressed_sync_op_write_binfo, so->o->dbg_id, bi_pre, bi_post);
 }
 
+static void __pet_trace_binfo_commit_rejected(const struct recovery_sync_op *so, const union nvmeib_blkset_info post, char ver_action) {
+	NVMEIBC_IO_PET_MSG_CRIT(&so->o->journal,
+		"binfo_commit_rejected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, ver=%c, n_slices=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all, ver_action, numeric_downcast(u8, so->n_slices));
+}
+
 static void __compressed_sync_op_trace_end(const struct recovery_sync_op *so) {
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync end: RV: @RV", _I, goodpath_nvmeibc_syncs, compressed_sync_op_trace_end, so->o->dbg_id, so->error);
 	NVMEIBC_IO_PET_MSG(&so->o->journal, "sync_end(orig_o_dbg_id=%u) = %d",
@@ -820,6 +826,7 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 		if (should_post_dbit_be_correct) {
 			const char ver_action = (so->o->op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) ? 'r' : 's';	// Commandless: pre may carry a dbit on W that this sync cannot clear
 			if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action)) {
+				__pet_trace_binfo_commit_rejected(so, binfo, ver_action);
 				WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing wrong dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 				nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 			}
@@ -837,6 +844,7 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 								no_dbits_for_w_segs ? 'w' :											// W- and W must not include any dbits
 								'r';																// 3+ Mirror, W seg in partial syncs can have dbits
 		if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action)) {
+			__pet_trace_binfo_commit_rejected(so, binfo, ver_action);
 			WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing wrong dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 			nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 		}
