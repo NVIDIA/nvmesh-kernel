@@ -818,7 +818,8 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 			}
 		}
 		if (should_post_dbit_be_correct) {
-			if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, 's')) {
+			const char ver_action = (so->o->op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) ? 'r' : 's';	// Commandless: pre may carry a dbit on W that this sync cannot clear
+			if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action)) {
 				WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing wrong dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 				nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 			}
@@ -832,7 +833,7 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 		const u32 num_unknown = nvmeibc_dbits_get_n_unk(&dbits, &so->r1->calculated_data.topo_traits);	// test unknowns in post-binfo
 		const bool special_2mirror_case = (so->r1->replicas <= 2);
 		const bool no_dbits_for_w_segs = (special_2mirror_case || (so->n_slices == LOCKSET_SLICES));
-		const char ver_action = (so->o->op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) ? 's' :		// Dont check W-
+		const char ver_action = (so->o->op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) ? 'r' :		// Commandless: only adds convicts on W-; pre may carry a dbit on W that cannot be cleared
 								no_dbits_for_w_segs ? 'w' :											// W- and W must not include any dbits
 								'r';																// 3+ Mirror, W seg in partial syncs can have dbits
 		if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action)) {
