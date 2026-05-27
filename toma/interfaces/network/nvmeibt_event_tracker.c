@@ -131,7 +131,7 @@ void nvmeibt_event_tracker_print_jdr(struct nvmeibt_event_tracker *tracker,
 		jdr_write_var(jdr, max_events, tracker->max_events);
 		{ /* event_tracker scope */
 			jdr_array_scope(jdr, "events");
-			for (i = 0, idx = tracker->head - 1; i < tracker->max_events; i++, idx = (idx - 1 + tracker->max_events) % tracker->max_events) {
+			for (i = 0, idx = (tracker->head - 1 + tracker->max_events) % tracker->max_events; i < tracker->max_events; i++, idx = (idx - 1 + tracker->max_events) % tracker->max_events) {
 				const struct nvmeibt_event_entry *entry = &tracker->events[idx];
 				if (entry->timestamp.tv_sec == 0 && entry->timestamp.tv_nsec == 0)
 					continue;
