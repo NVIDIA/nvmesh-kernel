@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <time.h>
 #include <string.h>
+#include <stdlib.h>
+#include <errno.h>
 
 #define WARN(condition, format, ...) ({assert(!(condition)); (void)format;})
 
@@ -25,12 +27,11 @@ extern const char __stop_test_pet_msgs[];
     u16 __io_pet_msg_written = 0;																										\
 	__auto_type __io_pet_journal_param = (pet_journal);																					\
 	if (nvmeib_pet_journal_is_activated(__io_pet_journal_param)) {																		\
-		static const char NVMESH_USED NVMESH_SECTION(TEST_PET_SECTION) __io_pet_msg[] = msg;												\
+		static const char NVMESH_USED NVMESH_SECTION(TEST_PET_SECTION) __io_pet_msg[] = msg;											\
 		u16 const __io_pet_msg_offset = (u64)(&__io_pet_msg) - (u64)(&__start_test_pet_msgs); 											\
 		struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)__io_pet_journal_param; /*droping const*/				\
-		__auto_type const __io_pet_msg_instance = NVMEIB_PET_MSG(__io_pet_msg_offset, __VA_ARGS__); 										\
 		if (0) nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__);														\
-		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, &__io_pet_msg_instance); 							\
+		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, __io_pet_msg_offset, __VA_ARGS__); 				\
 	}																																	\
     __io_pet_msg_written;                                                                                                       		\
 })
@@ -127,592 +128,165 @@ struct iovec iovec_malloc(size_t size)
 //}}}
 
 //gdb: examine command: x /[count]xb <pointer> //b for bytes
-static u8 __test_message_x_memory[256] = {0};
+static u8 __test_message_x_memory[512] = {0};
 static struct iovec __test_message_iovec = {.iov_base = __test_message_x_memory, .iov_len = ARRAY_SIZE(__test_message_x_memory)};
-#define TEST_TIMESTAMP_NS ((struct nvmeib_pet_variant){.type = NVMEIB_PET_STORE_TYPE_U_LONG_INT, .value = nvmeib_pet_get_trace_time_ns()})
-/* Compare expected layout with actual buffer; expected includes entity header (commit_id u8 + num_messages u2) */
-static void __bug_on_written_message_content_not_equal(u8 const* memory, size_t size)
+
+static void __test_stream_reset(struct nvmeib_pet_stream* stream)
 {
+	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
+	*stream = nvmeib_pet_stream_make(__test_message_iovec);
+}
+
+static struct nvmeib_pet_msg_header __test_load_msg_header(size_t offset)
+{
+	struct nvmeib_pet_msg_header header = {0};
+	memcpy(&header, __test_message_x_memory + offset, sizeof(header));
+	return header;
+}
+
+static void __test_check_msg_header(size_t offset, u16 raw_offset, u8 expected_args_n_bytes)
+{
+	struct nvmeib_pet_msg_header const header = __test_load_msg_header(offset);
+
+	BUG_ON(header.offset != raw_offset + 1);
+	BUG_ON(header.offset == 0);
+	BUG_ON(header.args_n_bytes != expected_args_n_bytes);
+	BUG_ON(header.timestamp == 0);
+}
+
+static void __test_check_payload(size_t offset, void const* expected, size_t size)
+{
+	u8 const* payload = __test_message_x_memory + offset + sizeof(struct nvmeib_pet_msg_header);
+	BUG_ON(memcmp(payload, expected, size) != 0);
+}
+
+static void __test_check_payload_sequence(size_t offset, u8 first, size_t size)
+{
+	u8 const* payload = __test_message_x_memory + offset + sizeof(struct nvmeib_pet_msg_header);
 	size_t idx = 0;
-	for(idx = 0; idx < size; idx++){
-		if(memory[idx] == '?')
-			continue;
-		if(memory[idx] != __test_message_x_memory[idx]){
-			BUG();
-		}
+
+	for (idx = 0; idx < size; ++idx) {
+		BUG_ON(payload[idx] != (u8)(first + idx));
 	}
 }
 
-void test_message_1(void)
+#define TEST_STREAM_WRITE_SEQUENCE(stream, raw_offset, expected_size, first_value, ...) \
+do { \
+	size_t const __start = (stream).written_bytes; \
+	size_t const __written = __NVMEIB_PET_STREAM_WRITE_MSG(&(stream), raw_offset, __VA_ARGS__); \
+	BUG_ON(__written != sizeof(struct nvmeib_pet_msg_header) + (expected_size)); \
+	BUG_ON((stream).written_bytes != __start + __written); \
+	__test_check_msg_header(__start, raw_offset, expected_size); \
+	__test_check_payload_sequence(__start, first_value, expected_size); \
+} while (0)
+
+void test_stream_write_all_arg_counts(void)
 {
-	__auto_type const msg = NVMEIB_PET_MSG(0x04d3, (int8_t)0x11);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1; //offset(2) + n_args(1) + (type(1) + timestamp(8)) + (type(1) + value(1))
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
+	struct nvmeib_pet_stream stream = {0};
+	__test_stream_reset(&stream);
 
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xd4, 0x04, //offset
-		0x01, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11
-	};
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0101, 1, 0x01, (u8)0x01);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0102, 2, 0x02, (u8)0x02, (u8)0x03);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0103, 3, 0x04, (u8)0x04, (u8)0x05, (u8)0x06);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0104, 4, 0x07, (u8)0x07, (u8)0x08, (u8)0x09, (u8)0x0a);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0105, 5, 0x0b, (u8)0x0b, (u8)0x0c, (u8)0x0d, (u8)0x0e, (u8)0x0f);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0106, 6, 0x10, (u8)0x10, (u8)0x11, (u8)0x12, (u8)0x13, (u8)0x14, (u8)0x15);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0107, 7, 0x16, (u8)0x16, (u8)0x17, (u8)0x18, (u8)0x19, (u8)0x1a, (u8)0x1b, (u8)0x1c);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0108, 8, 0x1d, (u8)0x1d, (u8)0x1e, (u8)0x1f, (u8)0x20, (u8)0x21, (u8)0x22, (u8)0x23, (u8)0x24);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0109, 9, 0x25, (u8)0x25, (u8)0x26, (u8)0x27, (u8)0x28, (u8)0x29, (u8)0x2a, (u8)0x2b, (u8)0x2c, (u8)0x2d);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x010a, 10, 0x2e, (u8)0x2e, (u8)0x2f, (u8)0x30, (u8)0x31, (u8)0x32, (u8)0x33, (u8)0x34, (u8)0x35, (u8)0x36, (u8)0x37);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x010b, 11, 0x38, (u8)0x38, (u8)0x39, (u8)0x3a, (u8)0x3b, (u8)0x3c, (u8)0x3d, (u8)0x3e, (u8)0x3f, (u8)0x40, (u8)0x41, (u8)0x42);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x010c, 12, 0x43, (u8)0x43, (u8)0x44, (u8)0x45, (u8)0x46, (u8)0x47, (u8)0x48, (u8)0x49, (u8)0x4a, (u8)0x4b, (u8)0x4c, (u8)0x4d, (u8)0x4e);
 
-	BUG_ON(msg.offset != 0x04d3+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
+	BUG_ON(*stream.written_msgs != 12);
 }
 
-void test_message_2(void)
+void test_stream_write_mixed_size_args(void)
 {
-	__auto_type const msg = NVMEIB_PET_MSG(0x04d4,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xd5, 0x04, //offset
-		0x02, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12     //arg2: U_BYTE
+	struct nvmeib_pet_stream stream = {0};
+	struct __attribute__((packed)) {
+		int8_t arg1;
+		uint16_t arg2;
+		uint32_t arg3;
+		uint64_t arg4;
+	} expected = {
+		.arg1 = (int8_t)0x11,
+		.arg2 = (uint16_t)0x2223,
+		.arg3 = (uint32_t)0x44444445,
+		.arg4 = (uint64_t)0x8888888888888889ULL,
 	};
+	size_t start = 0;
+	size_t written = 0;
 
-	BUG_ON(msg.offset != 0x04d4+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
+	__test_stream_reset(&stream);
+	start = stream.written_bytes;
+	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0201,
+						expected.arg1,
+						expected.arg2,
+						expected.arg3,
+						expected.arg4);
 
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
+	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(expected));
+	BUG_ON(stream.written_bytes != start + written);
+	BUG_ON(*stream.written_msgs != 1);
+	__test_check_msg_header(start, 0x0201, sizeof(expected));
+	__test_check_payload(start, &expected, sizeof(expected));
 }
 
-void test_message_3(void)
+void test_stream_write_zero_offset_is_stored_as_one(void)
 {
-	__auto_type const msg = NVMEIB_PET_MSG(0x04d5,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
+	struct nvmeib_pet_stream stream = {0};
+	size_t start = 0;
+	size_t written = 0;
+	u8 expected = 0x55;
 
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xd6, 0x04, //offset
-		0x03, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22     //arg3: S_SHORT
-	};
+	__test_stream_reset(&stream);
+	start = stream.written_bytes;
+	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0, expected);
 
-	BUG_ON(msg.offset != 0x04d5+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
+	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(expected));
+	__test_check_msg_header(start, 0, sizeof(expected));
+	__test_check_payload(start, &expected, sizeof(expected));
 }
 
-void test_message_4(void)
+void test_stream_write_args_are_evaluated_once(void)
 {
-	__auto_type const msg = NVMEIB_PET_MSG(0x04d6,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
+	struct nvmeib_pet_stream stream = {0};
+	int arg_count = 0;
+	size_t start = 0;
+	size_t written = 0;
+	u8 expected = 1;
 
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xd7, 0x04, //offset
-		0x04, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22     //arg4: U_SHORT
-	};
+	__test_stream_reset(&stream);
+	start = stream.written_bytes;
+	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0301, (u8)++arg_count);
 
-	BUG_ON(msg.offset != 0x04d6+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
+	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(expected));
+	BUG_ON(arg_count != 1);
+	__test_check_msg_header(start, 0x0301, sizeof(expected));
+	__test_check_payload(start, &expected, sizeof(expected));
 }
 
-void test_message_5(void)
+void test_stream_write_does_not_evaluate_args_without_space(void)
 {
-	__auto_type const msg = NVMEIB_PET_MSG(0x04d7,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223,
-				 (int32_t)        0x44444444);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
+	u8 small[NVMEIB_PET_ENTITY_HEADER_SIZE + sizeof(struct nvmeib_pet_msg_header)] = {0};
+	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make((struct iovec){
+		.iov_base = small,
+		.iov_len = sizeof(small),
+	});
+	int arg_count = 0;
+	size_t written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0302, (u8)++arg_count);
 
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xd8, 0x04, //offset
-		0x05, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22,    //arg4: U_SHORT
-		0x04, 0x44, 0x44, 0x44, 0x44     //arg5: S_INT
-	};
-
-	BUG_ON(msg.offset != 0x04d7+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[4] != 0x44444444);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
-}
-
-void test_message_6(void)
-{
-	__auto_type const msg = NVMEIB_PET_MSG(0x04d8,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223,
-				 (int32_t)        0x44444444,
-				 (uint32_t)       0x44444445);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xd9, 0x04, //offset
-		0x06, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22,    //arg4: U_SHORT
-		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
-		0x05, 0x45, 0x44, 0x44, 0x44     //arg6: U_INT
-	};
-
-	BUG_ON(msg.offset != 0x04d8+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[4] != 0x44444444);
-	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[5] != 0x44444445);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
-}
-
-void test_message_7(void)
-{
-	__auto_type const msg = NVMEIB_PET_MSG(0x04d9,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223,
-				 (int32_t)        0x44444444,
-				 (uint32_t)       0x44444445,
-				 (int64_t) 0x8888888888888888);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xda, 0x04, //offset
-		0x07, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22,    //arg4: U_SHORT
-		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
-		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
-		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88     //arg7: S_LONG_INT
-	};
-
-	BUG_ON(msg.offset != 0x04d9+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[4] != 0x44444444);
-	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[5] != 0x44444445);
-	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[6] != 0x8888888888888888);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
-}
-
-void test_message_8(void)
-{
-	__auto_type const msg = NVMEIB_PET_MSG(0x04da,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223,
-				 (int32_t)        0x44444444,
-				 (uint32_t)       0x44444445,
-				 (int64_t) 0x8888888888888888,
-				 (uint64_t)0x8888888888888889);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xdb, 0x04, //offset
-		0x08, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22,    //arg4: U_SHORT
-		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
-		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
-		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
-		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88     //arg8: U_LONG_INT
-	};
-
-	BUG_ON(msg.offset != 0x04da+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[4] != 0x44444444);
-	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[5] != 0x44444445);
-	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[6] != 0x8888888888888888);
-	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[7] != 0x8888888888888889);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
-}
-
-void test_message_9(void)
-{
-	__auto_type const msg = NVMEIB_PET_MSG(0x04db,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223,
-				 (int32_t)        0x44444444,
-				 (uint32_t)       0x44444445,
-				 (int64_t) 0x8888888888888888,
-				 (uint64_t)0x8888888888888889,
-				 (void*)           (void*)0xaaaaaaaaaaaaaaaa);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8 + 1 + 8; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value) + arg9(1 type + 8 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xdc, 0x04, //offset
-		0x09, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22,    //arg4: U_SHORT
-		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
-		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
-		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
-		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg8: U_LONG_INT
-		0x07, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa     //arg9: U_LONG_INT (pointer)
-	};
-
-	BUG_ON(msg.offset != 0x04db+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[4] != 0x44444444);
-	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[5] != 0x44444445);
-	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[6] != 0x8888888888888888);
-	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[7] != 0x8888888888888889);
-	BUG_ON(msg.type[8] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[8] != (u64)(void*)0xaaaaaaaaaaaaaaaa);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
-}
-
-void test_message_10(void)
-{
-	__auto_type const msg = NVMEIB_PET_MSG(0x04dc,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223,
-				 (int32_t)        0x44444444,
-				 (uint32_t)       0x44444445,
-				 (int64_t) 0x8888888888888888,
-				 (uint64_t)0x8888888888888889,
-				 (void*)           (void*)0xaaaaaaaaaaaaaaaa,
-				 (int8_t)               0x13);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8 + 1 + 8 + 1 + 1; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value) + arg9(1 type + 8 value) + arg10(1 type + 1 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xdd, 0x04, //offset
-		0x0a, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22,    //arg4: U_SHORT
-		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
-		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
-		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
-		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg8: U_LONG_INT
-		0x07, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,    //arg9: U_LONG_INT (pointer)
-		0x00, 0x13     //arg10: S_BYTE
-	};
-
-	BUG_ON(msg.offset != 0x04dc+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[4] != 0x44444444);
-	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[5] != 0x44444445);
-	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[6] != 0x8888888888888888);
-	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[7] != 0x8888888888888889);
-	BUG_ON(msg.type[8] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[8] != (u64)(void*)0xaaaaaaaaaaaaaaaa);
-	BUG_ON(msg.type[9] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[9] != 0x13);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
-}
-
-void test_message_11(void)
-{
-	__auto_type const msg = NVMEIB_PET_MSG(0x04dd,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223,
-				 (int32_t)        0x44444444,
-				 (uint32_t)       0x44444445,
-				 (int64_t) 0x8888888888888888,
-				 (uint64_t)0x8888888888888889,
-				 (void*)           (void*)0xaaaaaaaaaaaaaaaa,
-				 (int8_t)               0x13,
-				 (uint8_t)              0x14);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8 + 1 + 8 + 1 + 1 + 1 + 1; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value) + arg9(1 type + 8 value) + arg10(1 type + 1 value) + arg11(1 type + 1 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xde, 0x04, //offset
-		0x0b, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22,    //arg4: U_SHORT
-		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
-		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
-		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
-		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg8: U_LONG_INT
-		0x07, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,    //arg9: U_LONG_INT (pointer)
-		0x00, 0x13,    //arg10: S_BYTE
-		0x01, 0x14     //arg11: U_BYTE
-	};
-
-	BUG_ON(msg.offset != 0x04dd+1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[4] != 0x44444444);
-	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[5] != 0x44444445);
-	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[6] != 0x8888888888888888);
-	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[7] != 0x8888888888888889);
-	BUG_ON(msg.type[8] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[8] != (u64)(void*)0xaaaaaaaaaaaaaaaa);
-	BUG_ON(msg.type[9] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[9] != 0x13);
-	BUG_ON(msg.type[10] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[10] != 0x14);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
-}
-
-void test_message_12(void)
-{
-	__auto_type const msg = NVMEIB_PET_MSG(0x04de,
-				 (int8_t)               0x11,
-				 (uint8_t)              0x12,
-				 (int16_t)            0x2222,
-				 (uint16_t)           0x2223,
-				 (int32_t)        0x44444444,
-				 (uint32_t)       0x44444445,
-				 (int64_t) 0x8888888888888888,
-				 (uint64_t)0x8888888888888889,
-				 (void*)           (void*)0xaaaaaaaaaaaaaaaa,
-				 (int8_t)               0x13,
-				 (uint8_t)              0x14,
-				 (int16_t)            0x3333);
-	size_t const msg_size = 2 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 1 + 2 + 1 + 2 + 1 + 4 + 1 + 4 + 1 + 8 + 1 + 8 + 1 + 8 + 1 + 1 + 1 + 1 + 1 + 2; //offset(2) + timestamp(1 type + 8 value) + n_args(1) + arg1(1 type + 1 value) + arg2(1 type + 1 value) + arg3(1 type + 2 value) + arg4(1 type + 2 value) + arg5(1 type + 4 value) + arg6(1 type + 4 value) + arg7(1 type + 8 value) + arg8(1 type + 8 value) + arg9(1 type + 8 value) + arg10(1 type + 1 value) + arg11(1 type + 1 value) + arg12(1 type + 2 value)
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	u8 const memory_expected[128] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //commit_id
-		0x01, 0x00, //num_messages
-		0xdf, 0x04, //offset
-		0x0c, //n_args
-		'?', '?', '?', '?', '?', '?', '?', '?', '?', //timestamp variant - skip comparison
-		0x00, 0x11,    //arg1: S_BYTE
-		0x01, 0x12,    //arg2: U_BYTE
-		0x02, 0x22, 0x22,    //arg3: S_SHORT
-		0x03, 0x23, 0x22,    //arg4: U_SHORT
-		0x04, 0x44, 0x44, 0x44, 0x44,    //arg5: S_INT
-		0x05, 0x45, 0x44, 0x44, 0x44,    //arg6: U_INT
-		0x06, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg7: S_LONG_INT
-		0x07, 0x89, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,    //arg8: U_LONG_INT
-		0x07, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa,    //arg9: U_LONG_INT (pointer)
-		0x00, 0x13,    //arg10: S_BYTE
-		0x01, 0x14,    //arg11: U_BYTE
-		0x02, 0x33, 0x33     //arg12: S_SHORT
-	};
-
-	BUG_ON(msg.offset != (0x04de + 1));
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[0] != 0x11);
-	BUG_ON(msg.type[1] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[1] != 0x12);
-	BUG_ON(msg.type[2] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[2] != 0x2222);
-	BUG_ON(msg.type[3] != NVMEIB_PET_STORE_TYPE_U_SHORT || msg.value[3] != 0x2223);
-	BUG_ON(msg.type[4] != NVMEIB_PET_STORE_TYPE_S_INT || msg.value[4] != 0x44444444);
-	BUG_ON(msg.type[5] != NVMEIB_PET_STORE_TYPE_U_INT || msg.value[5] != 0x44444445);
-	BUG_ON(msg.type[6] != NVMEIB_PET_STORE_TYPE_S_LONG_INT || msg.value[6] != 0x8888888888888888);
-	BUG_ON(msg.type[7] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[7] != 0x8888888888888889);
-	BUG_ON(msg.type[8] != NVMEIB_PET_STORE_TYPE_U_LONG_INT || msg.value[8] != (u64)(void*)0xaaaaaaaaaaaaaaaa);
-	BUG_ON(msg.type[9] != NVMEIB_PET_STORE_TYPE_S_BYTE || msg.value[9] != 0x13);
-	BUG_ON(msg.type[10] != NVMEIB_PET_STORE_TYPE_U_BYTE || msg.value[10] != 0x14);
-	BUG_ON(msg.type[11] != NVMEIB_PET_STORE_TYPE_S_SHORT || msg.value[11] != 0x3333);
-
-	BUG_ON(nvmeib_pet_message_get_size(TEST_TIMESTAMP_NS, &msg) != msg_size);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(TEST_TIMESTAMP_NS, &msg, &stream) != msg_size);
-	__bug_on_written_message_content_not_equal(memory_expected, NVMEIB_PET_ENTITY_HEADER_SIZE + msg_size);
-}
-
-void test_get_store_type(void)
-{
-	// Test various types to ensure nvmeib_pet_get_store_type returns correct enum values
-	BUG_ON(nvmeib_pet_get_store_type((bool)true) != NVMEIB_PET_STORE_TYPE_U_BYTE);
-	BUG_ON(nvmeib_pet_get_store_type((uint8_t)0x12) != NVMEIB_PET_STORE_TYPE_U_BYTE);
-	BUG_ON(nvmeib_pet_get_store_type((int8_t)0x11) != NVMEIB_PET_STORE_TYPE_S_BYTE);
-	BUG_ON(nvmeib_pet_get_store_type((unsigned char)0x12) != NVMEIB_PET_STORE_TYPE_U_BYTE);
-	BUG_ON(nvmeib_pet_get_store_type((signed char)0x11) != NVMEIB_PET_STORE_TYPE_S_BYTE);
-	BUG_ON(nvmeib_pet_get_store_type((char)0x11) != NVMEIB_PET_STORE_TYPE_U_BYTE);
-
-	BUG_ON(nvmeib_pet_get_store_type((uint16_t)0x2222) != NVMEIB_PET_STORE_TYPE_U_SHORT);
-	BUG_ON(nvmeib_pet_get_store_type((int16_t)0x2222) != NVMEIB_PET_STORE_TYPE_S_SHORT);
-	BUG_ON(nvmeib_pet_get_store_type((unsigned short)0x2222) != NVMEIB_PET_STORE_TYPE_U_SHORT);
-	BUG_ON(nvmeib_pet_get_store_type((signed short)0x2222) != NVMEIB_PET_STORE_TYPE_S_SHORT);
-
-	BUG_ON(nvmeib_pet_get_store_type((uint32_t)0x44444444) != NVMEIB_PET_STORE_TYPE_U_INT);
-	BUG_ON(nvmeib_pet_get_store_type((int32_t)0x44444444) != NVMEIB_PET_STORE_TYPE_S_INT);
-	BUG_ON(nvmeib_pet_get_store_type((unsigned int)0x44444444) != NVMEIB_PET_STORE_TYPE_U_INT);
-	BUG_ON(nvmeib_pet_get_store_type((int)0x44444444) != NVMEIB_PET_STORE_TYPE_S_INT);
-
-	BUG_ON(nvmeib_pet_get_store_type((uint64_t)0x8888888888888888ULL) != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
-	BUG_ON(nvmeib_pet_get_store_type((int64_t)0x8888888888888888LL) != NVMEIB_PET_STORE_TYPE_S_LONG_INT);
-	BUG_ON(nvmeib_pet_get_store_type((unsigned long long)0x8888888888888888ULL) != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
-	BUG_ON(nvmeib_pet_get_store_type((long long)0x8888888888888888LL) != NVMEIB_PET_STORE_TYPE_S_LONG_INT);
-
-	void* ptr = (void*)0xff00ff00ff00ff00;
-	BUG_ON(nvmeib_pet_get_store_type(ptr) != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
-	BUG_ON(nvmeib_pet_get_store_type((void const*)ptr) != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
-
-	size_t sz = 100;
-	BUG_ON(nvmeib_pet_get_store_type(sz) != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
-	ssize_t ssz = -1;
-	BUG_ON(nvmeib_pet_get_store_type(ssz) != NVMEIB_PET_STORE_TYPE_S_LONG_INT);
+	BUG_ON(written != 0);
+	BUG_ON(arg_count != 0);
+	BUG_ON(stream.written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
+	BUG_ON(*stream.written_msgs != 0);
 }
 
 static struct nvmeib_pet_journal* test_get_pet_journal(struct nvmeib_pet_journal* journal, unsigned* calls)
 {
 	(*calls)++;
 	return journal;
-}
-
-void test_message_args_are_evaluated_once(void)
-{
-	int arg_count = 0;
-	__auto_type const msg = NVMEIB_PET_MSG(0x1234, ++arg_count);
-
-	BUG_ON(arg_count != 1);
-	BUG_ON(msg.value[0] != 1);
-}
-
-void test_message_does_not_embed_timestamp(void)
-{
-	__auto_type const msg = NVMEIB_PET_MSG(0x42, (int8_t)0x11);
-
-	BUG_ON(ARRAY_SIZE(msg.type) != 1);
-	BUG_ON(ARRAY_SIZE(msg.value) != 1);
-	BUG_ON(msg.type[0] != NVMEIB_PET_STORE_TYPE_S_BYTE);
-	BUG_ON(msg.value[0] != 0x11);
-}
-
-void test_message_size_uses_timestamp_variant_type(void)
-{
-	struct nvmeib_pet_variant const timestamp_ns = {
-		.type = NVMEIB_PET_STORE_TYPE_U_SHORT,
-		.value = 0x1234
-	};
-	__auto_type const msg = NVMEIB_PET_MSG(0x42, (uint8_t)0x11);
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make(__test_message_iovec);
-
-	BUG_ON(nvmeib_pet_message_get_size(timestamp_ns, &msg) != 2 + 1 + 1 + 2 + 1 + 1);
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
-	BUG_ON(nvmeib_pet_message_write(timestamp_ns, &msg, &stream) != 2 + 1 + 1 + 2 + 1 + 1);
 }
 
 void test_io_pet_macro_args_are_evaluated_once(void)
@@ -806,10 +380,9 @@ void test_journal_returns_release_cpu_to_controller(void)
 		.put_release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
 	};
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&controller.base, true);
-	__auto_type const msg = NVMEIB_PET_MSG(0x77, (u8)0x11);
 
 	BUG_ON(journal.release_cpu != 7);
-	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, &msg);
+	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x77, (u8)0x11);
 	nvmeib_pet_journal_commit(&journal);
 	BUG_ON(controller.put_calls != 1);
 	BUG_ON(controller.put_release_cpu != 7);
@@ -825,11 +398,11 @@ void test_inactive_journal_uses_no_release_cpu(void)
 	nvmeib_pet_journal_commit(&journal);
 }
 
-struct nvmeib_pet_variant __load_timestamp(u8 const* msg_start){
-	struct nvmeib_pet_variant variant = {0};
-	variant.type = msg_start[3]; //2 offset + 1 n_args + 1 timestamp type
-	memcpy(&variant.value, msg_start + 4, nvmeib_pet_store_type_get_size(variant.type)); //timestamp value
-	return variant;
+static struct nvmeib_pet_msg_header __load_msg_header_from(u8 const* msg_start)
+{
+	struct nvmeib_pet_msg_header header = {0};
+	memcpy(&header, msg_start, sizeof(header));
+	return header;
 }
 
 void test_journal_timestamp(void)
@@ -846,22 +419,25 @@ void test_journal_timestamp(void)
 	//not optimal, but better then nothing - I don't want to develop reader in C
 	//if you want to be sure that offsets are correct, run pe_messages.py script and see the result
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
-	__auto_type const msg1 = NVMEIB_PET_MSG(0x10, (u8)0x11);
-	__auto_type const msg2 = NVMEIB_PET_MSG(0x20, (u8)0x22);
 
 	u8 const* const msg1_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.written_bytes);
-	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, &msg1);
-	struct nvmeib_pet_variant const timestamp1 = __load_timestamp(msg1_start);
+	u16 const written1 = nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x10, (u8)0x11);
+	struct nvmeib_pet_msg_header const header1 = __load_msg_header_from(msg1_start);
 
 	u8 const* const msg2_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.written_bytes);
-	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, &msg2);
-	struct nvmeib_pet_variant const timestamp2 = __load_timestamp(msg2_start);
+	u16 const written2 = nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x20, (u8)0x22);
+	struct nvmeib_pet_msg_header const header2 = __load_msg_header_from(msg2_start);
 
-	BUG_ON(timestamp1.type != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
-	//BUG_ON(timestamp1.value == 0);
-
-	BUG_ON(timestamp2.type != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
-	//BUG_ON(timestamp2.value == 0); we cannot predict the timestamp value - on virtual machines we may be scheduled out any time 
+	BUG_ON(written1 != sizeof(struct nvmeib_pet_msg_header) + sizeof(u8));
+	BUG_ON(written2 != sizeof(struct nvmeib_pet_msg_header) + sizeof(u8));
+	BUG_ON(header1.offset != 0x10 + 1);
+	BUG_ON(header2.offset != 0x20 + 1);
+	BUG_ON(header1.args_n_bytes != sizeof(u8));
+	BUG_ON(header2.args_n_bytes != sizeof(u8));
+	BUG_ON(header1.timestamp == 0);
+	BUG_ON(header2.timestamp == 0);
+	BUG_ON(*(msg1_start + sizeof(struct nvmeib_pet_msg_header)) != 0x11);
+	BUG_ON(*(msg2_start + sizeof(struct nvmeib_pet_msg_header)) != 0x22);
 
 	nvmeib_pet_journal_commit(&journal);
 
@@ -869,7 +445,7 @@ void test_journal_timestamp(void)
 	free(perf_controller.memcpy_buffer.iov_base);
 }
 
-void test_journal_add_msg_accepts_const_pointer(void)
+void test_journal_add_msg_accepts_pointer_arg(void)
 {
 	struct perf_test_controller perf_controller = {
 		.base = {
@@ -881,14 +457,19 @@ void test_journal_add_msg_accepts_const_pointer(void)
 		.memcpy_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE)
 	};
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
-	__auto_type const msg = NVMEIB_PET_MSG(0x30, (u8)0x33);
-	enum nvmeib_pet_store_type const original_type = msg.type[0];
-	u64 const original_value = msg.value[0];
+	u8 const value = 0x33;
+	u8 const* const ptr = &value;
+	u8 const* const msg_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.written_bytes);
+	void const* written_ptr = NULL;
+	u16 const written = nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x30, ptr);
+	struct nvmeib_pet_msg_header const header = __load_msg_header_from(msg_start);
 
-	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, &msg);
+	memcpy(&written_ptr, msg_start + sizeof(struct nvmeib_pet_msg_header), sizeof(written_ptr));
 
-	BUG_ON(msg.type[0] != original_type);
-	BUG_ON(msg.value[0] != original_value);
+	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(ptr));
+	BUG_ON(header.offset != 0x30 + 1);
+	BUG_ON(header.args_n_bytes != sizeof(ptr));
+	BUG_ON(written_ptr != ptr);
 
 	nvmeib_pet_journal_commit(&journal);
 
@@ -1194,28 +775,17 @@ int main(int argc, char* argv[]){
 	file_pet_controller.fd_output = fd;
 
 	{
-		test_get_store_type();
-		test_message_args_are_evaluated_once();
-		test_message_does_not_embed_timestamp();
-		test_message_size_uses_timestamp_variant_type();
+		test_stream_write_all_arg_counts();
+		test_stream_write_mixed_size_args();
+		test_stream_write_zero_offset_is_stored_as_one();
+		test_stream_write_args_are_evaluated_once();
+		test_stream_write_does_not_evaluate_args_without_space();
 		test_io_pet_macro_args_are_evaluated_once();
 		test_io_pet_inactive_journal_does_not_evaluate_args();
 		test_journal_returns_release_cpu_to_controller();
 		test_inactive_journal_uses_no_release_cpu();
-		test_message_1();
-		test_message_2();
-		test_message_3();
-		test_message_4();
-		test_message_5();
-		test_message_6();
-		test_message_7();
-		test_message_8();
-		test_message_9();
-		test_message_10();
-		test_message_11();
-		test_message_12();
 		test_journal_timestamp();
-		test_journal_add_msg_accepts_const_pointer();
+		test_journal_add_msg_accepts_pointer_arg();
 		test_performance();
 		test_multiple_messages();
 		test_enums();

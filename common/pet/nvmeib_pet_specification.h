@@ -71,7 +71,7 @@ struct nvmeib_pet_base_controller{
 
 //{{{pet storage - implementation details
 
-/* Entity header: commit_id (u8) + num_messages (u2) = 10 bytes; must match nvmeib_pet_specification.ksy */
+/* Entity header: commit_id (u64) + num_messages (u16) = 10 bytes; must match nvmeib_pet_specification.ksy */
 enum { NVMEIB_PET_ENTITY_HEADER_SIZE = 10 };
 
 struct nvmeib_pet_stream{
@@ -81,6 +81,7 @@ struct nvmeib_pet_stream{
 };
 
 enum {NVMEIB_PET_MAX_STREAM_SIZE=64*1024}; //because written_bytes is u16
+enum {NVMEIB_PET_MAX_MSG_ARGS_N_BYTES=96}; //maximal 12 arguments, 8 bytes each => 96 bytes
 
 /* Offset of `written_msgs` in the stream data buffer */
 enum { NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET = 8 };
@@ -126,386 +127,441 @@ static inline struct iovec nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* sel
 	}
 }
 
-__attribute__((nonnull (1,3)))
-static inline void nvmeib_pet_iovec_append_any(struct iovec* out, size_t size, u8 const* data)
-{
-	memcpy(out->iov_base, data, size);
-	out->iov_base = (u8*)out->iov_base + size;
-	out->iov_len -= size;
-}
-
-#define nvmeib_pet_iovec_append_type(out, value)                                                    \
-({                                                                                                  \
-	__auto_type __pet_value_append = value;                                                         \
-	nvmeib_pet_iovec_append_any(out, sizeof(__pet_value_append), (u8 const*)(&__pet_value_append)); \
-})
-
-enum nvmeib_pet_store_type{
-	NVMEIB_PET_STORE_TYPE_S_BYTE     = 0,
-	NVMEIB_PET_STORE_TYPE_U_BYTE     = 1,
-	NVMEIB_PET_STORE_TYPE_S_SHORT    = 2,
-	NVMEIB_PET_STORE_TYPE_U_SHORT    = 3,
-	NVMEIB_PET_STORE_TYPE_S_INT      = 4,
-	NVMEIB_PET_STORE_TYPE_U_INT      = 5,
-	NVMEIB_PET_STORE_TYPE_S_LONG_INT = 6,
-	NVMEIB_PET_STORE_TYPE_U_LONG_INT = 7,
+struct __attribute__((packed)) nvmeib_pet_msg_header {
+	u16 offset;
+	u64 timestamp;
+	u8 args_n_bytes;
 };
 
-static inline u16 nvmeib_pet_store_type_get_size(enum nvmeib_pet_store_type type)
+static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset, u8 args_n_bytes)
 {
-	static const u16 sizes[] = {
-		[NVMEIB_PET_STORE_TYPE_S_BYTE] = sizeof(u8),
-		[NVMEIB_PET_STORE_TYPE_U_BYTE] = sizeof(u8),
-		[NVMEIB_PET_STORE_TYPE_S_SHORT] = sizeof(u16),
-		[NVMEIB_PET_STORE_TYPE_U_SHORT] = sizeof(u16),
-		[NVMEIB_PET_STORE_TYPE_S_INT] = sizeof(u32),
-		[NVMEIB_PET_STORE_TYPE_U_INT] = sizeof(u32),
-		[NVMEIB_PET_STORE_TYPE_S_LONG_INT] = sizeof(u64),
-		[NVMEIB_PET_STORE_TYPE_U_LONG_INT] = sizeof(u64),
+	return (struct nvmeib_pet_msg_header){
+		.offset = offset+1, /* offset==0 would be a special offset */
+		.timestamp = nvmeib_pet_get_trace_time_ns(),
+		.args_n_bytes = args_n_bytes,
 	};
-	return sizes[type];
 }
-
-struct nvmeib_pet_variant{
-	enum nvmeib_pet_store_type type;
-	uint64_t value;
-};
-
-static inline enum nvmeib_pet_store_type
-__nvmeib_pet_optimize_store_type_if_zero(enum nvmeib_pet_store_type store_type, uint64_t value)
-{
-	if (value){
-		return store_type;
-	}
-	return NVMEIB_PET_STORE_TYPE_U_BYTE;
-	//probably we can optimize even futher, by adding special type, but this is too much work
-}
-
-//64bit platform support only
-#define nvmeib_pet_get_store_type(value)															\
-({																									\
-	enum nvmeib_pet_store_type const __store_type __attribute__((unused)) =							\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), bool),						\
-		NVMEIB_PET_STORE_TYPE_U_BYTE,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), uint8_t),						\
-		NVMEIB_PET_STORE_TYPE_U_BYTE,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), int8_t),						\
-		NVMEIB_PET_STORE_TYPE_S_BYTE,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), unsigned char),				\
-		NVMEIB_PET_STORE_TYPE_U_BYTE,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), signed char),					\
-		NVMEIB_PET_STORE_TYPE_S_BYTE,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), char),						\
-    	NVMEIB_PET_STORE_TYPE_U_BYTE,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), uint16_t),					\
-		NVMEIB_PET_STORE_TYPE_U_SHORT,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), int16_t),						\
-		NVMEIB_PET_STORE_TYPE_S_SHORT,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), unsigned short),				\
-		NVMEIB_PET_STORE_TYPE_U_SHORT,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), signed short),				\
-		NVMEIB_PET_STORE_TYPE_S_SHORT,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), uint32_t),					\
-		NVMEIB_PET_STORE_TYPE_U_INT,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), int32_t),						\
-		NVMEIB_PET_STORE_TYPE_S_INT,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), unsigned int),				\
-		NVMEIB_PET_STORE_TYPE_U_INT,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), int),							\
-		NVMEIB_PET_STORE_TYPE_S_INT,																\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), long),						\
-		(sizeof(long) == 4 ? NVMEIB_PET_STORE_TYPE_S_INT : NVMEIB_PET_STORE_TYPE_S_LONG_INT),		\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), unsigned long),				\
-		(sizeof(long) == 4 ? NVMEIB_PET_STORE_TYPE_U_INT : NVMEIB_PET_STORE_TYPE_U_LONG_INT),		\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), uint64_t),					\
-		NVMEIB_PET_STORE_TYPE_U_LONG_INT,															\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), int64_t),						\
-		NVMEIB_PET_STORE_TYPE_S_LONG_INT,															\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), unsigned long long),			\
-		NVMEIB_PET_STORE_TYPE_U_LONG_INT,															\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), long long),					\
-		NVMEIB_PET_STORE_TYPE_S_LONG_INT,															\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), size_t),						\
-		NVMEIB_PET_STORE_TYPE_U_LONG_INT,															\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), ssize_t),						\
-		NVMEIB_PET_STORE_TYPE_S_LONG_INT,															\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), void const*),					\
-		NVMEIB_PET_STORE_TYPE_U_LONG_INT,															\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(value), typeof((void*)0)),			\
-		NVMEIB_PET_STORE_TYPE_U_LONG_INT,															\
-	NVMEIB_PET_STORE_TYPE_U_LONG_INT ))))))))))))))))))))))));															\
-	BUILD_BUG_ON_MSG(sizeof(void*) != 8, "only 64bit platforms are supported"); 										\
-	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), float), "float type is not supported");				\
-	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), double), "double type is not supported"); 				\
-	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), char*), "char* type is not supported");				\
-	BUILD_BUG_ON_MSG(__builtin_types_compatible_p(typeof(value), char const*), "char const* type is not supported");	\
-	__nvmeib_pet_optimize_store_type_if_zero(__store_type, (uint64_t)value); 											\
-})
-
-#define nvmeib_pet_variant_make(arg)			\
-({												\
-	(struct nvmeib_pet_variant){				\
-		.type = nvmeib_pet_get_store_type(arg),	\
-		.value=(uint64_t)(arg)					\
-	};											\
-})
-
-
-//offset == message id;
-//	the message should be stored as clear text in some compiler & linker generated section
-//	at runtime it is possible to calculate the message offset from the begining of the section;
-//	that offset will be used as the message id
-//	offset==0 represent end-of-sequence; since we cannot ensure it is not in use, I just +1 for every offset
-//timestamp is serialized before the message arguments, but is not stored in the message object
-
-//for performance reasons I use struct of arrays instead of arrays of structs
-//the delta is almost x2 both in memory usage (Linux stack frame is limited) and performance
-//last note: the underlying enum type is int, but this is too much for pet store type
-#define __NVMEIB_PET_MESSAGE_FIELDS(n_args) 			\
-	u16 offset; 										\
-	u8 /*enum nvmeib_pet_store_type*/ type[n_args];		\
-	u64 value[n_args];									\
-
-//obviously I can create a single macro, which generates the needed struct.
-//obvioulsy  can use macro to implement the function,
-//BUT using the macros all the way done make it very difficult to troublshoot the compiler error.
-
-struct nvmeib_pet_message_1{
-	__NVMEIB_PET_MESSAGE_FIELDS(1);
-};
-
-struct nvmeib_pet_message_2{
-	__NVMEIB_PET_MESSAGE_FIELDS(2);
-};
-
-struct nvmeib_pet_message_3{
-	__NVMEIB_PET_MESSAGE_FIELDS(3);
-};
-
-struct nvmeib_pet_message_4{
-	__NVMEIB_PET_MESSAGE_FIELDS(4);
-};
-
-struct nvmeib_pet_message_5{
-	__NVMEIB_PET_MESSAGE_FIELDS(5);
-};
-
-struct nvmeib_pet_message_6{
-	__NVMEIB_PET_MESSAGE_FIELDS(6);
-};
-
-struct nvmeib_pet_message_7{
-	__NVMEIB_PET_MESSAGE_FIELDS(7);
-};
-
-struct nvmeib_pet_message_8{
-	__NVMEIB_PET_MESSAGE_FIELDS(8);
-};
-
-struct nvmeib_pet_message_9{
-	__NVMEIB_PET_MESSAGE_FIELDS(9);
-};
-
-struct nvmeib_pet_message_10{
-	__NVMEIB_PET_MESSAGE_FIELDS(10);
-};
-
-struct nvmeib_pet_message_11{
-	__NVMEIB_PET_MESSAGE_FIELDS(11);
-};
-
-struct nvmeib_pet_message_12{
-	__NVMEIB_PET_MESSAGE_FIELDS(12);
-};
-
 
 //this is the interface to create message from any supported types
-#define NVMEIB_PET_MSG_1(offset_arg, exp1) 											\
-({																					\
-	__auto_type __arg1 = (exp1);													\
-	(struct nvmeib_pet_message_1){													\
-		.offset = offset_arg + 1,													\
-		.type = {nvmeib_pet_get_store_type(__arg1)},								\
-		.value = {(u64)(__arg1)}													\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE1(self, offset, exp1) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_2(offset_arg, exp1, exp2) \
-({																														\
-	__auto_type __arg1 = (exp1);																					\
-	__auto_type __arg2 = (exp2);																					\
-	(struct nvmeib_pet_message_2){																						\
-		.offset = offset_arg + 1,																						\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2)},								\
-		.value = {(u64)(__arg1), (u64)(__arg2)}																		\
-	}; 																													\
+#define __NVMEIB_PET_STREAM_WRITE2(self, offset, exp1, exp2) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_3(offset_arg, exp1, exp2, exp3) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	(struct nvmeib_pet_message_3){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE3(self, offset, exp1, exp2, exp3) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_4(offset_arg, exp1, exp2, exp3, exp4) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	(struct nvmeib_pet_message_4){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE4(self, offset, exp1, exp2, exp3, exp4) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_5(offset_arg, exp1, exp2, exp3, exp4, exp5) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	__auto_type __arg5 = (exp5);												\
-	(struct nvmeib_pet_message_5){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE5(self, offset, exp1, exp2, exp3, exp4, exp5) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+			typeof(exp5) arg5; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+			.arg5 = (exp5), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_6(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	__auto_type __arg5 = (exp5);												\
-	__auto_type __arg6 = (exp6);												\
-	(struct nvmeib_pet_message_6){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE6(self, offset, exp1, exp2, exp3, exp4, exp5, exp6) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+			typeof(exp5) arg5; \
+			typeof(exp6) arg6; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+			.arg5 = (exp5), \
+			.arg6 = (exp6), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_7(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	__auto_type __arg5 = (exp5);												\
-	__auto_type __arg6 = (exp6);												\
-	__auto_type __arg7 = (exp7);												\
-	(struct nvmeib_pet_message_7){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE7(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+			typeof(exp5) arg5; \
+			typeof(exp6) arg6; \
+			typeof(exp7) arg7; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+			.arg5 = (exp5), \
+			.arg6 = (exp6), \
+			.arg7 = (exp7), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_8(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	__auto_type __arg5 = (exp5);												\
-	__auto_type __arg6 = (exp6);												\
-	__auto_type __arg7 = (exp7);												\
-	__auto_type __arg8 = (exp8);												\
-	(struct nvmeib_pet_message_8){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE8(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+			typeof(exp5) arg5; \
+			typeof(exp6) arg6; \
+			typeof(exp7) arg7; \
+			typeof(exp8) arg8; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+			.arg5 = (exp5), \
+			.arg6 = (exp6), \
+			.arg7 = (exp7), \
+			.arg8 = (exp8), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_9(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	__auto_type __arg5 = (exp5);												\
-	__auto_type __arg6 = (exp6);												\
-	__auto_type __arg7 = (exp7);												\
-	__auto_type __arg8 = (exp8);												\
-	__auto_type __arg9 = (exp9);												\
-	(struct nvmeib_pet_message_9){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8), nvmeib_pet_get_store_type(__arg9)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8), (u64)(__arg9)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE9(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+			typeof(exp5) arg5; \
+			typeof(exp6) arg6; \
+			typeof(exp7) arg7; \
+			typeof(exp8) arg8; \
+			typeof(exp9) arg9; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+			.arg5 = (exp5), \
+			.arg6 = (exp6), \
+			.arg7 = (exp7), \
+			.arg8 = (exp8), \
+			.arg9 = (exp9), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_10(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	__auto_type __arg5 = (exp5);												\
-	__auto_type __arg6 = (exp6);												\
-	__auto_type __arg7 = (exp7);												\
-	__auto_type __arg8 = (exp8);												\
-	__auto_type __arg9 = (exp9);												\
-	__auto_type __arg10 = (exp10);												\
-	(struct nvmeib_pet_message_10){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8), nvmeib_pet_get_store_type(__arg9), nvmeib_pet_get_store_type(__arg10)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8), (u64)(__arg9), (u64)(__arg10)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE10(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+			typeof(exp5) arg5; \
+			typeof(exp6) arg6; \
+			typeof(exp7) arg7; \
+			typeof(exp8) arg8; \
+			typeof(exp9) arg9; \
+			typeof(exp10) arg10; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+			.arg5 = (exp5), \
+			.arg6 = (exp6), \
+			.arg7 = (exp7), \
+			.arg8 = (exp8), \
+			.arg9 = (exp9), \
+			.arg10 = (exp10), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_11(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	__auto_type __arg5 = (exp5);												\
-	__auto_type __arg6 = (exp6);												\
-	__auto_type __arg7 = (exp7);												\
-	__auto_type __arg8 = (exp8);												\
-	__auto_type __arg9 = (exp9);												\
-	__auto_type __arg10 = (exp10);												\
-	__auto_type __arg11 = (exp11);												\
-	(struct nvmeib_pet_message_11){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8), nvmeib_pet_get_store_type(__arg9), nvmeib_pet_get_store_type(__arg10), nvmeib_pet_get_store_type(__arg11)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8), (u64)(__arg9), (u64)(__arg10), (u64)(__arg11)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE11(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10) + sizeof(exp11); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+			typeof(exp5) arg5; \
+			typeof(exp6) arg6; \
+			typeof(exp7) arg7; \
+			typeof(exp8) arg8; \
+			typeof(exp9) arg9; \
+			typeof(exp10) arg10; \
+			typeof(exp11) arg11; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+			.arg5 = (exp5), \
+			.arg6 = (exp6), \
+			.arg7 = (exp7), \
+			.arg8 = (exp8), \
+			.arg9 = (exp9), \
+			.arg10 = (exp10), \
+			.arg11 = (exp11), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
 
-#define NVMEIB_PET_MSG_12(offset_arg, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11, exp12) \
-({																					\
-	__auto_type __arg1 = (exp1);												\
-	__auto_type __arg2 = (exp2);												\
-	__auto_type __arg3 = (exp3);												\
-	__auto_type __arg4 = (exp4);												\
-	__auto_type __arg5 = (exp5);												\
-	__auto_type __arg6 = (exp6);												\
-	__auto_type __arg7 = (exp7);												\
-	__auto_type __arg8 = (exp8);												\
-	__auto_type __arg9 = (exp9);												\
-	__auto_type __arg10 = (exp10);												\
-	__auto_type __arg11 = (exp11);												\
-	__auto_type __arg12 = (exp12);												\
-	(struct nvmeib_pet_message_12){													\
-		.offset = offset_arg + 1,														\
-		.type = {nvmeib_pet_get_store_type(__arg1), nvmeib_pet_get_store_type(__arg2), nvmeib_pet_get_store_type(__arg3), nvmeib_pet_get_store_type(__arg4), nvmeib_pet_get_store_type(__arg5), nvmeib_pet_get_store_type(__arg6), nvmeib_pet_get_store_type(__arg7), nvmeib_pet_get_store_type(__arg8), nvmeib_pet_get_store_type(__arg9), nvmeib_pet_get_store_type(__arg10), nvmeib_pet_get_store_type(__arg11), nvmeib_pet_get_store_type(__arg12)},\
-		.value = {(u64)(__arg1), (u64)(__arg2), (u64)(__arg3), (u64)(__arg4), (u64)(__arg5), (u64)(__arg6), (u64)(__arg7), (u64)(__arg8), (u64)(__arg9), (u64)(__arg10), (u64)(__arg11), (u64)(__arg12)}							\
-	};																				\
+#define __NVMEIB_PET_STREAM_WRITE12(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11, exp12) \
+({ \
+	size_t written = 0; \
+	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10) + sizeof(exp11) + sizeof(exp12); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
+	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	\
+	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
+	\
+	if (dest.iov_base) { \
+		struct __attribute__((packed)) { \
+			struct nvmeib_pet_msg_header header; \
+			typeof(exp1) arg1; \
+			typeof(exp2) arg2; \
+			typeof(exp3) arg3; \
+			typeof(exp4) arg4; \
+			typeof(exp5) arg5; \
+			typeof(exp6) arg6; \
+			typeof(exp7) arg7; \
+			typeof(exp8) arg8; \
+			typeof(exp9) arg9; \
+			typeof(exp10) arg10; \
+			typeof(exp11) arg11; \
+			typeof(exp12) arg12; \
+		} __tmp = { \
+			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.arg1 = (exp1), \
+			.arg2 = (exp2), \
+			.arg3 = (exp3), \
+			.arg4 = (exp4), \
+			.arg5 = (exp5), \
+			.arg6 = (exp6), \
+			.arg7 = (exp7), \
+			.arg8 = (exp8), \
+			.arg9 = (exp9), \
+			.arg10 = (exp10), \
+			.arg11 = (exp11), \
+			.arg12 = (exp12), \
+		}; \
+		\
+		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		written = sizeof(__tmp); \
+	} \
+	written; \
 })
-
 
 //counts the number of elements in __VA_ARGS__
 #define NVMEIB_PET_VA_NARGS_IMPL(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,N,...) N
@@ -513,205 +569,10 @@ struct nvmeib_pet_message_12{
 
 //if we know the number of arguments we can decide ourself what macro should be used
 //there is a need for double indirecion in order to convert number of arguments to actual number
-#define NVMEIB_PET_MSG_IMPL_IMPL(offset, n_args, ...) NVMEIB_PET_MSG_##n_args(offset, __VA_ARGS__)
-#define NVMEIB_PET_MSG_IMPL(offset, n_args, ...) NVMEIB_PET_MSG_IMPL_IMPL(offset, n_args, __VA_ARGS__)
-#define NVMEIB_PET_MSG(offset, ...) NVMEIB_PET_MSG_IMPL(offset, NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__)
-//      ^^^^^^^^^^^^^^ this is the public user interface
+#define __NVMEIB_PET_STREAM_WRITE_IMPL_IMPL(self, offset, n_args, ...) __NVMEIB_PET_STREAM_WRITE##n_args(self, offset, __VA_ARGS__)
+#define __NVMEIB_PET_STREAM_WRITE_IMPL(self, offset, n_args, ...) __NVMEIB_PET_STREAM_WRITE_IMPL_IMPL(self, offset, n_args, __VA_ARGS__)
+#define __NVMEIB_PET_STREAM_WRITE_MSG(self, offset, ...) __NVMEIB_PET_STREAM_WRITE_IMPL(self, offset, NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__)
 
-
-#define __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self)				\
-({																		\
-	u16 idx = 0;														\
-	u16 total = sizeof(self->offset) + 1 /* n_args */;					\
-	total += 1 + nvmeib_pet_store_type_get_size(timestamp_ns.type);		\
-	for (idx = 0; idx < ARRAY_SIZE(self->type); ++idx) {				\
-	    total += 1 + nvmeib_pet_store_type_get_size(self->type[idx]);	\
-	}																	\
-	total;																\
-})
-
-static inline u16 nvmeib_pet_message_1_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_1 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_2_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_2 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_3_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_3 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_4_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_4 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_5_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_5 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_6_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_6 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_7_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_7 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_8_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_8 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_9_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_9 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_10_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_10 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_11_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_11 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-static inline u16 nvmeib_pet_message_12_get_size(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_12 const* self)
-{return __NVMEIB_PET_MESSAGE_GET_SIZE(timestamp_ns, self); }
-
-#define nvmeib_pet_message_get_size(timestamp_ns, self)														\
-({																											\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_1 const*),	\
-	nvmeib_pet_message_1_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_2 const*),	\
-	nvmeib_pet_message_2_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_3 const*),	\
-	nvmeib_pet_message_3_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_4 const*),	\
-	nvmeib_pet_message_4_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_5 const*),	\
-	nvmeib_pet_message_5_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_6 const*),	\
-	nvmeib_pet_message_6_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_7 const*),	\
-	nvmeib_pet_message_7_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_8 const*),	\
-	nvmeib_pet_message_8_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_9 const*),	\
-	nvmeib_pet_message_9_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_10 const*),	\
-	nvmeib_pet_message_10_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_11 const*),	\
-	nvmeib_pet_message_11_get_size,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(self), struct nvmeib_pet_message_12 const*),	\
-	nvmeib_pet_message_12_get_size,																			\
-	0))))))))))))(timestamp_ns, self);																		\
-})
-
-/*
-message format(implemented):
-    offset(2bytes), number of arguments(1byte), {pet variant}+
-    where pet variant is written as {type(1bytes), value{(1|2|4|8) bytes}}
-kaitai supports other format:
-    offset, number of arguments, [type]+, [value]+
-
-the second format probably has better performance - we are capable to write the whole struct in a single memcpy
-nvmeib_pet_message struct would change to:
-{
-	u16 offset;
-	u8 n_args;
-	u8 type[n_args]; //no alignment needed, since the type u8 - BUILD_BUG_ON to confirm
-	u8 value[n_args*sizeof(u64)];
-	u8 size; //message size, it can be calculated at compile time
-}
-
-right now, I don't think we should go there, we can change this in future
-*/
-
-#define __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out)																		\
-({																																\
-	u16 idx = 0;																												\
-	__auto_type const __timestamp_ns = (timestamp_ns);																			\
-	u16 const size = nvmeib_pet_message_get_size(__timestamp_ns, self);															\
-	struct iovec buf = nvmeib_pet_stream_alloc(out, size);																		\
-	if (likely(buf.iov_base)) {																									\
-		nvmeib_pet_iovec_append_type(&buf, self->offset);																		\
-		nvmeib_pet_iovec_append_type(&buf, (u8)ARRAY_SIZE(self->type));															\
-		nvmeib_pet_iovec_append_type(&buf, (u8)__timestamp_ns.type);															\
-		nvmeib_pet_iovec_append_any(&buf, nvmeib_pet_store_type_get_size(__timestamp_ns.type), (u8 const*)(&__timestamp_ns.value));	\
-		for(idx = 0; idx < ARRAY_SIZE(self->type); ++idx){																		\
-			nvmeib_pet_iovec_append_type(&buf, (u8)self->type[idx]);															\
-			nvmeib_pet_iovec_append_any(&buf, nvmeib_pet_store_type_get_size(self->type[idx]), (u8 const*)(&self->value[idx]));	\
-		}																														\
-		BUG_ON(buf.iov_len != 0); /*size & write function should be fully synchronized*/										\
-	}																															\
-	buf.iov_base ? size : 0;																									\
-})
-
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_1_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_1 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_2_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_2 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_3_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_3 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_4_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_4 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_5_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_5 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_6_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_6 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_7_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_7 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_8_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_8 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_9_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_9 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_10_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_10 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_11_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_11 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-__attribute__((nonnull (2,3)))
-static inline u16 nvmeib_pet_message_12_write(struct nvmeib_pet_variant timestamp_ns, struct nvmeib_pet_message_12 const* self, struct nvmeib_pet_stream* out)
-{ return __NVMEIB_PET_MESSAGE_WRITE(timestamp_ns, self, out); }
-
-#define nvmeib_pet_message_write(timestamp_ns, self, out)														\
-({																											\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_1 const),	\
-		nvmeib_pet_message_1_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_2 const),	\
-		nvmeib_pet_message_2_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_3 const),	\
-		nvmeib_pet_message_3_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_4 const),	\
-		nvmeib_pet_message_4_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_5 const),	\
-		nvmeib_pet_message_5_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_6 const),	\
-		nvmeib_pet_message_6_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_7 const),	\
-		nvmeib_pet_message_7_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_8 const),	\
-		nvmeib_pet_message_8_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_9 const),	\
-		nvmeib_pet_message_9_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_10 const),	\
-	nvmeib_pet_message_10_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_11 const),	\
-	nvmeib_pet_message_11_write,																			\
-	__builtin_choose_expr(__builtin_types_compatible_p(typeof(*self), struct nvmeib_pet_message_12 const),	\
-	nvmeib_pet_message_12_write,																			\
-	0))))))))))))(timestamp_ns, self, out);																	\
-})
 
 //severity & verbosity
 //the main difference between traditional logging systems and PET is the following:
@@ -778,134 +639,27 @@ static inline void __nvmeib_pet_journal_clear_in_use(struct nvmeib_pet_journal* 
 	#endif
 }
 
-//don't add nvmeib_pet_journal_is_activated check here - too late - the arguments are already evaluated
-#define __NVMEIB_PET_JOURNAL_ADD_MSG_LOGIC_IMPL(self, severity, msg)																			\
-({																																				\
-	u16 written = 0;																															\
-	__auto_type const __pet_msg = (msg);																										\
-	u64 const curr_timestamp = nvmeib_pet_get_trace_time_ns();																					\
-	written = nvmeib_pet_message_write(nvmeib_pet_variant_make(curr_timestamp), __pet_msg, &self->stream);																\
-	if (written){ 																																\
-		self->worst_severity = nvmeib_pet_severity_get_worst(self->worst_severity, severity);													\
-	}																																			\
-	written;																																	\
-})
-
-#define __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg)							\
-({																					\
-	u16 written_bytes = 0;															\
-	bool const is_in_use = __nvmeib_pet_journal_test_and_set_in_use(self);			\
-	BUG_ON(is_in_use);																\
-	written_bytes = __NVMEIB_PET_JOURNAL_ADD_MSG_LOGIC_IMPL(self, severity, msg);	\
-	__nvmeib_pet_journal_clear_in_use(self);										\
-	written_bytes;																	\
-})
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_1(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_1 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_2(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_2 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_3(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_3 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_4(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_4 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_5(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_5 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_6(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_6 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_7(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_7 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_8(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_8 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_9(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_9 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_10(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_10 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_11(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_11 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
-__attribute__((nonnull (1,3)))
-static inline u16 nvmeib_pet_journal_add_msg_12(struct nvmeib_pet_journal* self, enum nvmeib_pet_severity severity, struct nvmeib_pet_message_12 const* msg)
-{ return __NVMEIB_PET_JOURNAL_ADD_MSG(self, severity, msg); }
-
 __attribute__((nonnull (1)))
-__attribute__((format (printf,1,2)))
+__attribute__((format (printf, 1, 2)))
 static inline void nvmeib_pet_journal_add_msg_verify_format(char const * const fmt, ...)
-{ (void)fmt; }
+{
+	(void)fmt;
+}
 
-
-#define nvmeib_pet_journal_add_msg(self, severity, msg)												\
-({																									\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_1 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_1*),					\
-		nvmeib_pet_journal_add_msg_1,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_2 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_2*),					\
-		nvmeib_pet_journal_add_msg_2,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_3 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_3*),					\
-		nvmeib_pet_journal_add_msg_3,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_4 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_4*),					\
-		nvmeib_pet_journal_add_msg_4,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_5 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_5*),					\
-		nvmeib_pet_journal_add_msg_5,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_6 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_6*),					\
-		nvmeib_pet_journal_add_msg_6,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_7 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_7*),					\
-		nvmeib_pet_journal_add_msg_7,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_8 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_8*),					\
-		nvmeib_pet_journal_add_msg_8,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_9 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_9*),					\
-		nvmeib_pet_journal_add_msg_9,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_10 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_10*),					\
-		nvmeib_pet_journal_add_msg_10,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_11 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_11*),					\
-		nvmeib_pet_journal_add_msg_11,																\
-	__builtin_choose_expr(																			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_12 const*) ||			\
-		__builtin_types_compatible_p(typeof(msg), struct nvmeib_pet_message_12*),					\
-		nvmeib_pet_journal_add_msg_12,																\
-	0))))))))))))(self, severity, msg);															\
+//don't add nvmeib_pet_journal_is_activated check here - too late - the arguments are already evaluated
+#define nvmeib_pet_journal_add_msg(self, severity, offset, ...)	\
+({	\
+	u16 written_bytes = 0;	\
+	__auto_type __nvmeib_pet_journal = (self); \
+	struct nvmeib_pet_stream* __nvmeib_pet_stream = &(__nvmeib_pet_journal->stream); \
+	bool const is_in_use = __nvmeib_pet_journal_test_and_set_in_use(__nvmeib_pet_journal); \
+	BUG_ON(is_in_use);	\
+	written_bytes = __NVMEIB_PET_STREAM_WRITE_MSG(__nvmeib_pet_stream, offset, __VA_ARGS__); \
+	if (written_bytes){ \
+		__nvmeib_pet_journal->worst_severity = nvmeib_pet_severity_get_worst(__nvmeib_pet_journal->worst_severity, severity); \
+	} \
+	__nvmeib_pet_journal_clear_in_use(__nvmeib_pet_journal); \
+	written_bytes; \
 })
 
 
