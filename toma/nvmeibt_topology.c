@@ -523,6 +523,7 @@ static void remove_seg_from_both_mem_gpts_if_eligable(struct nvmeibt_local_disk 
 {
 	struct nvmeibt_seg_active				*seg_active;
 	struct nvmeibt_disk_segment				*seg;
+	struct nvmeibt_disk_gpt_partition_entry	*metadata_gpt_entry;
 
 	// NFIN;
 	seg_active = nvmeibt_find_seg_active_of_specific_local_disk_by_uuid(local_disk, &cur_gpt_entry->partition_guid);
@@ -536,11 +537,15 @@ static void remove_seg_from_both_mem_gpts_if_eligable(struct nvmeibt_local_disk 
 	if (seg && is_gpt_entry_for_seg_needed(seg))
 		goto out;
 
+	metadata_gpt_entry = nvmeibt_seg_active_get_metadata_gpt_entry(seg_active);
+	NTOMA_ASSERT(sgk398z1, metadata_gpt_entry, "metadata_gpt_entry is NULL");
+	NTOMA_ASSERT(sgk398z2, ARE_UUID_EQ(&metadata_gpt_entry->partition_guid, &cur_gpt_entry->partition_guid), "metadata_gpt_entry uuid=@UUID_LE does not match main_gpt entry uuid=@UUID_LE", &metadata_gpt_entry->partition_guid, &cur_gpt_entry->partition_guid);
+
 	// Now we know that the seg_active is not a part of config or already deprecated and should be removed
 	NVMEIBT_SEG_ACTIVE_FREE_MEM_AND_PROCESSES(seg_active);
 	N_Tf(wtdhy43, "Deleting gpt_entry seg=@UUID_LE from disk=@STR", &cur_gpt_entry->partition_guid, nvmeibt_local_disk_display(local_disk));
 	nvmeibt_disk_metadata_free_gpt_entry(&local_disk->main_gpt, cur_gpt_entry);
-	nvmeibt_disk_metadata_free_gpt_entry(&local_disk->metadata_gpt, cur_gpt_entry);
+	nvmeibt_disk_metadata_free_gpt_entry(&local_disk->metadata_gpt, metadata_gpt_entry);
 	NNVMEIBT_LOCAL_DISK_INC_GPT_CHANGE_NO(d9md4g5, local_disk);
 out:
 	// NFOUT;
