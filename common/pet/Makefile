@@ -3,12 +3,6 @@ TESTS_DIR := tests
 SHELL := /bin/bash
 NVMESH_SRC_DIR ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 
-#the developer is expected to install it
-KSC = kaitai-struct-compiler
-
-# Input and output files
-PET_SPEC_FILE = nvmeib_pet_specification.ksy
-PET_BINFILE_READER = nvmeib_pet_archive.py
 GIT_COMMIT_ID = $(shell COMMIT_ID=; source ../../build_common.sh; git_commit_id)
 
 ifeq ($(filter-out 0x,$(COMMIT_ID)),)
@@ -40,11 +34,7 @@ TEST_OUT := $(BUILD_DIR)/messages.pet
 
 .PHONY: all clean test check dirs demo demo_dict perf fast_build FORCE
 
-# Default target: build generated sources and test binary.
-all: $(PET_BINFILE_READER) dirs $(TEST_EXE)
-
-$(PET_BINFILE_READER): $(PET_SPEC_FILE)
-	$(KSC) --target python $(PET_SPEC_FILE)
+all: dirs $(TEST_EXE)
 
 dirs:
 	@mkdir -p $(BUILD_DIR)
@@ -64,10 +54,10 @@ test: dirs $(TEST_EXE)
 
 check: test
 
-demo_dict: dirs test $(PET_BINFILE_READER)
+demo_dict: dirs test
 	PY=$(PY) ./pet_messages.sh save-dictionary $(TEST_EXE) test_pet_msgs $(TEST_DCT)
 
-demo: dirs test demo_dict $(PET_BINFILE_READER)
+demo: dirs test demo_dict
 	PY=$(PY) ./pet_messages.sh view --no-sort $(BUILD_DIR) $(TEST_OUT)
 
 perf: $(TEST_EXE)
@@ -76,6 +66,5 @@ perf: $(TEST_EXE)
 
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -f $(PET_BINFILE_READER)
 
 fast_build: dirs $(TEST_EXE) test

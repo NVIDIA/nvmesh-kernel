@@ -27,8 +27,6 @@ from elftools.elf.sections import Section
 from elftools.dwarf.die import DIE
 from elftools.dwarf.descriptions import describe_attr_value
 
-from nvmeib_pet_archive import NvmeibPetArchive, KaitaiStream
-
 
 # I really don't care about goodies, like pos & flags & width & precision & length & spec(sgGaAeEfFn)
 # gGaAeEfF - are used to print floating-point numbers - kernel & pet don't have them
@@ -49,28 +47,69 @@ PRINTF_SPEC_RE = printf_enum_re = re.compile(
 
 
 # ---------------------------------------------------------------------------
-# Kaitai helpers
+# PET binary reader
 # ---------------------------------------------------------------------------
 
 
-def pet_variant_get_value_attr_name(self: NvmeibPetArchive.PetVariant) -> str:
-	for vname in ('sv1', 'uv1', 'sv2', 'uv2', 'sv4', 'uv4', 'sv8', 'uv8'):
-		value = getattr(self, vname, None)
-		if value is not None:
-			return vname
-	raise RuntimeError(f'Failed to extract value from the variant: {self}')
+class PetRawMessage(typing.NamedTuple):
+	offset: int
+	timestamp: int
+	args_payload: bytes
+
+	@property
+	def raw_offset(self) -> int:
+		return self.offset - 1
 
 
-def pet_variant_get_value(self: NvmeibPetArchive.PetVariant) -> int:
-	for vname in ('sv1', 'uv1', 'sv2', 'uv2', 'sv4', 'uv4', 'sv8', 'uv8'):
-		value = getattr(self, vname, None)
-		if value is not None:
-			return value
-	raise RuntimeError(f'Failed to extract value from the variant: {self}')
+class PetEntity(typing.NamedTuple):
+	commit_id: int
+	size: int
+	messages: list[PetRawMessage]
+	fname: str
+	idx: int
 
 
-NvmeibPetArchive.PetVariant.pet_value = property(pet_variant_get_value)  # type: ignore
-NvmeibPetArchive.PetVariant.pet_value_attr_name = property(pet_variant_get_value_attr_name)  # type: ignore
+class PetArchiveReader:
+	ENTITY_HEADER = struct.Struct('<QH')
+	MSG_HEADER = struct.Struct('<HQB')
+
+	def __init__(self, fobj: typing.BinaryIO):
+		self.__fobj = fobj
+
+	def is_eof(self) -> bool:
+		pos = self.__fobj.tell()
+		data = self.__fobj.read(1)
+		self.__fobj.seek(pos)
+		return not data
+
+	def __read_exact(self, size: int, context: str) -> bytes:
+		pos = self.__fobj.tell()
+		data = self.__fobj.read(size)
+		if len(data) != size:
+			raise EOFError(f'Unexpected EOF while reading {context} at byte {pos}: expected {size}, got {len(data)}')
+		return data
+
+	def read_entity(self, fname: str, idx: int) -> PetEntity:
+		entity_start = self.__fobj.tell()
+		commit_id, num_messages = self.ENTITY_HEADER.unpack(
+			self.__read_exact(self.ENTITY_HEADER.size, f'entity {idx} header')
+		)
+		messages: list[PetRawMessage] = []
+
+		for msg_idx in range(num_messages):
+			offset, timestamp, args_n_bytes = self.MSG_HEADER.unpack(
+				self.__read_exact(self.MSG_HEADER.size, f'entity {idx} message {msg_idx} header')
+			)
+			payload = self.__read_exact(args_n_bytes, f'entity {idx} message {msg_idx} payload')
+			messages.append(PetRawMessage(offset=offset, timestamp=timestamp, args_payload=payload))
+
+		return PetEntity(
+			commit_id=commit_id,
+			messages=messages,
+			fname=fname,
+			idx=idx,
+			size=self.__fobj.tell() - entity_start,
+		)
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +534,10 @@ class ArgPrintfSpec(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
 
 	spec: str
+	pos: str = ''
+	width: str = ''
+	precision: str = ''
+	length: str = ''
 	tag: str = ''
 	type_name: str = ''
 
@@ -502,13 +545,54 @@ class ArgPrintfSpec(pydantic.BaseModel):
 	def from_re_match(m: re.Match[str]) -> 'ArgPrintfSpec':
 		return ArgPrintfSpec(
 			spec=m.group('spec') if m.group('spec') else '',
+			pos=m.group('pos') if m.group('pos') else '',
+			width=m.group('width') if m.group('width') else '',
+			precision=m.group('precision') if m.group('precision') else '',
+			length=m.group('length') if m.group('length') else '',
 			tag=m.group('tag') if m.group('tag') else '',
 			type_name=m.group('type_name') if m.group('type_name') else '',
 		)
 
 	@property
 	def hex(self) -> bool:
-		return bool(set('xXpP') & set(self.spec))
+		return bool(set('xXp') & set(self.spec))
+
+	@property
+	def consumes_arg(self) -> bool:
+		return self.spec != '%'
+
+	@property
+	def struct_code(self) -> str:
+		if not self.consumes_arg:
+			return ''
+		if self.pos:
+			raise ValueError(f'Positional printf arguments are not supported: %{self.pos}')
+		if self.width == '*' or self.precision == '.*':
+			raise ValueError('Dynamic printf width/precision is not supported')
+		if self.length == 'L':
+			raise ValueError('Printf length modifier L is not supported by PET integer payloads')
+		if self.spec == 'p':
+			return 'Q'
+
+		if self.spec in {'d', 'i', 'c'}:
+			if self.length == 'hh':
+				return 'b'
+			if self.length == 'h':
+				return 'h'
+			if self.length in {'l', 'll', 'j', 'z', 't'}:
+				return 'q'
+			return 'i'
+
+		if self.spec in {'u', 'o', 'x', 'X'}:
+			if self.length == 'hh':
+				return 'B'
+			if self.length == 'h':
+				return 'H'
+			if self.length in {'l', 'll', 'j', 'z', 't'}:
+				return 'Q'
+			return 'I'
+
+		raise ValueError(f'Unsupported printf specifier %{self.spec}')
 
 
 class ArgDecoder:
@@ -577,8 +661,8 @@ class EntitySkeleton:
 	def __init__(self, commit_id: int):
 		self.offsets: list[int] = [commit_id]
 
-	def update(self, msg: NvmeibPetArchive.Message) -> None:
-		self.offsets.append(msg.offset)
+	def update(self, msg: PetRawMessage) -> None:
+		self.offsets.append(msg.raw_offset)
 
 	def hexdigest(self) -> str:
 		hasher = hashlib.blake2s(digest_size=6)
@@ -593,6 +677,7 @@ class Template:
 		self.__c_spec = msg_spec
 		self.__py_spec: str = ''
 		self.__py_decoders: dict[int, typing.Callable[[int], typing.Any]] = {}
+		self.__payload_struct = struct.Struct('<')
 		self.__process_c_spec()  # updates __py_spec and __py_args
 
 	def __escape_msg_part(self, part: str) -> str:
@@ -601,23 +686,41 @@ class Template:
 	def __process_c_spec(self) -> None:
 		last = 0
 		parts: list[str] = []
+		struct_codes: list[str] = []
+		arg_idx = 0
 		spec = self.__c_spec.spec
-		for idx, m in enumerate(PRINTF_SPEC_RE.finditer(spec)):
+		for m in PRINTF_SPEC_RE.finditer(spec):
 			parts.append(self.__escape_msg_part(spec[last : m.start()]))  # field before separator
 			arg_printf_spec: ArgPrintfSpec = ArgPrintfSpec.from_re_match(m)
+			spec_prefix = m.group('spec_prefix') if m.group('spec_prefix') else ''
+			if not arg_printf_spec.consumes_arg:
+				parts.append(self.__escape_msg_part(spec_prefix))
+				parts.append('%')
+				last = m.end()
+				continue
+
+			try:
+				struct_codes.append(arg_printf_spec.struct_code)
+			except ValueError as error:
+				raise ValueError(f'{error}; message offset={self.__c_spec.offset:#06x}, spec={spec!r}') from error
+
+			if spec_prefix and not (arg_printf_spec.hex and spec_prefix.lower() == '0x'):
+				parts.append(self.__escape_msg_part(spec_prefix))
 			if m.group('type_name'):
 				udt_found: typing.Optional[TypeInfo] = self.__user_defined_types.get(m.group('type_name'), None)
 				if udt_found:
-					self.__py_decoders[idx] = ArgDecoder(udt_found, arg_printf_spec)
+					self.__py_decoders[arg_idx] = ArgDecoder(udt_found, arg_printf_spec)
 				parts.append('{}')
 			else:
 				if arg_printf_spec.hex:
 					parts.append('0x{:x}')
 				else:
 					parts.append('{}')
+			arg_idx += 1
 			last = m.end()
 		parts.append(self.__escape_msg_part(spec[last:]))  # trailing field
 		self.__py_spec = ''.join(parts)
+		self.__payload_struct = struct.Struct('<' + ''.join(struct_codes))
 
 	def __bool__(self):
 		return bool(self.__py_spec)
@@ -626,28 +729,37 @@ class Template:
 	def spec(self) -> MessageSpec:
 		return self.__c_spec
 
-	@typing.no_type_check
-	def __load_args(self, msg: NvmeibPetArchive.Message) -> list[typing.Any]:
-		args: list[int] = []
-		for idx, arg in enumerate(msg.args):  # type: ignore
+	def __load_args(self, msg: PetRawMessage) -> list[typing.Any]:
+		expected_n_bytes = self.__payload_struct.size
+		actual_n_bytes = len(msg.args_payload)
+		if expected_n_bytes != actual_n_bytes:
+			raise RuntimeError(
+				f'PET message payload size mismatch: stored_offset={msg.offset:#06x}, '
+				f'raw_offset={msg.raw_offset:#06x}, '
+				f'spec={self.__c_spec.spec!r}, expected={expected_n_bytes}, '
+				f'actual={actual_n_bytes}, payload={msg.args_payload.hex()}'
+			)
+
+		args: list[typing.Any] = []
+		for idx, value in enumerate(self.__payload_struct.unpack(msg.args_payload)):
 			decoder = self.__py_decoders.get(idx, None)
 			if decoder:
-				args.append(decoder(arg.pet_value))
+				args.append(decoder(value))
 			else:
-				args.append(arg.pet_value)
+				args.append(value)
 		return args
 
-	def instantiate(self, msg: NvmeibPetArchive.Message, fname: str, entity: int) -> Message:
+	def instantiate(self, msg: PetRawMessage, fname: str, entity: int) -> Message:
 		args: list[typing.Any] = self.__load_args(msg)
 		text = self.__py_spec.format(*args)
-		dt_stamp = datetime.datetime.fromtimestamp(msg.timestamp.uv8 / (10**9))  # type: ignore
+		dt_stamp = datetime.datetime.fromtimestamp(msg.timestamp / (10**9))
 		return Message(
 			fname=fname,
 			entity=entity,
-			ns_stamp=msg.timestamp.uv8,
+			ns_stamp=msg.timestamp,
 			dt_stamp=dt_stamp,
 			text=text,
-		)  # type: ignore
+		)
 
 
 class Dictionary(pydantic.BaseModel):
@@ -892,8 +1004,7 @@ class ViewMessages(Command):
 		self.__tsc_khz = None
 		self.__hdr_flags = None
 
-	@typing.no_type_check
-	def __skip_tracer_headers(self, kstream: KaitaiStream) -> bool:
+	def __skip_tracer_headers(self, fobj: typing.BinaryIO) -> bool:
 		"""Try to consume an 8-byte tracer buffer header from the stream.
 
 		Detection relies on the constant tsc_khz field (bytes 4-7) and
@@ -903,12 +1014,12 @@ class ViewMessages(Command):
 		Returns True if a header was consumed, False if the bytes were
 		not a header (stream is rewound to the original position).
 		"""
-		remaining = kstream.size() - kstream.pos()
-		if remaining < self._TRACER_HEADER_SIZE:
+		pos = fobj.tell()
+		header_bytes = fobj.read(self._TRACER_HEADER_SIZE)
+		if len(header_bytes) < self._TRACER_HEADER_SIZE:
+			fobj.seek(pos)
 			return False
 
-		pos = kstream.pos()
-		header_bytes = kstream.read_bytes(self._TRACER_HEADER_SIZE)
 		word0 = struct.unpack_from('<I', header_bytes, 0)[0]
 		word1 = struct.unpack_from('<I', header_bytes, 4)[0]
 
@@ -921,11 +1032,10 @@ class ViewMessages(Command):
 		if word1 == self.__tsc_khz and (word0 >> 24) == self.__hdr_flags:
 			return True
 
-		kstream.seek(pos)
+		fobj.seek(pos)
 		return False
 
-	@typing.no_type_check
-	def __iter_entities(self) -> typing.Generator[NvmeibPetArchive.Entity, None, None]:
+	def __iter_entities(self) -> typing.Generator[PetEntity, None, None]:
 		um_trace = any(s.um_trace for s in self.schemas.values())
 		n_files = len(self.traces)
 		for fpath in self.traces:
@@ -933,68 +1043,49 @@ class ViewMessages(Command):
 			self.__hdr_flags = None
 			with open(fpath, 'rb') as fobj:
 				idx = 0
-				kstream = KaitaiStream(fobj)
-				while not kstream.is_eof():
+				reader = PetArchiveReader(fobj)
+				while not reader.is_eof():
 					if um_trace:
-						while self.__skip_tracer_headers(kstream):
+						while self.__skip_tracer_headers(fobj):
 							pass
-						if kstream.is_eof():
+						if reader.is_eof():
 							break
-					entity_start_position = kstream.pos()
-					entity = NvmeibPetArchive.Entity(kstream)
+					entity = reader.read_entity(fpath.name if n_files > 1 else '', idx)
 					if entity.commit_id not in self.schemas:
 						raise RuntimeError(
 							f'No dictionary found for commit_id {hex(entity.commit_id)} in entity {idx} '
 							f'from file {fpath.name}'
 						)
-					entity.fname = fpath.name if n_files > 1 else ''
-					entity.idx = idx
-					entity.size = kstream.pos() - entity_start_position
 					idx += 1
 					yield entity
-			# The code below loads the whole file into memory - waste of resources
-			# archive: NvmeibPetArchive = NvmeibPetArchive.from_file(fpath)
-			# for entity in archive.entities:
-			# yield entity
 
-	@typing.no_type_check
 	def __iter_entity_raw_messages(
-		self, entity: NvmeibPetArchive.Entity
-	) -> typing.Generator[NvmeibPetArchive.Message, None, None]:
-		prev_ns_stamp = 0
+		self, entity: PetEntity
+	) -> typing.Generator[PetRawMessage, None, None]:
 		for msg in entity.messages:
 			if not msg.offset:
 				break
 
-			if msg.timestamp.pet_value_attr_name != 'uv8':
-				# it means we have time delta from the previous message
-				delta: int = msg.timestamp.pet_value
-				setattr(msg.timestamp, msg.timestamp.pet_value_attr_name, None)
-				msg.timestamp.uv8 = delta + prev_ns_stamp
-
-			prev_ns_stamp = msg.timestamp.uv8
-
 			yield msg
 
-	@typing.no_type_check
 	def __iter_entity_human_messages(
-		self, entity: NvmeibPetArchive.Entity
+		self, entity: PetEntity
 	) -> typing.Generator[Message, None, None]:
 		if entity.commit_id not in self.schemas:
 			raise RuntimeError(
 				f'No dictionary found for commit_id {hex(entity.commit_id)} in entity {entity.idx} '
 				f'from file {entity.fname}'
-			)
+		)
 		human_msg: typing.Optional[Message] = None
 		schema: PETSchema = self.schemas[entity.commit_id]
-		skeleton:EntitySkeleton = EntitySkeleton(entity.commit_id)
+		skeleton: EntitySkeleton = EntitySkeleton(entity.commit_id)
 
 		for msg in self.__iter_entity_raw_messages(entity):
 			try:
-				tmpl = schema.templates[msg.offset - 1]
+				tmpl = schema.templates[msg.raw_offset]
 			except KeyError:
 				msg = (
-					f'Unknown PET message offset {msg.offset:#06x} '
+					f'Unknown PET message offset stored={msg.offset:#06x} raw={msg.raw_offset:#06x} '
 					f'for entity {entity.idx} in schema {schema.git_commit_id}'
 				)
 				raise RuntimeError(msg)
