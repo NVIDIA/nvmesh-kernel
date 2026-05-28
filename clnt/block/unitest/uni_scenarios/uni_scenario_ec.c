@@ -2828,6 +2828,7 @@ TEST_FUNC int __test_dirty_convict(bunitest_s* btest)
 	for (i = 0; i < N_MAX_RAID_SLICE_LEN; ++i)
 		seg_mode[i] = NVMEIBTC_DS_MODE_RW;
 
+	for (u8 dconv_dirty_w = 0; dconv_dirty_w < 2; ++dconv_dirty_w) {	// NVMESH-8988: dirty seg state at dconvict time. 0: DEAD, 1: W (pre may carry a dbit on W)
 	for (itopo_other = 0; itopo_other < 2; ++itopo_other) {
 		for (u32 ti = 0; ti < ARRAY_SIZE(dbits_pre); ++ti) {
 			struct toma_recovery_args rcvr_args = {.type=NVMEIBT_RECOVERY_TYPE_EC_DCONVICT_TURNON, .cmd=NVMEIBT_CLIENT_MSG_TR_RECOVER_START, .on_start_wait_for_end = true, .recov_caller = UNI_RECOV_CALLER_TOMA};
@@ -2835,6 +2836,9 @@ TEST_FUNC int __test_dirty_convict(bunitest_s* btest)
 			const int dirty_seg_ind = dbits_pre[ti].dirty_seg_ind;
 			const bool has_dirty_seg = (dirty_seg_ind != -1);
 			const u64 dlba_stale = (praid.cpr[conv_segs[0]].dlba_start + 0);	// Put in first blockset, todo, try other blocksets
+			const u32 n_binfo_errors_pre = client->devs[vsi.volume]->dp.io_stats.mgr.n_binfo_errors;
+			if (dconv_dirty_w && !has_dirty_seg)
+				continue;	// No dirty seg to vary; second pass would be a duplicate
 			rcvr_args.ext_args.is_mandatory.override = rcvr_args.ext_args.is_mandatory.value = true;
 
 			// -- prepare RAM to pre state dbits.
@@ -2855,11 +2859,12 @@ TEST_FUNC int __test_dirty_convict(bunitest_s* btest)
 
 			// -- Turn on dirty convict in ram
 			if (has_dirty_seg) // if should turn on dbit.
-				seg_mode[dirty_seg_ind] = NVMEIBTC_DS_MODE_DEAD;
+				seg_mode[dirty_seg_ind] = dconv_dirty_w ? NVMEIBTC_DS_MODE_W : NVMEIBTC_DS_MODE_DEAD;
 			seg_mode[conv_seg_ind] = NVMEIBTC_DS_MODE_W_IS_DIRTY;
 			tomaSimulator_switchTopoEC(praid.tpr->header.uuid, seg_mode, SW_TOPO__WAIT_ACK_DR, NULL);
 			atomic_set(&maint_stats->n_dconvict_turnon, 0);
 			BUG_ON(tomaSimulator_recoverThing(praid.tpr, praid.cpr, rcvr_args) < 0);     // ask segment to turn on dconvict on the blocksets it owns
+			BUG_ON(client->devs[vsi.volume]->dp.io_stats.mgr.n_binfo_errors != n_binfo_errors_pre);	// NVMESH-8988: aux dconvict must not trip the binfo verifier
 			__verify_ram_dbits_valid(sys, &praid, &conv_segs, conv_nblk, dbits_post[ti]); // Verify convict turned on properly
 			ramDiskSimulator_lockUnSta(&sys->servers[conv_segs[0]].ramDisk, dlba_stale);		// Verify stale lock remained and remove it
 			BUG_ON(atomic_read(&maint_stats->n_dconvict_turnon) != 4);	// All 4 blocksets were handled properly
@@ -2902,6 +2907,7 @@ TEST_FUNC int __test_dirty_convict(bunitest_s* btest)
 			__verify_disk_dbits_valid(&praid, sys, 8, 9, 0, 0);		// Verify the covict cleaned from metadata
 		}  // end of ti(test index)
 	}
+	}  // end of dconv_dirty_w (NVMESH-8988)
 	NVMeshSystem_serialize(btest->sys);
 	BUG_ON(!NVMeshSystem_is_stable(btest->sys));
 	sim_kfree(mem);
