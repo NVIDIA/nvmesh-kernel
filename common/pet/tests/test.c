@@ -849,7 +849,6 @@ void test_journal_timestamp(void)
 	__auto_type const msg1 = NVMEIB_PET_MSG(0x10, (u8)0x11);
 	__auto_type const msg2 = NVMEIB_PET_MSG(0x20, (u8)0x22);
 
-	BUG_ON(journal.prev_timestamp_ns != 0);
 	u8 const* const msg1_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.written_bytes);
 	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, &msg1);
 	struct nvmeib_pet_variant const timestamp1 = __load_timestamp(msg1_start);
@@ -861,10 +860,8 @@ void test_journal_timestamp(void)
 	BUG_ON(timestamp1.type != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
 	//BUG_ON(timestamp1.value == 0);
 
-	BUG_ON(timestamp2.type == NVMEIB_PET_STORE_TYPE_U_LONG_INT);
+	BUG_ON(timestamp2.type != NVMEIB_PET_STORE_TYPE_U_LONG_INT);
 	//BUG_ON(timestamp2.value == 0); we cannot predict the timestamp value - on virtual machines we may be scheduled out any time 
-
-	//BUG_ON(journal.prev_timestamp_ns != timestamp1.value + timestamp2.value);
 
 	nvmeib_pet_journal_commit(&journal);
 

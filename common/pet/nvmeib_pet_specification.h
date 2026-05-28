@@ -727,7 +727,6 @@ struct nvmeib_pet_journal{
 	bool verbose;
 	u8 concurrent_access_detector; //don't bother to remove it in the production build - we have padding here;
 	s16 release_cpu;
-	u64 prev_timestamp_ns; //with high probability the next message may store delta between times, thus saving space
 };
 
 static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pet_base_controller const* controller, bool verbose)
@@ -745,7 +744,6 @@ static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pe
 		.verbose = verbose,
 		.concurrent_access_detector = 0,
 		.release_cpu = buffer.release_cpu,
-		.prev_timestamp_ns = 0,
 	};
 }
 
@@ -780,30 +778,15 @@ static inline void __nvmeib_pet_journal_clear_in_use(struct nvmeib_pet_journal* 
 	#endif
 }
 
-static inline struct nvmeib_pet_variant __nvmeib_pet_journal_get_curr_message_timestamp(u64 prev_timestamp, u64 curr_timestamp)
-{
-	u64 const delta = curr_timestamp - prev_timestamp;
-	//if ((delta & 0xFF) == delta) <== no chance to happen, even in the test for 2 sequential messages I did not see it
-	if ((delta & 0xFFFF) == delta){
-		return (struct nvmeib_pet_variant){.type = NVMEIB_PET_STORE_TYPE_U_SHORT, .value = delta};
-	} else if ((delta & 0xFFFFFFFF) == delta){
-		return (struct nvmeib_pet_variant){.type = NVMEIB_PET_STORE_TYPE_U_INT, .value = delta};
-	} else {
-		return (struct nvmeib_pet_variant){.type = NVMEIB_PET_STORE_TYPE_U_LONG_INT, .value = curr_timestamp};
-	}
-}
-
 //don't add nvmeib_pet_journal_is_activated check here - too late - the arguments are already evaluated
 #define __NVMEIB_PET_JOURNAL_ADD_MSG_LOGIC_IMPL(self, severity, msg)																			\
 ({																																				\
 	u16 written = 0;																															\
 	__auto_type const __pet_msg = (msg);																										\
 	u64 const curr_timestamp = nvmeib_pet_get_trace_time_ns();																					\
-	struct nvmeib_pet_variant const timestamp_ns = __nvmeib_pet_journal_get_curr_message_timestamp(self->prev_timestamp_ns, curr_timestamp);	\
-	written = nvmeib_pet_message_write(timestamp_ns, __pet_msg, &self->stream);																	\
+	written = nvmeib_pet_message_write(nvmeib_pet_variant_make(curr_timestamp), __pet_msg, &self->stream);																\
 	if (written){ 																																\
 		self->worst_severity = nvmeib_pet_severity_get_worst(self->worst_severity, severity);													\
-		self->prev_timestamp_ns = curr_timestamp;																								\
 	}																																			\
 	written;																																	\
 })
