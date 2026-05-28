@@ -6976,6 +6976,22 @@ TEST_FUNC int unitest_DegradedMode_n_mirrored(struct NVMeshSystem *sys){
 				__verify_no_dbits(db_vals);
 			}
 
+			if (n_deg == 2 && curSeg->replicas >= 3) {	// NVMESH-8988: {readable, W with pre dbit, W-} under aux dconvict
+				struct serverSimulator *curServer = serverOf(&client->physDiscs[ownerSeg->node_id]);
+				const u32 n_binfo_errors_pre = dev->dp.io_stats.mgr.n_binfo_errors;
+				const int w_seg = ind_dead_seg + 1;
+				__clean_cur_dbits(db_vals);
+				seg_stats[ind_dead_seg] = NVMEIBTC_DS_MODE_W_IS_DIRTY;
+				seg_stats[w_seg]        = NVMEIBTC_DS_MODE_W;
+				tomaSimulator_switchTopoEC(r1uuid(r1), seg_stats, SW_TOPO__WAIT_ACK, NULL);
+				*db_vals[owner_seg_ind] = nvmeib_dbits_entry_build_for_seg(w_seg);
+				tomaSimulator_recoverOK_Blocking(r1, ownerSeg, RCVR_DIRTY_REBUILD_CONV);
+				clientSimulator_wait_for_all_sync_ops(client);
+				BUG_ON(dev->dp.io_stats.mgr.n_binfo_errors != n_binfo_errors_pre);
+				ramDiskSimulator_verify_no_locks(&curServer->ramDisk);
+				ramDiskSimulator_verify_no_dirty_bits(&curServer->ramDisk);
+			}
+
 			for (j = 0; j < n_deg; j++) {
 				seg_stats[ind_dead_seg+j] = NVMEIBTC_DS_MODE_W;
 			}
