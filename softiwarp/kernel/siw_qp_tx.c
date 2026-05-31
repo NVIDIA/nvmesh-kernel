@@ -660,7 +660,7 @@ static inline int siw_tx_ctrl(struct siw_iwarp_tx *c_tx, struct socket *s,
 
 	if (send_jif > SIW_KERNEL_SENDMSG_LOG_TIMEOUT) {
 		dprint(DBG_ON, "(QP%d): kernel_sendmsg took %u ms\n", TX_QPID(c_tx), jiffies_to_msecs(send_jif));
-		SIW_TIMEOUT_WARN_ON_ONCE(send_jif, SIW_KERNEL_SENDMSG_WARN_TIMEOUT);
+		SIW_TIMEOUT_WARN_KNOWN_THROTTLED(send_jif, SIW_KERNEL_SENDMSG_WARN_TIMEOUT, 9028);
 	}
 
 	dprint(DBG_TX, " (QP%d): op=%d, %d of %d sent (%d)\n",
@@ -1436,7 +1436,7 @@ sge_done:
 	sent_jif = (jiffies - start_send_jif);
 	if (sent_jif > SIW_KERNEL_SENDMSG_LOG_TIMEOUT) {
 		dprint(DBG_ON, "(QP%d): kernel_sendmsg took %u ms\n", TX_QPID(c_tx), jiffies_to_msecs(sent_jif));
-		SIW_TIMEOUT_WARN_ON_ONCE(sent_jif, SIW_KERNEL_SENDMSG_WARN_TIMEOUT);
+		SIW_TIMEOUT_WARN_KNOWN_THROTTLED(sent_jif, SIW_KERNEL_SENDMSG_WARN_TIMEOUT, 9028);
 
 	}
 	if (rv < (int)hdr_len) {
@@ -3014,7 +3014,7 @@ static int siw_sq_run(unsigned long arg)
 			if ((proc_jif = (jiffies - start_proc_jif)) > SIW_QP_SQ_PROCESS_LOG_TIMEOUT) {
 				dprint(DBG_ON, "(QP%d): siw_qp_sq_process took %u ms",
 				       QP_ID(qp), jiffies_to_msecs(proc_jif));
-				SIW_TIMEOUT_WARN_ON_ONCE(proc_jif, SIW_QP_SQ_PROCESS_WARN_TIMEOUT);
+				SIW_TIMEOUT_WARN_KNOWN_THROTTLED(proc_jif, SIW_QP_SQ_PROCESS_WARN_TIMEOUT, 9028);
 			}
 
 			if (unlikely(rv < 0)) {
@@ -3159,7 +3159,7 @@ int siw_run_sq(void *data)
 				if (run_jif > list_jif && (run_jif - list_jif) > SIW_RUN_SQ_DELAY_LOG) {
 					dprint(DBG_ON, "QP(%d) - siw_sq_run delayed by %u ms\n",
 						QP_ID(qp), jiffies_to_msecs(run_jif - list_jif));
-					SIW_TIMEOUT_WARN_ON_ONCE(run_jif - list_jif, SIW_RUN_SQ_DELAY_WARN);
+					SIW_TIMEOUT_WARN_KNOWN_THROTTLED(run_jif - list_jif, SIW_RUN_SQ_DELAY_WARN, 9028);
 				}
 
 				rv = siw_sq_run((unsigned long)qp);

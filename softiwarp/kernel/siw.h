@@ -55,6 +55,7 @@
 #include <linux/llist.h>
 #include <linux/mm.h>
 #include <linux/kernel.h>
+#include <linux/ratelimit.h>
 
 #include <siw_kern_abi.h>
 #include <siw_user.h>
@@ -1599,6 +1600,28 @@ static inline struct siw_mr *siw_mem2mr(struct siw_mem *m)
 		unsigned long timeout = __timeout;			\
 		timeout *= clamp(relax_timeouts, 1U, 10000U);		\
 		SIW_WARN_KNOWN_ONCE(__delay > timeout, __bug);		\
+	} while (0)
+
+#define SIW_TIMEOUT_WARN_KNOWN(__delay, __timeout, __bug)	\
+	do {								\
+		unsigned long timeout = __timeout;			\
+		timeout *= clamp(relax_timeouts, 1U, 10000U);		\
+		SIW_WARN_KNOWN(__delay > timeout, __bug);		\
+	} while (0)
+
+#define SIW_TIMEOUT_WARN_KNOWN_THROTTLE_INTERVAL	(30 * HZ)
+
+#define SIW_TIMEOUT_WARN_KNOWN_THROTTLED(__delay, __timeout, __bug)	\
+	do {								\
+		unsigned long timeout = __timeout;			\
+		timeout *= clamp(relax_timeouts, 1U, 10000U);		\
+		if (__delay > timeout) {				\
+			static DEFINE_RATELIMIT_STATE(			\
+				_siw_to_warn_rl_##__LINE__,		\
+				SIW_TIMEOUT_WARN_KNOWN_THROTTLE_INTERVAL, 1); \
+			if (__ratelimit(&_siw_to_warn_rl_##__LINE__))	\
+				SIW_WARN_KNOWN(1, __bug);		\
+		}							\
 	} while (0)
 
 #include "../../common/compat/kr_incs_types.h"
