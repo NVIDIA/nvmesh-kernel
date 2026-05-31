@@ -5058,7 +5058,7 @@ int nvmeibt_raft_print_status_json(int (*printf_fn)(void *ctx, const char *fmt, 
 	} else {
 		(*printf_fn)(printf_ctx, "\"follower\"");
 	}
-	(*printf_fn)(printf_ctx, "}\n");
+	(*printf_fn)(printf_ctx, "}");
 
 	NFOUT;
 	return 0;
