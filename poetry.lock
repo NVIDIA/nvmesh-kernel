@@ -582,23 +582,6 @@ url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple"
 reference = "nv-shared"
 
 [[package]]
-name = "kaitaistruct"
-version = "0.11"
-description = "Kaitai Struct declarative parser generator for binary data: runtime library for Python"
-optional = false
-python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,>=2.7"
-groups = ["pet"]
-files = [
-    {file = "kaitaistruct-0.11-py2.py3-none-any.whl", hash = "sha256:5c6ce79177b4e193a577ecd359e26516d1d6d000a0bffd6e1010f2a46a62a561"},
-    {file = "kaitaistruct-0.11.tar.gz", hash = "sha256:053ee764288e78b8e53acf748e9733268acbd579b8d82a427b1805453625d74b"},
-]
-
-[package.source]
-type = "legacy"
-url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple"
-reference = "nv-shared"
-
-[[package]]
 name = "macholib"
 version = "1.16.3"
 description = "Mach-O header analysis and editing"
@@ -1379,4 +1362,4 @@ reference = "nv-shared"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.9,<3.13"
-content-hash = "a6b3f37dc272d604aed05e8e584d8d299ce0ae2dfbae3ec5fd63113efb66f36e"
+content-hash = "d6752f1a41766ba0d928adef521742dc69178d3238421d38fcf9a522851339b1"

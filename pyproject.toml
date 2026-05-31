@@ -25,7 +25,6 @@ priority = "primary"
 [tool.poetry.group.pet.dependencies]
 pyelftools = "^0.32"
 pydantic = "^2.12.5"
-kaitaistruct = "0.11"
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.13"

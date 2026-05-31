@@ -71,7 +71,7 @@ struct nvmeib_pet_base_controller{
 
 //{{{pet storage - implementation details
 
-/* Entity header: commit_id (u64) + num_messages (u16) = 10 bytes; must match nvmeib_pet_specification.ksy */
+/* Entity header: commit_id (u64) + num_messages (u16) = 10 bytes; must match PetArchiveReader.ENTITY_HEADER */
 enum { NVMEIB_PET_ENTITY_HEADER_SIZE = 10 };
 
 struct nvmeib_pet_stream{

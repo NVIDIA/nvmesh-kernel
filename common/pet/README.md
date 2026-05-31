@@ -33,7 +33,6 @@ The idea should cut the bootstrap phase from few weeks to probably one week or e
 
 - **pyelftools** -- ELF/DWARF parsing
 - **pydantic** -- Type hints enforcing
-- **kaitaistruct** -- Kaitai Struct runtime
 
 Exact versions of all dependencies (including transitive) are pinned in
 `requirements.txt`. Packages are installed from the internal NVIDIA Artifactory
@@ -68,12 +67,6 @@ When `CREATE_PYTHON_TOOLS_EXEC=yes`, all PET dependencies are compiled into a se
 To regenerate `requirements.txt` after changing the dependency versions in
 `pyproject.toml`, see the instructions at the top of `requirements.txt`.
 
-> **Note:** The Kaitai Struct *compiler* (`ksc`) is not needed at runtime. It
-> is only required to regenerate `nvmeib_pet_archive.py` from the `.ksy` spec.
-> See the [Kaitai download page](https://kaitai.io/#download) for installation
-> instructions.
-
-
 ## Build Artifacts
 
 PET dictionary generation is **integrated into the kernel build process**.
@@ -100,10 +93,3 @@ To view PET traces in human-readable text format on a NVMesh node:
 cd /var/log/nvmesh/trace_daemon
 ./nvmesh_pet_messages view --no-sort pet_dictionaries/ nvmeibc_io_pet_*
 ```
-
-## Kaitai
-
-[Kaitai](https://kaitai.io/) is a nice project, which allows to describe a binary data using YAML and generate parsers for it.
-
-+ nvmeib_pet_specification.ksy - describes the binary data
-+ nvmeib_pet_archive.py - the generated binary data parser
