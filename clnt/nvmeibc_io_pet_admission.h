@@ -25,7 +25,9 @@ static inline int nvmeibc_io_pet_effective_cpu_cap(unsigned const *max_traced_op
 static inline atomic_t *nvmeibc_io_pet_active_counter(struct nvmeibc_io_pet_pcpu_counter __percpu *active_traced_ops,
 						      int cpu)
 {
-	return &per_cpu_ptr(active_traced_ops, cpu)->active;
+	struct nvmeibc_io_pet_pcpu_counter *counter = per_cpu_ptr(active_traced_ops, cpu);
+
+	return &counter->active;
 }
 
 static inline bool nvmeibc_io_pet_try_acquire_slot(struct nvmeibc_io_pet_pcpu_counter __percpu *active_traced_ops,
