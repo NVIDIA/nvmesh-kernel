@@ -937,6 +937,13 @@ void nvmeibt_global_idle_time_activities(void)
 	}
 	n_calls++;
 
+	read_rpc_config_from_persist(false);
+	nvmeibt_global_reread_nvmesh_conf_as_needed();
+	//
+	if (nvmeibt_global_get_global()->is_in_shutdown_active_phase) {
+		goto out;
+	}
+
 	if (kafka_idle_time_sec > 60) { // kafka was idle more than 1 min
 		struct timespec now;
 		getnstimeofday_boot(&now);
@@ -944,13 +951,6 @@ void nvmeibt_global_idle_time_activities(void)
 			N_ETf(i990kss, "Kafka client deadlock detected (for @INT[sec])! Consider manual restart...", kafka_idle_time_sec);
 			last_kafka_idle_print_time_sec = now.tv_sec;
 		}
-	}
-
-	read_rpc_config_from_persist(false);
-	nvmeibt_global_reread_nvmesh_conf_as_needed();
-	//
-	if (nvmeibt_global_get_global()->is_in_shutdown_active_phase) {
-		goto out;
 	}
 
 	cur_update_praid_token = nvmeibt_kafka_get_update_praid_token_provided_by_mgmt();
