@@ -544,6 +544,15 @@ read_process_conf_file() {
 			fi
 
 			siw_params="${siw_params} iface_list=\"$siw_ifaces\""
+			if [ -n "$TCP_TX_CPUS" ]; then
+				siw_params="${siw_params} tx_cpus=$TCP_TX_CPUS"
+			fi
+			if [ -n "$TCP_TX_CPU_LIST" ]; then
+				siw_params="${siw_params} tx_cpu_list=\"$TCP_TX_CPU_LIST\""
+			fi
+			if [ "$TCP_TX_ONE_HT_PER_CORE" == "Yes" ] || [ "$TCP_TX_ONE_HT_PER_CORE" == "True" ]; then
+				siw_params="${siw_params} tx_one_ht_per_core=1"
+			fi
 			module_params="$module_params"
 		fi
 
@@ -570,6 +579,22 @@ record_current_module_params() {
 	done > /var/log/nvmesh/$outfile 2>&1
 }
 
+# Resolve a TCP affinity setting that may be overridden per netdev.
+# For setting X on netdev N, prefers X_<sanitized N> (non-alnum chars in N
+# replaced with '_') over the global X. Empty override suppresses global.
+get_per_nic_tcp_setting() {
+	local global_name="$1"
+	local netdev="$2"
+	local sanitized="${netdev//[^A-Za-z0-9]/_}"
+	local per_nic_name="${global_name}_${sanitized}"
+
+	if [ -n "${!per_nic_name+x}" ]; then
+		printf '%s' "${!per_nic_name}"
+	else
+		printf '%s' "${!global_name}"
+	fi
+}
+
 load_siw_tcp_module_if_needed() {
 	if is_tcp_enabled || [ -n "$SIW_IFACES" ]; then
 			# Enabling TCP
@@ -580,35 +605,37 @@ load_siw_tcp_module_if_needed() {
 			# Load softiwarp driver
 			ensure_module_up siw $siw_params
 			if [ "$TCP_SET_AFFINITY" != "No" ] && [ "$TCP_SET_AFFINITY" != "False" ]; then
-				# Configure TCP Affinity for performance
-				ta_opt=""
-
 				get_tcp_base_port_id
 				echo "tcp_base_port_id=$tcp_base_port_id"
-				ta_opt="$ta_opt --port=$tcp_base_port_id"
 
-				if [ ! -z "$TCP_NUM_RX_QUEUE" ]; then
-					ta_opt="$ta_opt --queues=$TCP_NUM_RX_QUEUE"
-				fi
-				if [ "$TCP_SET_NUM_RX_QUEUE" == "Yes" ] || [ "$TCP_SET_NUM_RX_QUEUE" == "True" ]; then
-					ta_opt="$ta_opt --setrxq"
-				fi
-				if [ ! -z "$TCP_NUM_CHANNELS" ]; then
-					ta_opt="$ta_opt --channels=$TCP_NUM_CHANNELS"
-				fi
-				if [ ! -z "$TCP_RX_CPU_AFFINITY_DOMAIN" ]; then
-					ta_opt="$ta_opt --domain=$TCP_RX_CPU_AFFINITY_DOMAIN"
-				fi
-				if [ "$TCP_RX_SET_IRQ_AFFINITY" == "No" ] || [ "$TCP_RX_SET_IRQ_AFFINITY" == "False" ]; then
-					ta_opt="$ta_opt --noirq"
-				fi
-				if [ ! -z "$TCP_FLOW_STEER" ]; then
-					ta_opt="$ta_opt --flowsteer=$TCP_FLOW_STEER"
-				fi
-				if [ ! -z "$TCP_RPS_MODE" ]; then
-					ta_opt="$ta_opt --rpsmode=$TCP_RPS_MODE"
-				fi
 				for i in $(echo $siw_ifaces | tr ',' ' '); do
+					ta_opt="--port=$tcp_base_port_id"
+
+					val=$(get_per_nic_tcp_setting TCP_NUM_RX_QUEUE "$i")
+					[ -n "$val" ] && ta_opt="$ta_opt --queues=$val"
+
+					val=$(get_per_nic_tcp_setting TCP_SET_NUM_RX_QUEUE "$i")
+					if [ "$val" == "Yes" ] || [ "$val" == "True" ]; then
+						ta_opt="$ta_opt --setrxq"
+					fi
+
+					val=$(get_per_nic_tcp_setting TCP_NUM_CHANNELS "$i")
+					[ -n "$val" ] && ta_opt="$ta_opt --channels=$val"
+
+					val=$(get_per_nic_tcp_setting TCP_RX_CPU_AFFINITY_DOMAIN "$i")
+					[ -n "$val" ] && ta_opt="$ta_opt --domain=$val"
+
+					val=$(get_per_nic_tcp_setting TCP_RX_SET_IRQ_AFFINITY "$i")
+					if [ "$val" == "No" ] || [ "$val" == "False" ]; then
+						ta_opt="$ta_opt --noirq"
+					fi
+
+					val=$(get_per_nic_tcp_setting TCP_FLOW_STEER "$i")
+					[ -n "$val" ] && ta_opt="$ta_opt --flowsteer=$val"
+
+					val=$(get_per_nic_tcp_setting TCP_RPS_MODE "$i")
+					[ -n "$val" ] && ta_opt="$ta_opt --rpsmode=$val"
+
 					$COMMON_SCRIPTS_PATH/nvmesh_set_tcp_affinity --device=$i $ta_opt
 				done
 			fi
