@@ -2675,7 +2675,7 @@ out:
 	return is_during_metadata_store;
 }
 
-void nvmeibt_seg_active_launch_store_of_all_seg_actives_metadata(void)
+void nvmeibt_seg_active_store_of_all_seg_actives_metadata(void)
 {
 	struct nvmeibt_local_disk		*local_disk;
 	struct nvmeibt_seg_active		*seg_active;

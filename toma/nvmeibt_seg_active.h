@@ -431,7 +431,7 @@ void nvmeibt_seg_active_get_recovery_blkset_range(
 
 typedef int (*printf_fn_t)(void *ctx, const char *fmt, ...);
 BOOL nvmeibt_seg_active_is_any_seg_active_during_metadata_store(void);
-void nvmeibt_seg_active_launch_store_of_all_seg_actives_metadata(void);
+void nvmeibt_seg_active_store_of_all_seg_actives_metadata(void);
 int nvmeibt_seg_active_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, struct nvmeibt_seg_active *seg_active, bool is_full_info_needed);
 int nvmeibt_seg_active_print_all_seg_actives_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx);
 void stale_locks_hash_to_string(printf_fn_t printf_fn, void *printf_ctx, struct nvmeibt_seg_active *seg_active);

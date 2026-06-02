@@ -719,13 +719,13 @@ static void terminate_toma(int rv)
 }
 
 #define MAX_WAIT_RECOVERY_SEC		5
+#define MAX_WAIT_METADATA_STORE_SEC	5
 #define MAX_WAIT_KAFKA_SEC			30
 #define MAX_WAIT_UNREGISTER_SEC		(MAX_WAIT_FOR_CLIENT_REGISTRANT_TIMEOUT_SEC + 2)
 static void attempt_stable_local_shutdown(void)
 {
 	static int						start_time_sec = 0;
 	static BOOL						are_disks_detached = 0;
-	static BOOL						is_store_segments_metadata_on_shutdown_launched = 0;
 	static BOOL						is_close_all_seg_actives_for_registration_launched = 0;
 	       BOOL						is_any_registred;
 	struct nvmeibt_node				*node;
@@ -769,15 +769,22 @@ static void attempt_stable_local_shutdown(void)
 		are_disks_detached = 1;
 	}
 
+	if (nvmeibt_seg_active_is_any_seg_active_during_metadata_store()) {
+		if (nvmeibt_global_get_cur_event_start_time().tv_sec - start_time_sec > MAX_WAIT_METADATA_STORE_SEC) {
+			N_Wf(gy19a12, "Metadata store failed");
+		} else {
+			N_Tf(gvvu602, "Awaiting metadata store");
+			goto out;
+		}
+	}
+
 	if (shutdown_status != ds_all || nvmeibt_raft_is_raft_shutdownable_now()) {
-		if (!is_store_segments_metadata_on_shutdown_launched && !is_any_registred) {		// At least 1 client attached. Cannot save (dbits/stale-locks) as they might be changed.
-			nvmeibt_seg_active_launch_store_of_all_seg_actives_metadata();
-			is_store_segments_metadata_on_shutdown_launched = 1;
+		// At least 1 client attached o. Cannot save (dbits/stale-locks) as they might be changed.
+		if (!is_any_registred && !nvmeibt_seg_active_is_any_seg_active_during_metadata_store()) {
+			nvmeibt_seg_active_store_of_all_seg_actives_metadata();
 		}
-		if (!nvmeibt_seg_active_is_any_seg_active_during_metadata_store()) {
-			nvmeibt_global_issue_leader_report_praids_status_to_mgmt();
-			terminate_toma(0);
-		}
+		nvmeibt_global_issue_leader_report_praids_status_to_mgmt();
+		terminate_toma(0);
 	}
 
 out:
