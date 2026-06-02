@@ -779,11 +779,10 @@ static void attempt_stable_local_shutdown(void)
 	}
 
 	if (shutdown_status != ds_all || nvmeibt_raft_is_raft_shutdownable_now()) {
-		// At least 1 client attached o. Cannot save (dbits/stale-locks) as they might be changed.
+		// At least 1 client attached or Cannot save (dbits/stale-locks) as they might be changed.
 		if (!is_any_registred && !nvmeibt_seg_active_is_any_seg_active_during_metadata_store()) {
 			nvmeibt_seg_active_store_of_all_seg_actives_metadata();
 		}
-		nvmeibt_global_issue_leader_report_praids_status_to_mgmt();
 		terminate_toma(0);
 	}
 
