@@ -813,8 +813,8 @@ enum nvmeibt_add_rv nvmeibt_local_disk_add_from_config(char *config_str, int con
 	new_local_disk->CHANGE_EVENT_counters.active_zeroing_CHANGE_no = 0;
 	new_local_disk->CHANGE_EVENT_counters.last_CHANGE_no = 0;
 
-	is_frozen = strstr("Frozen", f->status) ? true : false;
-	is_formatting = strstr("Format", f->status) ? true : false; /*Capture both: Formatting and Format_Error*/
+	is_frozen =     strstr(f->status, "Frozen") ? true : false;
+	is_formatting = strstr(f->status, "Format") ? true : false; /*Capture both: Formatting and Format_Error*/
 
 	f->smart_info.block_size = f->pblk_size;
 	f->smart_info.metadata_size = f->metadata_n_bytes;
