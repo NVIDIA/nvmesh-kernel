@@ -678,6 +678,7 @@ struct mutex {
 };						// Emulate kernel mutex by regular mutex
 
 extern __thread struct task_struct	*kthread_self_task;
+extern __thread int __nonsleepable_depth;
 struct task_struct* tasks_self(void);
 static inline void mutex_init(   struct mutex *mutex){ 			int rv = pthread_mutex_init(   &mutex->m, NULL); BUG_ON(rv!=0); }
 static inline void mutex_destroy(struct mutex *mutex){ 			int rv = pthread_mutex_destroy(&mutex->m); BUG_ON(rv!=0); 		}

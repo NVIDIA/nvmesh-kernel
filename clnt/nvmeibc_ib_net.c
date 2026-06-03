@@ -5,6 +5,7 @@
 
 #include <linux/bug.h>
 
+#include "nvmeib_nonsleepable.h"
 #include "nvmeibc_ib_net.h"
 #include "nvmeibc_main.h"
 #include "nvmeibc_volume.h"
@@ -6058,6 +6059,7 @@ static void handle_recv(struct nvmeibc_ib_net *net, struct ib_wc *wc)
 {
 	int rv;
 	__NFIN;
+	nvmesh_enter_nonsleepable();
 
 	BUG_ON(!net->dev_cq);
 
@@ -6079,12 +6081,14 @@ static void handle_recv(struct nvmeibc_ib_net *net, struct ib_wc *wc)
 		}
 	}
 
+	nvmesh_exit_nonsleepable();
 	__NFOUT;
 }
 
 static void handle_send(struct nvmeibc_ib_net *net, struct ib_wc *wc)
 {
 	__NFIN;
+	nvmesh_enter_nonsleepable();
 	if (nvmeib_opcode_from_wc(wc) == NVMEIB_DRAIN_QUEUE) {
 		/* In case of shared SCQ, drain may not be for this net's QP */
 		if (!net->drain_sq_done)
@@ -6104,6 +6108,7 @@ static void handle_send(struct nvmeibc_ib_net *net, struct ib_wc *wc)
 		nvmeibc_ib_net_disconnect(net);
 	}
 out:
+	nvmesh_exit_nonsleepable();
 	__NFOUT;
 }
 

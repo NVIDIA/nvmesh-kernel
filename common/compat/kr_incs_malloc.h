@@ -44,7 +44,15 @@
 	struct page *ZERO_PAGE(u64 vaddr);
 
 	// Allocation supported flags
-	enum { GFP_NOWAIT = 0, GFP_KERNEL = 0, __GFP_HIGHMEM = 0, GFP_ATOMIC = 0, GFP_NOFS = 0, GFP_NOIO = 0, __GFP_NOWARN = 0, __GFP_ZERO = 0x01000000};
+	// ___GFP_DIRECT_RECLAIM marks "may sleep" — used by the simulator to detect sleepable
+	// allocations attempted in non-sleepable contexts (spinlock held, IRQ disabled,
+	// completion/timer callback). See __nonsleepable_depth in kr_incs.{h,c}.
+	// Must fit in the low 24 bits: t_malloc_flags (kr_incs.c) reserves bits 24..31 for
+	// simulator-internal flags (do_zero, is_virtual_mem, page_order, ...).
+	enum { ___GFP_DIRECT_RECLAIM = 0x00400000,
+	       GFP_NOWAIT = 0, GFP_KERNEL = ___GFP_DIRECT_RECLAIM, __GFP_HIGHMEM = 0,
+	       GFP_ATOMIC = 0, GFP_NOFS = ___GFP_DIRECT_RECLAIM, GFP_NOIO = ___GFP_DIRECT_RECLAIM,
+	       __GFP_NOWARN = 0, __GFP_ZERO = 0x01000000};
 	#define KMALLOC_MAX_SIZE	(0x7FFFFFFF) 		// Big enough number
 
 	// Memory allocations emulation: slub_def.h, gfp.h, page_types.h, pgtable.h

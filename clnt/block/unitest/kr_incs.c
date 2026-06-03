@@ -301,6 +301,17 @@ void* __kmalloc(size_t size, gfp_t flags, enum allocated_by allocated_by){
 	const size_t malloc_size = __kmem_calc_alloc_size(size);
 
 	BUG_ON(size==0);
+	if (allocated_by != AB_SIMULATOR && (flags & ___GFP_DIRECT_RECLAIM) && __nonsleepable_depth > 0) {
+		// AB_SIMULATOR is exempt: simulator-internal bookkeeping isn't subject to
+		// the production "no GFP_KERNEL under spinlock" rule.
+		dump_stack();
+		pr_emerg("************************** BUG!!!! at %s, %s() line %d - "
+		         "sleepable allocation (GFP_KERNEL) in non-sleepable context "
+		         "(depth=%d, size=%zu) - use GFP_NOWAIT or hoist the allocation\n",
+		         __kget_curr_time_stamp(), __FUNCTION__, __LINE__,
+		         __nonsleepable_depth, size);
+		BUG();
+	}
 	if (__kmem_random_failure_occured()){// Random failure testing mechanism
 		return NULL;
 	}
@@ -577,19 +588,22 @@ void *kcalloc(size_t n, size_t size, gfp_t flags){
 }
 
 void *vzalloc(size_t size) {
-	union t_malloc_flags f = {.all = 0};
+	// vmalloc/vzalloc always sleep in the kernel — pass ___GFP_DIRECT_RECLAIM so
+	// __kmalloc catches calls from non-sleepable contexts.
+	union t_malloc_flags f = {.all = ___GFP_DIRECT_RECLAIM};
 	f.is_virtual_mem = f.do_zero = 1;
 	return kmalloc(size, f.all);
 }
 void *vmalloc(size_t size) {
-	union t_malloc_flags f = {.all = 0};
+	union t_malloc_flags f = {.all = ___GFP_DIRECT_RECLAIM};
 	f.is_virtual_mem = 1;
 	return kmalloc(size, f.all);
 }
 
 void* sim_kmalloc(size_t size, gfp_t flags){
-	void *p = __kmalloc(size, flags, AB_SIMULATOR);
-	return p;
+	// AB_SIMULATOR signals __kmalloc to skip the non-sleepable-context trap
+	// (simulator-internal bookkeeping isn't subject to production sleep rules).
+	return __kmalloc(size, flags, AB_SIMULATOR);
 }
 
 void *sim_kzalloc(size_t size, gfp_t flags){
@@ -872,6 +886,7 @@ void spin_unlock(spinlock_t *l){
 #ifdef DEBUG_SPINLOCKS
 	l->locked = false;
 #endif
+	__nonsleepable_depth--;
 }
 
 void spin_lock(spinlock_t *l){
@@ -888,6 +903,7 @@ void spin_lock(spinlock_t *l){
 	l->locked = backtrace(l->last_bt, ARRAY_SIZE(l->last_bt));
 	l->last_locker = get_current()->comm;
 #endif
+	__nonsleepable_depth++;
 }
 
 int spin_trylock(spinlock_t *l){
@@ -907,6 +923,8 @@ int spin_trylock(spinlock_t *l){
 		l->last_locker = get_current()->comm;
 	}
 #endif
+	if (res == 0) // pthread_*_trylock returns 0 on success (lock acquired)
+		__nonsleepable_depth++;
 	return res;
 }
 
@@ -966,6 +984,7 @@ void raw_local_irq_save(unsigned long *f){
 	*f = cpu->irq_flags;
 	cpu->irq_flags = 0xD;
 	mutex_unlock(&cpu->access_lock);
+	__nonsleepable_depth++;
 }
 void raw_local_irq_restore(unsigned long f){
 	struct cpu_prop	*cpu = kernel_sim_getmy_cpu();
@@ -987,6 +1006,7 @@ void raw_local_irq_restore(unsigned long f){
 	mutex_unlock(&cpu->access_lock);
 	cpu_ownership_release(cpu);
 	// TODO(EBA): need preempt enable ???
+	__nonsleepable_depth--;
 }
 
 bool irqs_disabled(void) {
@@ -1189,6 +1209,11 @@ static struct task_struct* tasks_find_next_task_by_thread_name(const char*thread
 
 // This is thread-local-storage for every thread that maintains the task_struct.
 __thread struct task_struct	*kthread_self_task;
+
+// Per-thread depth of non-sleepable region (spinlock held, IRQs disabled,
+// completion/timer callback). The kmalloc/vmalloc shims BUG() when a sleepable
+// allocation (GFP_KERNEL) is attempted while depth > 0.
+__thread int __nonsleepable_depth;
 
 void *kthread_data(struct task_struct *task) {
 	return task->parameters;	// same data argument that was passed to the kthread start function. in Linux this is to_kthread(task)->data
@@ -1733,7 +1758,10 @@ static int cpu_timers_execute_timers(void *param){					// Worker thread which ex
 				BUG_ON(cpu_timers_remove_locked(timers, t) != t);
 				__concurrent_store(timers->executing, t);
 				spin_unlock_irqrestore(&timers->lock, flags);	// unlock before invoking callback
+				// Kernel timer callbacks run in softirq context (non-sleepable)
+				__nonsleepable_depth++;
 				t->function(t->data); 				// Once this function terminates, 't' may not exist
+				__nonsleepable_depth--;
 				__concurrent_store(timers->executing, NULL);
 				continue;
 			}

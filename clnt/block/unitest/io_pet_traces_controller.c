@@ -73,7 +73,13 @@ struct nvmeib_pet_buffer __io_pet_controller_get_buffer(struct nvmeib_pet_base_c
 		};
 	}
 
-	ptr = kmalloc(self->buffer_size, GFP_KERNEL);
+	// Mirror production __io_pet_controller_get_buffer (clnt/nvmeibc_io_pet.c):
+	// runs in atomic context (recv-CQ poll holds the channel spinlock with
+	// irqsave; in the simulator, also via the timer-callback path). GFP_NOWAIT
+	// prevents sleep; __GFP_NOWARN keeps best-effort failures quiet.
+	// Stays as kmalloc/kfree (not sim_*) so the bytes land in AB_CLIENT, which
+	// matches the io_pet_buffers audited metric updated below.
+	ptr = kmalloc(self->buffer_size, GFP_NOWAIT | __GFP_NOWARN);
 	nvmesh_memmgr_metric_on_alloc_update(io_pet_buffers, ptr? ksize(ptr): self->buffer_size, ptr);
 	if (ptr) {
 		return (struct nvmeib_pet_buffer){

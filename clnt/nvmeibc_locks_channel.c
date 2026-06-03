@@ -4,6 +4,7 @@
 */
 
 #include "kr_incs.h"
+#include "nvmeib_nonsleepable.h"
 #include "nvmeibc_locks_channel.h"
 #include "nvmeib.h"
 #include "nvmeibc_disk.h"
@@ -2118,6 +2119,7 @@ void nvmeibc_locks_channel_lock_cmd_completion(struct nvmeibc_disk_lock_cmd *dis
 	unsigned long flags;
 
 	NFIN;
+	nvmesh_enter_nonsleepable();
 	wc.wr_id = nordda_wr_id_encode(opr->version, NVMEIB_DISK_LOCK_OPR, opr->index);
 	wc.status = err_code ? IB_WC_GENERAL_ERR : IB_WC_SUCCESS;
 
@@ -2182,6 +2184,7 @@ void nvmeibc_locks_channel_lock_cmd_completion(struct nvmeibc_disk_lock_cmd *dis
 		_ND(trace_locks_channel_nvmeibc_locks_channel_lock_cmd_completion, "net @NET max_intr_duration = @MAX_INTR_DURATION", net,
 			net->scq_stats.max_intr_duration);
 	}
+	nvmesh_exit_nonsleepable();
 	NFOUT;
 }
 

@@ -874,7 +874,9 @@ static int arnics_dup(struct list_head *target, struct list_head *source)
 	struct nvmeibc_admin_rnic *arnic, *a;
 	int n = 0;
 	list_for_each_entry(arnic, source, link) {
-		BUG_ON(!(a = kzalloc(sizeof(*a), GFP_KERNEL)));
+		// Called under disk_conf_spinlock; production sibling (__arnic_dup in
+		// clnt/nvmeibc_disk.c) uses GFP_ATOMIC for the same reason.
+		BUG_ON(!(a = kzalloc(sizeof(*a), GFP_NOWAIT)));
 		*a = *arnic;
 		a->order = n++;
 		list_add_tail(&a->link, target);

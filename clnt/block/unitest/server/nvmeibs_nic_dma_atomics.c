@@ -13,6 +13,7 @@
 #include "nvmeibs_main_sim.h"
 #include "nvmeibs_nic_dma_atomics.h"
 #include "nvmeibc_ib_nordda_channel_sim_shared.h"
+#include "common/nvmeib_nonsleepable.h"
 
 /*****************************************************************************/
 typedef struct {	// Async callback to call upon RDMA / Admin request completion
@@ -308,11 +309,16 @@ int nvmeibs_disk_locks_get_ec_dirty_bytes(struct nvmeibs_disk_private_data *disk
 }
 
 int nvmeibs_pass_gen_to_nordda_channel(struct serverSimulator *S, struct nvmeibc_disk_gen_cmd *gen_cmd) {
+	// Suspend the non-sleepable trap: srv/ runs sleepable in real production
+	// (separate process); the simulator collapses it into a synchronous call
+	// while a client spinlock is held.
+	int saved_depth = nvmesh_nonsleepable_suspend();
 	switch (gen_cmd->opcode) {
 		case NVMEIB_GEN_OP_GET_UUID_JOUR: gen_cmd->comp_code = nvmeibs_nordda_get_jrng_by_uuid(S, gen_cmd); break;
 		case NVMEIB_GEN_OP_JENTRY_ERASE:  gen_cmd->comp_code = nvmeibs_nordda_jentry_erase(    S, gen_cmd); break;
 		default: BUG(); break;
 	}
+	nvmesh_nonsleepable_resume(saved_depth);
 
 	// Callback
 	gen_cmd->disk = S->disk;
@@ -324,7 +330,10 @@ int nvmeibs_pass_gen_to_nordda_channel(struct serverSimulator *S, struct nvmeibc
 
 int nvmeibs_pass_gen_to_server(struct serverSimulator *S, struct nvmeibc_disk_gen_cmd *gen_cmd) {
 	struct nvmeib_local_disk __disk = {.p = &S->ramDisk.server_disk.di};
+	// Suspend the non-sleepable trap across the simulator's in-process srv/ call.
+	int saved_depth = nvmesh_nonsleepable_suspend();
 	gen_cmd->comp_code = nvmeibs_handle_gen_cmd(&__disk, gen_cmd->opcode, &gen_cmd->param, &gen_cmd->rsp, 0);
+	nvmesh_nonsleepable_resume(saved_depth);
 	if (gen_cmd->comp_code == (int)NVMEIBS_IO_RSP_EXPECT_ASYNC_REPLY)
 		gen_cmd->comp_code = 0;
 	// Callback

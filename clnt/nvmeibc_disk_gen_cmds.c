@@ -6,6 +6,7 @@
 #include "nvmeibc_disk_gen_cmds.h"
 #include "nvmeibc_block.h"
 #include "nvmeibc_jam.h"
+#include "nvmeib_nonsleepable.h"
 #include "../core_unitest/corecomm_injections.h"
 
 void corecomm_gen_jentry_erase_cb_(struct nvmeibc_disk_gen_cmd *gen_cmd);
@@ -21,6 +22,7 @@ void nvmeibc_disk_gen_cmd_completion__(
 	int comp_code = gen_cmd->comp_code;
 	bool local_gen = gen_cmd->local_bypass;
 	NFIN;
+	nvmesh_enter_nonsleepable();
 
 	on_disk_hook(nvmeibc_disk_gen_cmd_completion, gen_cmd->disk, gen_cmd_completion, gen_cmd);
 
@@ -83,6 +85,7 @@ void nvmeibc_disk_gen_cmd_completion__(
 		break;
 	}
 
+	nvmesh_exit_nonsleepable();
 	NFOUT;
 }
 
