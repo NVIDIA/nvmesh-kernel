@@ -831,7 +831,7 @@ int nvmeib_srvr_api_lib_send_async_msg_to_server(const struct km_comm_msg_hdr *h
 	struct nvmeibt_km_comm *p = _singleton;
 	struct srv_comm_msg *m = NNVMEIBT_BM_CALLOC(__AUTOID__, sizeof(*m) + sizeof(m->msg) + hdr->len);
 	int rv;
-	NTOMA_ASSERT(__AUTOID__, (hdr->opcode != csc_start || hdr->opcode < csc_end), "msg[@INT] Invalid type", hdr->opcode);
+	NTOMA_ASSERT(__AUTOID__, ((hdr->opcode != csc_start) && (hdr->opcode < csc_end)), "msg[@INT] Invalid type", hdr->opcode);
 	if (!m) {
 		N_Ef(stkmcnl2, "Fail to allocate nvmeibt_km_comm msg");
 		return -ENOMEM;
