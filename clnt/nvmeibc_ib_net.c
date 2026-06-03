@@ -1149,7 +1149,7 @@ static int scq_kthread_func(void *arg)
 
 		_NDn(trace_2_ib_net_scq_kthread_func, net, "transition back to IRQ");
 
-		/* The correct sequence to prevent lost-wakeups is: 
+		/* The correct sequence to prevent lost-wakeups is:
 		* 1. Set state for interrupt to see
 		* 2. Set_current_state(TASK_INTERRUPTIBLE);
 		* 3. Write Barrier
@@ -1191,7 +1191,7 @@ static int scq_kthread_func(void *arg)
 			/* Step 4: Enable interrupts using ib_req_notify_cq */
 			n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, NULL);
 		}
-	
+
 		if (n >= 0) {
 			tot += n;
 			if (continue_polling) {
@@ -1212,7 +1212,7 @@ static int scq_kthread_func(void *arg)
 
 		/* Step 6: Check state if interrupt has changed it to polling mode */
 		if ((READ_ONCE(net->scq_poll_mode) != NVMEIBC_IB_CQ_INTR) && (n >= 0) &&
-			!atomic_read(&net->dying)) 
+			!atomic_read(&net->dying))
 		{
 			_NDn(trace_3_ib_net_scq_kthread_func, net, "intr during transition to intr-mode, keep running");
 			set_current_state(TASK_RUNNING);
@@ -1333,7 +1333,7 @@ static int process_send_cq_offload_enb_(struct nvmeibc_ib_net *net, int ne,
 			if (n < ne) {
 				/* interrupt or poll-thread in last poll attempt */
 				if ((rearm_rv = ib_req_notify_cq(net->send_cq,
-						IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS))) 
+						IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS)))
 				{
 					if (unlikely(rearm_rv < 0)) {
 						_NEn(xxx_02, net, "Failed poll-cq (@COUNT), disconnect net", rearm_rv);
@@ -1413,7 +1413,7 @@ sw2polling:
 												  REQ_NOTIFY_TRUE, true, &req_notify_state);
 			if (n < 0) {
 				goto out;
-			} else if (req_notify_state == REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS || 
+			} else if (req_notify_state == REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS ||
 				req_notify_state == REQ_NOTIFY_STATE_CQ_NOT_EMPTY)
 			{
 				goto sw2polling;
@@ -1775,7 +1775,7 @@ static int process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify, enum re
 			if (req_notify && n < n_wc) {
 				BUG_ON(net->qp->recv_cq != net->recv_cq);
 				if ((rv = ib_req_notify_cq(net->recv_cq,
-					IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS))) 
+					IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS)))
 				{
 					if (rv < 0) {
 						_NEn(error_1_ib_net_process_recv_cq, net, "ib_req_notify_cq failed (@RV), disconnect net", rv);
@@ -1881,7 +1881,7 @@ static int rcq_kthread_func(void *arg)
 
 		_NDn(trace_2_ib_net_rcq_kthread_func, net, "transition back to IRQ");
 
-		/* The correct sequence to prevent lost-wakeups is: 
+		/* The correct sequence to prevent lost-wakeups is:
 		* 1. Set state for interrupt to see
 		* 2. Set_current_state(TASK_INTERRUPTIBLE);
 		* 3. Write Barrier
@@ -1922,7 +1922,7 @@ static int rcq_kthread_func(void *arg)
 			/* Step 4: Enable interrupts using ib_req_notify_cq */
 			n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, NULL);
 		}
-		
+
 		if (n >= 0) {
 			tot += n;
 			if (continue_polling) {
@@ -1943,7 +1943,7 @@ static int rcq_kthread_func(void *arg)
 
 		/* Step 6/7: Check state if interrupt has changed it to polling mode */
 		if ((READ_ONCE(net->rcq_poll_mode) != NVMEIBC_IB_CQ_INTR) && (n >= 0) &&
-			!atomic_read(&net->dying)) 
+			!atomic_read(&net->dying))
 		{
 			_NDn(trace_3_ib_net_rcq_kthread_func, net, "intr during transition to intr-mode, keep running");
 			set_current_state(TASK_RUNNING);
@@ -2074,7 +2074,7 @@ static inline void intr_process_recv_cq_(struct nvmeibc_ib_net *net)
 poll_again:
 		ncqe = (false && net->peek_cq) ? (*net->peek_cq)(net->recv_cq, net->n_wc_r) : 0;
 		if (nvmeib_intr_shaper_intr_should_wake_up_reason(net->intr_shaper, &wake_up_reason) ||
-			(ncqe > nvmeib_intr_shaper_get_max_burst(net->intr_shaper))) 
+			(ncqe > nvmeib_intr_shaper_get_max_burst(net->intr_shaper)))
 		{
 			_NDn(trace_ib_net_intr_process_recv_cq, net, "sw2polling (# wakeups_burst @N_WAKEUPS wakeups_cycles @N_WAKEUPS # rcqes @NCQE)", net->rcq_stats.n_wakeups_burst, net->rcq_stats.n_wakeups_cycles, ncqe);
 			nvmeib_qp_stats_on_offload_sched(net->qp_stats);
@@ -2100,7 +2100,7 @@ poll_again:
 			if (rv < 0) {
 				goto out;
 			} else if (req_notify_state == REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS ||
-				req_notify_state == REQ_NOTIFY_STATE_CQ_NOT_EMPTY) 
+				req_notify_state == REQ_NOTIFY_STATE_CQ_NOT_EMPTY)
 			{
 				if (++n_iter > nvmeibc_max_notify_cq_iterations) {
 					_NEn_dmesg(err_intr_process_recv_cq_, net, "Failed to arm recv cq after @INT iterations, disconnecting", n_iter);
@@ -2664,8 +2664,8 @@ static int create_qp_private_cq(struct nvmeibc_ib_net *net,
 		int *recv_intr_ptr = &recv_intr;
 		if (params->max_recv_cq == 1) {
 			/* Recv CQ is not used (lock channel):
-				 - Don't ask for a vector or it will screw up the RR algorithm. 
-			 		Just give it vector 0. 
+				 - Don't ask for a vector or it will screw up the RR algorithm.
+			 		Just give it vector 0.
 			*/
 			recv_intr_ptr = NULL;
 			recv_intr = 0;
@@ -4391,7 +4391,7 @@ int nvmeibc_ib_net_map_data(struct nvmeibc_ib_net *net,
 		goto map_complete;
 	}
 
-	if (req->map_sg_mode == MAP_SG_MR_COMBINED_USE_IB_DMA_MAP_SG || 
+	if (req->map_sg_mode == MAP_SG_MR_COMBINED_USE_IB_DMA_MAP_SG ||
 		req->map_sg_mode == MAP_SG_MR_USE_IB_DMA_MAP_SG_ONLY) {
 		struct nvmeib_mr_info mri = {};
 		void *fmr;
@@ -4417,7 +4417,7 @@ int nvmeibc_ib_net_map_data(struct nvmeibc_ib_net *net,
 			if (!(fmr = nvmeib_map_mr(nvdev, &mri))) {
 				goto unmap_data;
 			}
-			
+
 			BUG_ON(req->nmdesc >= NVMEIBS_MAX_IO_CHANNEL_MSGS);
 
 			req->fmr_list[req->nmdesc++] = fmr;
@@ -4430,7 +4430,7 @@ int nvmeibc_ib_net_map_data(struct nvmeibc_ib_net *net,
 
 			BUG_ON(mri.count <= 0 || mri.count > nents);
 			nents -= mri.count;
-			
+
 			/* SGL might be chained. The only safe-way to advance it is with a loop */
 			for (i = 0; i < mri.count && sg; i++) {
 				sg = sg_next(sg);
@@ -5127,14 +5127,14 @@ void nvmeibc_ib_net_complete_iocmd_sg_reuse(struct nvmeibc_ib_net *net,
 		}
 	}
 	else if (bcmd->op == NVMEIB_BLOCK_IO_OP_MD_READ ||
-		bcmd->op == NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR) 
+		bcmd->op == NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR)
 	{
 		/* ops which SG's (if any), was not ib-dma-mapped */
 	}
-	else if (!(nvmeib_block_io_op_is_write(bcmd->op) && was_reuse)) 
+	else if (!(nvmeib_block_io_op_is_write(bcmd->op) && was_reuse))
 	{
 		_NE(error_ib_net_nvmeibc_ib_net_complete_iocmd_sg,
-			"Invalid I/O command: NULL S/G (req=@REQ, op=@BLOCK_IO_OP, reused_bb=@BOOL_YN, was_reuse=@BOOL_YN)", 
+			"Invalid I/O command: NULL S/G (req=@REQ, op=@BLOCK_IO_OP, reused_bb=@BOOL_YN, was_reuse=@BOOL_YN)",
 			req, bcmd->op, req->reused_bb, was_reuse);
 	}
 
@@ -5305,7 +5305,7 @@ void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, enum stats_
 		ktime_t end_ts = ktime_get();
 		if (ktime_after(end_ts, bcmd->disk_cmd.start_ts)) {
 			u64 latency = ktime_to_ns(ktime_sub(end_ts, bcmd->disk_cmd.start_ts));
-		
+
 #if defined(NVMEIBC_ENABLE_PER_VOLUME_STATS)
 		nvmeibc_disk_add_stats(bcmd->disk, local_dev, bcmd->v_disk_stats, bcmd->reqs, latency,
 				       nvmeibc_disk_io_cmd_originator_is_recov(bcmd->orig));
@@ -5702,7 +5702,7 @@ int nvmeibc_ib_net_map_gen_data(struct nvmeibc_ib_net *net,
 		if ((rv = nvmeib_public_ib_dma_map_sg(P2IB(net->port), gen_sink_buf->sgt.sgl,
 			gen_sink_buf->sgt.nents, DMA_FROM_DEVICE)) <= 0)
 		{
-			_NT(trace_map_gen_data_map_sg_fail, 
+			_NT(trace_map_gen_data_map_sg_fail,
 				"Failed (@RV) to DMA map SGL @PTR with "
 				"@NENTS entries and length @LENGTH_INT bytes",
 				rv, gen_sink_buf->sgt.sgl,
@@ -5766,7 +5766,7 @@ void nvmeibc_ib_net_unmap_gen_data(struct nvmeibc_ib_net *net,
 		_NT(trace_1_ib_net_nvmeibc_ib_net_unmap_gen_data,
 		    "gen_cmd @GEN_CMD_OP (@PTR) sink[@IDX]: SGL @PTR entries @NENTS\n", gen_cmd->opcode,
 		    gen_cmd, i, gen_cmd->data_sink[i]->local.sgt.sgl, gen_cmd->data_sink[i]->local.sgt.nents);
-		
+
 		nvmeib_public_ib_dma_sync_sg_for_cpu(P2IB(net->port), gen_sink_buf->sgt.sgl,
 						     gen_sink_buf->sgt.nents, DMA_FROM_DEVICE);
 		/* JH IOMMU: DMA_FROM_DEVICE is correct. These maps are only used for sinks of Remote RDMA Write */
@@ -6138,7 +6138,7 @@ static DEV_CQ_PROCESS_FUNC(process_per_dev_cq)
 				ioch ? ioch->ct : -1, ch_type_to_str(ioch ? ioch->ct : -1));
 		}
 
-		
+
 		//if (wc->opcode & IB_WC_RECV)
 		if (nvmeib_opcode_from_wc(wc) == NVMEIB_RECV) {
 			nvmeibc_disk_net_intrs_stats_inc(net->ioch->disk, true);

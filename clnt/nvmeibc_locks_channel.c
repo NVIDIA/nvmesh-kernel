@@ -506,7 +506,7 @@ void nvmeibc_locks_channel_free(struct nvmeibc_locks_channel *ch)
 			}
 		}
 		kfree(ch->_2nd_net_params);
-		if (ch->opr_ip_buffer_page) {	
+		if (ch->opr_ip_buffer_page) {
 			__free_pages(ch->opr_ip_buffer_page, get_order(ch->opr_ip_buffer_size));
 			ch->opr_ip_buffer_page = NULL;
 			ch->opr_ip_buffer = NULL;
@@ -570,7 +570,7 @@ static struct nvmeibc_locks_channel *alloc(
 	if (!ch ||
 		!(ch->locks_ip_buffer = kzalloc(
 				sizeof(*ch->locks_ip_buffer) * NVMEIBC_CHANNEL_NUM_OF_ALLOC_APR, GFP_KERNEL)) ||
-			!(ch->opr_ip_buffer_page = alloc_pages_node(numa_node, GFP_KERNEL, get_order(opr_ip_buffer_size)))) 
+			!(ch->opr_ip_buffer_page = alloc_pages_node(numa_node, GFP_KERNEL, get_order(opr_ip_buffer_size))))
 	{
 		_NE(error_locks_channel_alloc, "failed to allocate memory for locks channel");
 		goto out_err;
@@ -598,13 +598,13 @@ static struct nvmeibc_locks_channel *alloc(
 
 	ch->_2nd_ch_pcpu = nvmeibc_lock_ch_2nd_ch_pcpu;
 	ch->_2nd_ch_pcpu_lockless = nvmeibc_lock_ch_2nd_ch_pcpu_lockless;
-	
+
 	if (!admin_ch->base.disk->access_local)
 		ch->_2nd_ch_coremask = nvmeibc_lock_ch_2nd_ch_coremask;
 
 	if (ch->_2nd_ch_coremask) {
 		if (ch->_2nd_ch_pcpu) {
-			_NE(error_locks_channel_alloc_inv_mode, 
+			_NE(error_locks_channel_alloc_inv_mode,
 			    "Invalid mode! Secondary channels cannot be both per-cpu and coremask channels");
 			goto out_err;
 		}
@@ -622,8 +622,8 @@ static struct nvmeibc_locks_channel *alloc(
 			    "OOM. Could not allocate pcpu mask");
 			goto out_err;
 		}
-		if (ch->_2nd_ch_pcpu_lockless && 
-			!(ch->_2nd_ch_pcpu_wq = alloc_workqueue("lock_pcpu_wq", 0, 0))) 
+		if (ch->_2nd_ch_pcpu_lockless &&
+			!(ch->_2nd_ch_pcpu_wq = alloc_workqueue("lock_pcpu_wq", 0, 0)))
 		{
 			_NE(error_3_locks_channel_alloc, "cannot allocate pcpu wq");
 			goto out_err;
@@ -944,7 +944,7 @@ static struct nvmeibc_locks_channel *connect_2nd_lock_chs(struct nvmeibc_locks_c
 		/* Don't create secondary lock channels when doing RPC locks */
 		goto out;
 	}
-	
+
 	if (ch->_2nd_ch_coremask) {
 		admin_ch->base.disk->max_2nd_lock_chs = min_t(int, num_online_cpus(), NVMEIB_DFLT_MAX_CPUS);
 		_NT(trace_connect_2nd_lock_chs, "Not connecting secondary channels in coremask mode."
@@ -1151,7 +1151,7 @@ out:
 
 bool nvmeibc_locks_channel_all_2nd_connected(struct nvmeibc_locks_channel *ch)
 {
-	int max_2nd_lock_chs = ch->_2nd_ch_pcpu ? cpumask_weight(ch->_2nd_ch_pcpu_mask) : 
+	int max_2nd_lock_chs = ch->_2nd_ch_pcpu ? cpumask_weight(ch->_2nd_ch_pcpu_mask) :
 						ch->base.disk->max_2nd_lock_chs;
 
 	/* Don't wait for secondary channels in coremask mode, they will be connected on demand */
@@ -1649,7 +1649,7 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	INIT_LIST_HEAD(&ch->free_ip_pool);
 	INIT_LIST_HEAD(&ch->aborted);
 
-	ch->opr_ip_buffer_phys = ib_dma_map_page(P2IB(ch->net.port), ch->opr_ip_buffer_page, 
+	ch->opr_ip_buffer_phys = ib_dma_map_page(P2IB(ch->net.port), ch->opr_ip_buffer_page,
 	0, ch->opr_ip_buffer_size, DMA_BIDIRECTIONAL);
 	if (ib_dma_mapping_error(P2IB(ch->net.port), ch->opr_ip_buffer_phys)) {
 		_NE(error_6_locks_channel_try_connect, "dma mapping opr_ip_buffer failed");
@@ -1756,7 +1756,7 @@ static void free_2nd_ch(struct nvmeibc_locks_channel *ch)
 static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	u64 cid, int comp_cpu, unsigned tcp_base_port, unsigned tcp_num_ports, bool comp_ll)
 {
-	
+
 	struct nvmeibc_ib_port *lport = primary_ch->net.port;
 	union ib_gid *dgid = &primary_ch->net.path.dgid;
 	int rv = 0;
@@ -1775,7 +1775,7 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	ch = primary_ch->_2nd_ch[n_idx];
 	ch->opr_ip_buffer_size = sizeof(*ch->opr_ip_buffer) * NVMEIB_LOCK_DATA_BUFFERS * NVMEIBC_LOCK_2ND_CH_NUM_OF_OPR;
 	if (!(ch->locks_ip_buffer = kzalloc(sizeof(*ch->locks_ip_buffer) * NVMEIBC_LOCK_2ND_CH_NUM_OF_OPR, GFP_KERNEL)) ||
-		!(ch->opr_ip_buffer_page = alloc_pages_node(primary_ch->base.numa_node, GFP_KERNEL, get_order(ch->opr_ip_buffer_size)))) 
+		!(ch->opr_ip_buffer_page = alloc_pages_node(primary_ch->base.numa_node, GFP_KERNEL, get_order(ch->opr_ip_buffer_size))))
 	{
 		_NE(error_1_locks_channel_init_2nd_ch, "Memory allocation error");
 		rv = -ENOMEM;
@@ -1793,8 +1793,8 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	nvmeibc_locks_channel_spin_lock_init(ch);
 	ch->locking_cpu = -1;
 
-	if ((rv = nvmeibc_channel_init(&ch->base, 
-		nvmeibc_cinst_get_core_p(&primary_ch->base), primary_ch->base.numa_node))) 
+	if ((rv = nvmeibc_channel_init(&ch->base,
+		nvmeibc_cinst_get_core_p(&primary_ch->base), primary_ch->base.numa_node)))
 	{
 		_NE(error_2_locks_channel_init_2nd_ch, "cannot init base channel");
 		goto free_ch;
@@ -1937,7 +1937,7 @@ static int try_connect_2nd_ch(struct nvmeibc_locks_channel *ch) {
 	bitmap_copy(ch->local_bypass_bmp, primary_ch->local_bypass_bmp, NVMEIBC_LOCK_NUM_OPR);
 #endif
 
-	ch->opr_ip_buffer_phys = ib_dma_map_page(P2IB(ch->net.port), ch->opr_ip_buffer_page, 
+	ch->opr_ip_buffer_phys = ib_dma_map_page(P2IB(ch->net.port), ch->opr_ip_buffer_page,
 		0, ch->opr_ip_buffer_size, DMA_BIDIRECTIONAL);
 	if (ib_dma_mapping_error(P2IB(ch->net.port), ch->opr_ip_buffer_phys)) {
 		_NE(error_8_locks_channel_try_connect_2nd_ch, "dma mapping opr_ip_buffer failed");
@@ -2185,7 +2185,7 @@ void nvmeibc_locks_channel_lock_cmd_completion(struct nvmeibc_disk_lock_cmd *dis
 	NFOUT;
 }
 
-int 
+int
 nvmeibc_locks_channel_connect_coremask_chs(struct nvmeibc_locks_channel *ch, struct nvmeibc_admin_channel *admin_ch,
 					u64 coremask_uid, const struct nvmeib_cpu_mask *cpumask, void *coremask_cookie,
 					const struct nvmeibc_locks_channel_coremask_ops *coremask_ops,
@@ -2234,7 +2234,7 @@ nvmeibc_locks_channel_connect_coremask_chs(struct nvmeibc_locks_channel *ch, str
 		NVMEIB_CPU_MASK_AND_NOT(core_not_ch_mask, *cpumask, chmask))
 	{
 		/* Pick start cpu as (disk_create_id * num_channels % bitmap_weight(core_not_ch_mask)).
-		 * 
+		 *
 		 * The idea is that subsequent disks will not overlap completion cpus.
 		 * For example with a mask with 8 bits set and 2 channels per mask, then:
 		 * Disk 1: Will create channels on the CPUs of the first 2 bits set in the mask
@@ -2246,39 +2246,39 @@ nvmeibc_locks_channel_connect_coremask_chs(struct nvmeibc_locks_channel *ch, str
 		/* Starting from start cpu, connect n secondary channels to use as lock channels */
 		for (cpu = start_cpu; n_mask_ch < primary_ch->_2nd_ch_coremask; cpu = next_cpu)
 		{
-			if ((rv = init_2nd_ch(primary_ch, primary_ch->n_2nd_ch, admin_ch->cid, cpu, 
-					0 /* TBD: tcp_base_port */, 
-					0 /* TBD: tcp_num_ports */, 
+			if ((rv = init_2nd_ch(primary_ch, primary_ch->n_2nd_ch, admin_ch->cid, cpu,
+					0 /* TBD: tcp_base_port */,
+					0 /* TBD: tcp_num_ports */,
 					false /* comp_ll */
 				)) < 0)
 			{
-				_NT(trace_nvmeibc_locks_channel_connect_coremask_chs_fail_init, 
-				    "LOCKS: Failed (@RV) to initialise Coremask @COREMASK_UID Lock Channel from Device @IB_DEV_NAME: @PORT", 
+				_NT(trace_nvmeibc_locks_channel_connect_coremask_chs_fail_init,
+				    "LOCKS: Failed (@RV) to initialise Coremask @COREMASK_UID Lock Channel from Device @IB_DEV_NAME: @PORT",
 				    rv, coremask_uid, P2IB(primary_ch->net.port)->name, primary_ch->net.port->port);
 				break;
 			}
 			pcpu_ch = primary_ch->_2nd_ch[primary_ch->n_2nd_ch];
 			rv = try_connect_2nd_ch(pcpu_ch);
 			if (rv) {
-				_NT(trace_nvmeibc_locks_channel_connect_coremask_chs_fail_connect, 
-				    "LOCKS: Failed (@RV) to connect Coremask @COREMASK_UID Lock Channel @CH_NAME from Device @IB_DEV_NAME: @PORT", 
+				_NT(trace_nvmeibc_locks_channel_connect_coremask_chs_fail_connect,
+				    "LOCKS: Failed (@RV) to connect Coremask @COREMASK_UID Lock Channel @CH_NAME from Device @IB_DEV_NAME: @PORT",
 				    rv, coremask_uid, pcpu_ch->base.name, P2IB(pcpu_ch->net.port)->name, pcpu_ch->net.port->port);
 				free_2nd_ch(pcpu_ch);
 				primary_ch->_2nd_ch[primary_ch->n_2nd_ch] = NULL;
 				break;
 			}
-			_NT(trace_nvmeibc_locks_channel_connect_coremask_chs_connect_ok, 
-			    "LOCKS: Connected Coremask @COREMASK_UID Lock Channel @CH_NAME on CPU @CPU from Device @IB_DEV_NAME: @PORT", 
+			_NT(trace_nvmeibc_locks_channel_connect_coremask_chs_connect_ok,
+			    "LOCKS: Connected Coremask @COREMASK_UID Lock Channel @CH_NAME on CPU @CPU from Device @IB_DEV_NAME: @PORT",
 				coremask_uid, pcpu_ch->base.name, cpu, P2IB(pcpu_ch->net.port)->name, pcpu_ch->net.port->port);
 			primary_ch->n_2nd_ch++;
-			
+
 			/* This map stores the percpu channels that are actually on that cpu.
 			 * Later the _2nd_ch_coremask_map will be populated either
 			 * by percpu channels that are either on that cpu or will be used by that cpu
 			 */
 			primary_ch->_2nd_ch_pcpu_map[cpu] = pcpu_ch;
 			n_mask_ch++;
-			
+
 			/* Set cpu in chmask and recalculate mask of coremask cpus without channels */
 			NVMEIB_CPU_MASK_SET_CPU(cpu, chmask);
 			if (!NVMEIB_CPU_MASK_AND_NOT(core_not_ch_mask, *cpumask, chmask)) {
@@ -2323,7 +2323,7 @@ nvmeibc_locks_channel_connect_coremask_chs(struct nvmeibc_locks_channel *ch, str
 		BUG_ON(!pcpu_ch);
 		BUG_ON(!nvmeibc_channel_is_pcpu_ch(&pcpu_ch->base));
 		BUG_ON(nvmeibc_channel_is_ll_pcpu_ch(&pcpu_ch->base));
-		
+
 		/* Set the coremask cookie (if not already set in previous iteration) */
 		if (nvmeibc_channel_is_coremask_ch(&pcpu_ch->base)) {
 			BUG_ON(nvmeibc_channel_get_coremask_ch_cookie(&pcpu_ch->base) != coremask_cookie);
@@ -2346,14 +2346,14 @@ out:
 	return rv;
 }
 
-void nvmeibc_locks_channel_disconnect_coremask_chs(struct nvmeibc_locks_channel *ch, const struct nvmeib_cpu_mask *cpumask, 
+void nvmeibc_locks_channel_disconnect_coremask_chs(struct nvmeibc_locks_channel *ch, const struct nvmeib_cpu_mask *cpumask,
 						   void *coremask_cookie)
 {
 	struct nvmeibc_locks_channel *primary_ch = get_primary_ch(ch);
 	struct nvmeibc_locks_channel *pcpu_ch;
 	unsigned int cpu;
 	NFIN;
-	
+
 	/* The target doesn't support disconnect of lock channels without rediscover so we just clear them from the map and keep them connected */
 	NVMEIB_CPU_MASK_FOR_EACH_CPU(cpu, *cpumask) {
 		pcpu_ch = primary_ch->_2nd_ch_coremask_map[cpu];
@@ -2382,14 +2382,14 @@ void nvmeibc_locks_channel_disconnect_coremask_chs(struct nvmeibc_locks_channel 
 	NFOUT;
 }
 
-struct nvmeibc_channel *nvmeibc_locks_channel_get_coremash_ch_for_cpu(struct nvmeibc_locks_channel *ch, 
+struct nvmeibc_channel *nvmeibc_locks_channel_get_coremash_ch_for_cpu(struct nvmeibc_locks_channel *ch,
 								      void *coremask_cookie, int cpu,
 								      struct nvmeib_cpu_mask *ch_cpumask)
 {
 	struct nvmeibc_locks_channel *primary_ch = get_primary_ch(ch);
 	struct nvmeibc_locks_channel *pcpu_ch;
 	struct nvmeibc_channel *ret = NULL;
-	
+
 	NFIN;
 	if (cpu < 0 || cpu >= NVMEIB_DFLT_MAX_CPUS) {
 		_NE(err_nvmeibc_locks_channel_get_coremash_ch_for_cpu_inv_cpu, "Invalid CPU @CPU", cpu);
