@@ -3578,8 +3578,8 @@ static int raft_leader_send_appendentries_to_all_peers(int is_with_raft_log)
 		NVMEIB_HASH_FOREACH(member, my_raft_global.raft_members_hash_by_uuid) {
 			struct nvmeibt_node	*its_node = nvmeibt_raft_member_get_node(member);
 			if (its_node) {
-				raft_leader_send_appendentries_to_a_peer(member, is_with_raft_log);
 				member->its_node->peer_statistics.is_awaiting_REP_first_APPEND_ENTRIES_with_cur_committed_and_applied_topo_timespec |= is_new_committed_or_applied;
+				raft_leader_send_appendentries_to_a_peer(member, is_with_raft_log);
 			}
 		}
 		raft_reset_leader_heartbeat_timeout(false);
