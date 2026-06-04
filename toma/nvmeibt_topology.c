@@ -898,7 +898,7 @@ static int check_local_segments_validity_when_config_changed_in_applied_topo(voi
 		disk_size_4kblk = (disk->its_local_disk->from_config.n_pblk * nvmeibt_local_disk_pblk_size(disk->its_local_disk) / 4096);
 
 		// Double loop for detecting overlaps
-		for (j = disk->n_segments - 1 - 1; j >= 0; --j) {
+		for (j = disk->n_segments - 1; j >= 0; --j) {
 			struct nvmeibt_disk_segment			*seg0 = disk->disk_segments[j];
 			struct nvmeibt_seg_mgmt				*m0 = &(seg0->seg_mgmt);
 
