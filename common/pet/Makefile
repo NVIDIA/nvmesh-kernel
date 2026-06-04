@@ -9,13 +9,14 @@ KSC = kaitai-struct-compiler
 # Input and output files
 PET_SPEC_FILE = nvmeib_pet_specification.ksy
 PET_BINFILE_READER = nvmeib_pet_archive.py
+GIT_COMMIT_ID = $(shell COMMIT_ID=; source ../../build_common.sh; git_commit_id)
 
-ifeq ($(COMMIT_ID),)
-COMMIT_ID = 0x$(shell source ../../build_common.sh; git_commit_id)
+ifeq ($(filter-out 0x,$(COMMIT_ID)),)
+override COMMIT_ID = 0x$(GIT_COMMIT_ID)
 endif
 
-ifeq ($(COMMIT_ID_STR),)
-COMMIT_ID_STR = $(shell source ../../build_common.sh; git_commit_id)
+ifeq ($(filter-out 0x,$(COMMIT_ID_STR)),)
+override COMMIT_ID_STR = $(GIT_COMMIT_ID)
 endif
 
 CC := gcc
