@@ -48,6 +48,8 @@ static inline int  nvmesh_nonsleepable_suspend(void) {
     int s = __nonsleepable_depth;
     __nonsleepable_depth = 0;
     return s;
+#else
+	return 0;
 #endif
 }
 static inline void nvmesh_nonsleepable_resume(int saved) {
