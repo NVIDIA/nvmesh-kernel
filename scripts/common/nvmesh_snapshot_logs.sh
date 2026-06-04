@@ -131,7 +131,7 @@ link_or_copy_file_to_cwd ${common_dir}/tools/traces_post_processor/pager
 link_or_copy_file_to_cwd ${common_dir}/tools/traces_post_processor/cpager
 link_or_copy_file_to_cwd ${common_dir}/tools/traces_post_processor/pager.py
 cp --sparse=always /etc/nvmesh/.nvmesh.conf ./
-cp --sparse=always ${common_dir}/toma_rpc.config ./
+cp --sparse=always ${common_dir}/tools/toma_rpc.config ./
 cp --sparse=always ${nvmesh_log_dir}/toma_trace.config ./
 #
 if ((${is_toma})); then
