@@ -3327,7 +3327,7 @@ static void set_guaranteed_sw_ver(void)
 		if (peer_member->peer_sw_ver > my_raft_global.guaranteed_sw_ver) {
 			new_guaranteed_sw_ver = peer_member->peer_sw_ver;
 			N_Tf(u87b443, "peer=@STR, has higher SW ver=@SOFTWARE_VERSION", peer_member->hostname, new_guaranteed_sw_ver);
-			n_new_ver++;
+			n_new_ver++;		// Note: Upgrade is done from version i to i+1 so we only count num mebmers with higher version, assuming all share the same version. So no need to search for the lowest version among new_ver members.
 		}
 	}
 	if (n_new_ver) {

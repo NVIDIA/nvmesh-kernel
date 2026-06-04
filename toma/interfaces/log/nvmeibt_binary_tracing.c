@@ -46,13 +46,13 @@ static void* trace_poller_thread(void *param) {
 
 	if (strcmp(tracing_cgroup, "") != 0) {
 		int fd = -1;
-		char tid[10];
+		char tid[16];
 		char cgroup_path[PATH_MAX];
 		struct nvmeibt_Buf buf;
 
 		snprintf(cgroup_path, PATH_MAX, "/sys/fs/cgroup/blkio/%s/tasks", tracing_cgroup);
 		buf.data_buf = (void *)tid;
-		snprintf((char *)(buf.data_buf), 20, "%ld", syscall(SYS_gettid));
+		snprintf((char *)(buf.data_buf), sizeof(tid), "%ld", syscall(SYS_gettid));
 		buf.buf_len = strlen((char *)(buf.data_buf));
 
 		fd = NNVMEIBT_OPEN(fdfsdy, cgroup_path, O_WRONLY, 0666);
