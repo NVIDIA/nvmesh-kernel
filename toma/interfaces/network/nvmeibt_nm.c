@@ -617,8 +617,7 @@ struct nvmeibt_nm_path * nvmeibt_nm_restart_path(struct nvmeibt_nm_path *path)
 	if (path_start_timer(path, 1)) {
 		free_path(path);
 		path = NULL;
-	}
-	else {
+	} else {
 		XDLIST_ADD_TAIL(&path->ra->connecting, &path->base);
 		path->cmt.base.guid = ++path->pp->pn->local_node->guid;
 		path->cmt.base.base.type = kt_connect_cm;
@@ -628,11 +627,12 @@ struct nvmeibt_nm_path * nvmeibt_nm_restart_path(struct nvmeibt_nm_path *path)
 		if (path->renew_srm_id) {
 			path->renew_srm_id = 0;
 			if (++path->srm_id == 0)
-                ++path->srm_id;
-            path->remote_srm_id = 0;
+				++path->srm_id;
+			path->remote_srm_id = 0;
 		}
 	}
-    N_Tf(nm_restart_path_t2000, "Path @STR: srm @UINT", path->name, path->srm_id);
+	if (path)
+		N_Tf(nm_restart_path_t2000, "Path @STR: srm @UINT", path->name, path->srm_id);
 	PFOUT;
 	return path;
 }
