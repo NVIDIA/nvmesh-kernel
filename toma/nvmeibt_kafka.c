@@ -680,6 +680,7 @@ static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_ms
 	n_in_air = atomic_inc_return(&kafka_n_sends_in_the_air);       // If a msg is about to be sent, we know the n_sends_in_the_air was already increased
 	err = rd_kafka_produce(k_topic, RD_KAFKA_PARTITION_UA, RD_KAFKA_MSG_F_COPY, (void*)val, val_len, key, key_len, (void*)msg);
 	if (err == 0) {
+		msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_SENT_TO_KAFKA;
 		N_Tf(b5v9skq, "@STR: produced key=@STR msgptr=@PTR, in_air_km=@INT", rd_kafka_topic_name(k_topic), key, msg, n_in_air);
 		NVMEIBT_LONG_TRACE_WRAPPER(tvsh875, 1, "", val, val_len);
 		return 0;
@@ -851,7 +852,6 @@ static void kafka_outgoing_msgs_queue_send_pending_msgs_to_kafka_producer(void) 
 			msg = XDLIST_LOOP_NEXT(msg, &komq.list)) { // msg is never the last, and only add (after the last) can occur in parallel, so no need to lock
 		const enum KAFKA_OUTGOING_MSG_STATE m_state = msg->kafka_outgoing_msg_state;
 		if ((m_state == KAFKA_OUTGOING_MSG_STATE_NOT_SENT) || (m_state == KAFKA_OUTGOING_MSG_STATE_REJECTED_BY_KAFKA)) {
-			msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_SENT_TO_KAFKA;
 			if (msg->out_priority == NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH) {
 				if (producer_send_msg(&k_high_priority, msg) != 0)
 					break;
