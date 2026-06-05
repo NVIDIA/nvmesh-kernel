@@ -83,6 +83,23 @@ struct nvmeib_pet_stream{
 enum {NVMEIB_PET_MAX_STREAM_SIZE=64*1024}; //because written_bytes is u16
 enum {NVMEIB_PET_MAX_MSG_ARGS_N_BYTES=96}; //maximal 12 arguments, 8 bytes each => 96 bytes
 
+/* PET stores compact scalar values only. Pointers are allowed as addresses,
+ * but string payloads and floating point values are intentionally unsupported.
+ */
+#define __NVMEIB_PET_ARG_TYPE_IS(value, type) __builtin_types_compatible_p(typeof(value), type)
+#define __NVMEIB_PET_VALIDATE_ARG_TYPE(value) \
+do { \
+	BUILD_BUG_ON_MSG(sizeof(void*) != 8, "only 64bit platforms are supported"); \
+	BUILD_BUG_ON_MSG(__NVMEIB_PET_ARG_TYPE_IS(value, float), "float type is not supported"); \
+	BUILD_BUG_ON_MSG(__NVMEIB_PET_ARG_TYPE_IS(value, double), "double type is not supported"); \
+	BUILD_BUG_ON_MSG(__NVMEIB_PET_ARG_TYPE_IS(value, long double), "long double type is not supported"); \
+	BUILD_BUG_ON_MSG(__NVMEIB_PET_ARG_TYPE_IS(value, char*), "char* type is not supported"); \
+	BUILD_BUG_ON_MSG(__NVMEIB_PET_ARG_TYPE_IS(value, char const*), "char const* type is not supported"); \
+	BUILD_BUG_ON_MSG(__NVMEIB_PET_ARG_TYPE_IS(value, char[sizeof(value)]), "char[] type is not supported"); \
+	BUILD_BUG_ON_MSG(__NVMEIB_PET_ARG_TYPE_IS(value, char const[sizeof(value)]), "char const[] type is not supported"); \
+	(void)sizeof((u64)(value)); \
+} while (0)
+
 /* Offset of `written_msgs` in the stream data buffer */
 enum { NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET = 8 };
 
@@ -567,11 +584,79 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 #define NVMEIB_PET_VA_NARGS_IMPL(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,N,...) N
 #define NVMEIB_PET_VA_NARGS(...) NVMEIB_PET_VA_NARGS_IMPL(__VA_ARGS__,12,11,10,9,8,7,6,5,4,3,2,1)
 
+#define __NVMEIB_PET_VALIDATE_ARGS1(exp1) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp1); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS2(exp1, exp2) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS1(exp1); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp2); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS3(exp1, exp2, exp3) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS2(exp1, exp2); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp3); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS4(exp1, exp2, exp3, exp4) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS3(exp1, exp2, exp3); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp4); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS5(exp1, exp2, exp3, exp4, exp5) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS4(exp1, exp2, exp3, exp4); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp5); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS6(exp1, exp2, exp3, exp4, exp5, exp6) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS5(exp1, exp2, exp3, exp4, exp5); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp6); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS7(exp1, exp2, exp3, exp4, exp5, exp6, exp7) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS6(exp1, exp2, exp3, exp4, exp5, exp6); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp7); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS8(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS7(exp1, exp2, exp3, exp4, exp5, exp6, exp7); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp8); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS9(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS8(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp9); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS10(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS9(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp10); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS11(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS10(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp11); \
+} while (0)
+#define __NVMEIB_PET_VALIDATE_ARGS12(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11, exp12) \
+do { \
+	__NVMEIB_PET_VALIDATE_ARGS11(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11); \
+	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp12); \
+} while (0)
+
+#define __NVMEIB_PET_VALIDATE_ARGS_IMPL_IMPL(n_args, ...) __NVMEIB_PET_VALIDATE_ARGS##n_args(__VA_ARGS__)
+#define __NVMEIB_PET_VALIDATE_ARGS_IMPL(n_args, ...) __NVMEIB_PET_VALIDATE_ARGS_IMPL_IMPL(n_args, __VA_ARGS__)
+#define __NVMEIB_PET_VALIDATE_MSG_ARGS(...) __NVMEIB_PET_VALIDATE_ARGS_IMPL(NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__)
+
 //if we know the number of arguments we can decide ourself what macro should be used
 //there is a need for double indirecion in order to convert number of arguments to actual number
 #define __NVMEIB_PET_STREAM_WRITE_IMPL_IMPL(self, offset, n_args, ...) __NVMEIB_PET_STREAM_WRITE##n_args(self, offset, __VA_ARGS__)
 #define __NVMEIB_PET_STREAM_WRITE_IMPL(self, offset, n_args, ...) __NVMEIB_PET_STREAM_WRITE_IMPL_IMPL(self, offset, n_args, __VA_ARGS__)
-#define __NVMEIB_PET_STREAM_WRITE_MSG(self, offset, ...) __NVMEIB_PET_STREAM_WRITE_IMPL(self, offset, NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__)
+#define __NVMEIB_PET_STREAM_WRITE_MSG(self, offset, ...) \
+({ \
+	__NVMEIB_PET_VALIDATE_MSG_ARGS(__VA_ARGS__); \
+	__NVMEIB_PET_STREAM_WRITE_IMPL(self, offset, NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__); \
+})
 
 
 //severity & verbosity

@@ -249,6 +249,59 @@ void test_stream_write_zero_offset_is_stored_as_one(void)
 	__test_check_payload(start, &expected, sizeof(expected));
 }
 
+void test_stream_write_supported_arg_types(void)
+{
+	struct nvmeib_pet_stream stream = {0};
+	bool bool_arg = true;
+	unsigned char unsigned_char_arg = 0x11;
+	signed char signed_char_arg = -2;
+	char char_arg = 0x12;
+	uint16_t uint16_arg = 0x2122;
+	int16_t int16_arg = -0x123;
+	uint32_t uint32_arg = 0x31323334;
+	int32_t int32_arg = -0x1234567;
+	unsigned long unsigned_long_arg = 0x41424344UL;
+	long long_arg = -0x12345678L;
+	size_t size_arg = 0x51525354UL;
+	ssize_t ssize_arg = -0x123456L;
+	void *ptr_arg = &stream;
+	void const *const_ptr_arg = &stream;
+	size_t written = 0;
+	size_t expected_payload_n_bytes = 0;
+
+	__test_stream_reset(&stream);
+	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0401,
+						bool_arg,
+						unsigned_char_arg,
+						signed_char_arg,
+						char_arg,
+						uint16_arg,
+						int16_arg,
+						uint32_arg,
+						int32_arg,
+						unsigned_long_arg,
+						long_arg,
+						size_arg,
+						ssize_arg);
+	expected_payload_n_bytes = sizeof(bool_arg) +
+				   sizeof(unsigned_char_arg) +
+				   sizeof(signed_char_arg) +
+				   sizeof(char_arg) +
+				   sizeof(uint16_arg) +
+				   sizeof(int16_arg) +
+				   sizeof(uint32_arg) +
+				   sizeof(int32_arg) +
+				   sizeof(unsigned_long_arg) +
+				   sizeof(long_arg) +
+				   sizeof(size_arg) +
+				   sizeof(ssize_arg);
+
+	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + expected_payload_n_bytes);
+
+	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0402, ptr_arg, const_ptr_arg);
+	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(ptr_arg) + sizeof(const_ptr_arg));
+}
+
 void test_stream_write_args_are_evaluated_once(void)
 {
 	struct nvmeib_pet_stream stream = {0};
@@ -778,6 +831,7 @@ int main(int argc, char* argv[]){
 		test_stream_write_all_arg_counts();
 		test_stream_write_mixed_size_args();
 		test_stream_write_zero_offset_is_stored_as_one();
+		test_stream_write_supported_arg_types();
 		test_stream_write_args_are_evaluated_once();
 		test_stream_write_does_not_evaluate_args_without_space();
 		test_io_pet_macro_args_are_evaluated_once();
