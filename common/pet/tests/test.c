@@ -137,6 +137,22 @@ static void __test_stream_reset(struct nvmeib_pet_stream* stream)
 	*stream = nvmeib_pet_stream_make(__test_message_iovec);
 }
 
+void test_msg_header_layout(void)
+{
+	enum {
+		msg_n_bytes = sizeof(((struct nvmeib_pet_msg_header *)0)->msg.timestamp) +
+			      sizeof(((struct nvmeib_pet_msg_header *)0)->msg.args_n_bytes),
+		spacer_n_bytes = sizeof(((struct nvmeib_pet_msg_header *)0)->spacer.bytes) +
+				 sizeof(((struct nvmeib_pet_msg_header *)0)->spacer.unused),
+		header_n_bytes = sizeof(((struct nvmeib_pet_msg_header *)0)->offset) + msg_n_bytes,
+	};
+
+	BUG_ON(sizeof(((struct nvmeib_pet_msg_header *)0)->msg) != msg_n_bytes);
+	BUG_ON(sizeof(((struct nvmeib_pet_msg_header *)0)->spacer) != spacer_n_bytes);
+	BUG_ON(sizeof(((struct nvmeib_pet_msg_header *)0)->msg) != sizeof(((struct nvmeib_pet_msg_header *)0)->spacer));
+	BUG_ON(sizeof(struct nvmeib_pet_msg_header) != header_n_bytes);
+}
+
 static struct nvmeib_pet_msg_header __test_load_msg_header(size_t offset)
 {
 	struct nvmeib_pet_msg_header header = {0};
@@ -150,8 +166,8 @@ static void __test_check_msg_header(size_t offset, u16 raw_offset, u8 expected_a
 
 	BUG_ON(header.offset != raw_offset + 1);
 	BUG_ON(header.offset == 0);
-	BUG_ON(header.args_n_bytes != expected_args_n_bytes);
-	BUG_ON(header.timestamp == 0);
+	BUG_ON(header.msg.args_n_bytes != expected_args_n_bytes);
+	BUG_ON(header.msg.timestamp == 0);
 }
 
 static void __test_check_payload(size_t offset, void const* expected, size_t size)
@@ -485,10 +501,10 @@ void test_journal_timestamp(void)
 	BUG_ON(written2 != sizeof(struct nvmeib_pet_msg_header) + sizeof(u8));
 	BUG_ON(header1.offset != 0x10 + 1);
 	BUG_ON(header2.offset != 0x20 + 1);
-	BUG_ON(header1.args_n_bytes != sizeof(u8));
-	BUG_ON(header2.args_n_bytes != sizeof(u8));
-	BUG_ON(header1.timestamp == 0);
-	BUG_ON(header2.timestamp == 0);
+	BUG_ON(header1.msg.args_n_bytes != sizeof(u8));
+	BUG_ON(header2.msg.args_n_bytes != sizeof(u8));
+	BUG_ON(header1.msg.timestamp == 0);
+	BUG_ON(header2.msg.timestamp == 0);
 	BUG_ON(*(msg1_start + sizeof(struct nvmeib_pet_msg_header)) != 0x11);
 	BUG_ON(*(msg2_start + sizeof(struct nvmeib_pet_msg_header)) != 0x22);
 
@@ -521,7 +537,7 @@ void test_journal_add_msg_accepts_pointer_arg(void)
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(ptr));
 	BUG_ON(header.offset != 0x30 + 1);
-	BUG_ON(header.args_n_bytes != sizeof(ptr));
+	BUG_ON(header.msg.args_n_bytes != sizeof(ptr));
 	BUG_ON(written_ptr != ptr);
 
 	nvmeib_pet_journal_commit(&journal);
@@ -828,6 +844,7 @@ int main(int argc, char* argv[]){
 	file_pet_controller.fd_output = fd;
 
 	{
+		test_msg_header_layout();
 		test_stream_write_all_arg_counts();
 		test_stream_write_mixed_size_args();
 		test_stream_write_zero_offset_is_stored_as_one();

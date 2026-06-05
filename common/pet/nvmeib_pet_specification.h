@@ -131,6 +131,22 @@ static inline void nvmeib_pet_stream_commit(struct nvmeib_pet_stream* self)
 	}
 }
 
+struct __attribute__((packed)) nvmeib_pet_msg_header {
+	u16 offset;
+	union {
+		/*offset != 0 - describes the message*/
+		struct __attribute__((packed)) {
+			u64 timestamp;
+			u8 args_n_bytes;
+		} msg;
+		/*offset == 0 - describes the amount of bytes that should be skipped; used by rotation algorithm*/
+		struct __attribute__((packed)) {
+			u64 bytes;
+			u8 unused;
+		} spacer;
+	};
+};
+
 __attribute__((nonnull (1)))
 static inline struct iovec nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* self, u16 size)
 {
@@ -144,18 +160,14 @@ static inline struct iovec nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* sel
 	}
 }
 
-struct __attribute__((packed)) nvmeib_pet_msg_header {
-	u16 offset;
-	u64 timestamp;
-	u8 args_n_bytes;
-};
-
 static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset, u8 args_n_bytes)
 {
 	return (struct nvmeib_pet_msg_header){
 		.offset = offset+1, /* offset==0 would be a special offset */
-		.timestamp = nvmeib_pet_get_trace_time_ns(),
-		.args_n_bytes = args_n_bytes,
+		.msg = {
+			.timestamp = nvmeib_pet_get_trace_time_ns(),
+			.args_n_bytes = args_n_bytes,
+		},
 	};
 }
 
