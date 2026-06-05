@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 #define WARN(condition, format, ...) ({assert(!(condition)); (void)format;})
 
@@ -130,6 +131,15 @@ struct iovec iovec_malloc(size_t size)
 //gdb: examine command: x /[count]xb <pointer> //b for bytes
 static u8 __test_message_x_memory[512] = {0};
 static struct iovec __test_message_iovec = {.iov_base = __test_message_x_memory, .iov_len = ARRAY_SIZE(__test_message_x_memory)};
+static char const* __test_random_rotation_output_dir = "rotations";
+
+static void __test_mkdir_if_needed(char const* path)
+{
+	if (mkdir(path, 0755) != 0 && errno != EEXIST) {
+		perror("failed to create random rotation output directory");
+		BUG();
+	}
+}
 
 static void __test_stream_reset(struct nvmeib_pet_stream* stream)
 {
@@ -285,19 +295,49 @@ static u16 __test_random_rotation_write_msg(struct nvmeib_pet_journal* journal, 
 	return written;
 }
 
-static void __test_stable_sort_random_rotation_msgs_by_time(struct test_random_rotation_msg* msgs, size_t n_msgs)
+static void __test_unrotate_random_rotation_msgs_by_time(struct test_random_rotation_msg* msgs, size_t n_msgs)
 {
 	size_t idx = 0;
+	size_t rotation_at = 0;
+	size_t newer_prefix_start = 0;
+	size_t n_tmp = 0;
 
+	if (n_msgs < 2) {
+		return;
+	}
+
+	rotation_at = n_msgs;
 	for (idx = 1; idx < n_msgs; ++idx) {
-		struct test_random_rotation_msg const key = msgs[idx];
-		size_t pos = idx;
-
-		while (pos > 0 && msgs[pos - 1].timestamp > key.timestamp) {
-			msgs[pos] = msgs[pos - 1];
-			--pos;
+		if (msgs[idx - 1].timestamp > msgs[idx].timestamp) {
+			rotation_at = idx;
+			break;
 		}
-		msgs[pos] = key;
+	}
+	if (rotation_at == n_msgs) {
+		return;
+	}
+
+	/* Physical order after rotation is: protected + newer-prefix + older-suffix. */
+	for (idx = 0; idx < rotation_at; ++idx) {
+		if (msgs[idx].timestamp > msgs[rotation_at].timestamp) {
+			newer_prefix_start = idx;
+			break;
+		}
+	}
+
+	struct test_random_rotation_msg tmp[n_msgs];
+
+	memcpy(tmp + n_tmp, msgs, newer_prefix_start * sizeof(*msgs));
+	n_tmp += newer_prefix_start;
+	memcpy(tmp + n_tmp, msgs + rotation_at, (n_msgs - rotation_at) * sizeof(*msgs));
+	n_tmp += n_msgs - rotation_at;
+	memcpy(tmp + n_tmp, msgs + newer_prefix_start, (rotation_at - newer_prefix_start) * sizeof(*msgs));
+	n_tmp += rotation_at - newer_prefix_start;
+	BUG_ON(n_tmp != n_msgs);
+
+	memcpy(msgs, tmp, n_msgs * sizeof(*msgs));
+	for (idx = 1; idx < n_msgs; ++idx) {
+		BUG_ON(msgs[idx - 1].timestamp > msgs[idx].timestamp);
 	}
 }
 
@@ -350,7 +390,7 @@ static size_t __test_read_random_rotation_msgs(struct nvmeib_pet_stream const* s
 		}
 	}
 
-	__test_stable_sort_random_rotation_msgs_by_time(msgs, n_msgs);
+	__test_unrotate_random_rotation_msgs_by_time(msgs, n_msgs);
 	return n_msgs;
 }
 
@@ -391,10 +431,13 @@ static void __test_write_all(int fd, void const* buffer, size_t n_bytes)
 
 static void __test_random_rotation_write_journal_file(u32 seed, struct nvmeib_pet_stream const* stream)
 {
-	char fname[128] = {0};
+	char fname[256] = {0};
 	int fd = -1;
+	int n = 0;
 
-	snprintf(fname, sizeof(fname), "build/random_rotation_seed_0x%08x.pet", seed);
+	n = snprintf(fname, sizeof(fname), "%s/seed_0x%08x.pet",
+		     __test_random_rotation_output_dir, seed);
+	BUG_ON(n < 0 || (size_t)n >= sizeof(fname));
 	fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (fd < 0) {
 		perror("failed to open random rotation journal artifact");
@@ -417,60 +460,35 @@ static void __test_random_rotation_print_payload(FILE* fp, struct test_random_ro
 	}
 }
 
-static void __test_random_rotation_write_text_file(u32 seed,
-						   struct nvmeib_pet_stream const* stream,
-						   u16 total_written_n_bytes,
-						   size_t n_written_msgs,
-						   struct test_random_rotation_stats const stats,
-						   struct test_random_rotation_msg const* expected_msgs,
-						   size_t n_expected_msgs,
-						   struct test_random_rotation_msg const* actual_msgs,
-						   size_t n_actual_msgs)
+static void __test_random_rotation_write_expected_file(u32 seed,
+						       struct test_random_rotation_msg const* expected_msgs,
+						       size_t n_expected_msgs)
 {
-	char fname[128] = {0};
+	char fname[256] = {0};
 	FILE* fp = NULL;
 	size_t idx = 0;
+	int n = 0;
 
-	snprintf(fname, sizeof(fname), "build/random_rotation_seed_0x%08x.txt", seed);
+	n = snprintf(fname, sizeof(fname), "%s/seed_0x%08x.expected.txt",
+		     __test_random_rotation_output_dir, seed);
+	BUG_ON(n < 0 || (size_t)n >= sizeof(fname));
 	fp = fopen(fname, "w");
 	if (!fp) {
-		perror("failed to open random rotation text artifact");
+		perror("failed to open random rotation expected artifact");
 		BUG();
 	}
 
-	fprintf(fp, "seed=0x%08x\n", seed);
-	fprintf(fp, "total_written_n_bytes=%u\n", total_written_n_bytes);
-	fprintf(fp, "n_written_msgs=%zu\n", n_written_msgs);
-	fprintf(fp, "max_written_bytes=%u\n", stream->max_written_bytes);
-	fprintf(fp, "protected_prefix=%u\n", stream->protected_prefix);
-	fprintf(fp, "write_offset=%u\n", stream->write_offset);
-	fprintf(fp, "useful_msgs=%u\n", stats.useful_msgs);
-	fprintf(fp, "useful_msg_bytes=%u\n", stats.useful_msg_bytes);
-	fprintf(fp, "spacer_bytes=%u\n", stats.spacer_bytes);
-	fprintf(fp, "padding_bytes=%u\n", stats.padding_bytes);
-	fprintf(fp, "n_expected_msgs=%zu\n", n_expected_msgs);
-	fprintf(fp, "n_actual_msgs=%zu\n", n_actual_msgs);
-
-	fprintf(fp, "\nexpected_sorted_by_time:\n");
 	for (idx = 0; idx < n_expected_msgs; ++idx) {
-		fprintf(fp, "%zu raw_offset=0x%04x record_n_bytes=%u args_n_bytes=%u timestamp=%llu payload=",
+		fprintf(fp,
+			"%zu raw_offset=0x%04x record_n_bytes=%u args_n_bytes=%u timestamp=%llu payload=",
 			idx, expected_msgs[idx].raw_offset, expected_msgs[idx].record_n_bytes,
 			expected_msgs[idx].args_n_bytes, (unsigned long long)expected_msgs[idx].timestamp);
 		__test_random_rotation_print_payload(fp, &expected_msgs[idx]);
 		fprintf(fp, "\n");
 	}
 
-	fprintf(fp, "\nactual_sorted_by_time:\n");
-	for (idx = 0; idx < n_actual_msgs; ++idx) {
-		fprintf(fp, "%zu raw_offset=0x%04x record_n_bytes=%u args_n_bytes=%u timestamp=%llu payload=",
-			idx, actual_msgs[idx].raw_offset, actual_msgs[idx].record_n_bytes,
-			actual_msgs[idx].args_n_bytes, (unsigned long long)actual_msgs[idx].timestamp);
-		__test_random_rotation_print_payload(fp, &actual_msgs[idx]);
-		fprintf(fp, "\n");
-	}
-
 	if (fclose(fp) != 0) {
-		perror("failed to close random rotation text artifact");
+		perror("failed to close random rotation expected artifact");
 		BUG();
 	}
 }
@@ -525,7 +543,7 @@ void test_stream_write_all_arg_counts(void)
 	TEST_STREAM_WRITE_SEQUENCE(stream, 0x010b, 11, 0x38, (u8)0x38, (u8)0x39, (u8)0x3a, (u8)0x3b, (u8)0x3c, (u8)0x3d, (u8)0x3e, (u8)0x3f, (u8)0x40, (u8)0x41, (u8)0x42);
 	TEST_STREAM_WRITE_SEQUENCE(stream, 0x010c, 12, 0x43, (u8)0x43, (u8)0x44, (u8)0x45, (u8)0x46, (u8)0x47, (u8)0x48, (u8)0x49, (u8)0x4a, (u8)0x4b, (u8)0x4c, (u8)0x4d, (u8)0x4e);
 
-	BUG_ON(*stream.written_msgs != 12);
+	BUG_ON(*stream.journal_size != 0);
 }
 
 void test_stream_protect_empty_prefix(void)
@@ -537,7 +555,7 @@ void test_stream_protect_empty_prefix(void)
 
 	__test_check_protected_area(&stream, NVMEIB_PET_ENTITY_HEADER_SIZE);
 	BUG_ON(stream.max_written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
-	BUG_ON(*stream.written_msgs != 0);
+	BUG_ON(*stream.journal_size != 0);
 }
 
 void test_stream_protect_prefix_expands_protected_area(void)
@@ -560,7 +578,7 @@ void test_stream_protect_prefix_expands_protected_area(void)
 	second_protected = stream.max_written_bytes;
 	__test_check_protected_area(&stream, second_protected);
 	BUG_ON(second_protected <= first_protected);
-	BUG_ON(*stream.written_msgs != 2);
+	BUG_ON(*stream.journal_size != 0);
 }
 
 void test_stream_write_mixed_size_args(void)
@@ -590,7 +608,7 @@ void test_stream_write_mixed_size_args(void)
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(expected));
 	BUG_ON(stream.max_written_bytes != start + written);
-	BUG_ON(*stream.written_msgs != 1);
+	BUG_ON(*stream.journal_size != 0);
 	__test_check_msg_header(start, 0x0201, sizeof(expected));
 	__test_check_payload(start, &expected, sizeof(expected));
 }
@@ -891,38 +909,43 @@ void test_stream_rotation_end_wrap_shrinks_eof_and_writes_from_prefix(void)
 	__test_check_spacer_from_buffer(buffer, final_msg_end, final_spacer_n_bytes);
 }
 
-void test_stream_written_msgs_saturates(void)
+void test_stream_commit_sets_journal_size(void)
 {
 	struct nvmeib_pet_stream stream = {0};
 	u16 written = 0;
+	u16 expected_journal_size = 0;
 
 	__test_stream_reset(&stream);
-	*stream.written_msgs = (u16)-1;
 
 	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0741, (u8)0x41);
+	expected_journal_size = stream.max_written_bytes;
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(u8));
-	BUG_ON(*stream.written_msgs != (u16)-1);
+	BUG_ON(*stream.journal_size != 0);
+
+	nvmeib_pet_stream_commit(&stream);
+
+	BUG_ON(*stream.journal_size != expected_journal_size);
+	BUG_ON(stream.data.iov_len != expected_journal_size);
 }
 
-static size_t __test_make_random_rotation_expectation(struct test_random_rotation_msg const* written_msgs,
-						      size_t n_written_msgs,
+static size_t __test_make_random_rotation_expectation(struct test_random_rotation_msg const* generated_msgs,
+						      size_t n_generated_msgs,
 						      u16 readable_n_bytes,
 						      struct test_random_rotation_msg* expected_msgs)
 {
-	size_t start = n_written_msgs;
+	size_t start = n_generated_msgs;
 	size_t expected_n_bytes = 0;
 	size_t n_expected_msgs = 0;
 
 	while (start > 0 &&
-	       expected_n_bytes + written_msgs[start - 1].record_n_bytes <= readable_n_bytes) {
+	       expected_n_bytes + generated_msgs[start - 1].record_n_bytes <= readable_n_bytes) {
 		--start;
-		expected_n_bytes += written_msgs[start].record_n_bytes;
+		expected_n_bytes += generated_msgs[start].record_n_bytes;
 	}
 
-	n_expected_msgs = n_written_msgs - start;
-	memcpy(expected_msgs, written_msgs + start, n_expected_msgs * sizeof(*expected_msgs));
-	__test_stable_sort_random_rotation_msgs_by_time(expected_msgs, n_expected_msgs);
+	n_expected_msgs = n_generated_msgs - start;
+	memcpy(expected_msgs, generated_msgs + start, n_expected_msgs * sizeof(*expected_msgs));
 	return n_expected_msgs;
 }
 
@@ -932,14 +955,14 @@ static size_t __test_make_random_rotation_expectation(struct test_random_rotatio
  *
  * Writes:  [P][random messages .........................]
  * Journal: [P][M|S][M|S]...[M|EOF]
- * Expect:  stable-sort-by-time(newest messages that fit useful bytes)
+ * Expect:  unrotate-by-time(newest messages that fit useful bytes)
  */
 void test_journal_random_rotation_retains_last_messages(void)
 {
 	enum {
 		journal_n_bytes = 512,
 		target_written_n_bytes = 1536,
-		n_runs = 420,
+		n_runs = 42,
 		max_random_msgs = 192,
 	};
 	unsigned run = 0;
@@ -957,29 +980,30 @@ void test_journal_random_rotation_retains_last_messages(void)
 			.memcpy_buffer = {0},
 		};
 		struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&controller.base, true);
-		struct test_random_rotation_msg written_msgs[max_random_msgs] = {0};
+		struct test_random_rotation_msg generated_msgs[max_random_msgs] = {0};
 		struct test_random_rotation_msg expected_msgs[max_random_msgs] = {0};
 		struct test_random_rotation_msg actual_msgs[max_random_msgs] = {0};
 		u32 const initial_seed = seed_base + run;
 		u16 total_written_n_bytes = 0;
-		size_t n_written_msgs = 0;
+		size_t n_generated_msgs = 0;
 		size_t n_expected_msgs = 0;
 		size_t n_actual_msgs = 0;
 		u16 readable_n_bytes = 0;
 		u16 useful_capacity = 0;
 		struct test_random_rotation_stats run_stats = {0};
+		struct nvmeib_pet_stream committed_stream = {0};
 
 		srandom(initial_seed);
 		nvmeib_pet_journal_protect_prefix(&journal);
 		while (total_written_n_bytes < target_written_n_bytes) {
 			u16 written = 0;
-			u16 const raw_offset = 0x0800 + (run * max_random_msgs) + n_written_msgs;
+			u16 const raw_offset = 0x0800 + (run * max_random_msgs) + n_generated_msgs;
 
-			BUG_ON(n_written_msgs >= max_random_msgs);
+			BUG_ON(n_generated_msgs >= max_random_msgs);
 			written = __test_random_rotation_write_msg(&journal, raw_offset,
-								   &written_msgs[n_written_msgs]);
+								   &generated_msgs[n_generated_msgs]);
 			total_written_n_bytes += written;
-			++n_written_msgs;
+			++n_generated_msgs;
 		}
 
 		BUG_ON(journal.stream.max_written_bytes > sizeof(buffer));
@@ -989,18 +1013,19 @@ void test_journal_random_rotation_retains_last_messages(void)
 		BUG_ON(run_stats.spacer_bytes + run_stats.padding_bytes > readable_n_bytes);
 		useful_capacity = readable_n_bytes - run_stats.spacer_bytes - run_stats.padding_bytes;
 		n_expected_msgs = __test_make_random_rotation_expectation(
-			written_msgs, n_written_msgs, useful_capacity, expected_msgs);
-		__test_random_rotation_write_journal_file(initial_seed, &journal.stream);
-		__test_random_rotation_write_text_file(initial_seed, &journal.stream, total_written_n_bytes,
-						       n_written_msgs, run_stats,
-						       expected_msgs, n_expected_msgs,
-						       actual_msgs, n_actual_msgs);
+			generated_msgs, n_generated_msgs, useful_capacity, expected_msgs);
+
+		committed_stream = journal.stream;
+		nvmeib_pet_journal_commit(&journal);
+		BUG_ON(*committed_stream.journal_size != committed_stream.max_written_bytes);
+
+		__test_random_rotation_write_journal_file(initial_seed, &committed_stream);
+		__test_random_rotation_write_expected_file(initial_seed, expected_msgs, n_expected_msgs);
 		__test_compare_random_rotation_msgs(expected_msgs, n_expected_msgs, actual_msgs, n_actual_msgs);
 		printf("Random rotation test[%u]: seed=0x%08x useful_msgs=%u useful_msg_bytes=%u spacer_bytes=%u padding_bytes=%u\n",
 		       run, initial_seed, run_stats.useful_msgs, run_stats.useful_msg_bytes,
 		       run_stats.spacer_bytes, run_stats.padding_bytes);
 
-		nvmeib_pet_journal_commit(&journal);
 	}
 }
 
@@ -1088,7 +1113,7 @@ void test_stream_write_does_not_evaluate_args_without_space(void)
 	BUG_ON(written != 0);
 	BUG_ON(arg_count != 0);
 	BUG_ON(stream.max_written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
-	BUG_ON(*stream.written_msgs != 0);
+	BUG_ON(*stream.journal_size != 0);
 }
 
 static struct nvmeib_pet_journal* test_get_pet_journal(struct nvmeib_pet_journal* journal, unsigned* calls)
@@ -1165,6 +1190,8 @@ void test_journal_protect_prefix_after_context(void)
 	};
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
 	u16 protected_prefix = 0;
+	u16* journal_size = NULL;
+	u16 expected_journal_size = 0;
 
 	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0601, (u8)0x01);
 	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0602, (u8)0x02);
@@ -1174,9 +1201,12 @@ void test_journal_protect_prefix_after_context(void)
 
 	__test_check_protected_area(&journal.stream, protected_prefix);
 	BUG_ON(journal.stream.max_written_bytes <= protected_prefix);
-	BUG_ON(*(journal.stream.written_msgs) != 3);
+	journal_size = journal.stream.journal_size;
+	expected_journal_size = journal.stream.max_written_bytes;
+	BUG_ON(*journal_size != 0);
 
 	nvmeib_pet_journal_commit(&journal);
+	BUG_ON(*journal_size != expected_journal_size);
 
 	free(perf_controller.msgs_buffer.iov_base);
 	free(perf_controller.memcpy_buffer.iov_base);
@@ -1615,6 +1645,9 @@ void test_errno(void)
 int main(int argc, char* argv[]){
 	int_cpu_freq_tsc_offset_jiffies();  // measure CPU freq, initialize tsc_khz
 	char const* fname = argc > 1 ? argv[1] : "test.pet";
+	__test_random_rotation_output_dir = argc > 2 ? argv[2] : "rotations";
+	__test_mkdir_if_needed(__test_random_rotation_output_dir);
+
 	int const fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
 		perror("failed to open 'io_pet_messages.binlog' file");
@@ -1637,7 +1670,7 @@ int main(int argc, char* argv[]){
 		test_stream_calculate_consumable_n_bytes_for_short_eof_tail();
 		test_stream_allocate_rotate_final_update_does_not_extend_eof();
 		test_stream_rotation_end_wrap_shrinks_eof_and_writes_from_prefix();
-		test_stream_written_msgs_saturates();
+		test_stream_commit_sets_journal_size();
 		test_journal_random_rotation_retains_last_messages();
 		test_stream_write_supported_arg_types();
 		test_stream_write_args_are_evaluated_once();

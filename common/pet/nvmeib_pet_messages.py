@@ -89,23 +89,123 @@ class PetArchiveReader:
 			raise EOFError(f'Unexpected EOF while reading {context} at byte {pos}: expected {size}, got {len(data)}')
 		return data
 
+	def __physical_eof(self) -> int:
+		pos = self.__fobj.tell()
+		self.__fobj.seek(0, os.SEEK_END)
+		end = self.__fobj.tell()
+		self.__fobj.seek(pos)
+		return end
+
+	@staticmethod
+	def __unrotate_messages_by_timestamp(messages: list[PetRawMessage]) -> list[PetRawMessage]:
+		"""Restore timestamp order inside one journal after stream rotation.
+
+		The writer logic lives in `__nvmeib_pet_stream_allocate_rotate()` in
+		`nvmeib_pet_specification.h`. The matching C test oracle is
+		`__test_unrotate_random_rotation_msgs_by_time()` in `tests/test.c`.
+
+		After rotation, physical scan order can contain one timestamp drop:
+
+		    physical: [ protected ][ newer-prefix ][ older-suffix ]
+		    logical:  [ protected ][ older-suffix ][ newer-prefix ]
+		                         ^ first timestamp drop is here
+
+		The protected prefix is immutable and older than/equal to the rotating
+		area, so only the rotating suffix needs to be split and swapped.
+		"""
+		if len(messages) < 2:
+			return messages
+
+		rotation_at = len(messages)
+		for idx in range(1, len(messages)):
+			if messages[idx - 1].timestamp > messages[idx].timestamp:
+				rotation_at = idx
+				break
+		if rotation_at == len(messages):
+			return messages
+
+		# Physical order after rotation is: protected + newer-prefix + older-suffix.
+		older_suffix = messages[rotation_at:]
+		newer_prefix_start = 0
+		for idx in range(rotation_at):
+			if messages[idx].timestamp > older_suffix[0].timestamp:
+				newer_prefix_start = idx
+				break
+
+		protected = messages[:newer_prefix_start]
+		newer_prefix = messages[newer_prefix_start:rotation_at]
+		ordered = protected + older_suffix + newer_prefix
+		for idx in range(1, len(ordered)):
+			if ordered[idx - 1].timestamp > ordered[idx].timestamp:
+				raise ValueError('PET messages are not a single rotated timestamp sequence')
+
+		return ordered
+
 	def read_entity(self, fname: str, idx: int) -> PetEntity:
 		entity_start = self.__fobj.tell()
-		commit_id, num_messages = self.ENTITY_HEADER.unpack(
+		physical_eof = self.__physical_eof()
+		commit_id, journal_size = self.ENTITY_HEADER.unpack(
 			self.__read_exact(self.ENTITY_HEADER.size, f'entity {idx} header')
 		)
-		messages: list[PetRawMessage] = []
-
-		for msg_idx in range(num_messages):
-			section_offset, timestamp, args_n_bytes = self.MSG_HEADER.unpack(
-				self.__read_exact(self.MSG_HEADER.size, f'entity {idx} message {msg_idx} header')
+		if journal_size < self.ENTITY_HEADER.size:
+			raise ValueError(
+				f'Invalid PET entity {idx} journal_size={journal_size}: '
+				f'minimum={self.ENTITY_HEADER.size}'
 			)
-			payload = self.__read_exact(args_n_bytes, f'entity {idx} message {msg_idx} payload')
-			messages.append(PetRawMessage(section_offset=section_offset, timestamp=timestamp, args_payload=payload))
+		entity_end = entity_start + journal_size
+		if entity_end > physical_eof:
+			raise EOFError(
+				f'Invalid PET entity {idx} journal_size={journal_size}: '
+				f'entity_end={entity_end}, file_end={physical_eof}'
+			)
+		messages: list[PetRawMessage] = []
+		record_idx = 0
+
+		# Records are self-describing inside the committed journal_size range.
+		while self.__fobj.tell() < entity_end:
+			record_start = self.__fobj.tell()
+			remaining = entity_end - record_start
+
+			if remaining < self.MSG_HEADER.size:
+				self.__fobj.seek(entity_end)
+				break
+
+			section_offset, timestamp_or_bytes, args_n_bytes_or_unused = self.MSG_HEADER.unpack(
+				self.__read_exact(self.MSG_HEADER.size, f'entity {idx} record {record_idx} header')
+			)
+			remaining_payload = remaining - self.MSG_HEADER.size
+
+			if section_offset == 0:
+				spacer_payload_n_bytes = timestamp_or_bytes
+				if args_n_bytes_or_unused != 0:
+					raise ValueError(
+						f'Invalid PET spacer in entity {idx} at byte {record_start}: '
+						f'unused={args_n_bytes_or_unused}'
+					)
+				if spacer_payload_n_bytes > remaining_payload:
+					raise EOFError(
+						f'Invalid PET spacer in entity {idx} at byte {record_start}: '
+						f'payload={spacer_payload_n_bytes}, remaining={remaining_payload}'
+					)
+				self.__fobj.seek(spacer_payload_n_bytes, os.SEEK_CUR)
+				record_idx += 1
+				continue
+
+			args_n_bytes = args_n_bytes_or_unused
+			if args_n_bytes > remaining_payload:
+				raise EOFError(
+					f'Invalid PET message in entity {idx} at byte {record_start}: '
+					f'payload={args_n_bytes}, remaining={remaining_payload}'
+				)
+			payload = self.__read_exact(args_n_bytes, f'entity {idx} record {record_idx} payload')
+			messages.append(
+				PetRawMessage(section_offset=section_offset, timestamp=timestamp_or_bytes, args_payload=payload)
+			)
+			record_idx += 1
 
 		return PetEntity(
 			commit_id=commit_id,
-			messages=messages,
+			messages=self.__unrotate_messages_by_timestamp(messages),
 			fname=fname,
 			idx=idx,
 			size=self.__fobj.tell() - entity_start,
@@ -933,6 +1033,51 @@ class SaveDictionary(Command):
 		dictionary.save(self.output)
 
 
+class ViewRawMessages(Command):
+	@classmethod
+	@typing.no_type_check
+	def register(cls, subparsers) -> None:
+		parser = subparsers.add_parser('view-raw', description='view raw PET message records')
+		parser.set_defaults(klass=cls)
+		parser.add_argument('traces', type=pathlib.Path, nargs='+', help='per entity traces files')
+		parser.add_argument(
+			'--no-sort',
+			action='store_true',
+			dest='no_sort',
+			default=False,
+			help="By default, all raw records are sorted; '--no-sort' disables the ordering.",
+		)
+
+	def __init__(self, args: argparse.Namespace):
+		super().__init__(args)
+		self.traces = args.traces
+		self.sort = not args.no_sort
+
+	def __iter_raw_messages(self) -> typing.Generator[PetRawMessage, None, None]:
+		for fpath in self.traces:
+			with open(fpath, 'rb') as fobj:
+				reader = PetArchiveReader(fobj)
+				idx = 0
+				while not reader.is_eof():
+					entity = reader.read_entity(fpath.name if len(self.traces) > 1 else '', idx)
+					idx += 1
+					yield from entity.messages
+
+	def __call__(self):
+		raw_msgs: typing.Iterable[PetRawMessage] = self.__iter_raw_messages()
+		if self.sort:
+			raw_msgs = sorted(raw_msgs, key=lambda msg: msg.timestamp)
+
+		for idx, msg in enumerate(raw_msgs):
+			args_n_bytes = len(msg.args_payload)
+			record_n_bytes = PetArchiveReader.MSG_HEADER.size + args_n_bytes
+			print(
+				f'{idx} raw_offset=0x{msg.raw_offset:04x} '
+				f'record_n_bytes={record_n_bytes} args_n_bytes={args_n_bytes} '
+				f'timestamp={msg.timestamp} payload={msg.args_payload.hex()}'
+			)
+
+
 # PET schema is a collection of templates, keyed by commit id
 class PETSchema:
 	def __init__(self, git_commit_id: int, dictionary: Dictionary):
@@ -1062,11 +1207,7 @@ class ViewMessages(Command):
 	def __iter_entity_raw_messages(
 		self, entity: PetEntity
 	) -> typing.Generator[PetRawMessage, None, None]:
-		for msg in entity.messages:
-			if not msg.section_offset:
-				break
-
-			yield msg
+		yield from entity.messages
 
 	def __iter_entity_human_messages(
 		self, entity: PetEntity

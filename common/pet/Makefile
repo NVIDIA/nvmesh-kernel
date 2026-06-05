@@ -1,5 +1,6 @@
 BUILD_DIR := build
 TESTS_DIR := tests
+ROTATIONS_DIR := $(BUILD_DIR)/rotations
 SHELL := /bin/bash
 NVMESH_SRC_DIR ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 
@@ -48,7 +49,7 @@ COVERAGE_LCOV := $(COVERAGE_DIR)/coverage.lcov
 all: dirs $(TEST_EXE)
 
 dirs:
-	@mkdir -p $(BUILD_DIR)
+	@mkdir -p $(BUILD_DIR) $(ROTATIONS_DIR)
 
 $(CFLAGS_STAMP): FORCE | dirs
 	@printf '%s\n' '$(CFLAGS)' > $@.tmp
@@ -61,7 +62,9 @@ $(TEST_EXE): $(TEST_OBJ)
 	$(CC) $^ -o $@ $(LDFLAGS)
 
 test: dirs $(TEST_EXE)
-	./$(TEST_EXE) $(TEST_OUT)
+	rm -f $(ROTATIONS_DIR)/seed_*.pet \
+		$(ROTATIONS_DIR)/seed_*.txt
+	./$(TEST_EXE) $(TEST_OUT) $(ROTATIONS_DIR)
 
 check: test
 
@@ -70,6 +73,17 @@ demo_dict: dirs test
 
 demo: dirs test demo_dict
 	PY=$(PY) ./pet_messages.sh view --no-sort $(BUILD_DIR) $(TEST_OUT)
+	@echo "Comparing generated rotation journals with viewer output..."
+	@for pet in $(ROTATIONS_DIR)/seed_*.pet; do \
+		test -e "$$pet" || { echo "No rotation PET files found in $(ROTATIONS_DIR)"; exit 1; }; \
+		expected="$${pet%.pet}.expected.txt"; \
+		viewer="$${pet%.pet}.viewer.txt"; \
+		PY=$(PY) ./pet_messages.sh view-raw "$$pet" > "$$viewer"; \
+		test -s "$$expected"; \
+		test -s "$$viewer"; \
+		diff -u "$$expected" "$$viewer"; \
+	done
+	@echo "Rotation viewer outputs generated and compared: $(ROTATIONS_DIR)"
 
 perf: $(TEST_EXE)
 	$(PERF) record $(PERF_RECORD_FLAGS) -o $(PERF_DATA) -- $(TEST_EXE)

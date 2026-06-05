@@ -71,13 +71,17 @@ struct nvmeib_pet_base_controller{
 
 //{{{pet storage - implementation details
 
-/* Entity header: commit_id (u64) + num_messages (u16) = 10 bytes; must match PetArchiveReader.ENTITY_HEADER */
+/* Entity header: commit_id (u64) + journal_size (u16) = 10 bytes; must match PetArchiveReader.ENTITY_HEADER */
 enum { NVMEIB_PET_ENTITY_HEADER_SIZE = 10 };
+/* Offset of `journal_size` in the stream data buffer */
+enum { NVMEIB_PET_STREAM_JOURNAL_SIZE_OFFSET = 8 };
 
 struct nvmeib_pet_stream{
 	struct iovec data;
-	/* pointer to data.iov_base[8], num_messages */
-	u16* written_msgs;
+	/* Pointer to data.iov_base[NVMEIB_PET_STREAM_JOURNAL_SIZE_OFFSET],
+	 * committed journal size in bytes.
+	 */
+	u16* journal_size;
 	/* Highest byte written in data; viewer scans [0, max_written_bytes). */
 	u16 max_written_bytes;
 	/* Next physical byte to allocate. Before rotation it tracks
@@ -110,22 +114,19 @@ do { \
 	(void)sizeof((u64)(value)); \
 } while (0)
 
-/* Offset of `written_msgs` in the stream data buffer */
-enum { NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET = 8 };
-
 static inline struct nvmeib_pet_stream nvmeib_pet_stream_make(struct iovec data)
 {
 	struct nvmeib_pet_stream stream = {
 		.data = data,
 		.max_written_bytes = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 		.write_offset = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
-		.written_msgs = data.iov_base ? (u16*)((u8*)data.iov_base + NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET) : (u16*)NULL,
+		.journal_size = data.iov_base ? (u16*)((u8*)data.iov_base + NVMEIB_PET_STREAM_JOURNAL_SIZE_OFFSET) : (u16*)NULL,
 		.protected_prefix = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 	};
 
-	if (stream.written_msgs){ // If `stream.written_msgs` is not NULL, it implies that `data.iov_base` is not NULL.
+	if (stream.journal_size){ // If `stream.journal_size` is not NULL, it implies that `data.iov_base` is not NULL.
 		*(u64*)data.iov_base = (u64)COMMIT_ID;
-		(*stream.written_msgs) = 0;
+		(*stream.journal_size) = 0;
 	}
 
 	if (unlikely(NVMEIB_PET_MAX_STREAM_SIZE < data.iov_len)){
@@ -139,6 +140,7 @@ __attribute__((nonnull (1)))
 static inline void nvmeib_pet_stream_commit(struct nvmeib_pet_stream* self)
 {
 	if (self->data.iov_base) {
+		(*self->journal_size) = self->max_written_bytes;
 		self->data.iov_len = self->max_written_bytes;
 	}
 }
@@ -166,13 +168,6 @@ enum {
 	NVMEIB_PET_MAX_MSG_N_BYTES = sizeof(struct nvmeib_pet_msg_header) + NVMEIB_PET_MAX_MSG_ARGS_N_BYTES,
 	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_ENTITY_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
 };
-
-static inline void __nvmeib_pet_stream_inc_written_msgs(struct nvmeib_pet_stream* self)
-{
-	if (*self->written_msgs != (u16)-1) {
-		(*self->written_msgs) += 1;
-	}
-}
 
 static inline void __nvmeib_pet_stream_write_spacer(struct nvmeib_pet_stream* self, u16 physical_offset, u16 body_n_bytes)
 {
@@ -325,7 +320,6 @@ static inline u8* nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* self, u16 si
 		return NULL;
 	}
 
-	__nvmeib_pet_stream_inc_written_msgs(self);
 	return msg;
 }
 
@@ -970,7 +964,7 @@ __attribute__((nonnull (1)))
 static inline void nvmeib_pet_journal_commit(struct nvmeib_pet_journal* self)
 {
 	if (likely(nvmeib_pet_journal_is_activated(self))){
-		if (*(self->stream.written_msgs)) {
+		if (self->stream.max_written_bytes > NVMEIB_PET_ENTITY_HEADER_SIZE) {
 			nvmeib_pet_stream_commit(&self->stream);
 			self->controller->flush(self->controller, self->worst_severity, self->stream.data);
 		}
