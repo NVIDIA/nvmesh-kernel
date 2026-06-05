@@ -19,6 +19,11 @@ ifneq ($(filter perf,$(MAKECMDGOALS)),)
 OPTFLAGS := -O2
 endif
 CFLAGS := -Wall -Wextra -ggdb $(OPTFLAGS) -I"." -I".." -I"../.." -DCOMMIT_ID=$(COMMIT_ID) -DCOMMIT_ID_STR=\"$(COMMIT_ID_STR)\"
+LDFLAGS :=
+ifeq ($(COVERAGE),1)
+CFLAGS += --coverage -fprofile-abs-path -fprofile-update=atomic
+LDFLAGS += --coverage
+endif
 CFLAGS_STAMP := $(BUILD_DIR)/.test.cflags
 
 PERF ?= perf
@@ -32,7 +37,13 @@ TEST_OBJ := $(BUILD_DIR)/test.o
 TEST_DCT := $(BUILD_DIR)/dict.${COMMIT_ID}.json
 TEST_OUT := $(BUILD_DIR)/messages.pet
 
-.PHONY: all clean test check dirs demo demo_dict perf fast_build FORCE
+LCOV ?= lcov
+GENHTML ?= genhtml
+COVERAGE_DIR := $(BUILD_DIR)/coverage
+COVERAGE_RAW_LCOV := $(COVERAGE_DIR)/coverage.raw.lcov
+COVERAGE_LCOV := $(COVERAGE_DIR)/coverage.lcov
+
+.PHONY: all clean test check dirs demo demo_dict perf coverage fast_build FORCE
 
 all: dirs $(TEST_EXE)
 
@@ -47,7 +58,7 @@ $(BUILD_DIR)/test.o: $(TESTS_DIR)/test.c nvmeib_pet_specification.h $(CFLAGS_STA
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TEST_EXE): $(TEST_OBJ)
-	$(CC) $^ -o $@
+	$(CC) $^ -o $@ $(LDFLAGS)
 
 test: dirs $(TEST_EXE)
 	./$(TEST_EXE) $(TEST_OUT)
@@ -63,6 +74,39 @@ demo: dirs test demo_dict
 perf: $(TEST_EXE)
 	$(PERF) record $(PERF_RECORD_FLAGS) -o $(PERF_DATA) -- $(TEST_EXE)
 	$(PERF) report $(PERF_REPORT_FLAGS) -i $(PERF_DATA) 2>&1 | rg -o "^\s+[0-9].*pet[^\s]*" | head -40
+
+coverage:
+	@command -v $(LCOV) >/dev/null || { echo "$(LCOV) is required for coverage reports"; exit 1; }
+	@command -v $(GENHTML) >/dev/null || { echo "$(GENHTML) is required for coverage reports"; exit 1; }
+	$(MAKE) clean
+	$(MAKE) test COVERAGE=1
+	rm -rf $(COVERAGE_DIR)
+	mkdir -p $(COVERAGE_DIR)
+	$(LCOV) --capture \
+		--directory $(BUILD_DIR) \
+		--output-file $(COVERAGE_RAW_LCOV) \
+		--rc branch_coverage=1 \
+		--filter range \
+		--ignore-errors mismatch \
+		--ignore-errors inconsistent
+	@test -s $(COVERAGE_RAW_LCOV) || { echo "Coverage capture did not create $(COVERAGE_RAW_LCOV)"; exit 1; }
+	$(LCOV) --remove $(COVERAGE_RAW_LCOV) \
+		'*/tests/*' \
+		'/usr/*' \
+		--output-file $(COVERAGE_LCOV) \
+		--rc branch_coverage=1 \
+		--filter range \
+		--ignore-errors inconsistent \
+		--ignore-errors unused
+	$(GENHTML) $(COVERAGE_LCOV) \
+		--output-directory $(COVERAGE_DIR) \
+		--branch-coverage \
+		--title "PET Coverage" \
+		--ignore-errors inconsistent \
+		--ignore-errors corrupt \
+		--ignore-errors unmapped
+	@echo "Coverage report: $(COVERAGE_DIR)/index.html"
+	@echo "LCOV tracefile: $(COVERAGE_LCOV)"
 
 clean:
 	rm -rf $(BUILD_DIR)
