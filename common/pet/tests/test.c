@@ -189,15 +189,15 @@ static void __test_check_payload_sequence(size_t offset, u8 first, size_t size)
 static void __test_check_protected_area(struct nvmeib_pet_stream const* stream, u16 protected_prefix)
 {
 	BUG_ON(stream->protected_prefix != protected_prefix);
-	BUG_ON(stream->protected_prefix > stream->written_bytes);
+	BUG_ON(stream->protected_prefix > stream->max_written_bytes);
 }
 
 #define TEST_STREAM_WRITE_SEQUENCE(stream, raw_offset, expected_size, first_value, ...) \
 do { \
-	size_t const __start = (stream).written_bytes; \
+	size_t const __start = (stream).max_written_bytes; \
 	size_t const __written = __NVMEIB_PET_STREAM_WRITE_MSG(&(stream), raw_offset, __VA_ARGS__); \
 	BUG_ON(__written != sizeof(struct nvmeib_pet_msg_header) + (expected_size)); \
-	BUG_ON((stream).written_bytes != __start + __written); \
+	BUG_ON((stream).max_written_bytes != __start + __written); \
 	__test_check_msg_header(__start, raw_offset, expected_size); \
 	__test_check_payload_sequence(__start, first_value, expected_size); \
 } while (0)
@@ -231,7 +231,7 @@ void test_stream_protect_empty_prefix(void)
 	nvmeib_pet_stream_protect_prefix(&stream);
 
 	__test_check_protected_area(&stream, NVMEIB_PET_ENTITY_HEADER_SIZE);
-	BUG_ON(stream.written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
+	BUG_ON(stream.max_written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
 	BUG_ON(*stream.written_msgs != 0);
 }
 
@@ -244,7 +244,7 @@ void test_stream_protect_prefix_expands_protected_area(void)
 	__test_stream_reset(&stream);
 	__test_check_protected_area(&stream, NVMEIB_PET_ENTITY_HEADER_SIZE);
 	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0501, 1, 0x01, (u8)0x01);
-	first_protected = stream.written_bytes;
+	first_protected = stream.max_written_bytes;
 	nvmeib_pet_stream_protect_prefix(&stream);
 	__test_check_protected_area(&stream, first_protected);
 
@@ -252,7 +252,7 @@ void test_stream_protect_prefix_expands_protected_area(void)
 	__test_check_protected_area(&stream, first_protected);
 	nvmeib_pet_stream_protect_prefix(&stream);
 
-	second_protected = stream.written_bytes;
+	second_protected = stream.max_written_bytes;
 	__test_check_protected_area(&stream, second_protected);
 	BUG_ON(second_protected <= first_protected);
 	BUG_ON(*stream.written_msgs != 2);
@@ -276,7 +276,7 @@ void test_stream_write_mixed_size_args(void)
 	size_t written = 0;
 
 	__test_stream_reset(&stream);
-	start = stream.written_bytes;
+	start = stream.max_written_bytes;
 	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0201,
 						expected.arg1,
 						expected.arg2,
@@ -284,7 +284,7 @@ void test_stream_write_mixed_size_args(void)
 						expected.arg4);
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(expected));
-	BUG_ON(stream.written_bytes != start + written);
+	BUG_ON(stream.max_written_bytes != start + written);
 	BUG_ON(*stream.written_msgs != 1);
 	__test_check_msg_header(start, 0x0201, sizeof(expected));
 	__test_check_payload(start, &expected, sizeof(expected));
@@ -298,7 +298,7 @@ void test_stream_write_zero_offset_is_stored_as_one(void)
 	u8 expected = 0x55;
 
 	__test_stream_reset(&stream);
-	start = stream.written_bytes;
+	start = stream.max_written_bytes;
 	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0, expected);
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(expected));
@@ -368,7 +368,7 @@ void test_stream_write_args_are_evaluated_once(void)
 	u8 expected = 1;
 
 	__test_stream_reset(&stream);
-	start = stream.written_bytes;
+	start = stream.max_written_bytes;
 	written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0301, (u8)++arg_count);
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(expected));
@@ -389,7 +389,7 @@ void test_stream_write_does_not_evaluate_args_without_space(void)
 
 	BUG_ON(written != 0);
 	BUG_ON(arg_count != 0);
-	BUG_ON(stream.written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
+	BUG_ON(stream.max_written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
 	BUG_ON(*stream.written_msgs != 0);
 }
 
@@ -470,12 +470,12 @@ void test_journal_protect_prefix_after_context(void)
 
 	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0601, (u8)0x01);
 	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0602, (u8)0x02);
-	protected_prefix = journal.stream.written_bytes;
+	protected_prefix = journal.stream.max_written_bytes;
 	nvmeib_pet_journal_protect_prefix(&journal);
 	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0603, (u8)0x03);
 
 	__test_check_protected_area(&journal.stream, protected_prefix);
-	BUG_ON(journal.stream.written_bytes <= protected_prefix);
+	BUG_ON(journal.stream.max_written_bytes <= protected_prefix);
 	BUG_ON(*(journal.stream.written_msgs) != 3);
 
 	nvmeib_pet_journal_commit(&journal);
@@ -570,11 +570,11 @@ void test_journal_timestamp(void)
 	//if you want to be sure that offsets are correct, run pe_messages.py script and see the result
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
 
-	u8 const* const msg1_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.written_bytes);
+	u8 const* const msg1_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.max_written_bytes);
 	u16 const written1 = nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x10, (u8)0x11);
 	struct nvmeib_pet_msg_header const header1 = __load_msg_header_from(msg1_start);
 
-	u8 const* const msg2_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.written_bytes);
+	u8 const* const msg2_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.max_written_bytes);
 	u16 const written2 = nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x20, (u8)0x22);
 	struct nvmeib_pet_msg_header const header2 = __load_msg_header_from(msg2_start);
 
@@ -609,7 +609,7 @@ void test_journal_add_msg_accepts_pointer_arg(void)
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
 	u8 const value = 0x33;
 	u8 const* const ptr = &value;
-	u8 const* const msg_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.written_bytes);
+	u8 const* const msg_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.max_written_bytes);
 	void const* written_ptr = NULL;
 	u16 const written = nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x30, ptr);
 	struct nvmeib_pet_msg_header const header = __load_msg_header_from(msg_start);

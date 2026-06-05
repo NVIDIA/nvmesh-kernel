@@ -76,7 +76,7 @@ enum { NVMEIB_PET_ENTITY_HEADER_SIZE = 10 };
 
 struct nvmeib_pet_stream{
 	struct iovec data;
-	u16 written_bytes;
+	u16 max_written_bytes;
 	u16* written_msgs; /* pointer to data.iov_base[8], num_messages */
 	/* Bytes in [0, protected_prefix) are retained by rotation. The area starts
 	 * with the entity header and may be extended by explicit user request.
@@ -84,7 +84,7 @@ struct nvmeib_pet_stream{
 	u16 protected_prefix;
 };
 
-enum {NVMEIB_PET_MAX_STREAM_SIZE=64*1024}; //because written_bytes is u16
+enum {NVMEIB_PET_MAX_STREAM_SIZE=64*1024}; //because max_written_bytes is u16
 enum {NVMEIB_PET_MAX_MSG_ARGS_N_BYTES=96}; //maximal 12 arguments, 8 bytes each => 96 bytes
 
 /* PET stores compact scalar values only. Pointers are allowed as addresses,
@@ -111,7 +111,7 @@ static inline struct nvmeib_pet_stream nvmeib_pet_stream_make(struct iovec data)
 {
 	struct nvmeib_pet_stream stream = {
 		.data = data,
-		.written_bytes = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
+		.max_written_bytes = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 		.written_msgs = data.iov_base ? (u16*)((u8*)data.iov_base + NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET) : (u16*)NULL,
 		.protected_prefix = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 	};
@@ -132,7 +132,7 @@ __attribute__((nonnull (1)))
 static inline void nvmeib_pet_stream_commit(struct nvmeib_pet_stream* self)
 {
 	if (self->data.iov_base) {
-		self->data.iov_len = self->written_bytes;
+		self->data.iov_len = self->max_written_bytes;
 	}
 }
 
@@ -155,11 +155,11 @@ struct __attribute__((packed)) nvmeib_pet_msg_header {
 __attribute__((nonnull (1)))
 static inline struct iovec nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* self, u16 size)
 {
-	if (unlikely((size_t)self->written_bytes + (size_t)size > self->data.iov_len)){
+	if (unlikely((size_t)self->max_written_bytes + (size_t)size > self->data.iov_len)){
 		return (struct iovec){0}; //not enough memory
 	} else {
-		struct iovec const res = {.iov_base = (u8*)self->data.iov_base + self->written_bytes, .iov_len=size};
-		self->written_bytes += size;
+		struct iovec const res = {.iov_base = (u8*)self->data.iov_base + self->max_written_bytes, .iov_len=size};
+		self->max_written_bytes += size;
 		(*self->written_msgs) += 1;
 		return res;
 	}
@@ -172,8 +172,8 @@ static inline void nvmeib_pet_stream_protect_prefix(struct nvmeib_pet_stream* se
 		return;
 	}
 
-	BUG_ON(self->protected_prefix > self->written_bytes);
-	self->protected_prefix = self->written_bytes;
+	BUG_ON(self->protected_prefix > self->max_written_bytes);
+	self->protected_prefix = self->max_written_bytes;
 }
 
 static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset, u8 args_n_bytes)
@@ -781,17 +781,17 @@ static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* 
 //don't add nvmeib_pet_journal_is_activated check here - too late - the arguments are already evaluated
 #define nvmeib_pet_journal_add_msg(self, severity, offset, ...)	\
 ({	\
-	u16 written_bytes = 0;	\
+	u16 msg_written_bytes = 0;	\
 	__auto_type __nvmeib_pet_journal = (self); \
 	struct nvmeib_pet_stream* __nvmeib_pet_stream = &(__nvmeib_pet_journal->stream); \
 	bool const is_in_use = __nvmeib_pet_journal_test_and_set_in_use(__nvmeib_pet_journal); \
 	BUG_ON(is_in_use);	\
-	written_bytes = __NVMEIB_PET_STREAM_WRITE_MSG(__nvmeib_pet_stream, offset, __VA_ARGS__); \
-	if (written_bytes){ \
+	msg_written_bytes = __NVMEIB_PET_STREAM_WRITE_MSG(__nvmeib_pet_stream, offset, __VA_ARGS__); \
+	if (msg_written_bytes){ \
 		__nvmeib_pet_journal->worst_severity = nvmeib_pet_severity_get_worst(__nvmeib_pet_journal->worst_severity, severity); \
 	} \
 	__nvmeib_pet_journal_clear_in_use(__nvmeib_pet_journal); \
-	written_bytes; \
+	msg_written_bytes; \
 })
 
 
