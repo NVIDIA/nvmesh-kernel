@@ -52,13 +52,13 @@ PRINTF_SPEC_RE = printf_enum_re = re.compile(
 
 
 class PetRawMessage(typing.NamedTuple):
-	offset: int
+	section_offset: int
 	timestamp: int
 	args_payload: bytes
 
 	@property
 	def raw_offset(self) -> int:
-		return self.offset - 1
+		return self.section_offset - 1
 
 
 class PetEntity(typing.NamedTuple):
@@ -97,11 +97,11 @@ class PetArchiveReader:
 		messages: list[PetRawMessage] = []
 
 		for msg_idx in range(num_messages):
-			offset, timestamp, args_n_bytes = self.MSG_HEADER.unpack(
+			section_offset, timestamp, args_n_bytes = self.MSG_HEADER.unpack(
 				self.__read_exact(self.MSG_HEADER.size, f'entity {idx} message {msg_idx} header')
 			)
 			payload = self.__read_exact(args_n_bytes, f'entity {idx} message {msg_idx} payload')
-			messages.append(PetRawMessage(offset=offset, timestamp=timestamp, args_payload=payload))
+			messages.append(PetRawMessage(section_offset=section_offset, timestamp=timestamp, args_payload=payload))
 
 		return PetEntity(
 			commit_id=commit_id,
@@ -734,7 +734,7 @@ class Template:
 		actual_n_bytes = len(msg.args_payload)
 		if expected_n_bytes != actual_n_bytes:
 			raise RuntimeError(
-				f'PET message payload size mismatch: stored_offset={msg.offset:#06x}, '
+				f'PET message payload size mismatch: section_offset={msg.section_offset:#06x}, '
 				f'raw_offset={msg.raw_offset:#06x}, '
 				f'spec={self.__c_spec.spec!r}, expected={expected_n_bytes}, '
 				f'actual={actual_n_bytes}, payload={msg.args_payload.hex()}'
@@ -1063,7 +1063,7 @@ class ViewMessages(Command):
 		self, entity: PetEntity
 	) -> typing.Generator[PetRawMessage, None, None]:
 		for msg in entity.messages:
-			if not msg.offset:
+			if not msg.section_offset:
 				break
 
 			yield msg
@@ -1085,7 +1085,7 @@ class ViewMessages(Command):
 				tmpl = schema.templates[msg.raw_offset]
 			except KeyError:
 				msg = (
-					f'Unknown PET message offset stored={msg.offset:#06x} raw={msg.raw_offset:#06x} '
+					f'Unknown PET message section_offset={msg.section_offset:#06x} raw={msg.raw_offset:#06x} '
 					f'for entity {entity.idx} in schema {schema.git_commit_id}'
 				)
 				raise RuntimeError(msg)

@@ -76,8 +76,14 @@ enum { NVMEIB_PET_ENTITY_HEADER_SIZE = 10 };
 
 struct nvmeib_pet_stream{
 	struct iovec data;
+	/* pointer to data.iov_base[8], num_messages */
+	u16* written_msgs;
+	/* Highest byte written in data; viewer scans [0, max_written_bytes). */
 	u16 max_written_bytes;
-	u16* written_msgs; /* pointer to data.iov_base[8], num_messages */
+	/* Next physical byte to allocate. Before rotation it tracks
+	 * max_written_bytes; after rotation it may point inside the suffix.
+	 */
+	u16 write_offset;
 	/* Bytes in [0, protected_prefix) are retained by rotation. The area starts
 	 * with the entity header and may be extended by explicit user request.
 	 */
@@ -112,6 +118,7 @@ static inline struct nvmeib_pet_stream nvmeib_pet_stream_make(struct iovec data)
 	struct nvmeib_pet_stream stream = {
 		.data = data,
 		.max_written_bytes = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
+		.write_offset = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 		.written_msgs = data.iov_base ? (u16*)((u8*)data.iov_base + NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET) : (u16*)NULL,
 		.protected_prefix = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 	};
@@ -137,32 +144,189 @@ static inline void nvmeib_pet_stream_commit(struct nvmeib_pet_stream* self)
 }
 
 struct __attribute__((packed)) nvmeib_pet_msg_header {
-	u16 offset;
+	u16 section_offset;
 	union {
-		/*offset != 0 - describes the message*/
+		/* section_offset != 0 - stored raw section offset + 1 */
 		struct __attribute__((packed)) {
 			u64 timestamp;
 			u8 args_n_bytes;
 		} msg;
-		/*offset == 0 - describes the amount of bytes that should be skipped; used by rotation algorithm*/
+		/* section_offset == 0 - rotation spacer */
 		struct __attribute__((packed)) {
+			/* payload bytes after this header */
 			u64 bytes;
 			u8 unused;
 		} spacer;
 	};
 };
 
-__attribute__((nonnull (1)))
-static inline struct iovec nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* self, u16 size)
+enum {
+	NVMEIB_PET_MIN_MSG_ARGS_N_BYTES = 1,
+	NVMEIB_PET_MIN_MSG_N_BYTES = sizeof(struct nvmeib_pet_msg_header) + NVMEIB_PET_MIN_MSG_ARGS_N_BYTES,
+	NVMEIB_PET_MAX_MSG_N_BYTES = sizeof(struct nvmeib_pet_msg_header) + NVMEIB_PET_MAX_MSG_ARGS_N_BYTES,
+	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_ENTITY_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
+};
+
+static inline void __nvmeib_pet_stream_inc_written_msgs(struct nvmeib_pet_stream* self)
 {
-	if (unlikely((size_t)self->max_written_bytes + (size_t)size > self->data.iov_len)){
-		return (struct iovec){0}; //not enough memory
-	} else {
-		struct iovec const res = {.iov_base = (u8*)self->data.iov_base + self->max_written_bytes, .iov_len=size};
-		self->max_written_bytes += size;
+	if (*self->written_msgs != (u16)-1) {
 		(*self->written_msgs) += 1;
-		return res;
 	}
+}
+
+static inline void __nvmeib_pet_stream_write_spacer(struct nvmeib_pet_stream* self, u16 physical_offset, u16 body_n_bytes)
+{
+	/* section_offset zero marks a spacer; bytes is the payload after this header. */
+	struct nvmeib_pet_msg_header const spacer = {
+		.section_offset = 0,
+		.spacer = {
+			.bytes = body_n_bytes,
+			.unused = 0,
+		},
+	};
+
+	BUG_ON((size_t)physical_offset + sizeof(spacer) + body_n_bytes > self->data.iov_len);
+	memcpy((u8*)self->data.iov_base + physical_offset, &spacer, sizeof(spacer));
+}
+
+static inline u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream const* self, u16 physical_offset, u16 eof_offset)
+{
+	BUG_ON(physical_offset > eof_offset);
+
+	u16 const remaining = eof_offset - physical_offset;
+	struct nvmeib_pet_msg_header header = {0};
+	u16 msg_n_bytes = 0;
+
+	/* EOF tail smaller than a header cannot be parsed by the viewer. */
+	if (remaining < sizeof(header)) {
+		return remaining;
+	}
+
+	memcpy(&header, (u8*)self->data.iov_base + physical_offset, sizeof(header));
+	if (header.section_offset == 0) {
+		/* Spacer bytes are the payload after the header. */
+		if (header.spacer.unused == 0 &&
+		    header.spacer.bytes <= (remaining - sizeof(header))) {
+			return (u16)(sizeof(header) + header.spacer.bytes);
+		}
+
+		/* Bad spacer is a stream invariant violation. */
+		BUG();
+		return remaining;
+	}
+
+	/* Message length is header plus argument payload, capped by EOF. */
+	msg_n_bytes = sizeof(header) + header.msg.args_n_bytes;
+	return msg_n_bytes <= remaining ? msg_n_bytes : remaining;
+}
+
+/* Allocate a physical range for one complete message.
+ * Returns the destination pointer and advances write_offset, or NULL when
+ * [protected_prefix, end) cannot hold size bytes. Maintains the viewer
+ * contract: message/spacer records up to max_written_bytes, never partial
+ * records after EOF.
+ */
+static inline u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size)
+{
+	u16 const header_n_bytes = sizeof(struct nvmeib_pet_msg_header);
+	u16 const msg_and_spacer_n_bytes = size + header_n_bytes;
+	u16 write_offset = self->write_offset;
+	size_t write_end = (size_t)write_offset + size;
+	u16 span = 0;
+
+	/* Fast path: the new message reaches EOF, so no spacer is needed. */
+	if (likely(write_end >= self->max_written_bytes &&
+		   write_end <= self->data.iov_len)) {
+		self->write_offset = (u16)write_end;
+		self->max_written_bytes = self->write_offset;
+		return (u8*)self->data.iov_base + write_offset;
+	}
+
+	/* No room at the tail; shrink EOF if needed and wrap to the prefix. */
+	if (unlikely(write_end > self->data.iov_len)) {
+		BUG_ON(write_offset > self->max_written_bytes);
+		self->max_written_bytes = write_offset;
+
+		self->write_offset = self->protected_prefix;
+		write_offset = self->write_offset;
+		write_end = (size_t)write_offset + size;
+	}
+
+	/* Even after wrap, the message must fit in the rotatable area. */
+	BUG_ON(write_end > self->data.iov_len);
+
+	/* Wrapping may also make the new message reach the current EOF. */
+	if (write_end >= self->max_written_bytes) {
+		self->write_offset = (u16)write_end;
+		self->max_written_bytes = self->write_offset;
+		return (u8*)self->data.iov_base + write_offset;
+	}
+
+	/* Middle overwrites need space for the message and a spacer header. */
+	while (write_offset + span < self->max_written_bytes) {
+		u16 const consumable_n_bytes = __nvmeib_pet_stream_calculate_consumable_n_bytes(self, write_offset + span, self->max_written_bytes);
+
+		BUG_ON(!consumable_n_bytes);
+
+		span += consumable_n_bytes;
+		/* Exact fit, EOF, or enough room for the message and the spacer . */
+		if (span == size ||
+		    ((write_offset + span) == self->max_written_bytes) ||
+		    span >= msg_and_spacer_n_bytes) {
+			break;
+		}
+	}
+
+	BUG_ON(span < size);
+
+	/* Extra consumed bytes must become a spacer or be hidden by EOF. */
+	if (span > size) {
+		u16 const leftover = span - size;
+		u16 const leftover_physical_offset = write_offset + size;
+
+		/* A header-sized leftover is kept parseable by turning it into a spacer. */
+		if (leftover >= header_n_bytes) {
+			__nvmeib_pet_stream_write_spacer(self, leftover_physical_offset, leftover - header_n_bytes);
+		} else {
+			/* Tiny leftovers are only valid at EOF; hide them by shrinking EOF. */
+			BUG_ON(write_offset + span != self->max_written_bytes);
+			self->max_written_bytes = leftover_physical_offset;
+		}
+	}
+
+	self->write_offset = write_offset + size;
+	/* EOF extension is handled by the fast path before middle overwrite. */
+	BUG_ON(self->max_written_bytes < self->write_offset);
+	return (u8*)self->data.iov_base + write_offset;
+}
+
+__attribute__((nonnull (1)))
+static inline u8* nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* self, u16 size)
+{
+	u8* msg = NULL;
+
+	BUG_ON(size < NVMEIB_PET_MIN_MSG_N_BYTES);
+	BUG_ON(size > NVMEIB_PET_MAX_MSG_N_BYTES);
+
+	if (!self->data.iov_base ||
+	    unlikely(self->protected_prefix > self->data.iov_len) ||
+	    unlikely((size_t)size > self->data.iov_len - self->protected_prefix)) {
+		return NULL;
+	}
+
+	BUG_ON(self->protected_prefix > self->max_written_bytes);
+	BUG_ON(self->write_offset < self->protected_prefix);
+	BUG_ON(self->write_offset > self->max_written_bytes);
+	BUG_ON(self->write_offset > self->data.iov_len);
+	BUG_ON(self->max_written_bytes > self->data.iov_len);
+
+	msg = __nvmeib_pet_stream_allocate_rotate(self, size);
+	if (!msg) {
+		return NULL;
+	}
+
+	__nvmeib_pet_stream_inc_written_msgs(self);
+	return msg;
 }
 
 __attribute__((nonnull (1)))
@@ -173,13 +337,16 @@ static inline void nvmeib_pet_stream_protect_prefix(struct nvmeib_pet_stream* se
 	}
 
 	BUG_ON(self->protected_prefix > self->max_written_bytes);
+	BUG_ON(self->max_written_bytes > self->data.iov_len);
 	self->protected_prefix = self->max_written_bytes;
+	BUG_ON((size_t)self->data.iov_len - self->protected_prefix < NVMEIB_PET_MIN_MSG_N_BYTES);
+	self->write_offset = self->protected_prefix;
 }
 
-static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset, u8 args_n_bytes)
+static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 raw_section_offset, u8 args_n_bytes)
 {
 	return (struct nvmeib_pet_msg_header){
-		.offset = offset+1, /* offset==0 would be a special offset */
+		.section_offset = raw_section_offset+1, /* section_offset==0 would be a special offset */
 		.msg = {
 			.timestamp = nvmeib_pet_get_trace_time_ns(),
 			.args_n_bytes = args_n_bytes,
@@ -193,11 +360,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -206,7 +373,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg1 = (exp1), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -217,11 +384,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -232,7 +399,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg2 = (exp2), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -243,11 +410,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -260,7 +427,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg3 = (exp3), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -271,11 +438,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -290,7 +457,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg4 = (exp4), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -301,11 +468,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -322,7 +489,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg5 = (exp5), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -333,11 +500,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -356,7 +523,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg6 = (exp6), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -367,11 +534,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -392,7 +559,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg7 = (exp7), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -403,11 +570,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -430,7 +597,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg8 = (exp8), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -441,11 +608,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -470,7 +637,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg9 = (exp9), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -481,11 +648,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -512,7 +679,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg10 = (exp10), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -523,11 +690,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10) + sizeof(exp11); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -556,7 +723,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg11 = (exp11), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -567,11 +734,11 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10) + sizeof(exp11) + sizeof(exp12); \
 	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	struct iovec dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
-	if (dest.iov_base) { \
+	if (dest) { \
 		struct __attribute__((packed)) { \
 			struct nvmeib_pet_msg_header header; \
 			typeof(exp1) arg1; \
@@ -602,7 +769,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset
 			.arg12 = (exp12), \
 		}; \
 		\
-		memcpy(dest.iov_base, &__tmp, sizeof(__tmp)); \
+		memcpy(dest, &__tmp, sizeof(__tmp)); \
 		written = sizeof(__tmp); \
 	} \
 	written; \
@@ -710,6 +877,10 @@ static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pe
 								     .data = { 0 },
 								     .release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
 							     };
+
+	if (buffer.data.iov_base) {
+		BUG_ON(buffer.data.iov_len <= NVMEIB_PET_MIN_JOURNAL_N_BYTES);
+	}
 
 	return (struct nvmeib_pet_journal){
 		.controller = controller,
