@@ -78,6 +78,10 @@ struct nvmeib_pet_stream{
 	struct iovec data;
 	u16 written_bytes;
 	u16* written_msgs; /* pointer to data.iov_base[8], num_messages */
+	/* Bytes in [0, protected_prefix) are retained by rotation. The area starts
+	 * with the entity header and may be extended by explicit user request.
+	 */
+	u16 protected_prefix;
 };
 
 enum {NVMEIB_PET_MAX_STREAM_SIZE=64*1024}; //because written_bytes is u16
@@ -108,7 +112,8 @@ static inline struct nvmeib_pet_stream nvmeib_pet_stream_make(struct iovec data)
 	struct nvmeib_pet_stream stream = {
 		.data = data,
 		.written_bytes = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
-		.written_msgs = data.iov_base ? (u16*)((u8*)data.iov_base + NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET) : (u16*)NULL
+		.written_msgs = data.iov_base ? (u16*)((u8*)data.iov_base + NVMEIB_PET_STREAM_WRITTEN_MSGS_OFFSET) : (u16*)NULL,
+		.protected_prefix = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 	};
 
 	if (stream.written_msgs){ // If `stream.written_msgs` is not NULL, it implies that `data.iov_base` is not NULL.
@@ -158,6 +163,17 @@ static inline struct iovec nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* sel
 		(*self->written_msgs) += 1;
 		return res;
 	}
+}
+
+__attribute__((nonnull (1)))
+static inline void nvmeib_pet_stream_protect_prefix(struct nvmeib_pet_stream* self)
+{
+	if (!self->data.iov_base) {
+		return;
+	}
+
+	BUG_ON(self->protected_prefix > self->written_bytes);
+	self->protected_prefix = self->written_bytes;
 }
 
 static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 offset, u8 args_n_bytes)
@@ -741,6 +757,25 @@ __attribute__((format (printf, 1, 2)))
 static inline void nvmeib_pet_journal_add_msg_verify_format(char const * const fmt, ...)
 {
 	(void)fmt;
+}
+
+/* Mark all currently written journal bytes as protected prefix. Call this after
+ * writing stable entity context; later rotation may overwrite only bytes after
+ * stream.protected_prefix. Inactive journals are ignored.
+ */
+__attribute__((nonnull (1)))
+static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* self)
+{
+	bool is_in_use = false;
+
+	if (!nvmeib_pet_journal_is_activated(self)) {
+		return;
+	}
+
+	is_in_use = __nvmeib_pet_journal_test_and_set_in_use(self);
+	BUG_ON(is_in_use);
+	nvmeib_pet_stream_protect_prefix(&self->stream);
+	__nvmeib_pet_journal_clear_in_use(self);
 }
 
 //don't add nvmeib_pet_journal_is_activated check here - too late - the arguments are already evaluated

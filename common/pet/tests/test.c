@@ -186,6 +186,12 @@ static void __test_check_payload_sequence(size_t offset, u8 first, size_t size)
 	}
 }
 
+static void __test_check_protected_area(struct nvmeib_pet_stream const* stream, u16 protected_prefix)
+{
+	BUG_ON(stream->protected_prefix != protected_prefix);
+	BUG_ON(stream->protected_prefix > stream->written_bytes);
+}
+
 #define TEST_STREAM_WRITE_SEQUENCE(stream, raw_offset, expected_size, first_value, ...) \
 do { \
 	size_t const __start = (stream).written_bytes; \
@@ -215,6 +221,41 @@ void test_stream_write_all_arg_counts(void)
 	TEST_STREAM_WRITE_SEQUENCE(stream, 0x010c, 12, 0x43, (u8)0x43, (u8)0x44, (u8)0x45, (u8)0x46, (u8)0x47, (u8)0x48, (u8)0x49, (u8)0x4a, (u8)0x4b, (u8)0x4c, (u8)0x4d, (u8)0x4e);
 
 	BUG_ON(*stream.written_msgs != 12);
+}
+
+void test_stream_protect_empty_prefix(void)
+{
+	struct nvmeib_pet_stream stream = {0};
+
+	__test_stream_reset(&stream);
+	nvmeib_pet_stream_protect_prefix(&stream);
+
+	__test_check_protected_area(&stream, NVMEIB_PET_ENTITY_HEADER_SIZE);
+	BUG_ON(stream.written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
+	BUG_ON(*stream.written_msgs != 0);
+}
+
+void test_stream_protect_prefix_expands_protected_area(void)
+{
+	struct nvmeib_pet_stream stream = {0};
+	u16 first_protected = 0;
+	u16 second_protected = 0;
+
+	__test_stream_reset(&stream);
+	__test_check_protected_area(&stream, NVMEIB_PET_ENTITY_HEADER_SIZE);
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0501, 1, 0x01, (u8)0x01);
+	first_protected = stream.written_bytes;
+	nvmeib_pet_stream_protect_prefix(&stream);
+	__test_check_protected_area(&stream, first_protected);
+
+	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0502, 1, 0x02, (u8)0x02);
+	__test_check_protected_area(&stream, first_protected);
+	nvmeib_pet_stream_protect_prefix(&stream);
+
+	second_protected = stream.written_bytes;
+	__test_check_protected_area(&stream, second_protected);
+	BUG_ON(second_protected <= first_protected);
+	BUG_ON(*stream.written_msgs != 2);
 }
 
 void test_stream_write_mixed_size_args(void)
@@ -401,6 +442,46 @@ void test_io_pet_inactive_journal_does_not_evaluate_args(void)
 	BUG_ON(written != 0);
 	BUG_ON(journal_get_count != 1);
 	BUG_ON(arg_count != 0);
+}
+
+void test_inactive_journal_protect_prefix_is_noop(void)
+{
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(NULL, true);
+
+	nvmeib_pet_journal_protect_prefix(&journal);
+
+	BUG_ON(nvmeib_pet_journal_is_activated(&journal));
+	BUG_ON(journal.stream.protected_prefix != 0);
+}
+
+void test_journal_protect_prefix_after_context(void)
+{
+	struct perf_test_controller perf_controller = {
+		.base = {
+			.flush = __perf_test_flush,
+			.get_buffer = __perf_test_get_buffer,
+			.put_buffer = __perf_test_put_buffer
+		},
+		.msgs_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE),
+		.memcpy_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE)
+	};
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
+	u16 protected_prefix = 0;
+
+	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0601, (u8)0x01);
+	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0602, (u8)0x02);
+	protected_prefix = journal.stream.written_bytes;
+	nvmeib_pet_journal_protect_prefix(&journal);
+	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0603, (u8)0x03);
+
+	__test_check_protected_area(&journal.stream, protected_prefix);
+	BUG_ON(journal.stream.written_bytes <= protected_prefix);
+	BUG_ON(*(journal.stream.written_msgs) != 3);
+
+	nvmeib_pet_journal_commit(&journal);
+
+	free(perf_controller.msgs_buffer.iov_base);
+	free(perf_controller.memcpy_buffer.iov_base);
 }
 
 struct release_cookie_test_controller {
@@ -846,6 +927,8 @@ int main(int argc, char* argv[]){
 	{
 		test_msg_header_layout();
 		test_stream_write_all_arg_counts();
+		test_stream_protect_empty_prefix();
+		test_stream_protect_prefix_expands_protected_area();
 		test_stream_write_mixed_size_args();
 		test_stream_write_zero_offset_is_stored_as_one();
 		test_stream_write_supported_arg_types();
@@ -853,6 +936,8 @@ int main(int argc, char* argv[]){
 		test_stream_write_does_not_evaluate_args_without_space();
 		test_io_pet_macro_args_are_evaluated_once();
 		test_io_pet_inactive_journal_does_not_evaluate_args();
+		test_inactive_journal_protect_prefix_is_noop();
+		test_journal_protect_prefix_after_context();
 		test_journal_returns_release_cpu_to_controller();
 		test_inactive_journal_uses_no_release_cpu();
 		test_journal_timestamp();
