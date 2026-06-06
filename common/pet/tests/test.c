@@ -131,7 +131,7 @@ struct iovec iovec_malloc(size_t size)
 //gdb: examine command: x /[count]xb <pointer> //b for bytes
 static u8 __test_message_x_memory[512] = {0};
 static struct iovec __test_message_iovec = {.iov_base = __test_message_x_memory, .iov_len = ARRAY_SIZE(__test_message_x_memory)};
-static char const* __test_random_rotation_output_dir = "rotations";
+static char const* __test_random_rotation_output_dir = "build/rotations";
 
 static void __test_mkdir_if_needed(char const* path)
 {
@@ -1837,8 +1837,11 @@ void test_errno(void)
 
 int main(int argc, char* argv[]){
 	int_cpu_freq_tsc_offset_jiffies();  // measure CPU freq, initialize tsc_khz
-	char const* fname = argc > 1 ? argv[1] : "test.pet";
-	__test_random_rotation_output_dir = argc > 2 ? argv[2] : "rotations";
+	char const* fname = argc > 1 ? argv[1] : "build/test.pet";
+	__test_random_rotation_output_dir = argc > 2 ? argv[2] : "build/rotations";
+	if (argc <= 2) {
+		__test_mkdir_if_needed("build");
+	}
 	__test_mkdir_if_needed(__test_random_rotation_output_dir);
 
 	int const fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
