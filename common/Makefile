@@ -34,6 +34,7 @@ nvmeib_common-y := \
 	nvmeib_scatterlist_iter.o \
 	nvmeib_completion_noise.o \
 	nvmeib_pcpu_wq.o \
+	pet/nvmeib_pet_specification.o \
 	nvmeib_io_histograms.o
 
 ifeq ($(call ofed_ver_check,5,1),no)

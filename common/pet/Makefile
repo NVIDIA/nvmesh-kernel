@@ -35,6 +35,8 @@ PERF_REPORT_FLAGS ?= --stdio --stdio --sort=symbol --percentage=absolute -g none
 
 TEST_EXE := $(BUILD_DIR)/test
 TEST_OBJ := $(BUILD_DIR)/test.o
+PET_SPEC_OBJ := $(BUILD_DIR)/nvmeib_pet_specification.o
+TEST_OBJS := $(TEST_OBJ) $(PET_SPEC_OBJ)
 TEST_DCT := $(BUILD_DIR)/dict.${COMMIT_ID}.json
 TEST_OUT := $(BUILD_DIR)/messages.pet
 
@@ -58,7 +60,10 @@ $(CFLAGS_STAMP): FORCE | dirs
 $(BUILD_DIR)/test.o: $(TESTS_DIR)/test.c nvmeib_pet_specification.h $(CFLAGS_STAMP) | dirs
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TEST_EXE): $(TEST_OBJ)
+$(BUILD_DIR)/nvmeib_pet_specification.o: nvmeib_pet_specification.c nvmeib_pet_specification.h $(CFLAGS_STAMP) | dirs
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(TEST_EXE): $(TEST_OBJS)
 	$(CC) $^ -o $@ $(LDFLAGS)
 
 test: dirs $(TEST_EXE)

@@ -196,6 +196,7 @@ SOURCES += $(CMDIR)/nvmeib_error_tags.c
 SOURCES += $(CMDIR)/nvmeib_pcpu_wq.c
 SOURCES += $(CMDIR)/proc_epilog.c
 SOURCES += $(CMDIR)/nvmeib_scatterlist_iter.c
+SOURCES += $(SSDA)/common/pet/nvmeib_pet_specification.c
 SOURCES += $(SSDA)/common_public/nvmeib_public_procfs.c
 SOURCES += $(SSDA)/common_public/nvmeib_jdr_proc.c
 SOURCES += $(SSDA)/common_public/kth/nvmeib_public_kth.c
