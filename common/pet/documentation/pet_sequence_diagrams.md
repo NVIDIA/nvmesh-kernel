@@ -204,6 +204,9 @@ struct io_pet_controller (kernel implementation)
 - The controller is created once per nvmeibc module instance
 - All volumes and block devices share the same controller instance
 - The controller uses the msgloop infrastructure created by the common module
+- Runtime journal layout and rotation are described separately in
+  `pet_message_rotation.md`. Controller propagation is independent from whether
+  an entity is still appending linearly or has rotated its suffix.
 - Controller creation can fail if:
   - Memory allocation fails
   - Buffer size configuration is invalid (< 256 bytes)

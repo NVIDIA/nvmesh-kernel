@@ -67,6 +67,46 @@ The proposed solution does NOT use the components above, but provides an alterna
 5. The entity buffer is single threaded.  
 6. The number of messages, sent via PET functionality, should be 0(zero) in production.
 
+### Current journal storage
+
+The current PET stream is a bounded byte journal. A committed entity starts
+with:
+
+```c
+struct __attribute__((packed)) nvmeib_pet_stream_header {
+    u64 commit_id;
+    u16 journal_size;
+};
+```
+
+`journal_size` is the committed scan boundary. The viewer parses only bytes
+inside this range and treats the records after the header as either normal
+messages or rotation spacers.
+
+Normal messages store a `section_offset` value that is the raw message section
+offset plus one. `section_offset == 0` is reserved for a spacer record. A spacer
+does not describe a message; it tells the viewer how many payload bytes to skip.
+
+The stream keeps:
+
+* `max_written_bytes` - the highest byte written; committed as `journal_size`
+* `write_offset` - the next physical byte to allocate
+* `protected_prefix` - the range `[0, protected_prefix)` retained by rotation
+
+The user may call `nvmeib_pet_journal_protect_prefix()` after writing the
+messages that describe the entity context. Later messages are written into the
+rotating suffix. If the suffix wraps, older suffix messages may be replaced by
+newer messages or spacers, but the protected prefix stays visible.
+
+The viewer contract is:
+
+```text
+(msg)(msg|spacer)*(msg|eof)
+```
+
+where `eof` is `journal_size`. Messages inside one entity are unrotated by
+timestamp drop detection before they are returned to higher-level viewer code.
+
 ### Usage example
 
 ```c

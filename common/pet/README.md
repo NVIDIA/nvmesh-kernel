@@ -29,6 +29,53 @@ Since the block code is shared between all of them, we need from the first day t
 
 The idea should cut the bootstrap phase from few weeks to probably one week or even less. The next step would be to introduce "mcs" like file, where those message will be copied to.
 
+## Current Journal Format
+
+Each flushed PET entity starts with a compact stream header:
+
+```text
+{ commit_id, journal_size }
+```
+
+The viewer scans only `journal_size` bytes. Records after the header are
+self-describing messages or rotation spacers. A normal message stores the
+dictionary section offset plus one in `section_offset`; `section_offset == 0`
+marks a spacer whose `bytes` field tells the viewer how many payload bytes to
+skip.
+
+PET journals are bounded. A journal may protect an initial prefix with
+`nvmeib_pet_journal_protect_prefix()`, then rotate only the suffix. This keeps
+the entity context visible while preserving the latest suffix messages. See
+`documentation/pet_message_rotation.md` for the exact writer and viewer
+contract.
+
+## Local Validation Targets
+
+From `common/pet`:
+
+```bash
+make test
+make demo
+make perf
+make coverage
+```
+
+- `make test` builds and runs the C test suite.
+- `make demo` also builds a dictionary, renders PET output, generates random
+  rotation journals under `build/rotations/`, and compares viewer output with
+  the expected raw output.
+- `make perf` builds with `-O2`, records `build/perf.data`, and prints the top
+  PET symbols from `perf report`.
+- `make coverage` captures an lcov/genhtml report under `build/coverage/`.
+
+Rotation demo artifacts are named:
+
+```text
+build/rotations/seed_*.pet
+build/rotations/seed_*.expected.txt
+build/rotations/seed_*.viewer.txt
+```
+
 ## Python dependencies
 
 - **pyelftools** -- ELF/DWARF parsing
@@ -86,10 +133,14 @@ installed under **`/opt/nvmesh/bin`** and also exposed under
 **`/var/log/nvmesh/trace_daemon/nvmesh_pet_messages`** (symlink to the same
 binary).
 
-## View PET Traces 
+## View PET Traces
 To view PET traces in human-readable text format on a NVMesh node:
 
 ```bash
 cd /var/log/nvmesh/trace_daemon
 ./nvmesh_pet_messages view --no-sort pet_dictionaries/ nvmeibc_io_pet_*
 ```
+
+The viewer unrotates messages inside each entity when a rotating journal wraps.
+By default, `view` and `view-raw` also sort across all selected entities by
+timestamp; `--no-sort` keeps entity-local output easier to inspect.

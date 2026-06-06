@@ -50,7 +50,11 @@ NVMEIBC_IO_PET_MSG(&o->journal,
 	severity, rv);
 ```
 
-The macro returns written bytes (`u16`). Most production callsites ignore it, but a zero return means the message was not written, usually because the journal is inactive or full.
+The macro returns written bytes (`u16`). Most production callsites ignore it. A
+zero return means the message was not written, usually because the journal is
+inactive or the stream is invalid. Do not use zero as the normal "journal full"
+signal: active rotating journals can keep writing by replacing older suffix
+records.
 
 Severity guide:
 
@@ -82,6 +86,8 @@ Rules:
 - PET supports 1 to 12 message arguments.
 - Do not pass `float`, `double`, `char *`, or `char const *` as PET arguments.
 - Do not rely on side effects in message arguments. Arguments are skipped when the journal is inactive, but evaluated when active even if the journal is later discarded by severity policy.
+  In an active rotating journal, a message may also be evaluated and written,
+  then later rotated out of the visible suffix.
 
 Common IO PET annotations currently used:
 
@@ -138,9 +144,34 @@ Important callsite areas:
 - `clnt/block/datapath_ec/recov/`
 - App-side analogues under `app/clnt/block/data_path/`, `app/clnt/block/managers/`, and `app/clnt/block/volume/`
 
+## Rotation And Protected Context
+
+PET journals are bounded. The current stream format keeps:
+
+- a protected prefix, usually the entity header plus early context messages
+- a rotating suffix, which retains the latest later messages
+
+After writing the messages that make the IO understandable, call:
+
+```c
+nvmeib_pet_journal_protect_prefix(&o->journal);
+```
+
+The protect call extends the retained prefix to the current journal end and
+makes later writes rotate in the suffix. Use it after stable context such as
+operation type, debug id, volume/topology identity, LBA range, and initial
+metadata. The suffix must still have enough room for rotation after protection.
+
+When adding messages, keep the protected context compact and high value. Later
+request/response or state-machine breadcrumbs can live in the rotating suffix.
+If a failure produces many suffix messages, older suffix breadcrumbs may be
+gone while the protected context remains.
+
 ## Reading PET Viewer Output
 
-Viewer output may be globally interleaved by timestamp. Read it by `entity=[N]` to reconstruct one operation lifecycle.
+The reader unrotates messages inside each entity when rotation wrapped the
+physical journal. Viewer output may still be globally interleaved by timestamp.
+Read it by `entity=[N]` to reconstruct one operation lifecycle.
 
 For observed simulator trace shapes, use `clnt/block/skills/dp_io_pet_patterns.md`. It catalogs the unique execution-flow patterns from `app/*_kc_*pet.log` and normalizes away raw values such as timestamps, addresses, lock ids, txids, and pointers.
 
@@ -165,6 +196,9 @@ Interpretation pattern:
 - Then inspect disk/RDMA/lock sub-events between those anchors.
 - Treat typed expansions as the semantic values; raw hex is still useful for exact comparisons.
 - If two entities refer to the same address, lock id, or blockset info, they may be related even when the operation timelines are separate.
+- If an entity rotated, missing older suffix messages may be a retention effect.
+  The protected prefix should still contain enough context to understand the
+  remaining suffix.
 
 ## Adding A New Message
 
@@ -177,7 +211,9 @@ Checklist:
 - Keep argument count under 12.
 - Guard detailed per-block or content dumps with `nvmeib_pet_journal_is_verbose()`.
 - Avoid strings and expensive formatting. PET stores compact typed values, not string payloads.
-- Consider the finite journal buffer. The default kernel PET buffer is intentionally small.
+- Consider the finite journal buffer. The default kernel PET buffer is
+  intentionally small; protect only compact context and leave room for the
+  rotating suffix.
 
 ## Useful Searches
 

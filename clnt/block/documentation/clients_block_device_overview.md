@@ -154,6 +154,8 @@ SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
 
 [Operation](#operation-\(op\))
 
+[Datapath IO PET diagnostics](#datapath-io-pet-diagnostics)
+
 [Command (cmd)](#command-\(cmd\))
 
 [RDMAs](#rdmas)
@@ -1528,6 +1530,17 @@ LBA \= Logical block address
 291. An operation (or ‘op’ for short) is the basic component of all datapath actions  
      1. An operation has an ‘op’ (read/write/trim/turn on dbit/fix bad sector/fix ram data structure) etc  
      2. An operation is spawned typically via an incoming bio, a problem in the blockset or a recovery mechanism
+
+### Datapath IO PET diagnostics {#datapath-io-pet-diagnostics}
+
+Datapath IO PET records a compact per-operation journal for diagnostics. The
+journal is usually discarded on the good path and flushed on commit when the
+operation severity and controller policy require it.
+
+For practical instrumentation and interpretation rules, use
+`nvmesh.kernel/clnt/block/skills/dp_io_pet.md`. For the common journal layout,
+protected-prefix behavior, rotation spacers, and viewer ordering rules, see
+`nvmesh.kernel/common/pet/documentation/pet_message_rotation.md`.
 
 ### Command (cmd) {#command-(cmd)}
 

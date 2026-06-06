@@ -17,9 +17,9 @@ This document compares:
 |---|---|---|
 | Primary API shape | `NVMEIBC_IO_PET_MSG(journal, "printf...", severity, args...)` with severity shortcuts (`_NORM/_WARN/_ERROR/_CRIT`) | `_NF/_ND/_NT/_NI/_NW/_NE(name, fmt, ...)`, `_N*_dmesg`, `_N*_SCOPE`, `_N*_to_user` |
 | Record ownership | Per-entity journal object (`struct nvmeib_pet_journal`) tied to operation context | Global/per-CPU trace channels (longterm, shortterm, goodpath, metrics, eph, eternal) |
-| Write timing | Append to private buffer during execution; flush/put on `nvmeib_pet_journal_commit()` | Event emitted at call site into configured trace channel |
+| Write timing | Write to a private bounded journal during execution; after prefix protection, later writes rotate in the suffix; flush/put on `nvmeib_pet_journal_commit()` | Event emitted at call site into configured trace channel |
 | Persistence policy | Flush decision can depend on worst severity seen in journal (`worst_severity`) and controller policy (`minimal_severity`) | Channel choice is explicit at callsite (`NVMEIB_LOG_LONGTERM`, `..._GOODPATH`, `..._ETERNAL`, etc.); dmesg mirroring configurable per macro |
-| Buffer model | Explicit `get_buffer/put_buffer/flush` controller API; can be no-memory/no-buffer safely | Trace backend/channel infra from `nvmeib_trace.h` + generated tracepoints; no per-operation private journal |
+| Buffer model | Explicit `get_buffer/put_buffer/flush` controller API; can be no-memory/no-buffer safely; retained data is protected prefix plus latest rotating suffix | Trace backend/channel infra from `nvmeib_trace.h` + generated tracepoints; no per-operation private journal |
 | Message identity | Message text embedded in dedicated ELF section, message id derived from section offset | Trace event identity is `name` (mapped to generated trace function symbol) |
 | Format contract | `printf`-like format verified via `__attribute__((format(printf,...)))` helper; args serialized as typed compact variants | Custom trace format language (`@TAG`-style placeholders) used by binary tracer/event pipeline |
 | Argument/type limits | PET message constructor supports 1..12 args (`NVMEIB_PET_MSG_1..12`); forbids float/double/char*/const char* | Kernel trace path explicitly works around zero-arg limitation and mentions LTTNG max-args pressure (10) |
@@ -37,7 +37,7 @@ This document compares:
 ### 1. Data flow model
 - PET:
   1. `NVMEIBC_IO_PET_MSG*` builds compact typed message arguments; the journal add path captures and serializes the timestamp.
-  2. Message appended into per-operation journal stream.
+  2. Message is written into the per-operation journal stream. Before rotation this is append-only; after prefix protection the suffix can rotate and overwrite older suffix records.
   3. On commit, journal flushes once and releases buffer.
 - Binary traces:
   1. `_N*` wrapper chooses channel/severity macro.
@@ -49,7 +49,7 @@ This document compares:
 - Binary traces perform *preselected routing* by macro/channel used at instrumentation point.
 
 ### 3. Context strategy
-- PET stores the full per-entity timeline in one buffer, making reconstruction of a single failing I/O straightforward.
+- PET stores an initial protected context and the latest visible suffix in one buffer, making reconstruction of a single failing I/O straightforward while keeping memory bounded.
 - Binary traces emphasize globally mergeable event streams across subsystems/channels.
 
 ## Struct Rendering and Build Costs
@@ -80,7 +80,7 @@ This document compares:
 
 ### Argument evaluation semantics
 - PET top-level macro (`NVMEIBC_IO_PET_MSG`) wraps formatting/serialization inside `if (nvmeib_pet_journal_is_activated(...))`, so `__VA_ARGS__` are not evaluated when the journal is inactive.
-- PET lower-level add path (`nvmeib_pet_journal_add_msg(...)`) assumes the message object already exists; as noted in `nvmeib_pet_specification.h`, at that stage arguments are already evaluated.
+- PET lower-level add path (`nvmeib_pet_journal_add_msg(...)`) assumes the message object already exists; as noted in `nvmeib_pet_specification.h`, at that stage arguments are already evaluated. Active rotating journals normally continue writing after the physical end of the buffer by replacing older suffix records, so do not model active writes as "evaluate until full, then stop".
 - Traces: generated trace functions perform level checks *inside* the function body (for example `if (scope >= lvl)` in generated code), but function-call arguments are evaluated before entering that function. So expensive/side-effectful trace arguments still execute even when the runtime level check drops the event.
 - With `DISABLE_ALL_TRACING`, dummy macros in `kr_incs_dummy_empty_traces.h` collapse many trace calls to empty expressions, which removes most argument evaluation.
 - Practical rule for both systems: avoid side effects in log arguments; precompute only when needed or guard explicitly around expensive argument expressions.
@@ -96,6 +96,7 @@ Use PET when:
 - You need end-to-end history of one I/O/operation instance.
 - You want to keep good-path persistence low and flush mainly on problematic outcomes.
 - You are instrumenting deep datapath execution where message locality per operation matters.
+- You can write stable context first, protect it, and then keep only the latest later messages in a rotating suffix.
 
 Use binary traces when:
 - You need system-wide observability across components/channels.
@@ -134,6 +135,7 @@ Guidelines:
 - Ensure argument count/type fit PET constraints (1..12 args, no float/double/string pointers).
 ### 2) PET -> Binary traces: non-equivalent / not lossless
 - PET is designed around deferred commit of a message set (journal) and may drop the whole set at commit time.
+- PET rotation may also drop older suffix messages while keeping the protected prefix and newer suffix messages.
 - Binary traces emit each event immediately, so they cannot represent "build a set, then discard all of it" as a native semantic.
 - Because of that semantic mismatch, PET -> binary traces is not a true migration. At best it is a behavioral rewrite that changes persistence and noise characteristics.
 - If trace visibility is needed for PET paths, keep traces only as coarse breadcrumbs and retain PET as the source of detailed per-entity history.
