@@ -1034,6 +1034,9 @@ class SaveDictionary(Command):
 
 
 class ViewRawMessages(Command):
+	# Size in bytes of the UM tracer buffer header written by _write_initial_header().
+	_TRACER_HEADER_SIZE = 8
+
 	@classmethod
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
@@ -1047,18 +1050,56 @@ class ViewRawMessages(Command):
 			default=False,
 			help="By default, all raw records are sorted; '--no-sort' disables the ordering.",
 		)
+		parser.add_argument(
+			'--um-trace',
+			action='store_true',
+			dest='um_trace',
+			default=False,
+			help='Skip UM tracer buffer headers before each PET entity.',
+		)
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
 		self.traces = args.traces
 		self.sort = not args.no_sort
+		self.um_trace = args.um_trace
+		self.__tsc_khz = None
+		self.__hdr_flags = None
+
+	def __skip_tracer_headers(self, fobj: typing.BinaryIO) -> bool:
+		pos = fobj.tell()
+		header_bytes = fobj.read(self._TRACER_HEADER_SIZE)
+		if len(header_bytes) < self._TRACER_HEADER_SIZE:
+			fobj.seek(pos)
+			return False
+
+		word0 = struct.unpack_from('<I', header_bytes, 0)[0]
+		word1 = struct.unpack_from('<I', header_bytes, 4)[0]
+
+		if self.__tsc_khz is None:
+			self.__tsc_khz = word1
+			self.__hdr_flags = word0 >> 24
+			return True
+
+		if word1 == self.__tsc_khz and (word0 >> 24) == self.__hdr_flags:
+			return True
+
+		fobj.seek(pos)
+		return False
 
 	def __iter_raw_messages(self) -> typing.Generator[PetRawMessage, None, None]:
 		for fpath in self.traces:
+			self.__tsc_khz = None
+			self.__hdr_flags = None
 			with open(fpath, 'rb') as fobj:
 				reader = PetArchiveReader(fobj)
 				idx = 0
 				while not reader.is_eof():
+					if self.um_trace:
+						while self.__skip_tracer_headers(fobj):
+							pass
+						if reader.is_eof():
+							break
 					entity = reader.read_entity(fpath.name if len(self.traces) > 1 else '', idx)
 					idx += 1
 					yield from entity.messages
