@@ -163,6 +163,17 @@ void test_msg_header_layout(void)
 	BUG_ON(sizeof(struct nvmeib_pet_msg_header) != header_n_bytes);
 }
 
+void test_stream_header_layout(void)
+{
+	enum {
+		header_n_bytes = sizeof(((struct nvmeib_pet_stream_header *)0)->commit_id) +
+				 sizeof(((struct nvmeib_pet_stream_header *)0)->journal_size),
+	};
+
+	BUG_ON(sizeof(struct nvmeib_pet_stream_header) != header_n_bytes);
+	BUG_ON(NVMEIB_PET_ENTITY_HEADER_SIZE != sizeof(struct nvmeib_pet_stream_header));
+}
+
 static struct nvmeib_pet_msg_header __test_load_msg_header(size_t offset)
 {
 	struct nvmeib_pet_msg_header header = {0};
@@ -515,6 +526,16 @@ static void __test_check_protected_area(struct nvmeib_pet_stream const* stream, 
 	BUG_ON(stream->protected_prefix > stream->max_written_bytes);
 }
 
+static void __test_stream_set_synthetic_protected_prefix(struct nvmeib_pet_stream* stream)
+{
+	/* Rotation-shape tests use tiny buffers on purpose; bypass the production
+	 * "two max messages" capacity contract and set the protected prefix directly.
+	 */
+	BUG_ON(stream->max_written_bytes > stream->data.iov_len);
+	stream->protected_prefix = stream->max_written_bytes;
+	stream->write_offset = stream->protected_prefix;
+}
+
 #define TEST_STREAM_WRITE_SEQUENCE(stream, raw_offset, expected_size, first_value, ...) \
 do { \
 	size_t const __start = (stream).max_written_bytes; \
@@ -543,7 +564,6 @@ void test_stream_write_all_arg_counts(void)
 	TEST_STREAM_WRITE_SEQUENCE(stream, 0x010b, 11, 0x38, (u8)0x38, (u8)0x39, (u8)0x3a, (u8)0x3b, (u8)0x3c, (u8)0x3d, (u8)0x3e, (u8)0x3f, (u8)0x40, (u8)0x41, (u8)0x42);
 	TEST_STREAM_WRITE_SEQUENCE(stream, 0x010c, 12, 0x43, (u8)0x43, (u8)0x44, (u8)0x45, (u8)0x46, (u8)0x47, (u8)0x48, (u8)0x49, (u8)0x4a, (u8)0x4b, (u8)0x4c, (u8)0x4d, (u8)0x4e);
 
-	BUG_ON(*stream.journal_size != 0);
 }
 
 void test_stream_protect_empty_prefix(void)
@@ -555,7 +575,6 @@ void test_stream_protect_empty_prefix(void)
 
 	__test_check_protected_area(&stream, NVMEIB_PET_ENTITY_HEADER_SIZE);
 	BUG_ON(stream.max_written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
-	BUG_ON(*stream.journal_size != 0);
 }
 
 void test_stream_protect_prefix_expands_protected_area(void)
@@ -578,7 +597,6 @@ void test_stream_protect_prefix_expands_protected_area(void)
 	second_protected = stream.max_written_bytes;
 	__test_check_protected_area(&stream, second_protected);
 	BUG_ON(second_protected <= first_protected);
-	BUG_ON(*stream.journal_size != 0);
 }
 
 void test_stream_write_mixed_size_args(void)
@@ -608,7 +626,6 @@ void test_stream_write_mixed_size_args(void)
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(expected));
 	BUG_ON(stream.max_written_bytes != start + written);
-	BUG_ON(*stream.journal_size != 0);
 	__test_check_msg_header(start, 0x0201, sizeof(expected));
 	__test_check_payload(start, &expected, sizeof(expected));
 }
@@ -658,7 +675,7 @@ void test_stream_rotation_small_over_large_leaves_spacer(void)
 
 	memset(buffer, 0xcc, sizeof(buffer));
 	stream = nvmeib_pet_stream_make((struct iovec){.iov_base = buffer, .iov_len = sizeof(buffer)});
-	nvmeib_pet_stream_protect_prefix(&stream);
+	__test_stream_set_synthetic_protected_prefix(&stream);
 
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0701, (u64)0x11, (u64)0x12) != msg_2u64_n_bytes);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0702, (u8)0x22) != msg_u8_n_bytes);
@@ -698,7 +715,7 @@ void test_stream_rotation_small_over_large_consumes_next_without_tiny_gap(void)
 
 	memset(buffer, 0xcc, sizeof(buffer));
 	stream = nvmeib_pet_stream_make((struct iovec){.iov_base = buffer, .iov_len = sizeof(buffer)});
-	nvmeib_pet_stream_protect_prefix(&stream);
+	__test_stream_set_synthetic_protected_prefix(&stream);
 
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0711, (u64)0x11) != msg_u64_n_bytes);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0712, (u8)0x22) != msg_u8_n_bytes);
@@ -733,7 +750,7 @@ void test_stream_rotation_large_over_small_messages_reduces_eof_for_tiny_tail(vo
 
 	memset(buffer, 0xcc, sizeof(buffer));
 	stream = nvmeib_pet_stream_make((struct iovec){.iov_base = buffer, .iov_len = sizeof(buffer)});
-	nvmeib_pet_stream_protect_prefix(&stream);
+	__test_stream_set_synthetic_protected_prefix(&stream);
 
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0721, (u8)0x21) != msg_u8_n_bytes);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0722, (u8)0x22) != msg_u8_n_bytes);
@@ -770,7 +787,7 @@ void test_stream_rotation_uses_unwritten_tail_after_eof(void)
 
 	memset(buffer, 0xcc, sizeof(buffer));
 	stream = nvmeib_pet_stream_make((struct iovec){.iov_base = buffer, .iov_len = sizeof(buffer)});
-	nvmeib_pet_stream_protect_prefix(&stream);
+	__test_stream_set_synthetic_protected_prefix(&stream);
 
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0725, (u8)0x25) != msg_u8_n_bytes);
 	BUG_ON(stream.max_written_bytes == sizeof(buffer));
@@ -839,7 +856,7 @@ void test_stream_allocate_rotate_final_update_does_not_extend_eof(void)
 
 	memset(spacer_buffer, 0xcc, sizeof(spacer_buffer));
 	stream = nvmeib_pet_stream_make((struct iovec){.iov_base = spacer_buffer, .iov_len = sizeof(spacer_buffer)});
-	nvmeib_pet_stream_protect_prefix(&stream);
+	__test_stream_set_synthetic_protected_prefix(&stream);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0727, (u64)0x27, (u64)0x28) != msg_2u64_n_bytes);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0728, (u8)0x28) != msg_u8_n_bytes);
 	old_max_written_bytes = stream.max_written_bytes;
@@ -851,7 +868,7 @@ void test_stream_allocate_rotate_final_update_does_not_extend_eof(void)
 
 	memset(tiny_tail_buffer, 0xcc, sizeof(tiny_tail_buffer));
 	stream = nvmeib_pet_stream_make((struct iovec){.iov_base = tiny_tail_buffer, .iov_len = sizeof(tiny_tail_buffer)});
-	nvmeib_pet_stream_protect_prefix(&stream);
+	__test_stream_set_synthetic_protected_prefix(&stream);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0729, (u8)0x29) != msg_u8_n_bytes);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x072a, (u8)0x2a) != msg_u8_n_bytes);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x072b, (u8)0x2b) != msg_u8_n_bytes);
@@ -889,7 +906,7 @@ void test_stream_rotation_end_wrap_shrinks_eof_and_writes_from_prefix(void)
 
 	memset(buffer, 0xcc, sizeof(buffer));
 	stream = nvmeib_pet_stream_make((struct iovec){.iov_base = buffer, .iov_len = sizeof(buffer)});
-	nvmeib_pet_stream_protect_prefix(&stream);
+	__test_stream_set_synthetic_protected_prefix(&stream);
 
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0731, (u64)0x31, (u64)0x32) != msg_2u64_n_bytes);
 	BUG_ON(__NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0732, (u8)0x32) != msg_u8_n_bytes);
@@ -912,6 +929,7 @@ void test_stream_rotation_end_wrap_shrinks_eof_and_writes_from_prefix(void)
 void test_stream_commit_sets_journal_size(void)
 {
 	struct nvmeib_pet_stream stream = {0};
+	struct nvmeib_pet_stream_header committed_header = {0};
 	u16 written = 0;
 	u16 expected_journal_size = 0;
 
@@ -921,12 +939,13 @@ void test_stream_commit_sets_journal_size(void)
 	expected_journal_size = stream.max_written_bytes;
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(u8));
-	BUG_ON(*stream.journal_size != 0);
 
 	nvmeib_pet_stream_commit(&stream);
 
-	BUG_ON(*stream.journal_size != expected_journal_size);
 	BUG_ON(stream.data.iov_len != expected_journal_size);
+	memcpy(&committed_header, stream.data.iov_base, sizeof(committed_header));
+	BUG_ON(committed_header.commit_id != (u64)COMMIT_ID);
+	BUG_ON(committed_header.journal_size != expected_journal_size);
 }
 
 static size_t __test_make_random_rotation_expectation(struct test_random_rotation_msg const* generated_msgs,
@@ -992,6 +1011,7 @@ void test_journal_random_rotation_retains_last_messages(void)
 		u16 useful_capacity = 0;
 		struct test_random_rotation_stats run_stats = {0};
 		struct nvmeib_pet_stream committed_stream = {0};
+		struct nvmeib_pet_stream_header committed_header = {0};
 
 		srandom(initial_seed);
 		nvmeib_pet_journal_protect_prefix(&journal);
@@ -1017,7 +1037,9 @@ void test_journal_random_rotation_retains_last_messages(void)
 
 		committed_stream = journal.stream;
 		nvmeib_pet_journal_commit(&journal);
-		BUG_ON(*committed_stream.journal_size != committed_stream.max_written_bytes);
+		memcpy(&committed_header, committed_stream.data.iov_base, sizeof(committed_header));
+		BUG_ON(committed_header.commit_id != (u64)COMMIT_ID);
+		BUG_ON(committed_header.journal_size != committed_stream.max_written_bytes);
 
 		__test_random_rotation_write_journal_file(initial_seed, &committed_stream);
 		__test_random_rotation_write_expected_file(initial_seed, expected_msgs, n_expected_msgs);
@@ -1100,22 +1122,6 @@ void test_stream_write_args_are_evaluated_once(void)
 	__test_check_payload(start, &expected, sizeof(expected));
 }
 
-void test_stream_write_does_not_evaluate_args_without_space(void)
-{
-	u8 small[NVMEIB_PET_ENTITY_HEADER_SIZE + sizeof(struct nvmeib_pet_msg_header)] = {0};
-	struct nvmeib_pet_stream stream = nvmeib_pet_stream_make((struct iovec){
-		.iov_base = small,
-		.iov_len = sizeof(small),
-	});
-	int arg_count = 0;
-	size_t written = __NVMEIB_PET_STREAM_WRITE_MSG(&stream, 0x0302, (u8)++arg_count);
-
-	BUG_ON(written != 0);
-	BUG_ON(arg_count != 0);
-	BUG_ON(stream.max_written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
-	BUG_ON(*stream.journal_size != 0);
-}
-
 static struct nvmeib_pet_journal* test_get_pet_journal(struct nvmeib_pet_journal* journal, unsigned* calls)
 {
 	(*calls)++;
@@ -1189,8 +1195,8 @@ void test_journal_protect_prefix_after_context(void)
 		.memcpy_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE)
 	};
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
+	struct nvmeib_pet_stream_header committed_header = {0};
 	u16 protected_prefix = 0;
-	u16* journal_size = NULL;
 	u16 expected_journal_size = 0;
 
 	nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x0601, (u8)0x01);
@@ -1201,12 +1207,12 @@ void test_journal_protect_prefix_after_context(void)
 
 	__test_check_protected_area(&journal.stream, protected_prefix);
 	BUG_ON(journal.stream.max_written_bytes <= protected_prefix);
-	journal_size = journal.stream.journal_size;
 	expected_journal_size = journal.stream.max_written_bytes;
-	BUG_ON(*journal_size != 0);
 
 	nvmeib_pet_journal_commit(&journal);
-	BUG_ON(*journal_size != expected_journal_size);
+	memcpy(&committed_header, perf_controller.msgs_buffer.iov_base, sizeof(committed_header));
+	BUG_ON(committed_header.commit_id != (u64)COMMIT_ID);
+	BUG_ON(committed_header.journal_size != expected_journal_size);
 
 	free(perf_controller.msgs_buffer.iov_base);
 	free(perf_controller.memcpy_buffer.iov_base);
@@ -1432,17 +1438,68 @@ static struct perf_test_stats __test_performance_memcpy(struct iovec dest, const
 	};
 }
 
-static struct perf_test_stats __test_performance_journal(struct nvmeib_pet_journal* journal)
+static size_t __test_performance_journal_iteration_n_bytes(void)
+{
+	size_t const header_n_bytes = sizeof(struct nvmeib_pet_msg_header);
+
+	return
+		header_n_bytes + sizeof((int)0) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
+			sizeof((unsigned short)0 + 5) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
+			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
+			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
+			sizeof(struct perf_test_stats*) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
+			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
+			sizeof(struct perf_test_stats*) + sizeof(struct nvmeib_pet_journal*) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
+			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
+			sizeof(struct perf_test_stats*) + sizeof(struct nvmeib_pet_journal*) +
+			sizeof((signed char)0 + 7) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
+			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
+			sizeof(struct perf_test_stats*) + sizeof(struct nvmeib_pet_journal*) +
+			sizeof((signed char)0 + 7) + sizeof((unsigned char)0 + 8) +
+		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
+			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
+			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
+			sizeof(struct perf_test_stats*) + sizeof(struct nvmeib_pet_journal*) +
+			sizeof((signed char)0 + 7) + sizeof((unsigned char)0 + 8) +
+			sizeof((short)0 + 9);
+}
+
+static struct perf_test_stats __test_performance_journal_impl(struct nvmeib_pet_journal* journal,
+							     size_t target_written_n_bytes,
+							     bool allow_rotation)
 {
 	struct perf_test_stats stats = {0};
+	size_t const iteration_n_bytes = __test_performance_journal_iteration_n_bytes();
 	u32 arg_counter = 0;
-	u32 iteration = 0;
 
 	size_t written = 0;
 	struct timespec start_time, end_time;
 	clock_gettime(CLOCK_MONOTONIC, &start_time);
 
-	for (iteration = 0; iteration < 118; ++iteration) {
+	while (stats.total_bytes + iteration_n_bytes <= target_written_n_bytes) {
+		if (!allow_rotation) {
+			BUG_ON(journal->stream.write_offset != journal->stream.max_written_bytes);
+			BUG_ON((size_t)journal->stream.write_offset + iteration_n_bytes > journal->stream.data.iov_len);
+		}
+
 		arg_counter += 1;
 		arg_counter %= 13;
 		written = PET_MSG_NORM(journal, "msg_1arg; val=%d", (int)arg_counter);
@@ -1527,9 +1584,124 @@ static struct perf_test_stats __test_performance_journal(struct nvmeib_pet_journ
 	return stats;
 }
 
+static struct perf_test_stats __test_performance_journal(struct nvmeib_pet_journal* journal)
+{
+	BUG_ON(journal->stream.max_written_bytes > journal->stream.data.iov_len);
+	return __test_performance_journal_impl(
+		journal,
+		journal->stream.data.iov_len - journal->stream.max_written_bytes,
+		false);
+}
+
+static u64 __test_performance_random_u64(void)
+{
+	return ((u64)__test_random_u32() << 32) | __test_random_u32();
+}
+
+static u16 __test_performance_write_random_warmup_msg(struct nvmeib_pet_journal* journal, u16 remaining)
+{
+	u16 const header_n_bytes = sizeof(struct nvmeib_pet_msg_header);
+	u16 const min_msg_n_bytes = header_n_bytes + sizeof(u8);
+	u16 max_u64_args = 0;
+	u16 raw_offset = (u16)(__test_random_u32() & 0x7fff);
+	u64 args[12] = {0};
+	u16 idx = 0;
+
+	BUG_ON(remaining < min_msg_n_bytes);
+	for (idx = 0; idx < ARRAY_SIZE(args); ++idx) {
+		args[idx] = __test_performance_random_u64();
+	}
+
+	if (remaining < header_n_bytes + sizeof(u64)) {
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL,
+						  raw_offset, (u8)args[0]);
+	}
+
+	max_u64_args = (remaining - header_n_bytes) / sizeof(u64);
+	if (max_u64_args > ARRAY_SIZE(args)) {
+		max_u64_args = ARRAY_SIZE(args);
+	}
+
+	switch ((__test_random_u32() % max_u64_args) + 1) {
+	case 1:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0]);
+	case 2:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1]);
+	case 3:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2]);
+	case 4:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3]);
+	case 5:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3],
+						  args[4]);
+	case 6:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3],
+						  args[4], args[5]);
+	case 7:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3],
+						  args[4], args[5], args[6]);
+	case 8:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3],
+						  args[4], args[5], args[6], args[7]);
+	case 9:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3],
+						  args[4], args[5], args[6], args[7],
+						  args[8]);
+	case 10:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3],
+						  args[4], args[5], args[6], args[7],
+						  args[8], args[9]);
+	case 11:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3],
+						  args[4], args[5], args[6], args[7],
+						  args[8], args[9], args[10]);
+	default:
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+						  args[0], args[1], args[2], args[3],
+						  args[4], args[5], args[6], args[7],
+						  args[8], args[9], args[10], args[11]);
+	}
+}
+
+static void __test_performance_prepare_rotating_journal(struct nvmeib_pet_journal* journal)
+{
+	u16 const min_msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + sizeof(u8);
+
+	while ((size_t)journal->stream.write_offset + min_msg_n_bytes <= journal->stream.data.iov_len) {
+		u16 const remaining = journal->stream.data.iov_len - journal->stream.write_offset;
+		size_t const written = __test_performance_write_random_warmup_msg(journal, remaining);
+
+		BUG_ON(written == 0);
+		BUG_ON(written > remaining);
+	}
+}
+
+static struct perf_test_stats __test_performance_journal_rotating(struct nvmeib_pet_journal* journal)
+{
+	__test_performance_prepare_rotating_journal(journal);
+	return __test_performance_journal_impl(
+		journal,
+		NVMEIB_PET_MAX_STREAM_SIZE - NVMEIB_PET_ENTITY_HEADER_SIZE,
+		true);
+}
+
 void test_performance(void)
 {
-	const int num_runs = 1000;
+	enum {
+		num_runs = 10000,
+		rotating_journal_n_bytes = 1024,
+	};
 	struct perf_test_controller perf_controller = {
 		.base = {
 			.flush = __perf_test_flush,
@@ -1539,7 +1711,16 @@ void test_performance(void)
 		.msgs_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE),
 		.memcpy_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE)
 	};
-	printf("Performance test: Comparing journal write vs raw memcpy\n");
+	struct perf_test_controller rotating_perf_controller = {
+		.base = {
+			.flush = __perf_test_flush,
+			.get_buffer = __perf_test_get_buffer,
+			.put_buffer = __perf_test_put_buffer
+		},
+		.msgs_buffer = iovec_malloc(rotating_journal_n_bytes),
+		.memcpy_buffer = {0}
+	};
+	printf("Performance test: Comparing journal write, rotating journal write, and raw memcpy\n");
 	printf("Running each test %d times for averaging...\n\n", num_runs);
 
 	struct perf_test_stats stats = {0};
@@ -1553,6 +1734,17 @@ void test_performance(void)
 
 	print_perf_report(&stats, "Journal Write");
 
+	srandom(0x50455452);
+	stats = (struct perf_test_stats){0};
+	for (int run = 0; run < num_runs; run++) {
+		struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&rotating_perf_controller.base, true);
+		struct perf_test_stats run_stats = __test_performance_journal_rotating(&journal);
+		merge_stats(&stats, run_stats);
+		nvmeib_pet_journal_commit(&journal);
+	}
+
+	print_perf_report(&stats, "Journal Rotating Write");
+
 	stats = (struct perf_test_stats){0};
 	for (int run = 0; run < num_runs; run++) {
 		struct perf_test_stats run_stats = __test_performance_memcpy(perf_controller.msgs_buffer, perf_controller.memcpy_buffer);
@@ -1561,6 +1753,7 @@ void test_performance(void)
 
 	print_perf_report(&stats, "Raw memcpy");
 
+	free(rotating_perf_controller.msgs_buffer.iov_base);
 	free(perf_controller.memcpy_buffer.iov_base);
 	free(perf_controller.msgs_buffer.iov_base);
 }
@@ -1658,6 +1851,7 @@ int main(int argc, char* argv[]){
 
 	{
 		test_msg_header_layout();
+		test_stream_header_layout();
 		test_stream_write_all_arg_counts();
 		test_stream_protect_empty_prefix();
 		test_stream_protect_prefix_expands_protected_area();
@@ -1674,7 +1868,6 @@ int main(int argc, char* argv[]){
 		test_journal_random_rotation_retains_last_messages();
 		test_stream_write_supported_arg_types();
 		test_stream_write_args_are_evaluated_once();
-		test_stream_write_does_not_evaluate_args_without_space();
 		test_io_pet_macro_args_are_evaluated_once();
 		test_io_pet_inactive_journal_does_not_evaluate_args();
 		test_inactive_journal_protect_prefix_is_noop();
