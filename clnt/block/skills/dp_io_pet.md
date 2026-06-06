@@ -75,9 +75,21 @@ The message string is `printf`-checked at compile time. The PET viewer also unde
 "rv=%d<errno>"
 ```
 
+Static validation contract:
+
+- `nvmeib_pet_journal_add_msg_verify_format()` is a `printf`-attribute helper. It catches ordinary `printf` mistakes, but ordinary `printf` rules include integer promotions.
+- PET does not store promoted varargs. PET serializes a packed payload whose fields are `typeof(arg)` and whose payload size is `sum(sizeof(arg))`.
+- Therefore `%x` with `numeric_downcast(u8, value)` is legal for `printf` but invalid for PET: the viewer will expect 4 bytes while PET stored 1 byte.
+- The format string must describe the serialized PET payload width, not only what `printf` would accept after vararg promotion.
+- Do not add viewer-side guessing to compensate for mismatches. A payload-size mismatch means the callsite format, the argument type, or the generated dictionary is wrong/stale.
+
 Rules:
 
 - Keep the `printf` specifier correct for the actual argument width.
+- Use `%hhu` / `%hhx` for `u8`, `s8`, `uint8_t`, `int8_t`, and `numeric_downcast(u8|s8, ...)`.
+- Use `%hu` / `%hx` for `u16`, `s16`, `uint16_t`, `int16_t`, and `numeric_downcast(u16|s16, ...)`.
+- Use `%u` / `%x` for 32-bit integer payloads.
+- Use `%lu` / `%lx` or `%llu` / `%llx` only when the stored expression type is actually 64-bit or pointer-sized as appropriate.
 - Add `<enum ...>` for compact enum values that should render as names.
 - Add `<union ...>` for raw packed fields where bit expansion is useful.
 - Add `<errno>` for return values where errno decoding helps.
@@ -88,6 +100,20 @@ Rules:
 - Do not rely on side effects in message arguments. Arguments are skipped when the journal is inactive, but evaluated when active even if the journal is later discarded by severity policy.
   In an active rotating journal, a message may also be evaluated and written,
   then later rotated out of the visible suffix.
+
+Bad and good examples:
+
+```c
+/* Bad: stores 1 byte, format describes 4 bytes. */
+NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+	"disk_io.request(flags=0x%x)",
+	numeric_downcast(u8, flags));
+
+/* Good: stores 1 byte, format describes 1 byte. */
+NVMEIBC_IO_PET_MSG_NORM(&o->journal,
+	"disk_io.request(flags=0x%hhx)",
+	numeric_downcast(u8, flags));
+```
 
 Common IO PET annotations currently used:
 
