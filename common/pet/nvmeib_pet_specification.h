@@ -184,11 +184,12 @@ static inline void __nvmeib_pet_stream_write_spacer(struct nvmeib_pet_stream* se
 
 static inline u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream const* self, u16 physical_offset, u16 eof_offset)
 {
-	BUG_ON(physical_offset > eof_offset);
-
-	u16 const remaining = eof_offset - physical_offset;
+	u16 remaining = 0;
 	struct nvmeib_pet_msg_header header = {0};
 	u16 msg_n_bytes = 0;
+
+	BUG_ON(physical_offset > eof_offset);
+	remaining = eof_offset - physical_offset;
 
 	/* EOF tail smaller than a header cannot be parsed by the viewer. */
 	if (remaining < sizeof(header)) {

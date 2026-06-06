@@ -19,7 +19,7 @@ OPTFLAGS := -O0
 ifneq ($(filter perf,$(MAKECMDGOALS)),)
 OPTFLAGS := -O2
 endif
-CFLAGS := -Wall -Wextra -ggdb $(OPTFLAGS) -I"." -I".." -I"../.." -DCOMMIT_ID=$(COMMIT_ID) -DCOMMIT_ID_STR=\"$(COMMIT_ID_STR)\"
+CFLAGS := -std=gnu99 -Wall -Wextra -ggdb $(OPTFLAGS) -I"." -I".." -I"../.." -DCOMMIT_ID=$(COMMIT_ID) -DCOMMIT_ID_STR=\"$(COMMIT_ID_STR)\"
 LDFLAGS :=
 ifeq ($(COVERAGE),1)
 CFLAGS += --coverage -fprofile-abs-path -fprofile-update=atomic
