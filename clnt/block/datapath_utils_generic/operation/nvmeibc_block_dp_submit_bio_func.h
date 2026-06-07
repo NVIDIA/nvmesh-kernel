@@ -115,6 +115,7 @@ static inline void __pet_nvmeibc_log_operation_create(struct operation *o, u32 s
 	NVMEIBC_IO_PET_MSG_NORM(&o->journal,
 		"operation.create(short_volume_id=%d, o=%p, type=%d<enum nvmeib_block_io_op>, vlba_start_s=0x%llx, nlbas=%llu, bio_part_ofst_s=0x%x)",
 		short_volume_id, o, o->op, get_op_start_lba(o), get_op_nlbas(o), o->bios[0]->bio_offst);
+	nvmeib_pet_journal_protect_prefix(&o->journal);
 }
 
 #define BIO_LEADER_REF  0x40000000

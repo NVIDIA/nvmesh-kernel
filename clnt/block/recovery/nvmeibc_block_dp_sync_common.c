@@ -484,6 +484,7 @@ static void __compressed_sync_op_trace_start(const struct recovery_sync_op *so) 
 		"sync_start(origr_o_dbg_id=%u op=%hhu<enum nvmeib_block_io_op> vol_id=%u topo=%llu rlba=%llu slices=%hhu-%hhu)",
 		so->orig_rldr ? so->orig_rldr->o->dbg_id : 0, numeric_downcast(u8, so->o->op), vol_id,
 		(u64)so->o->topo->debug_unique_index, so->rlba, numeric_downcast(u8, so->start_slice), numeric_downcast(u8, so->n_slices));
+	nvmeib_pet_journal_protect_prefix(&so->o->journal);
 }
 
 static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op *so) {
