@@ -241,8 +241,11 @@ static int mlx5_alloc_n_map(struct nvmeib_alloc_n_map *mem)
 	mem->lkey = mem->mr->lkey;
 	mem->rkey = mem->mr->rkey;
 	_ND(trace_nvmeib_public_mlx5_imp_mlx5_alloc_n_map, "mr_key=@MR_KEY", mem->lkey);
+	/* The device copied the page list during create_mkey; free the scratch
+	 * buffer on the success path too (was leaked on every successful MR). */
+	mlx5_vfree(in);
 	goto out;
-	
+
 free_in:
 	mlx5_vfree(in);
 
