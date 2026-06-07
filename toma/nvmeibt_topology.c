@@ -538,7 +538,6 @@ static void remove_seg_from_both_mem_gpts_if_eligable(struct nvmeibt_local_disk 
 		goto out;
 
 	// Now we know that the seg_active is not a part of config or already deprecated and should be removed
-	NVMEIBT_SEG_ACTIVE_FREE_MEM_AND_PROCESSES(seg_active);
 	N_Tf(wtdhy43, "Deleting gpt_entry seg=@UUID_LE from disk=@STR", &cur_gpt_entry->partition_guid, nvmeibt_local_disk_display(local_disk));
 	nvmeibt_disk_metadata_free_gpt_entry(&local_disk->main_gpt, cur_gpt_entry);
 	metadata_gpt_entry = nvmeibt_seg_active_get_metadata_gpt_entry(seg_active);
@@ -549,6 +548,7 @@ static void remove_seg_from_both_mem_gpts_if_eligable(struct nvmeibt_local_disk 
 	} else {
 		N_Ef(sgk398z1, "metadata_gpt_entry is NULL");
 	}
+	NVMEIBT_SEG_ACTIVE_FREE_MEM_AND_PROCESSES(seg_active);
 	NNVMEIBT_LOCAL_DISK_INC_GPT_CHANGE_NO(d9md4g5, local_disk);
 out:
 	// NFOUT;
