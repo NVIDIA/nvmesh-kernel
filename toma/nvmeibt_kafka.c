@@ -650,6 +650,7 @@ static void all_producers_msg_to_mgmt_delivery_cb(rd_kafka_t *k, const rd_kafka_
 	NTOMA_ASSERT(tmiiakm1, ((n_in_air >= 0) && msg), "in_air_km=@INT, msgptr=@PTR. Memory corruption", n_in_air, msg);
 	(void)opaque;	// We use static vars instead of generic opaque context. If needed set with rd_kafka_conf_set_opaque()
 	N_Tf(jsnewij1, "@STR: k_handle=@PTR, in_air=@INT, msgptr=@PTR, err=@INT", rd_kafka_name(k), k, n_in_air, msg, k_msg->err);
+	NTOMA_ASSERT(tmiiakm2, msg->kafka_outgoing_msg_state == KAFKA_OUTGOING_MSG_STATE_SENT_TO_KAFKA, "msgptr=@PTR, msg_status=@CHAR", msg, msg->kafka_outgoing_msg_state);
 	if (k_msg->err) {
 		msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_REJECTED_BY_KAFKA;
 		N_Wf(tvsjhgr, "@STR: k_handle=@PTR, in_air=@INT, msgptr=@PTR, err=@STR, Message delivery failed", rd_kafka_name(k), k, n_in_air, msg, rd_kafka_err2str(k_msg->err));
@@ -678,16 +679,17 @@ static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_ms
 	if (val[val_len - 1] == '\0')
 		val_len -= 1;	// Seems as if the string terminating \0 is driving MGMT JSON parser crazy
 	n_in_air = atomic_inc_return(&kafka_n_sends_in_the_air);       // If a msg is about to be sent, we know the n_sends_in_the_air was already increased
+	msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_SENT_TO_KAFKA;
 	err = rd_kafka_produce(k_topic, RD_KAFKA_PARTITION_UA, RD_KAFKA_MSG_F_COPY, (void*)val, val_len, key, key_len, (void*)msg);
-	if (err == 0) {
-		msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_SENT_TO_KAFKA;
+	if (err == 0) {		// Dont touch the message, it could be asyncronously accepted by kafka
 		N_Tf(b5v9skq, "@STR: produced key=@STR msgptr=@PTR, in_air_km=@INT", rd_kafka_topic_name(k_topic), key, msg, n_in_air);
 		NVMEIBT_LONG_TRACE_WRAPPER(tvsh875, 1, "", val, val_len);
 		return 0;
 	}
+	msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_NOT_SENT;
 	n_in_air = atomic_dec_return(&kafka_n_sends_in_the_air);
 	NTOMA_ASSERT(tmiiakm0, (n_in_air >= 0), "in_air_km=@INT is negative. Memory corruption", n_in_air);
-	N_Wf(n58skal, "@STR: Failed to produce to kafka msg to err='@STR', in_air_km=@INT  (@AUTO_ERRNO)", rd_kafka_topic_name(k_topic), rd_kafka_err2name(rd_kafka_last_error()), n_in_air);
+	N_Wf(n58skal, "@STR: Failed to produce to kafka msgptr=@PTR to err='@STR', in_air_km=@INT  (@AUTO_ERRNO)", rd_kafka_topic_name(k_topic), msg, rd_kafka_err2name(rd_kafka_last_error()), n_in_air);
 	check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__FATAL);
 	return -1;
 }
@@ -866,8 +868,8 @@ static void kafka_outgoing_msgs_queue_send_pending_msgs_to_kafka_producer(void) 
 			}
 		} else if (m_state == KAFKA_OUTGOING_MSG_STATE_ACCEPTED_BY_KAFKA) {
 			continue; // komq.last_sent_in_list was rewinded, and we are during retransmission, just skip it
-		} else {		// Already sent, unknown state - BUG
-			N_Ef(26gqwu7, "msgptr=@PTR skipping. msg_status=@CHAR", msg, msg->kafka_outgoing_msg_state);
+		} else {		// Already sent, not accepted by kafka yet, skip
+			N_Tf(26gqwu7, "msgptr=@PTR skipping. msg_status=@CHAR", msg, msg->kafka_outgoing_msg_state);
 		}
 	}
 }
