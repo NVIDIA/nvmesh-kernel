@@ -74,7 +74,7 @@ test: dirs $(TEST_EXE)
 check: test
 
 demo_dict: dirs test
-	PY=$(PY) ./pet_messages.sh save-dictionary $(TEST_EXE) test_pet_msgs $(TEST_DCT)
+	PY=$(PY) ./pet_messages.sh save-dictionary $(TEST_EXE) $(TEST_DCT)
 
 demo: dirs test demo_dict
 	PY=$(PY) ./pet_messages.sh view --no-sort $(BUILD_DIR) $(TEST_OUT)

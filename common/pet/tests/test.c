@@ -18,26 +18,11 @@
 #include "nvmeib_pet_specification.h"
 
 //{{{ instantiate the pet framework
-#define TEST_PET_SECTION  "test_pet_msgs"
+extern const char __start_nvmeib_pet_messages[];
+extern const char __stop_nvmeib_pet_messages[];
 
-extern const char __start_test_pet_msgs[];
-extern const char __stop_test_pet_msgs[];
-
-#define PET_MSG(pet_journal, msg, severity,...)   \
-({																																		\
-    u16 __io_pet_msg_written = 0;																										\
-	__auto_type __io_pet_journal_param = (pet_journal);																					\
-	if (nvmeib_pet_journal_is_activated(__io_pet_journal_param)) {																		\
-		static const char NVMESH_USED NVMESH_SECTION(TEST_PET_SECTION) __io_pet_msg[] = msg;											\
-		u16 const __io_pet_msg_offset = (u64)(&__io_pet_msg) - (u64)(&__start_test_pet_msgs); 											\
-		struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)__io_pet_journal_param; /*droping const*/				\
-		if (0) nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__);														\
-		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, __io_pet_msg_offset, __VA_ARGS__); 				\
-	}																																	\
-    __io_pet_msg_written;                                                                                                       		\
-})
-
-#define PET_MSG_NORM(pet_journal, msg, ...) PET_MSG(pet_journal, msg, NVMEIB_PET_SEVERITY_NORMAL, __VA_ARGS__)
+#define PET_MSG(pet_journal, msg, severity, ...) NVMEIB_IO_PET_MSG(pet_journal, msg, severity, __VA_ARGS__)
+#define PET_MSG_NORM(pet_journal, msg, ...) NVMEIB_IO_PET_MSG_NORM(pet_journal, msg, __VA_ARGS__)
 
 #include "compat/kr_incs_time_jiff.inc.c" // Due to legacy reasons, `tsc_khz` and `int_cpu_freq_tsc_offset_jiffies()` are defined here.
 //}}}

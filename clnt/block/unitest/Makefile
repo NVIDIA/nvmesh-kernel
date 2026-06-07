@@ -373,7 +373,7 @@ $(EXE_NAME): $(OBJECTS) $(ASMOBJ) $(OBJ_DIR)/traces_ids.o
 
 pet_dictionary: $(EXE_NAME)
 	@mkdir -p $(PET_DICT_DIR)
-	-$(PET_MESSAGES_SH) save-dictionary $(EXE_PATH) nvmeibc_io_pet_msgs $(PET_DICTIONARY)
+	-$(PET_MESSAGES_SH) save-dictionary $(EXE_PATH) $(PET_DICTIONARY)
 
 $(OBJECTS): $(PRECOMPILED_HEADERS)
 

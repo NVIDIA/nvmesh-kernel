@@ -16,6 +16,7 @@
 #endif
 #include "compat/kr_incs_types.h"
 #include "compat/kr_incs_asserts.h"
+#include "compat/kr_incs_compiler_types.h"
 #include "compat/kr_incs_time_rdtsc.h"
 #include "compat/kr_incs_time_jiff.h"
 #include "common/nvmeib_math.h"
@@ -167,6 +168,8 @@ enum {
 	NVMEIB_PET_MIN_ROTATABLE_N_BYTES = 2 * NVMEIB_PET_MAX_MSG_N_BYTES,
 	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_ENTITY_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
 };
+
+#define NVMEIB_PET_MESSAGE_SECTION "nvmeib_pet_messages"
 
 u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream const* self, u16 physical_offset, u16 eof_offset);
 u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size);
@@ -837,6 +840,25 @@ static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* 
 	__nvmeib_pet_journal_clear_in_use(__nvmeib_pet_journal); \
 	msg_written_bytes; \
 })
+
+#define NVMEIB_IO_PET_MSG(pet_journal, msg, severity,...) \
+({ \
+	u16 __io_pet_msg_written = 0; \
+	__auto_type __io_pet_journal_param = (pet_journal); \
+	if (nvmeib_pet_journal_is_activated(__io_pet_journal_param)) { \
+		static const char NVMESH_USED NVMESH_SECTION(NVMEIB_PET_MESSAGE_SECTION) __io_pet_msg[] = msg; \
+		u16 const __io_pet_msg_offset = (u64)(&__io_pet_msg) - (u64)(&__start_nvmeib_pet_messages); \
+		struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)__io_pet_journal_param; \
+		if (0) nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__); \
+		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, __io_pet_msg_offset, __VA_ARGS__); \
+	} \
+	__io_pet_msg_written; \
+})
+
+#define NVMEIB_IO_PET_MSG_NORM(pet_journal, msg, ...) NVMEIB_IO_PET_MSG(pet_journal, msg, NVMEIB_PET_SEVERITY_NORMAL, __VA_ARGS__)
+#define NVMEIB_IO_PET_MSG_WARN(pet_journal, msg, ...) NVMEIB_IO_PET_MSG(pet_journal, msg, NVMEIB_PET_SEVERITY_WARNING, __VA_ARGS__)
+#define NVMEIB_IO_PET_MSG_ERROR(pet_journal, msg, ...) NVMEIB_IO_PET_MSG(pet_journal, msg, NVMEIB_PET_SEVERITY_ERROR, __VA_ARGS__)
+#define NVMEIB_IO_PET_MSG_CRIT(pet_journal, msg, ...) NVMEIB_IO_PET_MSG(pet_journal, msg, NVMEIB_PET_SEVERITY_CRITICAL, __VA_ARGS__)
 
 
 __attribute__((nonnull (1)))

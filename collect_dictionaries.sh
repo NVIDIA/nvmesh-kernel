@@ -26,9 +26,7 @@ find . \
 	| xargs -I{} cp -f {} "${TMPDIR}" 2>/dev/null || true
 
 # Build PET dictionary from client module if present
-# Section .nvmeibc_io_pet_msgs is where PET strings live in the client kernel module
 PET_MODULE="${PET_MODULE:-}"
-PET_SECTION="${PET_SECTION:-.nvmeibc_io_pet_msgs}"
 if [ -z "$PET_MODULE" ]; then
 	echo "PET_MODULE is not set, no PET dictionary will be built"
 else
@@ -77,7 +75,7 @@ function build_pet_dictionary() {
 	PET_PYTHON="poetry run python${PY:-3}"
 	echo "poetry run python is set to $PET_PYTHON"
 	start=$SECONDS
-	if $PET_PYTHON common/pet/nvmeib_pet_messages.py save-dictionary "$PET_MODULE" "$PET_SECTION" "$PET_DICT"; then
+	if $PET_PYTHON common/pet/nvmeib_pet_messages.py save-dictionary "$PET_MODULE" "$PET_DICT"; then
 		runtime=$((SECONDS - start))
 		echo "PET dictionary saved to ${PET_DICT} in ${runtime} seconds"
 	else

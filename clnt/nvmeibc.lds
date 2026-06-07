@@ -13,11 +13,11 @@ SECTIONS {
                 __stop_nvmeibc_error_tags = .;
         }
 
-        .nvmeibc_io_pet_msgs : {
+        .nvmeib_pet_messages : {
                . = ALIGN(8);
-                __start_nvmeibc_io_pet_msgs = .;
-                KEEP(*(.nvmeibc_io_pet_msgs))
-                __stop_nvmeibc_io_pet_msgs = .;
+                __start_nvmeib_pet_messages = .;
+                KEEP(*(.nvmeib_pet_messages))
+                __stop_nvmeib_pet_messages = .;
         }
 
         .nvmeibc_wq_metrics : {

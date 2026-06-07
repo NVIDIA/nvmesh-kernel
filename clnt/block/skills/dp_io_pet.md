@@ -23,7 +23,7 @@ For the block IO path:
 - Kernel/controller plumbing lives in `clnt/nvmeibc_io_pet.c`.
 - Design docs live under `common/pet/documentation/`.
 
-The IO macro stores every format string in the `nvmeibc_io_pet_msgs` ELF section and uses the section offset as the message id. The viewer uses that dictionary plus the serialized arguments to render human-readable lines.
+The IO macro stores every format string in the common `nvmeib_pet_messages` ELF section and uses the section offset as the message id. The viewer uses that dictionary plus the serialized arguments to render human-readable lines.
 
 ## Message API
 
@@ -79,9 +79,10 @@ Static validation contract:
 
 - `nvmeib_pet_journal_add_msg_verify_format()` is a `printf`-attribute helper. It catches ordinary `printf` mistakes, but ordinary `printf` rules include integer promotions.
 - PET does not store promoted varargs. PET serializes a packed payload whose fields are `typeof(arg)` and whose payload size is `sum(sizeof(arg))`.
-- Therefore `%x` with `numeric_downcast(u8, value)` is legal for `printf` but invalid for PET: the viewer will expect 4 bytes while PET stored 1 byte.
-- The format string must describe the serialized PET payload width, not only what `printf` would accept after vararg promotion.
+- In the current dictionary/viewer path, the format string is still used to infer the serialized payload width. Therefore `%x` with `numeric_downcast(u8, value)` is legal for `printf` but invalid for the current PET viewer: the viewer will expect 4 bytes while PET stored 1 byte.
+- Until layout-driven dictionaries are implemented, the format string must describe the serialized PET payload width, not only what `printf` would accept after vararg promotion.
 - Do not add viewer-side guessing to compensate for mismatches. A payload-size mismatch means the callsite format, the argument type, or the generated dictionary is wrong/stale.
+- The planned long-term fix is documented in `common/pet/documentation/pet_static_layout_validation.md`: dictionary layout metadata will drive binary parsing, and format strings will be used only for presentation.
 
 Rules:
 

@@ -45,6 +45,9 @@ PRINTF_SPEC_RE = printf_enum_re = re.compile(
 	re.VERBOSE,
 )
 
+PET_MESSAGE_SECTION = 'nvmeib_pet_messages'
+PET_MESSAGE_ELF_SECTION_NAMES = (PET_MESSAGE_SECTION, f'.{PET_MESSAGE_SECTION}')
+
 
 # ---------------------------------------------------------------------------
 # PET binary reader
@@ -884,17 +887,25 @@ class Dictionary(pydantic.BaseModel):
 
 
 class TemplatesLoader:
-	def __init__(self, module: pathlib.Path, section_name: str):
+	def __init__(self, module: pathlib.Path, section_names: typing.Union[str, typing.Sequence[str]]):
 		self.module = module
-		self.section_name = section_name
+		if isinstance(section_names, str):
+			self.section_names = (section_names,)
+		else:
+			self.section_names = tuple(section_names)
 
 	@typing.no_type_check
 	def __load_messages_blob(self) -> bytes:
 		with open(self.module, 'rb') as fobj:
 			elf = ELFFile(fobj)
-			section: Section = elf.get_section_by_name(self.section_name)
+			section: typing.Optional[Section] = None
+			for section_name in self.section_names:
+				section = elf.get_section_by_name(section_name)
+				if section:
+					break
 			if not section:
-				raise ValueError(f'{self.section_name} section was not found in {self.module}')
+				names = ', '.join(self.section_names)
+				raise ValueError(f'PET message section ({names}) was not found in {self.module}')
 
 			offset: int = section['sh_offset']
 			size: int = section['sh_size']
@@ -1011,7 +1022,10 @@ class SaveDictionary(Command):
 		parser = subparsers.add_parser(
 			'save-dictionary', description='save all messages within a module to the dedicated file'
 		)
-		cls.add_module_section_args(parser)
+		parser.set_defaults(klass=cls)
+		parser.add_argument(
+			'module', type=pathlib.Path, help='path to the binary file(executable, shared library, kernel module)'
+		)
 		parser.add_argument('output', type=pathlib.Path, help='path to the output file')
 		parser.add_argument(
 			'--um-trace',
@@ -1023,7 +1037,7 @@ class SaveDictionary(Command):
 
 	def __init__(self, args: argparse.Namespace):
 		super().__init__(args)
-		self.extractor = TemplatesLoader(args.module, args.section)
+		self.extractor = TemplatesLoader(args.module, PET_MESSAGE_ELF_SECTION_NAMES)
 		self.output = args.output
 		self.um_trace = args.um_trace
 

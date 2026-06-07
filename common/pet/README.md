@@ -49,6 +49,10 @@ the entity context visible while preserving the latest suffix messages. See
 `documentation/pet_message_rotation.md` for the exact writer and viewer
 contract.
 
+PET format strings must describe the serialized argument payload, not only
+ordinary `printf` vararg compatibility. The planned static validation flow is
+documented in `documentation/pet_static_layout_validation.md`.
+
 ## Local Validation Targets
 
 From `common/pet`:
@@ -92,7 +96,7 @@ automatically creates a Python virtual environment on first use and installs
 the pinned dependencies:
 
 ```bash
-common/pet/pet_messages.sh save-dictionary MODULE SECTION OUTPUT
+common/pet/pet_messages.sh save-dictionary MODULE OUTPUT
 ```
 
 By default the venv is created at `common/pet/.venv`. To place it elsewhere
