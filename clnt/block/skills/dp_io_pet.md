@@ -23,7 +23,7 @@ For the block IO path:
 - Kernel/controller plumbing lives in `clnt/nvmeibc_io_pet.c`.
 - Design docs live under `common/pet/documentation/`.
 
-The IO macro stores every format string in the common `nvmeib_pet_messages` ELF section and uses the section offset as the message id. The viewer uses that dictionary plus the serialized arguments to render human-readable lines.
+The IO macro stores one fixed `struct nvmeib_pet_message` record in the common `nvmeib_pet_messages` ELF section. The runtime journal stores `message_id = message_index + 1`, with `0` reserved for rotation spacers. The viewer uses the dictionary layout from that record to decode serialized argument bytes, then uses the format string only for presentation and annotations.
 
 ## Message API
 

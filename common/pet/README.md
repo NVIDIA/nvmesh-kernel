@@ -38,10 +38,11 @@ Each flushed PET entity starts with a compact stream header:
 ```
 
 The viewer scans only `journal_size` bytes. Records after the header are
-self-describing messages or rotation spacers. A normal message stores the
-dictionary section offset plus one in `section_offset`; `section_offset == 0`
-marks a spacer whose `bytes` field tells the viewer how many payload bytes to
-skip.
+self-describing messages or rotation spacers. A normal message stores
+`message_id = message_index + 1`; `message_id == 0` marks a spacer whose
+`bytes` field tells the viewer how many payload bytes to skip. The message
+index addresses fixed `struct nvmeib_pet_message` records in the
+`nvmeib_pet_messages` section.
 
 PET journals are bounded. A journal may protect an initial prefix with
 `nvmeib_pet_journal_protect_prefix()`, then rotate only the suffix. This keeps

@@ -95,8 +95,6 @@ struct nvmeib_pet_stream{
 };
 
 enum {NVMEIB_PET_MAX_STREAM_SIZE=64*1024}; //because max_written_bytes is u16
-enum {NVMEIB_PET_MAX_MSG_ARGS_N_BYTES=96}; //maximal 12 arguments, 8 bytes each => 96 bytes
-
 /* PET stores compact scalar values only. Pointers are allowed as addresses,
  * but string payloads and floating point values are intentionally unsupported.
  */
@@ -113,6 +111,90 @@ do { \
 	BUILD_BUG_ON_MSG(__NVMEIB_PET_ARG_TYPE_IS(value, char const[sizeof(value)]), "char const[] type is not supported"); \
 	(void)sizeof((u64)(value)); \
 } while (0)
+
+/* These codes are Python struct module format characters. The viewer unpacks
+ * PET payloads with "<" + arg_struct_code, so this mapping is the binary layout
+ * contract between the C writer and Python dictionary/viewer.
+ */
+#define __NVMEIB_PET_ARG_STRUCT_CODE_FALLBACK(value) \
+	__builtin_choose_expr(__builtin_classify_type(value) == 5, \
+		'Q', \
+	__builtin_choose_expr(sizeof(value) == 1, \
+		'B', \
+	__builtin_choose_expr(sizeof(value) == 2, \
+		'H', \
+	__builtin_choose_expr(sizeof(value) == 4, \
+		'i', \
+	__builtin_choose_expr(sizeof(value) == 8, \
+		'Q', \
+	'?')))))
+
+#define __NVMEIB_PET_ARG_STRUCT_CODE(value) \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, bool), \
+		'B', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, u8), \
+		'B', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, uint8_t), \
+		'B', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, unsigned char), \
+		'B', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, char), \
+		'B', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, s8), \
+		'b', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, int8_t), \
+		'b', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, signed char), \
+		'b', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, u16), \
+		'H', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, uint16_t), \
+		'H', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, unsigned short), \
+		'H', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, s16), \
+		'h', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, int16_t), \
+		'h', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, signed short), \
+		'h', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, u32), \
+		'I', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, uint32_t), \
+		'I', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, unsigned int), \
+		'I', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, s32), \
+		'i', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, int32_t), \
+		'i', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, int), \
+		'i', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, unsigned long), \
+		(sizeof(unsigned long) == 4 ? 'I' : 'Q'), \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, long), \
+		(sizeof(long) == 4 ? 'i' : 'q'), \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, u64), \
+		'Q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, uint64_t), \
+		'Q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, unsigned long long), \
+		'Q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, s64), \
+		'q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, int64_t), \
+		'q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, long long), \
+		'q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, size_t), \
+		'Q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, ssize_t), \
+		'q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, void const*), \
+		'Q', \
+	__builtin_choose_expr(__NVMEIB_PET_ARG_TYPE_IS(value, typeof((void*)0)), \
+		'Q', \
+	__NVMEIB_PET_ARG_STRUCT_CODE_FALLBACK(value)))))))))))))))))))))))))))))))))
 
 static inline struct nvmeib_pet_stream nvmeib_pet_stream_make(struct iovec data)
 {
@@ -145,14 +227,14 @@ static inline void nvmeib_pet_stream_commit(struct nvmeib_pet_stream* self)
 }
 
 struct __attribute__((packed)) nvmeib_pet_msg_header {
-	u16 section_offset;
+	u16 message_id;
 	union {
-		/* section_offset != 0 - stored raw section offset + 1 */
+		/* message_id != 0 - stored message record index + 1 */
 		struct __attribute__((packed)) {
 			u64 timestamp;
 			u8 args_n_bytes;
 		} msg;
-		/* section_offset == 0 - rotation spacer */
+		/* message_id == 0 - rotation spacer */
 		struct __attribute__((packed)) {
 			/* payload bytes after this header */
 			u64 bytes;
@@ -162,7 +244,9 @@ struct __attribute__((packed)) nvmeib_pet_msg_header {
 };
 
 enum {
+	NVMEIB_PET_MAX_MSG_ARGS = 12,
 	NVMEIB_PET_MIN_MSG_ARGS_N_BYTES = 1,
+	NVMEIB_PET_MAX_MSG_ARGS_N_BYTES = NVMEIB_PET_MAX_MSG_ARGS * sizeof(u64),
 	NVMEIB_PET_MIN_MSG_N_BYTES = sizeof(struct nvmeib_pet_msg_header) + NVMEIB_PET_MIN_MSG_ARGS_N_BYTES,
 	NVMEIB_PET_MAX_MSG_N_BYTES = sizeof(struct nvmeib_pet_msg_header) + NVMEIB_PET_MAX_MSG_ARGS_N_BYTES,
 	NVMEIB_PET_MIN_ROTATABLE_N_BYTES = 2 * NVMEIB_PET_MAX_MSG_N_BYTES,
@@ -170,6 +254,26 @@ enum {
 };
 
 #define NVMEIB_PET_MESSAGE_SECTION "nvmeib_pet_messages"
+
+enum {
+	NVMEIB_PET_MESSAGE_N_BYTES_SHIFT = 9,
+	NVMEIB_PET_MESSAGE_N_BYTES = 1 << NVMEIB_PET_MESSAGE_N_BYTES_SHIFT,
+	NVMEIB_PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES = NVMEIB_PET_MAX_MSG_ARGS + 1,
+	NVMEIB_PET_MESSAGE_FORMAT_N_BYTES = NVMEIB_PET_MESSAGE_N_BYTES - NVMEIB_PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES,
+};
+
+struct __attribute__((packed, aligned(NVMEIB_PET_MESSAGE_N_BYTES))) nvmeib_pet_message {
+	char arg_struct_code[NVMEIB_PET_MAX_MSG_ARGS + 1];
+	char format[NVMEIB_PET_MESSAGE_FORMAT_N_BYTES];
+};
+
+enum {
+	NVMEIB_PET_MESSAGE_FIELDS_N_BYTES = sizeof(((struct nvmeib_pet_message*)0)->arg_struct_code) +
+					    sizeof(((struct nvmeib_pet_message*)0)->format),
+	NVMEIB_PET_MESSAGE_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message) == NVMEIB_PET_MESSAGE_FIELDS_N_BYTES),
+	NVMEIB_PET_MESSAGE_EXPECTED_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message) == NVMEIB_PET_MESSAGE_N_BYTES),
+	NVMEIB_PET_MESSAGE_NOT_EMPTY_CHECK = 1 / (sizeof(struct nvmeib_pet_message) != 0),
+};
 
 u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream const* self, u16 physical_offset, u16 eof_offset);
 u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size);
@@ -219,10 +323,10 @@ static inline void nvmeib_pet_stream_protect_prefix(struct nvmeib_pet_stream* se
 	self->write_offset = self->protected_prefix;
 }
 
-static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 raw_section_offset, u8 args_n_bytes)
+static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 message_index, u8 args_n_bytes)
 {
 	return (struct nvmeib_pet_msg_header){
-		.section_offset = raw_section_offset+1, /* section_offset==0 would be a special offset */
+		.message_id = message_index + 1, /* message_id==0 is reserved for spacers */
 		.msg = {
 			.timestamp = nvmeib_pet_get_trace_time_ns(),
 			.args_n_bytes = args_n_bytes,
@@ -655,6 +759,35 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 raw_se
 #define NVMEIB_PET_VA_NARGS_IMPL(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,N,...) N
 #define NVMEIB_PET_VA_NARGS(...) NVMEIB_PET_VA_NARGS_IMPL(__VA_ARGS__,12,11,10,9,8,7,6,5,4,3,2,1)
 
+#define __NVMEIB_PET_ARG_STRUCT_CODES1(exp1) \
+	__NVMEIB_PET_ARG_STRUCT_CODE(exp1)
+#define __NVMEIB_PET_ARG_STRUCT_CODES2(exp1, exp2) \
+	__NVMEIB_PET_ARG_STRUCT_CODES1(exp1), __NVMEIB_PET_ARG_STRUCT_CODE(exp2)
+#define __NVMEIB_PET_ARG_STRUCT_CODES3(exp1, exp2, exp3) \
+	__NVMEIB_PET_ARG_STRUCT_CODES2(exp1, exp2), __NVMEIB_PET_ARG_STRUCT_CODE(exp3)
+#define __NVMEIB_PET_ARG_STRUCT_CODES4(exp1, exp2, exp3, exp4) \
+	__NVMEIB_PET_ARG_STRUCT_CODES3(exp1, exp2, exp3), __NVMEIB_PET_ARG_STRUCT_CODE(exp4)
+#define __NVMEIB_PET_ARG_STRUCT_CODES5(exp1, exp2, exp3, exp4, exp5) \
+	__NVMEIB_PET_ARG_STRUCT_CODES4(exp1, exp2, exp3, exp4), __NVMEIB_PET_ARG_STRUCT_CODE(exp5)
+#define __NVMEIB_PET_ARG_STRUCT_CODES6(exp1, exp2, exp3, exp4, exp5, exp6) \
+	__NVMEIB_PET_ARG_STRUCT_CODES5(exp1, exp2, exp3, exp4, exp5), __NVMEIB_PET_ARG_STRUCT_CODE(exp6)
+#define __NVMEIB_PET_ARG_STRUCT_CODES7(exp1, exp2, exp3, exp4, exp5, exp6, exp7) \
+	__NVMEIB_PET_ARG_STRUCT_CODES6(exp1, exp2, exp3, exp4, exp5, exp6), __NVMEIB_PET_ARG_STRUCT_CODE(exp7)
+#define __NVMEIB_PET_ARG_STRUCT_CODES8(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8) \
+	__NVMEIB_PET_ARG_STRUCT_CODES7(exp1, exp2, exp3, exp4, exp5, exp6, exp7), __NVMEIB_PET_ARG_STRUCT_CODE(exp8)
+#define __NVMEIB_PET_ARG_STRUCT_CODES9(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9) \
+	__NVMEIB_PET_ARG_STRUCT_CODES8(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8), __NVMEIB_PET_ARG_STRUCT_CODE(exp9)
+#define __NVMEIB_PET_ARG_STRUCT_CODES10(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10) \
+	__NVMEIB_PET_ARG_STRUCT_CODES9(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9), __NVMEIB_PET_ARG_STRUCT_CODE(exp10)
+#define __NVMEIB_PET_ARG_STRUCT_CODES11(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11) \
+	__NVMEIB_PET_ARG_STRUCT_CODES10(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10), __NVMEIB_PET_ARG_STRUCT_CODE(exp11)
+#define __NVMEIB_PET_ARG_STRUCT_CODES12(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11, exp12) \
+	__NVMEIB_PET_ARG_STRUCT_CODES11(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11), __NVMEIB_PET_ARG_STRUCT_CODE(exp12)
+
+#define __NVMEIB_PET_ARG_STRUCT_CODES_IMPL_IMPL(n_args, ...) __NVMEIB_PET_ARG_STRUCT_CODES##n_args(__VA_ARGS__)
+#define __NVMEIB_PET_ARG_STRUCT_CODES_IMPL(n_args, ...) __NVMEIB_PET_ARG_STRUCT_CODES_IMPL_IMPL(n_args, __VA_ARGS__)
+#define __NVMEIB_PET_ARG_STRUCT_CODES(...) __NVMEIB_PET_ARG_STRUCT_CODES_IMPL(NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__)
+
 #define __NVMEIB_PET_VALIDATE_ARGS1(exp1) \
 do { \
 	__NVMEIB_PET_VALIDATE_ARG_TYPE(exp1); \
@@ -846,11 +979,19 @@ static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* 
 	u16 __io_pet_msg_written = 0; \
 	__auto_type __io_pet_journal_param = (pet_journal); \
 	if (nvmeib_pet_journal_is_activated(__io_pet_journal_param)) { \
-		static const char NVMESH_USED NVMESH_SECTION(NVMEIB_PET_MESSAGE_SECTION) __io_pet_msg[] = msg; \
-		u16 const __io_pet_msg_offset = (u64)(&__io_pet_msg) - (u64)(&__start_nvmeib_pet_messages); \
+		static const struct nvmeib_pet_message NVMESH_USED NVMESH_ALIGNED(NVMEIB_PET_MESSAGE_N_BYTES) NVMESH_SECTION(NVMEIB_PET_MESSAGE_SECTION) __io_pet_message = { \
+			.arg_struct_code = { __NVMEIB_PET_ARG_STRUCT_CODES(__VA_ARGS__) }, \
+			.format = msg, \
+		}; \
+		u64 const __io_pet_message_offset = (u64)&__io_pet_message - (u64)__start_nvmeib_pet_messages; \
+		u64 const __io_pet_message_index64 = __io_pet_message_offset >> NVMEIB_PET_MESSAGE_N_BYTES_SHIFT; \
+		u16 const __io_pet_message_index = (u16)__io_pet_message_index64; \
 		struct nvmeib_pet_journal* __io_pet_journal = (struct nvmeib_pet_journal*)__io_pet_journal_param; \
-		if (0) nvmeib_pet_journal_add_msg_verify_format(__io_pet_msg, __VA_ARGS__); \
-		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, __io_pet_msg_offset, __VA_ARGS__); \
+		BUG_ON(__io_pet_message_offset & (NVMEIB_PET_MESSAGE_N_BYTES - 1)); \
+		BUG_ON(__io_pet_message_index64 >= 0xffff); \
+		BUILD_BUG_ON_MSG(sizeof(msg) > NVMEIB_PET_MESSAGE_FORMAT_N_BYTES, "PET format string is too long"); \
+		if (0) nvmeib_pet_journal_add_msg_verify_format(msg, __VA_ARGS__); \
+		__io_pet_msg_written = nvmeib_pet_journal_add_msg(__io_pet_journal, severity, __io_pet_message_index, __VA_ARGS__); \
 	} \
 	__io_pet_msg_written; \
 })

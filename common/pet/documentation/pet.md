@@ -83,9 +83,11 @@ struct __attribute__((packed)) nvmeib_pet_stream_header {
 inside this range and treats the records after the header as either normal
 messages or rotation spacers.
 
-Normal messages store a `section_offset` value that is the raw message section
-offset plus one. `section_offset == 0` is reserved for a spacer record. A spacer
-does not describe a message; it tells the viewer how many payload bytes to skip.
+Normal messages store a `message_id` value. `message_id == 0` is reserved for a
+spacer record; real messages store `message_index + 1`, where `message_index` is
+the index of a fixed `struct nvmeib_pet_message` record in the
+`nvmeib_pet_messages` ELF section. A spacer does not describe a message; it
+tells the viewer how many payload bytes to skip.
 
 The stream keeps:
 

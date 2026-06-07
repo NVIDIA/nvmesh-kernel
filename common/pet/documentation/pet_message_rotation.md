@@ -47,7 +47,7 @@ Every record in the committed range starts with:
 
 ```c
 struct __attribute__((packed)) nvmeib_pet_msg_header {
-    u16 section_offset;
+    u16 message_id;
     union {
         struct __attribute__((packed)) {
             u64 timestamp;
@@ -64,19 +64,20 @@ struct __attribute__((packed)) nvmeib_pet_msg_header {
 Normal message:
 
 ```text
-section_offset != 0
+message_id != 0
+message_index = message_id - 1
 msg.timestamp = message timestamp
 msg.args_n_bytes = serialized argument payload bytes
 payload follows the header
 ```
 
-The stored message id is the raw dictionary section offset plus one. That keeps
-`section_offset == 0` reserved for rotation spacers.
+The stored message id is the fixed dictionary record index plus one. That keeps
+`message_id == 0` reserved for rotation spacers.
 
 Spacer:
 
 ```text
-section_offset = 0
+message_id = 0
 spacer.bytes = payload bytes after this spacer header
 spacer.unused = 0
 payload bytes are skipped by the viewer
@@ -172,11 +173,11 @@ must not be read.
 The viewer parses records linearly:
 
 ```text
-if section_offset != 0:
+if message_id != 0:
     read args_n_bytes payload bytes
     emit raw message
 
-if section_offset == 0:
+if message_id == 0:
     require unused == 0
     skip spacer.bytes payload bytes
 ```
@@ -229,6 +230,6 @@ output.
 
 ## Future Work
 
-The implemented format intentionally does not add a second entity envelope,
-magic value, generation counter, or dropped-message counters. Those may be
-added later if corruption handling or richer rotation statistics require them.
+The implemented format intentionally keeps the entity envelope small. Additional
+corruption handling or richer rotation statistics can be designed later if they
+become necessary.

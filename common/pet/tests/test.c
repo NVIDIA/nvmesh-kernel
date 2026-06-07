@@ -18,8 +18,8 @@
 #include "nvmeib_pet_specification.h"
 
 //{{{ instantiate the pet framework
-extern const char __start_nvmeib_pet_messages[];
-extern const char __stop_nvmeib_pet_messages[];
+extern struct nvmeib_pet_message const __start_nvmeib_pet_messages[];
+extern struct nvmeib_pet_message const __stop_nvmeib_pet_messages[];
 
 #define PET_MSG(pet_journal, msg, severity, ...) NVMEIB_IO_PET_MSG(pet_journal, msg, severity, __VA_ARGS__)
 #define PET_MSG_NORM(pet_journal, msg, ...) NVMEIB_IO_PET_MSG_NORM(pet_journal, msg, __VA_ARGS__)
@@ -139,7 +139,7 @@ void test_msg_header_layout(void)
 			      sizeof(((struct nvmeib_pet_msg_header *)0)->msg.args_n_bytes),
 		spacer_n_bytes = sizeof(((struct nvmeib_pet_msg_header *)0)->spacer.bytes) +
 				 sizeof(((struct nvmeib_pet_msg_header *)0)->spacer.unused),
-		header_n_bytes = sizeof(((struct nvmeib_pet_msg_header *)0)->section_offset) + msg_n_bytes,
+		header_n_bytes = sizeof(((struct nvmeib_pet_msg_header *)0)->message_id) + msg_n_bytes,
 	};
 
 	BUG_ON(sizeof(((struct nvmeib_pet_msg_header *)0)->msg) != msg_n_bytes);
@@ -173,22 +173,22 @@ static struct nvmeib_pet_msg_header __test_load_msg_header_from_buffer(u8 const*
 	return header;
 }
 
-static void __test_check_msg_header(size_t offset, u16 raw_offset, u8 expected_args_n_bytes)
+static void __test_check_msg_header(size_t offset, u16 message_index, u8 expected_args_n_bytes)
 {
 	struct nvmeib_pet_msg_header const header = __test_load_msg_header(offset);
 
-	BUG_ON(header.section_offset != raw_offset + 1);
-	BUG_ON(header.section_offset == 0);
+	BUG_ON(header.message_id != message_index + 1);
+	BUG_ON(header.message_id == 0);
 	BUG_ON(header.msg.args_n_bytes != expected_args_n_bytes);
 	BUG_ON(header.msg.timestamp == 0);
 }
 
-static void __test_check_msg_header_from_buffer(u8 const* buffer, size_t offset, u16 raw_offset, u8 expected_args_n_bytes)
+static void __test_check_msg_header_from_buffer(u8 const* buffer, size_t offset, u16 message_index, u8 expected_args_n_bytes)
 {
 	struct nvmeib_pet_msg_header const header = __test_load_msg_header_from_buffer(buffer, offset);
 
-	BUG_ON(header.section_offset != raw_offset + 1);
-	BUG_ON(header.section_offset == 0);
+	BUG_ON(header.message_id != message_index + 1);
+	BUG_ON(header.message_id == 0);
 	BUG_ON(header.msg.args_n_bytes != expected_args_n_bytes);
 	BUG_ON(header.msg.timestamp == 0);
 }
@@ -198,13 +198,13 @@ static void __test_check_spacer_from_buffer(u8 const* buffer, size_t offset, u16
 	struct nvmeib_pet_msg_header const header = __test_load_msg_header_from_buffer(buffer, offset);
 
 	BUG_ON(expected_physical_n_bytes < sizeof(header));
-	BUG_ON(header.section_offset != 0);
+	BUG_ON(header.message_id != 0);
 	BUG_ON(header.spacer.bytes != expected_physical_n_bytes - sizeof(header));
 	BUG_ON(header.spacer.unused != 0);
 }
 
 struct test_random_rotation_msg {
-	u16 raw_offset;
+	u16 message_index;
 	u16 record_n_bytes;
 	u8 args_n_bytes;
 	u64 timestamp;
@@ -224,7 +224,7 @@ static u32 __test_random_u32(void)
 }
 
 static void __test_random_rotation_capture_msg(struct nvmeib_pet_journal const* journal,
-					       u16 raw_offset, u16 written,
+					       u16 message_index, u16 written,
 					       struct test_random_rotation_msg* msg)
 {
 	u16 const msg_offset = journal->stream.write_offset - written;
@@ -232,12 +232,12 @@ static void __test_random_rotation_capture_msg(struct nvmeib_pet_journal const* 
 	struct nvmeib_pet_msg_header const header = __test_load_msg_header_from_buffer(buffer, msg_offset);
 
 	BUG_ON(written < sizeof(header));
-	BUG_ON(header.section_offset != raw_offset + 1);
+	BUG_ON(header.message_id != message_index + 1);
 	BUG_ON(header.msg.args_n_bytes != written - sizeof(header));
 	BUG_ON(header.msg.args_n_bytes > sizeof(msg->payload));
 
 	*msg = (struct test_random_rotation_msg){
-		.raw_offset = raw_offset,
+		.message_index = message_index,
 		.record_n_bytes = written,
 		.args_n_bytes = header.msg.args_n_bytes,
 		.timestamp = header.msg.timestamp,
@@ -245,7 +245,7 @@ static void __test_random_rotation_capture_msg(struct nvmeib_pet_journal const* 
 	memcpy(msg->payload, buffer + msg_offset + sizeof(header), msg->args_n_bytes);
 }
 
-static u16 __test_random_rotation_write_msg(struct nvmeib_pet_journal* journal, u16 raw_offset,
+static u16 __test_random_rotation_write_msg(struct nvmeib_pet_journal* journal, u16 message_index,
 					    struct test_random_rotation_msg* msg)
 {
 	u16 written = 0;
@@ -258,33 +258,33 @@ static u16 __test_random_rotation_write_msg(struct nvmeib_pet_journal* journal, 
 
 	switch (random() % 8) {
 	case 0:
-		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset, a8);
+		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index, a8);
 		break;
 	case 1:
-		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset, a16);
+		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index, a16);
 		break;
 	case 2:
-		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset, a32);
+		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index, a32);
 		break;
 	case 3:
-		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset, a64);
+		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index, a64);
 		break;
 	case 4:
-		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset, a8, a16, a32);
+		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index, a8, a16, a32);
 		break;
 	case 5:
-		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset, a64, a32, a16, a8);
+		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index, a64, a32, a16, a8);
 		break;
 	case 6:
-		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset, a64, b64);
+		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index, a64, b64);
 		break;
 	default:
-		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset, a64, b64, c64, a32);
+		written = nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index, a64, b64, c64, a32);
 		break;
 	}
 
 	BUG_ON(written == 0);
-	__test_random_rotation_capture_msg(journal, raw_offset, written, msg);
+	__test_random_rotation_capture_msg(journal, message_index, written, msg);
 	while (nvmeib_pet_get_trace_time_ns() <= msg->timestamp) {
 		/* Keep test timestamps strictly ordered. */
 	}
@@ -357,7 +357,7 @@ static size_t __test_read_random_rotation_msgs(struct nvmeib_pet_stream const* s
 		}
 
 		header = __test_load_msg_header_from_buffer(buffer, pos);
-		if (header.section_offset == 0) {
+		if (header.message_id == 0) {
 			u16 spacer_n_bytes = 0;
 
 			BUG_ON(header.spacer.unused != 0);
@@ -373,7 +373,7 @@ static size_t __test_read_random_rotation_msgs(struct nvmeib_pet_stream const* s
 			BUG_ON(n_msgs >= max_msgs);
 			BUG_ON(header.msg.args_n_bytes > sizeof(msgs[n_msgs].payload));
 			msgs[n_msgs] = (struct test_random_rotation_msg){
-				.raw_offset = header.section_offset - 1,
+				.message_index = header.message_id - 1,
 				.record_n_bytes = record_n_bytes,
 				.args_n_bytes = header.msg.args_n_bytes,
 				.timestamp = header.msg.timestamp,
@@ -399,7 +399,7 @@ static void __test_compare_random_rotation_msgs(struct test_random_rotation_msg 
 
 	BUG_ON(n_actual != n_expected);
 	for (idx = 0; idx < n_expected; ++idx) {
-		BUG_ON(actual[idx].raw_offset != expected[idx].raw_offset);
+		BUG_ON(actual[idx].message_index != expected[idx].message_index);
 		BUG_ON(actual[idx].record_n_bytes != expected[idx].record_n_bytes);
 		BUG_ON(actual[idx].args_n_bytes != expected[idx].args_n_bytes);
 		BUG_ON(actual[idx].timestamp != expected[idx].timestamp);
@@ -476,8 +476,8 @@ static void __test_random_rotation_write_expected_file(u32 seed,
 
 	for (idx = 0; idx < n_expected_msgs; ++idx) {
 		fprintf(fp,
-			"%zu raw_offset=0x%04x record_n_bytes=%u args_n_bytes=%u timestamp=%llu payload=",
-			idx, expected_msgs[idx].raw_offset, expected_msgs[idx].record_n_bytes,
+			"%zu message_id=0x%04x message_index=0x%04x record_n_bytes=%u args_n_bytes=%u timestamp=%llu payload=",
+			idx, expected_msgs[idx].message_index + 1, expected_msgs[idx].message_index, expected_msgs[idx].record_n_bytes,
 			expected_msgs[idx].args_n_bytes, (unsigned long long)expected_msgs[idx].timestamp);
 		__test_random_rotation_print_payload(fp, &expected_msgs[idx]);
 		fprintf(fp, "\n");
@@ -521,13 +521,13 @@ static void __test_stream_set_synthetic_protected_prefix(struct nvmeib_pet_strea
 	stream->write_offset = stream->protected_prefix;
 }
 
-#define TEST_STREAM_WRITE_SEQUENCE(stream, raw_offset, expected_size, first_value, ...) \
+#define TEST_STREAM_WRITE_SEQUENCE(stream, message_index, expected_size, first_value, ...) \
 do { \
 	size_t const __start = (stream).max_written_bytes; \
-	size_t const __written = __NVMEIB_PET_STREAM_WRITE_MSG(&(stream), raw_offset, __VA_ARGS__); \
+	size_t const __written = __NVMEIB_PET_STREAM_WRITE_MSG(&(stream), message_index, __VA_ARGS__); \
 	BUG_ON(__written != sizeof(struct nvmeib_pet_msg_header) + (expected_size)); \
 	BUG_ON((stream).max_written_bytes != __start + __written); \
-	__test_check_msg_header(__start, raw_offset, expected_size); \
+	__test_check_msg_header(__start, message_index, expected_size); \
 	__test_check_payload_sequence(__start, first_value, expected_size); \
 } while (0)
 
@@ -1002,10 +1002,10 @@ void test_journal_random_rotation_retains_last_messages(void)
 		nvmeib_pet_journal_protect_prefix(&journal);
 		while (total_written_n_bytes < target_written_n_bytes) {
 			u16 written = 0;
-			u16 const raw_offset = 0x0800 + (run * max_random_msgs) + n_generated_msgs;
+			u16 const message_index = 0x0800 + (run * max_random_msgs) + n_generated_msgs;
 
 			BUG_ON(n_generated_msgs >= max_random_msgs);
-			written = __test_random_rotation_write_msg(&journal, raw_offset,
+			written = __test_random_rotation_write_msg(&journal, message_index,
 								   &generated_msgs[n_generated_msgs]);
 			total_written_n_bytes += written;
 			++n_generated_msgs;
@@ -1286,7 +1286,7 @@ void test_journal_timestamp(void)
 		.memcpy_buffer = iovec_malloc(NVMEIB_PET_MAX_STREAM_SIZE)
 	};
 	//not optimal, but better then nothing - I don't want to develop reader in C
-	//if you want to be sure that offsets are correct, run pe_messages.py script and see the result
+	//if you want to be sure that message indexes are correct, run pet_messages.py script and see the result
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
 
 	u8 const* const msg1_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.max_written_bytes);
@@ -1299,8 +1299,8 @@ void test_journal_timestamp(void)
 
 	BUG_ON(written1 != sizeof(struct nvmeib_pet_msg_header) + sizeof(u8));
 	BUG_ON(written2 != sizeof(struct nvmeib_pet_msg_header) + sizeof(u8));
-	BUG_ON(header1.section_offset != 0x10 + 1);
-	BUG_ON(header2.section_offset != 0x20 + 1);
+	BUG_ON(header1.message_id != 0x10 + 1);
+	BUG_ON(header2.message_id != 0x20 + 1);
 	BUG_ON(header1.msg.args_n_bytes != sizeof(u8));
 	BUG_ON(header2.msg.args_n_bytes != sizeof(u8));
 	BUG_ON(header1.msg.timestamp == 0);
@@ -1336,7 +1336,7 @@ void test_journal_add_msg_accepts_pointer_arg(void)
 	memcpy(&written_ptr, msg_start + sizeof(struct nvmeib_pet_msg_header), sizeof(written_ptr));
 
 	BUG_ON(written != sizeof(struct nvmeib_pet_msg_header) + sizeof(ptr));
-	BUG_ON(header.section_offset != 0x30 + 1);
+	BUG_ON(header.message_id != 0x30 + 1);
 	BUG_ON(header.msg.args_n_bytes != sizeof(ptr));
 	BUG_ON(written_ptr != ptr);
 
@@ -1588,7 +1588,7 @@ static u16 __test_performance_write_random_warmup_msg(struct nvmeib_pet_journal*
 	u16 const header_n_bytes = sizeof(struct nvmeib_pet_msg_header);
 	u16 const min_msg_n_bytes = header_n_bytes + sizeof(u8);
 	u16 max_u64_args = 0;
-	u16 raw_offset = (u16)(__test_random_u32() & 0x7fff);
+	u16 message_index = (u16)(__test_random_u32() & 0x7fff);
 	u64 args[12] = {0};
 	u16 idx = 0;
 
@@ -1599,7 +1599,7 @@ static u16 __test_performance_write_random_warmup_msg(struct nvmeib_pet_journal*
 
 	if (remaining < header_n_bytes + sizeof(u64)) {
 		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL,
-						  raw_offset, (u8)args[0]);
+						  message_index, (u8)args[0]);
 	}
 
 	max_u64_args = (remaining - header_n_bytes) / sizeof(u64);
@@ -1609,50 +1609,50 @@ static u16 __test_performance_write_random_warmup_msg(struct nvmeib_pet_journal*
 
 	switch ((__test_random_u32() % max_u64_args) + 1) {
 	case 1:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0]);
 	case 2:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1]);
 	case 3:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2]);
 	case 4:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3]);
 	case 5:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3],
 						  args[4]);
 	case 6:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3],
 						  args[4], args[5]);
 	case 7:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3],
 						  args[4], args[5], args[6]);
 	case 8:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3],
 						  args[4], args[5], args[6], args[7]);
 	case 9:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3],
 						  args[4], args[5], args[6], args[7],
 						  args[8]);
 	case 10:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3],
 						  args[4], args[5], args[6], args[7],
 						  args[8], args[9]);
 	case 11:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3],
 						  args[4], args[5], args[6], args[7],
 						  args[8], args[9], args[10]);
 	default:
-		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, raw_offset,
+		return nvmeib_pet_journal_add_msg(journal, NVMEIB_PET_SEVERITY_NORMAL, message_index,
 						  args[0], args[1], args[2], args[3],
 						  args[4], args[5], args[6], args[7],
 						  args[8], args[9], args[10], args[11]);
@@ -1751,6 +1751,7 @@ void test_multiple_messages(void)
 
 	PET_MSG_NORM(&journal, "operation created; o=%p offset=0x%llx size=%u", &journal, (unsigned long long)(4096*4096), 8192);
 	PET_MSG_NORM(&journal, "operation completed; raid uuid=%x", 0xb1c69d3e);
+	PET_MSG_NORM(&journal, "operation compact flag=0x%x", (u8)0xab);
 	PET_MSG_NORM(&journal, "operation completed; rv=%d", -1);
 
 	nvmeib_pet_journal_commit(&journal);

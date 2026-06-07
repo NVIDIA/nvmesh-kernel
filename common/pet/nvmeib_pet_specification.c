@@ -12,9 +12,9 @@
 
 static void __nvmeib_pet_stream_write_spacer(struct nvmeib_pet_stream* self, u16 physical_offset, u16 body_n_bytes)
 {
-	/* section_offset zero marks a spacer; bytes is the payload after this header. */
+	/* message_id zero marks a spacer; bytes is the payload after this header. */
 	struct nvmeib_pet_msg_header const spacer = {
-		.section_offset = 0,
+		.message_id = 0,
 		.spacer = {
 			.bytes = body_n_bytes,
 			.unused = 0,
@@ -40,7 +40,7 @@ u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream co
 	}
 
 	memcpy(&header, (u8*)self->data.iov_base + physical_offset, sizeof(header));
-	if (header.section_offset == 0) {
+	if (header.message_id == 0) {
 		/* Spacer bytes are the payload after the header. */
 		if (likely(header.spacer.unused == 0 &&
 		    header.spacer.bytes <= (remaining - sizeof(header)))) {

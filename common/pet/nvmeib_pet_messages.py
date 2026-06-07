@@ -47,6 +47,13 @@ PRINTF_SPEC_RE = printf_enum_re = re.compile(
 
 PET_MESSAGE_SECTION = 'nvmeib_pet_messages'
 PET_MESSAGE_ELF_SECTION_NAMES = (PET_MESSAGE_SECTION, f'.{PET_MESSAGE_SECTION}')
+PET_MAX_MSG_ARGS = 12
+PET_MESSAGE_N_BYTES_SHIFT = 9
+PET_MESSAGE_N_BYTES = 1 << PET_MESSAGE_N_BYTES_SHIFT
+PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES = PET_MAX_MSG_ARGS + 1
+PET_MESSAGE_FORMAT_N_BYTES = PET_MESSAGE_N_BYTES - PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES
+PET_MESSAGE_STRUCT = struct.Struct(f'<{PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES}s{PET_MESSAGE_FORMAT_N_BYTES}s')
+PET_MESSAGE_ARG_STRUCT_CODES = frozenset('bBhHiIqQ')
 
 
 # ---------------------------------------------------------------------------
@@ -55,13 +62,13 @@ PET_MESSAGE_ELF_SECTION_NAMES = (PET_MESSAGE_SECTION, f'.{PET_MESSAGE_SECTION}')
 
 
 class PetRawMessage(typing.NamedTuple):
-	section_offset: int
+	message_id: int
 	timestamp: int
 	args_payload: bytes
 
 	@property
-	def raw_offset(self) -> int:
-		return self.section_offset - 1
+	def message_index(self) -> int:
+		return self.message_id - 1
 
 
 class PetEntity(typing.NamedTuple):
@@ -173,12 +180,12 @@ class PetArchiveReader:
 				self.__fobj.seek(entity_end)
 				break
 
-			section_offset, timestamp_or_bytes, args_n_bytes_or_unused = self.MSG_HEADER.unpack(
+			message_id, timestamp_or_bytes, args_n_bytes_or_unused = self.MSG_HEADER.unpack(
 				self.__read_exact(self.MSG_HEADER.size, f'entity {idx} record {record_idx} header')
 			)
 			remaining_payload = remaining - self.MSG_HEADER.size
 
-			if section_offset == 0:
+			if message_id == 0:
 				spacer_payload_n_bytes = timestamp_or_bytes
 				if args_n_bytes_or_unused != 0:
 					raise ValueError(
@@ -202,7 +209,7 @@ class PetArchiveReader:
 				)
 			payload = self.__read_exact(args_n_bytes, f'entity {idx} record {record_idx} payload')
 			messages.append(
-				PetRawMessage(section_offset=section_offset, timestamp=timestamp_or_bytes, args_payload=payload)
+				PetRawMessage(message_id=message_id, timestamp=timestamp_or_bytes, args_payload=payload)
 			)
 			record_idx += 1
 
@@ -629,8 +636,9 @@ class DwarfRuntime:
 class MessageSpec(pydantic.BaseModel):
 	model_config = pydantic.ConfigDict(frozen=True)
 
-	offset: int
-	spec: str
+	message_index: int
+	format_string: str
+	arg_struct_codes: str
 
 
 class ArgPrintfSpec(pydantic.BaseModel):
@@ -757,20 +765,20 @@ class EntitySkeleton:
 	"""Stable signature of an entity's execution shape.
 
 	The skeleton is built from the entity commit id plus ordered PET message
-	offsets. It ignores timestamps and argument values, so entities with the
+	indexes. It ignores timestamps and argument values, so entities with the
 	same control/message flow group under the same hash.
 	"""
 
 	def __init__(self, commit_id: int):
-		self.offsets: list[int] = [commit_id]
+		self.message_indexes: list[int] = [commit_id]
 
 	def update(self, msg: PetRawMessage) -> None:
-		self.offsets.append(msg.raw_offset)
+		self.message_indexes.append(msg.message_index)
 
 	def hexdigest(self) -> str:
 		hasher = hashlib.blake2s(digest_size=6)
-		for offset in self.offsets:
-			hasher.update(offset.to_bytes(8, byteorder='little', signed=False))
+		for message_index in self.message_indexes:
+			hasher.update(message_index.to_bytes(8, byteorder='little', signed=False))
 		return hasher.hexdigest()
 
 
@@ -789,11 +797,10 @@ class Template:
 	def __process_c_spec(self) -> None:
 		last = 0
 		parts: list[str] = []
-		struct_codes: list[str] = []
 		arg_idx = 0
-		spec = self.__c_spec.spec
-		for m in PRINTF_SPEC_RE.finditer(spec):
-			parts.append(self.__escape_msg_part(spec[last : m.start()]))  # field before separator
+		format_string = self.__c_spec.format_string
+		for m in PRINTF_SPEC_RE.finditer(format_string):
+			parts.append(self.__escape_msg_part(format_string[last : m.start()]))  # field before separator
 			arg_printf_spec: ArgPrintfSpec = ArgPrintfSpec.from_re_match(m)
 			spec_prefix = m.group('spec_prefix') if m.group('spec_prefix') else ''
 			if not arg_printf_spec.consumes_arg:
@@ -803,9 +810,11 @@ class Template:
 				continue
 
 			try:
-				struct_codes.append(arg_printf_spec.struct_code)
+				_ = arg_printf_spec.struct_code
 			except ValueError as error:
-				raise ValueError(f'{error}; message offset={self.__c_spec.offset:#06x}, spec={spec!r}') from error
+				raise ValueError(
+					f'{error}; message_index={self.__c_spec.message_index:#06x}, format_string={format_string!r}'
+				) from error
 
 			if spec_prefix and not (arg_printf_spec.hex and spec_prefix.lower() == '0x'):
 				parts.append(self.__escape_msg_part(spec_prefix))
@@ -821,9 +830,15 @@ class Template:
 					parts.append('{}')
 			arg_idx += 1
 			last = m.end()
-		parts.append(self.__escape_msg_part(spec[last:]))  # trailing field
+		parts.append(self.__escape_msg_part(format_string[last:]))  # trailing field
+		if arg_idx != len(self.__c_spec.arg_struct_codes):
+			raise ValueError(
+				f'PET message argument count mismatch: message_index={self.__c_spec.message_index:#06x}, '
+				f'format_args={arg_idx}, arg_struct_codes_args={len(self.__c_spec.arg_struct_codes)}, '
+				f'format_string={format_string!r}'
+			)
 		self.__py_spec = ''.join(parts)
-		self.__payload_struct = struct.Struct('<' + ''.join(struct_codes))
+		self.__payload_struct = struct.Struct('<' + self.__c_spec.arg_struct_codes)
 
 	def __bool__(self):
 		return bool(self.__py_spec)
@@ -837,9 +852,9 @@ class Template:
 		actual_n_bytes = len(msg.args_payload)
 		if expected_n_bytes != actual_n_bytes:
 			raise RuntimeError(
-				f'PET message payload size mismatch: section_offset={msg.section_offset:#06x}, '
-				f'raw_offset={msg.raw_offset:#06x}, '
-				f'spec={self.__c_spec.spec!r}, expected={expected_n_bytes}, '
+				f'PET message payload size mismatch: message_id={msg.message_id:#06x}, '
+				f'message_index={msg.message_index:#06x}, '
+				f'format_string={self.__c_spec.format_string!r}, expected={expected_n_bytes}, '
 				f'actual={actual_n_bytes}, payload={msg.args_payload.hex()}'
 			)
 
@@ -878,7 +893,7 @@ class Dictionary(pydantic.BaseModel):
 	def build_templates(self) -> dict[int, Template]:
 		templates: dict[int, Template] = {}
 		for msg in self.specs:
-			templates[msg.offset] = Template(msg, self.user_defined_types)
+			templates[msg.message_index] = Template(msg, self.user_defined_types)
 		return templates
 
 	def save(self, fpath: pathlib.Path) -> None:
@@ -887,6 +902,15 @@ class Dictionary(pydantic.BaseModel):
 
 
 class TemplatesLoader:
+	"""Build a PET dictionary from one binary/module.
+
+	The PET message section is intentionally parsed as a fixed ABI:
+	`struct nvmeib_pet_message`, represented by PET_MESSAGE_STRUCT above. Each
+	record embeds its format string, so no pointer or relocation resolution is
+	needed. DWARF is consulted only after the message strings are known, and only
+	for optional `<enum ...>` / `<struct ...>` pretty-printing.
+	"""
+
 	def __init__(self, module: pathlib.Path, section_names: typing.Union[str, typing.Sequence[str]]):
 		self.module = module
 		if isinstance(section_names, str):
@@ -895,44 +919,86 @@ class TemplatesLoader:
 			self.section_names = tuple(section_names)
 
 	@typing.no_type_check
-	def __load_messages_blob(self) -> bytes:
-		with open(self.module, 'rb') as fobj:
-			elf = ELFFile(fobj)
-			section: typing.Optional[Section] = None
-			for section_name in self.section_names:
-				section = elf.get_section_by_name(section_name)
-				if section:
-					break
-			if not section:
-				names = ', '.join(self.section_names)
-				raise ValueError(f'PET message section ({names}) was not found in {self.module}')
+	def __load_messages_section(self, elf: ELFFile) -> Section:
+		# Find the canonical PET message-record section. We accept both names
+		# because ELF tools may expose a user section with or without the leading
+		# dot, depending on how the binary was produced.
+		for section_name in self.section_names:
+			section = elf.get_section_by_name(section_name)
+			if section:
+				return section
+		names = ', '.join(self.section_names)
+		raise ValueError(f'PET message section ({names}) was not found in {self.module}')
 
-			offset: int = section['sh_offset']
-			size: int = section['sh_size']
+	def __decode_arg_struct_codes(self, record_index: int, data: bytes) -> str:
+		# C emits a fixed-size, zero-terminated array of Python struct module
+		# format codes. Bytes after the terminator must stay zero so malformed
+		# records fail during dictionary generation instead of while viewing.
+		nul_at = data.find(b'\x00')
+		if nul_at == -1:
+			raise ValueError(f'PET message record {record_index} arg_struct_code is not terminated')
+		active = data[:nul_at]
+		tail = data[nul_at:]
+		if any(tail):
+			raise ValueError(f'PET message record {record_index} has non-zero bytes after arg_struct_code terminator')
+		try:
+			codes = active.decode('ascii')
+		except UnicodeDecodeError as error:
+			raise ValueError(f'PET message record {record_index} has non-ASCII arg_struct_code') from error
+		for code in codes:
+			if code not in PET_MESSAGE_ARG_STRUCT_CODES:
+				raise ValueError(f'PET message record {record_index} has unsupported struct code {code!r}')
+		if struct.calcsize('<' + codes) > 96:
+			raise ValueError(f'PET message record {record_index} payload layout is too large: {codes!r}')
+		return codes
 
-			fobj.seek(offset)
-			return fobj.read(size)
+	def __decode_format_string(self, record_index: int, data: bytes) -> str:
+		# The C record embeds the whole format string in a fixed-size array. The
+		# macro rejects literals that do not fit, so a valid record must contain a
+		# NUL terminator and zero padding after it.
+		nul_at = data.find(b'\x00')
+		if nul_at == -1:
+			raise ValueError(f'PET message record {record_index} format is not terminated')
+		if any(data[nul_at:]):
+			raise ValueError(f'PET message record {record_index} has non-zero bytes after format terminator')
+		return data[:nul_at].decode('utf-8', 'replace')
 
 	def __load_messages_spec(self) -> list[MessageSpec]:
-		data = self.__load_messages_blob()
-		msgs: list[MessageSpec] = []
+		with open(self.module, 'rb') as fobj:
+			elf = ELFFile(fobj)
+			section = self.__load_messages_section(elf)
+			data = section.data()
+			# The section is an array of packed struct nvmeib_pet_message records,
+			# not a string table. A non-multiple size means the producer/linker did
+			# not emit the section according to the PET ABI.
+			if len(data) % PET_MESSAGE_STRUCT.size != 0:
+				raise ValueError(
+					f'PET message section size must be a multiple of {PET_MESSAGE_STRUCT.size}: '
+					f'section={section.name}, size={len(data)}'
+				)
 
-		msg_starts_at: int = 0
-		bin_msg = bytearray()
-		for idx, byte in enumerate(data):
-			if byte == 0:
-				if bin_msg:
-					msgs.append(MessageSpec(offset=msg_starts_at, spec=bin_msg.decode('utf-8', 'replace')))
-					bin_msg.clear()
-				msg_starts_at = idx + 1
-			else:
-				bin_msg.append(byte)
+			msgs: list[MessageSpec] = []
+			for record_index, record_offset in enumerate(range(0, len(data), PET_MESSAGE_STRUCT.size)):
+				arg_codes_raw, format_raw = PET_MESSAGE_STRUCT.unpack_from(data, record_offset)
+				arg_struct_codes = self.__decode_arg_struct_codes(record_index, arg_codes_raw)
+				format_string = self.__decode_format_string(record_index, format_raw)
+				if not format_string:
+					raise ValueError(f'PET message record {record_index} has empty format')
+				msgs.append(
+					MessageSpec(
+						message_index=record_index,
+						format_string=format_string,
+						arg_struct_codes=arg_struct_codes,
+					)
+				)
 		return msgs
 
 	def __list_user_defined_types(self, msgs: list[MessageSpec]) -> set[str]:
+		# DWARF loading is comparatively expensive, so first collect only the
+		# type names that are explicitly requested by PET format annotations.
 		types: set[str] = set()
 		for msg in msgs:
-			for m in PRINTF_SPEC_RE.finditer(msg.spec):
+			for m in PRINTF_SPEC_RE.finditer(msg.format_string):
 				if m.group('tag') and m.group('type_name'):
 					types.add(f'{m.group("type_name")}')
 		return types
@@ -963,7 +1029,7 @@ class Command(abc.ABC):
 		parser.add_argument(
 			'module', type=pathlib.Path, help='path to the binary file(executable, shared library, kernel module)'
 		)
-		parser.add_argument('section', type=str, help='the ELF section name, all the PET strings are stored in')
+		parser.add_argument('section', type=str, help='the ELF section name to inspect')
 
 	@classmethod
 	@typing.no_type_check
@@ -1020,7 +1086,7 @@ class SaveDictionary(Command):
 	@typing.no_type_check
 	def register(cls, subparsers) -> None:
 		parser = subparsers.add_parser(
-			'save-dictionary', description='save all messages within a module to the dedicated file'
+			'save-dictionary', description='save PET message records from a module to a dictionary file'
 		)
 		parser.set_defaults(klass=cls)
 		parser.add_argument(
@@ -1127,7 +1193,7 @@ class ViewRawMessages(Command):
 			args_n_bytes = len(msg.args_payload)
 			record_n_bytes = PetArchiveReader.MSG_HEADER.size + args_n_bytes
 			print(
-				f'{idx} raw_offset=0x{msg.raw_offset:04x} '
+				f'{idx} message_id=0x{msg.message_id:04x} message_index=0x{msg.message_index:04x} '
 				f'record_n_bytes={record_n_bytes} args_n_bytes={args_n_bytes} '
 				f'timestamp={msg.timestamp} payload={msg.args_payload.hex()}'
 			)
@@ -1278,10 +1344,10 @@ class ViewMessages(Command):
 
 		for msg in self.__iter_entity_raw_messages(entity):
 			try:
-				tmpl = schema.templates[msg.raw_offset]
+				tmpl = schema.templates[msg.message_index]
 			except KeyError:
 				msg = (
-					f'Unknown PET message section_offset={msg.section_offset:#06x} raw={msg.raw_offset:#06x} '
+					f'Unknown PET message message_id={msg.message_id:#06x} message_index={msg.message_index:#06x} '
 					f'for entity {entity.idx} in schema {schema.git_commit_id}'
 				)
 				raise RuntimeError(msg)
@@ -1314,7 +1380,7 @@ class ViewMessages(Command):
 
 def main():
 	parser = argparse.ArgumentParser(
-		description='extract ASCII strings from a ELF binary .rodata section',
+		description='build PET dictionaries and view PET journal files',
 		formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 	)
 	subparsers = parser.add_subparsers(required=True)

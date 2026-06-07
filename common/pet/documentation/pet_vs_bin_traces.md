@@ -20,7 +20,7 @@ This document compares:
 | Write timing | Write to a private bounded journal during execution; after prefix protection, later writes rotate in the suffix; flush/put on `nvmeib_pet_journal_commit()` | Event emitted at call site into configured trace channel |
 | Persistence policy | Flush decision can depend on worst severity seen in journal (`worst_severity`) and controller policy (`minimal_severity`) | Channel choice is explicit at callsite (`NVMEIB_LOG_LONGTERM`, `..._GOODPATH`, `..._ETERNAL`, etc.); dmesg mirroring configurable per macro |
 | Buffer model | Explicit `get_buffer/put_buffer/flush` controller API; can be no-memory/no-buffer safely; retained data is protected prefix plus latest rotating suffix | Trace backend/channel infra from `nvmeib_trace.h` + generated tracepoints; no per-operation private journal |
-| Message identity | Message text embedded in dedicated ELF section, message id derived from section offset | Trace event identity is `name` (mapped to generated trace function symbol) |
+| Message identity | Fixed message records embedded in the common PET ELF section; runtime id is record index plus one | Trace event identity is `name` (mapped to generated trace function symbol) |
 | Format contract | `printf`-like format verified via `__attribute__((format(printf,...)))` helper; args serialized as typed compact variants | Custom trace format language (`@TAG`-style placeholders) used by binary tracer/event pipeline |
 | Argument/type limits | PET message constructor supports 1..12 args (`NVMEIB_PET_MSG_1..12`); forbids float/double/char*/const char* | Kernel trace path explicitly works around zero-arg limitation and mentions LTTNG max-args pressure (10) |
 | Zero-arg behavior | Public PET constructors are 1..12 args (no dedicated zero-arg message macro) | Wrapper has explicit logic/comments for no-arg traces (dummy char in kernel path) |
@@ -152,7 +152,7 @@ Guidelines:
 - Over-persisting good path: moving traces -> PET usually reduces persistence, but only if commit threshold/config is set appropriately.
 - Losing filterability: moving traces -> PET can remove token-aware `pager.py` filtering workflows if equivalent trace tokens are not kept.
 - Type drift: PET compile-time checks reject unsupported types early; preserve explicit integer widths/casts during translation.
-- Message identity drift: PET identity is section offset-derived; binary tracer identity is event name-derived. Keep a stable naming scheme during mixed operation.
+- Message identity drift: PET identity is message-record-index-derived; binary tracer identity is event name-derived. Keep a stable naming scheme during mixed operation.
 
 ## Source References
 - `clnt/nvmeibc_io_pet.h`
