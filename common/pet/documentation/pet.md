@@ -73,15 +73,26 @@ The current PET stream is a bounded byte journal. A committed entity starts
 with:
 
 ```c
+struct __attribute__((packed)) nvmeib_pet_trace_clock {
+    u64 tsc_offset;
+    u32 tsc_khz;
+};
+
 struct __attribute__((packed)) nvmeib_pet_stream_header {
     u64 commit_id;
     u16 journal_size;
+    struct nvmeib_pet_trace_clock trace_clock;
 };
 ```
 
 `journal_size` is the committed scan boundary. The viewer parses only bytes
 inside this range and treats the records after the header as either normal
-messages or rotation spacers.
+messages or rotation spacers. `trace_clock` lets the viewer convert the raw TSC
+ticks stored in each message header to nanoseconds:
+
+```text
+ns = (ticks + tsc_offset) * 1000000 / tsc_khz
+```
 
 Normal messages store a `message_id` value. `message_id == 0` is reserved for a
 spacer record; real messages store `message_index + 1`, where `message_index` is
@@ -107,7 +118,8 @@ The viewer contract is:
 ```
 
 where `eof` is `journal_size`. Messages inside one entity are unrotated by
-timestamp drop detection before they are returned to higher-level viewer code.
+raw tick drop detection and converted to nanoseconds before they are returned
+to higher-level viewer code.
 
 ### Usage example
 

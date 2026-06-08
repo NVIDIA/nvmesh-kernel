@@ -36,7 +36,7 @@ This document compares:
 ## Key Architectural Differences
 ### 1. Data flow model
 - PET:
-  1. `NVMEIBC_IO_PET_MSG*` builds compact typed message arguments; the journal add path captures and serializes the timestamp.
+  1. `NVMEIBC_IO_PET_MSG*` builds compact typed message arguments; the journal add path captures raw TSC ticks, and the committed journal header stores the clock metadata needed to restore nanoseconds in the viewer.
   2. Message is written into the per-operation journal stream. Before rotation this is append-only; after prefix protection the suffix can rotate and overwrite older suffix records.
   3. On commit, journal flushes once and releases buffer.
 - Binary traces:

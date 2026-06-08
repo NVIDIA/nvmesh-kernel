@@ -34,10 +34,12 @@ The idea should cut the bootstrap phase from few weeks to probably one week or e
 Each flushed PET entity starts with a compact stream header:
 
 ```text
-{ commit_id, journal_size }
+{ commit_id, journal_size, tsc_offset, tsc_khz }
 ```
 
-The viewer scans only `journal_size` bytes. Records after the header are
+The viewer scans only `journal_size` bytes. `tsc_offset` and `tsc_khz` let the
+viewer convert raw per-message TSC ticks to nanoseconds with
+`(ticks + tsc_offset) * 1000000 / tsc_khz`. Records after the header are
 self-describing messages or rotation spacers. A normal message stores
 `message_id = message_index + 1`; `message_id == 0` marks a spacer whose
 `bytes` field tells the viewer how many payload bytes to skip. The message

@@ -151,10 +151,14 @@ void test_msg_header_layout(void)
 void test_stream_header_layout(void)
 {
 	enum {
+		trace_clock_n_bytes = sizeof(((struct nvmeib_pet_trace_clock *)0)->tsc_offset) +
+				      sizeof(((struct nvmeib_pet_trace_clock *)0)->tsc_khz),
 		header_n_bytes = sizeof(((struct nvmeib_pet_stream_header *)0)->commit_id) +
-				 sizeof(((struct nvmeib_pet_stream_header *)0)->journal_size),
+				 sizeof(((struct nvmeib_pet_stream_header *)0)->journal_size) +
+				 trace_clock_n_bytes,
 	};
 
+	BUG_ON(sizeof(struct nvmeib_pet_trace_clock) != trace_clock_n_bytes);
 	BUG_ON(sizeof(struct nvmeib_pet_stream_header) != header_n_bytes);
 	BUG_ON(NVMEIB_PET_ENTITY_HEADER_SIZE != sizeof(struct nvmeib_pet_stream_header));
 }
@@ -171,6 +175,21 @@ static struct nvmeib_pet_msg_header __test_load_msg_header_from_buffer(u8 const*
 	struct nvmeib_pet_msg_header header = {0};
 	memcpy(&header, buffer + offset, sizeof(header));
 	return header;
+}
+
+static void __test_check_trace_clock(struct nvmeib_pet_trace_clock trace_clock)
+{
+	struct nvmeib_pet_trace_clock const expected = nvmeib_pet_trace_clock_get();
+
+	BUG_ON(trace_clock.tsc_khz == 0);
+	BUG_ON(trace_clock.tsc_offset != expected.tsc_offset);
+	BUG_ON(trace_clock.tsc_khz != expected.tsc_khz);
+}
+
+static u64 __test_trace_ticks_to_ns(u64 ticks, struct nvmeib_pet_trace_clock trace_clock)
+{
+	BUG_ON(trace_clock.tsc_khz == 0);
+	return MUL_X_DIV_Y(ticks + trace_clock.tsc_offset, 1000000ULL, (u64)trace_clock.tsc_khz);
 }
 
 static void __test_check_msg_header(size_t offset, u16 message_index, u8 expected_args_n_bytes)
@@ -285,7 +304,7 @@ static u16 __test_random_rotation_write_msg(struct nvmeib_pet_journal* journal, 
 
 	BUG_ON(written == 0);
 	__test_random_rotation_capture_msg(journal, message_index, written, msg);
-	while (nvmeib_pet_get_trace_time_ns() <= msg->timestamp) {
+	while (nvmeib_pet_get_trace_time_ticks() <= msg->timestamp) {
 		/* Keep test timestamps strictly ordered. */
 	}
 	return written;
@@ -458,7 +477,8 @@ static void __test_random_rotation_print_payload(FILE* fp, struct test_random_ro
 
 static void __test_random_rotation_write_expected_file(u32 seed,
 						       struct test_random_rotation_msg const* expected_msgs,
-						       size_t n_expected_msgs)
+						       size_t n_expected_msgs,
+						       struct nvmeib_pet_trace_clock trace_clock)
 {
 	char fname[256] = {0};
 	FILE* fp = NULL;
@@ -475,10 +495,12 @@ static void __test_random_rotation_write_expected_file(u32 seed,
 	}
 
 	for (idx = 0; idx < n_expected_msgs; ++idx) {
+		u64 const ns_timestamp = __test_trace_ticks_to_ns(expected_msgs[idx].timestamp, trace_clock);
+
 		fprintf(fp,
 			"%zu message_id=0x%04x message_index=0x%04x record_n_bytes=%u args_n_bytes=%u timestamp=%llu payload=",
 			idx, expected_msgs[idx].message_index + 1, expected_msgs[idx].message_index, expected_msgs[idx].record_n_bytes,
-			expected_msgs[idx].args_n_bytes, (unsigned long long)expected_msgs[idx].timestamp);
+			expected_msgs[idx].args_n_bytes, (unsigned long long)ns_timestamp);
 		__test_random_rotation_print_payload(fp, &expected_msgs[idx]);
 		fprintf(fp, "\n");
 	}
@@ -931,6 +953,7 @@ void test_stream_commit_sets_journal_size(void)
 	memcpy(&committed_header, stream.data.iov_base, sizeof(committed_header));
 	BUG_ON(committed_header.commit_id != (u64)COMMIT_ID);
 	BUG_ON(committed_header.journal_size != expected_journal_size);
+	__test_check_trace_clock(committed_header.trace_clock);
 }
 
 static size_t __test_make_random_rotation_expectation(struct test_random_rotation_msg const* generated_msgs,
@@ -1025,9 +1048,11 @@ void test_journal_random_rotation_retains_last_messages(void)
 		memcpy(&committed_header, committed_stream.data.iov_base, sizeof(committed_header));
 		BUG_ON(committed_header.commit_id != (u64)COMMIT_ID);
 		BUG_ON(committed_header.journal_size != committed_stream.max_written_bytes);
+		__test_check_trace_clock(committed_header.trace_clock);
 
 		__test_random_rotation_write_journal_file(initial_seed, &committed_stream);
-		__test_random_rotation_write_expected_file(initial_seed, expected_msgs, n_expected_msgs);
+		__test_random_rotation_write_expected_file(initial_seed, expected_msgs, n_expected_msgs,
+							   committed_header.trace_clock);
 		__test_compare_random_rotation_msgs(expected_msgs, n_expected_msgs, actual_msgs, n_actual_msgs);
 		printf("Random rotation test[%u]: seed=0x%08x useful_msgs=%u useful_msg_bytes=%u spacer_bytes=%u padding_bytes=%u\n",
 		       run, initial_seed, run_stats.useful_msgs, run_stats.useful_msg_bytes,
@@ -1198,6 +1223,7 @@ void test_journal_protect_prefix_after_context(void)
 	memcpy(&committed_header, perf_controller.msgs_buffer.iov_base, sizeof(committed_header));
 	BUG_ON(committed_header.commit_id != (u64)COMMIT_ID);
 	BUG_ON(committed_header.journal_size != expected_journal_size);
+	__test_check_trace_clock(committed_header.trace_clock);
 
 	free(perf_controller.msgs_buffer.iov_base);
 	free(perf_controller.memcpy_buffer.iov_base);
@@ -1290,11 +1316,15 @@ void test_journal_timestamp(void)
 	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&perf_controller.base, true);
 
 	u8 const* const msg1_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.max_written_bytes);
+	u64 const ticks_before1 = nvmeib_pet_get_trace_time_ticks();
 	u16 const written1 = nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x10, (u8)0x11);
+	u64 const ticks_after1 = nvmeib_pet_get_trace_time_ticks();
 	struct nvmeib_pet_msg_header const header1 = __load_msg_header_from(msg1_start);
 
 	u8 const* const msg2_start = (u8 const*)(journal.stream.data.iov_base + journal.stream.max_written_bytes);
+	u64 const ticks_before2 = nvmeib_pet_get_trace_time_ticks();
 	u16 const written2 = nvmeib_pet_journal_add_msg(&journal, NVMEIB_PET_SEVERITY_NORMAL, 0x20, (u8)0x22);
+	u64 const ticks_after2 = nvmeib_pet_get_trace_time_ticks();
 	struct nvmeib_pet_msg_header const header2 = __load_msg_header_from(msg2_start);
 
 	BUG_ON(written1 != sizeof(struct nvmeib_pet_msg_header) + sizeof(u8));
@@ -1305,6 +1335,10 @@ void test_journal_timestamp(void)
 	BUG_ON(header2.msg.args_n_bytes != sizeof(u8));
 	BUG_ON(header1.msg.timestamp == 0);
 	BUG_ON(header2.msg.timestamp == 0);
+	BUG_ON(header1.msg.timestamp < ticks_before1);
+	BUG_ON(header1.msg.timestamp > ticks_after1);
+	BUG_ON(header2.msg.timestamp < ticks_before2);
+	BUG_ON(header2.msg.timestamp > ticks_after2);
 	BUG_ON(*(msg1_start + sizeof(struct nvmeib_pet_msg_header)) != 0x11);
 	BUG_ON(*(msg2_start + sizeof(struct nvmeib_pet_msg_header)) != 0x22);
 

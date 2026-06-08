@@ -80,7 +80,7 @@ class PetEntity(typing.NamedTuple):
 
 
 class PetArchiveReader:
-	ENTITY_HEADER = struct.Struct('<QH')
+	ENTITY_HEADER = struct.Struct('<QHQI')
 	MSG_HEADER = struct.Struct('<HQB')
 
 	def __init__(self, fobj: typing.BinaryIO):
@@ -151,12 +151,20 @@ class PetArchiveReader:
 
 		return ordered
 
+	@staticmethod
+	def __ticks_to_ns(ticks: int, tsc_offset: int, tsc_khz: int) -> int:
+		if tsc_khz == 0:
+			raise ValueError('Invalid PET trace clock: tsc_khz=0')
+		return ((ticks + tsc_offset) * 1000000) // tsc_khz
+
 	def read_entity(self, fname: str, idx: int) -> PetEntity:
 		entity_start = self.__fobj.tell()
 		physical_eof = self.__physical_eof()
-		commit_id, journal_size = self.ENTITY_HEADER.unpack(
+		commit_id, journal_size, tsc_offset, tsc_khz = self.ENTITY_HEADER.unpack(
 			self.__read_exact(self.ENTITY_HEADER.size, f'entity {idx} header')
 		)
+		if tsc_khz == 0:
+			raise ValueError(f'Invalid PET entity {idx} trace clock: tsc_khz=0')
 		if journal_size < self.ENTITY_HEADER.size:
 			raise ValueError(
 				f'Invalid PET entity {idx} journal_size={journal_size}: '
@@ -213,9 +221,13 @@ class PetArchiveReader:
 			)
 			record_idx += 1
 
+		messages = [
+			msg._replace(timestamp=self.__ticks_to_ns(msg.timestamp, tsc_offset, tsc_khz))
+			for msg in self.__unrotate_messages_by_timestamp(messages)
+		]
 		return PetEntity(
 			commit_id=commit_id,
-			messages=self.__unrotate_messages_by_timestamp(messages),
+			messages=messages,
 			fname=fname,
 			idx=idx,
 			size=self.__fobj.tell() - entity_start,

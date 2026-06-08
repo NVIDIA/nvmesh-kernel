@@ -24,20 +24,35 @@
 
 //{{{ OS integration
 
+struct __attribute__((packed)) nvmeib_pet_trace_clock {
+	u64 tsc_offset;
+	u32 tsc_khz;
+};
+
 #if defined(__KERNEL__)
 	#include "nvmeib_trace.h"
 
-	static inline u64 nvmeib_pet_get_trace_time_ns(void)
+	static inline struct nvmeib_pet_trace_clock nvmeib_pet_trace_clock_get(void)
 	{
-		return nvmeib_trace_get_time_ns();
+		return (struct nvmeib_pet_trace_clock){
+			.tsc_offset = nvmeib_trace_tsc_offset_ticks,
+			.tsc_khz = nvmeib_public_tsc_khz(),
+		};
 	}
 #else
-	static inline u64 nvmeib_pet_get_trace_time_ns(void)
+	static inline struct nvmeib_pet_trace_clock nvmeib_pet_trace_clock_get(void)
 	{
-		u64 ticks = nvmeib_public_rdtsc() + tsc_offset;
-		return MUL_X_DIV_Y(ticks, 1000000ULL, (u64)tsc_khz);
+		return (struct nvmeib_pet_trace_clock){
+			.tsc_offset = (u64)tsc_offset,
+			.tsc_khz = tsc_khz,
+		};
 	}
 #endif
+
+static inline u64 nvmeib_pet_get_trace_time_ticks(void)
+{
+	return (u64)nvmeib_public_rdtsc();
+}
 
 enum nvmeib_pet_severity{
 	NVMEIB_PET_SEVERITY_NORMAL   = 0, //periodic dump to see what is going on
@@ -77,6 +92,7 @@ struct nvmeib_pet_base_controller{
 struct __attribute__((packed)) nvmeib_pet_stream_header {
 	u64 commit_id;
 	u16 journal_size;
+	struct nvmeib_pet_trace_clock trace_clock;
 };
 
 enum { NVMEIB_PET_ENTITY_HEADER_SIZE = sizeof(struct nvmeib_pet_stream_header) };
@@ -120,6 +136,7 @@ static inline void nvmeib_pet_stream_commit(struct nvmeib_pet_stream* self)
 		struct nvmeib_pet_stream_header const header = {
 			.commit_id = (u64)COMMIT_ID,
 			.journal_size = self->max_written_bytes,
+			.trace_clock = nvmeib_pet_trace_clock_get(),
 		};
 
 		memcpy(self->data.iov_base, &header, sizeof(header));
@@ -207,7 +224,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	return (struct nvmeib_pet_msg_header){
 		.message_id = message_index + 1, /* message_id==0 is reserved for spacers */
 		.msg = {
-			.timestamp = nvmeib_pet_get_trace_time_ns(),
+			.timestamp = nvmeib_pet_get_trace_time_ticks(),
 			.args_n_bytes = args_n_bytes,
 		},
 	};

@@ -22,15 +22,26 @@ recent messages and may overwrite older suffix messages.
 Each flushed entity starts with a packed stream header:
 
 ```c
+struct __attribute__((packed)) nvmeib_pet_trace_clock {
+    u64 tsc_offset;
+    u32 tsc_khz;
+};
+
 struct __attribute__((packed)) nvmeib_pet_stream_header {
     u64 commit_id;
     u16 journal_size;
+    struct nvmeib_pet_trace_clock trace_clock;
 };
 ```
 
 `journal_size` is the number of committed bytes in this entity. The writer
 copies this header during `nvmeib_pet_stream_commit()` and shrinks the flushed
-`iovec` to `journal_size`.
+`iovec` to `journal_size`. `trace_clock` stores the conversion metadata needed
+to turn raw message TSC ticks into nanoseconds:
+
+```text
+ns = (ticks + tsc_offset) * 1000000 / tsc_khz
+```
 
 The viewer scans only the range:
 
@@ -66,10 +77,14 @@ Normal message:
 ```text
 message_id != 0
 message_index = message_id - 1
-msg.timestamp = message timestamp
+msg.timestamp = raw TSC ticks
 msg.args_n_bytes = serialized argument payload bytes
 payload follows the header
 ```
+
+`msg.timestamp` is stored as raw TSC ticks. The viewer restores nanoseconds
+using the entity header's `trace_clock` before returning messages to higher
+layers.
 
 The stored message id is the fixed dictionary record index plus one. That keeps
 `message_id == 0` reserved for rotation spacers.
@@ -198,9 +213,9 @@ logical:  [ protected ][ older suffix ][ newer prefix ]
 ```
 
 `PetArchiveReader.read_entity()` unrotates messages for each entity by detecting
-the timestamp drop created by rotation. This is per-entity behavior. Viewer
-commands may still apply their own global timestamp sort across entities unless
-the user passes `--no-sort`.
+the raw tick drop created by rotation, then converts ticks to nanoseconds. This
+is per-entity behavior. Viewer commands may still apply their own global
+timestamp sort across entities unless the user passes `--no-sort`.
 
 ## API Notes
 
