@@ -154,28 +154,6 @@ enum {
 	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_ENTITY_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
 };
 
-#define NVMEIB_PET_MESSAGE_SECTION "nvmeib_pet_messages"
-
-enum {
-	NVMEIB_PET_MESSAGE_N_BYTES_SHIFT = 9,
-	NVMEIB_PET_MESSAGE_N_BYTES = 1 << NVMEIB_PET_MESSAGE_N_BYTES_SHIFT,
-	NVMEIB_PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES = NVMEIB_PET_MAX_MSG_ARGS + 1,
-	NVMEIB_PET_MESSAGE_FORMAT_N_BYTES = NVMEIB_PET_MESSAGE_N_BYTES - NVMEIB_PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES,
-};
-
-struct __attribute__((packed, aligned(NVMEIB_PET_MESSAGE_N_BYTES))) nvmeib_pet_message {
-	char arg_struct_code[NVMEIB_PET_MAX_MSG_ARGS + 1];
-	char format[NVMEIB_PET_MESSAGE_FORMAT_N_BYTES];
-};
-
-enum {
-	NVMEIB_PET_MESSAGE_FIELDS_N_BYTES = sizeof(((struct nvmeib_pet_message*)0)->arg_struct_code) +
-					    sizeof(((struct nvmeib_pet_message*)0)->format),
-	NVMEIB_PET_MESSAGE_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message) == NVMEIB_PET_MESSAGE_FIELDS_N_BYTES),
-	NVMEIB_PET_MESSAGE_EXPECTED_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message) == NVMEIB_PET_MESSAGE_N_BYTES),
-	NVMEIB_PET_MESSAGE_NOT_EMPTY_CHECK = 1 / (sizeof(struct nvmeib_pet_message) != 0),
-};
-
 u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream const* self, u16 physical_offset, u16 eof_offset);
 u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size);
 
@@ -666,7 +644,6 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	__NVMEIB_PET_STREAM_WRITE_IMPL(self, offset, NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__); \
 })
 
-
 //severity & verbosity
 //the main difference between traditional logging systems and PET is the following:
 //* PET must accumulate the whole history and the history will be stored only in case it saw some "problematic" record.
@@ -762,6 +739,24 @@ static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* 
 	__nvmeib_pet_journal_clear_in_use(self);
 }
 
+__attribute__((nonnull (1)))
+static inline void nvmeib_pet_journal_commit(struct nvmeib_pet_journal* self)
+{
+	if (likely(nvmeib_pet_journal_is_activated(self))){
+		if (self->stream.max_written_bytes > NVMEIB_PET_ENTITY_HEADER_SIZE) {
+			nvmeib_pet_stream_commit(&self->stream);
+			self->controller->flush(self->controller, self->worst_severity, self->stream.data);
+		}
+
+		self->controller->put_buffer(self->controller, (struct nvmeib_pet_buffer){
+								       .data = self->stream.data,
+								       .release_cpu = self->release_cpu,
+							       });
+	}
+
+	(*self) = (struct nvmeib_pet_journal){0};
+}
+
 //don't add nvmeib_pet_journal_is_activated check here - too late - the arguments are already evaluated
 #define nvmeib_pet_journal_add_msg(self, severity, offset, ...)	\
 ({	\
@@ -777,6 +772,28 @@ static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* 
 	__nvmeib_pet_journal_clear_in_use(__nvmeib_pet_journal); \
 	msg_written_bytes; \
 })
+
+#define NVMEIB_PET_MESSAGE_SECTION "nvmeib_pet_messages"
+
+enum {
+	NVMEIB_PET_MESSAGE_N_BYTES_SHIFT = 9,
+	NVMEIB_PET_MESSAGE_N_BYTES = 1 << NVMEIB_PET_MESSAGE_N_BYTES_SHIFT,
+	NVMEIB_PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES = NVMEIB_PET_MAX_MSG_ARGS + 1,
+	NVMEIB_PET_MESSAGE_FORMAT_N_BYTES = NVMEIB_PET_MESSAGE_N_BYTES - NVMEIB_PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES,
+};
+
+struct __attribute__((packed, aligned(NVMEIB_PET_MESSAGE_N_BYTES))) nvmeib_pet_message {
+	char arg_struct_code[NVMEIB_PET_MAX_MSG_ARGS + 1];
+	char format[NVMEIB_PET_MESSAGE_FORMAT_N_BYTES];
+};
+
+enum {
+	NVMEIB_PET_MESSAGE_FIELDS_N_BYTES = sizeof(((struct nvmeib_pet_message*)0)->arg_struct_code) +
+					    sizeof(((struct nvmeib_pet_message*)0)->format),
+	NVMEIB_PET_MESSAGE_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message) == NVMEIB_PET_MESSAGE_FIELDS_N_BYTES),
+	NVMEIB_PET_MESSAGE_EXPECTED_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message) == NVMEIB_PET_MESSAGE_N_BYTES),
+	NVMEIB_PET_MESSAGE_NOT_EMPTY_CHECK = 1 / (sizeof(struct nvmeib_pet_message) != 0),
+};
 
 #define NVMEIB_IO_PET_MSG(pet_journal, msg, severity,...) \
 ({ \
@@ -806,23 +823,6 @@ static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* 
 #define NVMEIB_IO_PET_MSG_CRIT(pet_journal, msg, ...) NVMEIB_IO_PET_MSG(pet_journal, msg, NVMEIB_PET_SEVERITY_CRITICAL, __VA_ARGS__)
 
 
-__attribute__((nonnull (1)))
-static inline void nvmeib_pet_journal_commit(struct nvmeib_pet_journal* self)
-{
-	if (likely(nvmeib_pet_journal_is_activated(self))){
-		if (self->stream.max_written_bytes > NVMEIB_PET_ENTITY_HEADER_SIZE) {
-			nvmeib_pet_stream_commit(&self->stream);
-			self->controller->flush(self->controller, self->worst_severity, self->stream.data);
-		}
-
-		self->controller->put_buffer(self->controller, (struct nvmeib_pet_buffer){
-								       .data = self->stream.data,
-								       .release_cpu = self->release_cpu,
-							       });
-	}
-
-	(*self) = (struct nvmeib_pet_journal){0};
-}
 //}}}
 
 #endif//__NVMEIB_PET_SPECIFICATION_H__
