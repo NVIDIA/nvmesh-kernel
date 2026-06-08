@@ -57,10 +57,10 @@ $(CFLAGS_STAMP): FORCE | dirs
 	@printf '%s\n' '$(CFLAGS)' > $@.tmp
 	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm $@.tmp; fi
 
-$(BUILD_DIR)/test.o: $(TESTS_DIR)/test.c nvmeib_pet_specification.h $(CFLAGS_STAMP) | dirs
+$(BUILD_DIR)/test.o: $(TESTS_DIR)/test.c nvmeib_pet_specification.h nvmeib_pet_types.h $(CFLAGS_STAMP) | dirs
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/nvmeib_pet_specification.o: nvmeib_pet_specification.c nvmeib_pet_specification.h $(CFLAGS_STAMP) | dirs
+$(BUILD_DIR)/nvmeib_pet_specification.o: nvmeib_pet_specification.c nvmeib_pet_specification.h nvmeib_pet_types.h $(CFLAGS_STAMP) | dirs
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TEST_EXE): $(TEST_OBJS)
