@@ -221,7 +221,7 @@ or other context that makes later messages readable. The suffix keeps the most
 recent messages and may overwrite older suffix messages.
 
 At journal buffer creation, all three offsets start at
-`NVMEIB_PET_ENTITY_HEADER_SIZE` for an active journal. The protected area
+`NVMEIB_PET_JOURNALBUF_HEADER_SIZE` for an active journal. The protected area
 initially contains only the journal buffer header.
 
 The user may call `nvmeib_pet_journal_protect_prefix()` after writing the

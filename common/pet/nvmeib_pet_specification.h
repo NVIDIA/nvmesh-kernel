@@ -95,7 +95,7 @@ struct __attribute__((packed)) nvmeib_pet_journalbuf_header {
 	struct nvmeib_pet_trace_clock trace_clock;
 };
 
-enum { NVMEIB_PET_ENTITY_HEADER_SIZE = sizeof(struct nvmeib_pet_journalbuf_header) };
+enum { NVMEIB_PET_JOURNALBUF_HEADER_SIZE = sizeof(struct nvmeib_pet_journalbuf_header) };
 
 struct nvmeib_pet_journalbuf{
 	struct iovec data;
@@ -106,7 +106,7 @@ struct nvmeib_pet_journalbuf{
 	 */
 	u16 write_offset;
 	/* Bytes in [0, protected_prefix) are retained by rotation. The area starts
-	 * with the entity header and may be extended by explicit user request.
+	 * with the journal buffer header and may be extended by explicit user request.
 	 */
 	u16 protected_prefix;
 };
@@ -117,9 +117,9 @@ static inline struct nvmeib_pet_journalbuf nvmeib_pet_journalbuf_make(struct iov
 {
 	struct nvmeib_pet_journalbuf journalbuf = {
 		.data = data,
-		.max_written_bytes = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
-		.write_offset = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
-		.protected_prefix = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
+		.max_written_bytes = data.iov_base ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
+		.write_offset = data.iov_base ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
+		.protected_prefix = data.iov_base ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
 	};
 
 	if (unlikely(NVMEIB_PET_MAX_JOURNALBUF_SIZE < data.iov_len)){
@@ -168,7 +168,7 @@ enum {
 	NVMEIB_PET_MIN_MSG_N_BYTES = sizeof(struct nvmeib_pet_journalbuf_message_header) + NVMEIB_PET_MIN_MSG_ARGS_N_BYTES,
 	NVMEIB_PET_MAX_MSG_N_BYTES = sizeof(struct nvmeib_pet_journalbuf_message_header) + NVMEIB_PET_MAX_MSG_ARGS_N_BYTES,
 	NVMEIB_PET_MIN_ROTATABLE_N_BYTES = 2 * NVMEIB_PET_MAX_MSG_N_BYTES,
-	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_ENTITY_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
+	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
 };
 
 u16 __nvmeib_pet_journalbuf_calculate_consumable_n_bytes(struct nvmeib_pet_journalbuf const* self, u16 physical_offset, u16 eof_offset);
@@ -738,7 +738,7 @@ static inline void nvmeib_pet_journal_add_msg_verify_format(char const * const f
 }
 
 /* Mark all currently written journal bytes as protected prefix. Call this after
- * writing stable entity context; later rotation may overwrite only bytes after
+ * writing stable journal context; later rotation may overwrite only bytes after
  * journalbuf.protected_prefix. Inactive journals are ignored.
  */
 __attribute__((nonnull (1)))
@@ -760,7 +760,7 @@ __attribute__((nonnull (1)))
 static inline void nvmeib_pet_journal_commit(struct nvmeib_pet_journal* self)
 {
 	if (likely(nvmeib_pet_journal_is_activated(self))){
-		if (self->journalbuf.max_written_bytes > NVMEIB_PET_ENTITY_HEADER_SIZE) {
+		if (self->journalbuf.max_written_bytes > NVMEIB_PET_JOURNALBUF_HEADER_SIZE) {
 			nvmeib_pet_journalbuf_commit(&self->journalbuf);
 			self->controller->flush(self->controller, self->worst_severity, self->journalbuf.data);
 		}

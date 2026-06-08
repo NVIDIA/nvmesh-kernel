@@ -160,7 +160,7 @@ void test_stream_header_layout(void)
 
 	BUG_ON(sizeof(struct nvmeib_pet_trace_clock) != trace_clock_n_bytes);
 	BUG_ON(sizeof(struct nvmeib_pet_journalbuf_header) != header_n_bytes);
-	BUG_ON(NVMEIB_PET_ENTITY_HEADER_SIZE != sizeof(struct nvmeib_pet_journalbuf_header));
+	BUG_ON(NVMEIB_PET_JOURNALBUF_HEADER_SIZE != sizeof(struct nvmeib_pet_journalbuf_header));
 }
 
 static struct nvmeib_pet_journalbuf_message_header __test_load_msg_header(size_t offset)
@@ -362,7 +362,7 @@ static size_t __test_read_random_rotation_msgs(struct nvmeib_pet_journalbuf cons
 					       struct test_random_rotation_stats* stats)
 {
 	u8 const* const buffer = stream->data.iov_base;
-	u16 pos = NVMEIB_PET_ENTITY_HEADER_SIZE;
+	u16 pos = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
 	size_t n_msgs = 0;
 
 	*stats = (struct test_random_rotation_stats){0};
@@ -580,8 +580,8 @@ void test_stream_protect_empty_prefix(void)
 	__test_stream_reset(&stream);
 	nvmeib_pet_journalbuf_protect_prefix(&stream);
 
-	__test_check_protected_area(&stream, NVMEIB_PET_ENTITY_HEADER_SIZE);
-	BUG_ON(stream.max_written_bytes != NVMEIB_PET_ENTITY_HEADER_SIZE);
+	__test_check_protected_area(&stream, NVMEIB_PET_JOURNALBUF_HEADER_SIZE);
+	BUG_ON(stream.max_written_bytes != NVMEIB_PET_JOURNALBUF_HEADER_SIZE);
 }
 
 void test_stream_protect_prefix_expands_protected_area(void)
@@ -591,7 +591,7 @@ void test_stream_protect_prefix_expands_protected_area(void)
 	u16 second_protected = 0;
 
 	__test_stream_reset(&stream);
-	__test_check_protected_area(&stream, NVMEIB_PET_ENTITY_HEADER_SIZE);
+	__test_check_protected_area(&stream, NVMEIB_PET_JOURNALBUF_HEADER_SIZE);
 	TEST_STREAM_WRITE_SEQUENCE(stream, 0x0501, 1, 0x01, (u8)0x01);
 	first_protected = stream.max_written_bytes;
 	nvmeib_pet_journalbuf_protect_prefix(&stream);
@@ -669,15 +669,15 @@ void test_stream_rotation_small_over_large_leaves_spacer(void)
 	enum {
 		msg_u8_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u8),
 		msg_2u64_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u64) + sizeof(u64),
-		buffer_n_bytes = NVMEIB_PET_ENTITY_HEADER_SIZE + msg_2u64_n_bytes + msg_u8_n_bytes,
+		buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_2u64_n_bytes + msg_u8_n_bytes,
 	};
 	u8 buffer[buffer_n_bytes];
 	struct nvmeib_pet_journalbuf stream = {0};
 	u16 written = 0;
-	u16 const old_large_offset = NVMEIB_PET_ENTITY_HEADER_SIZE;
-	u16 const rotated_msg_offset = NVMEIB_PET_ENTITY_HEADER_SIZE;
+	u16 const old_large_offset = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
+	u16 const rotated_msg_offset = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
 	u16 const spacer_offset = rotated_msg_offset + msg_u8_n_bytes;
-	u16 const old_second_msg_offset = NVMEIB_PET_ENTITY_HEADER_SIZE + msg_2u64_n_bytes;
+	u16 const old_second_msg_offset = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_2u64_n_bytes;
 	u16 const spacer_n_bytes = msg_2u64_n_bytes - msg_u8_n_bytes;
 
 	memset(buffer, 0xcc, sizeof(buffer));
@@ -711,12 +711,12 @@ void test_stream_rotation_small_over_large_consumes_next_without_tiny_gap(void)
 	enum {
 		msg_u8_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u8),
 		msg_u64_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u64),
-		buffer_n_bytes = NVMEIB_PET_ENTITY_HEADER_SIZE + msg_u64_n_bytes + msg_u8_n_bytes,
+		buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_u64_n_bytes + msg_u8_n_bytes,
 	};
 	u8 buffer[buffer_n_bytes];
 	struct nvmeib_pet_journalbuf stream = {0};
 	u16 written = 0;
-	u16 const rotated_msg_offset = NVMEIB_PET_ENTITY_HEADER_SIZE;
+	u16 const rotated_msg_offset = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
 	u16 const spacer_offset = rotated_msg_offset + msg_u8_n_bytes;
 	u16 const spacer_n_bytes = msg_u64_n_bytes + msg_u8_n_bytes - msg_u8_n_bytes;
 
@@ -747,12 +747,12 @@ void test_stream_rotation_large_over_small_messages_reduces_eof_for_tiny_tail(vo
 	enum {
 		msg_u8_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u8),
 		msg_2u64_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u64) + sizeof(u64),
-		buffer_n_bytes = NVMEIB_PET_ENTITY_HEADER_SIZE + msg_u8_n_bytes + msg_u8_n_bytes + msg_u8_n_bytes,
+		buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_u8_n_bytes + msg_u8_n_bytes + msg_u8_n_bytes,
 	};
 	u8 buffer[buffer_n_bytes];
 	struct nvmeib_pet_journalbuf stream = {0};
 	u16 written = 0;
-	u16 const rotated_msg_offset = NVMEIB_PET_ENTITY_HEADER_SIZE;
+	u16 const rotated_msg_offset = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
 	u16 const rotated_msg_end = rotated_msg_offset + msg_2u64_n_bytes;
 
 	memset(buffer, 0xcc, sizeof(buffer));
@@ -784,12 +784,12 @@ void test_stream_rotation_uses_unwritten_tail_after_eof(void)
 	enum {
 		msg_u8_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u8),
 		msg_2u64_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u64) + sizeof(u64),
-		buffer_n_bytes = NVMEIB_PET_ENTITY_HEADER_SIZE + msg_2u64_n_bytes,
+		buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_2u64_n_bytes,
 	};
 	u8 buffer[buffer_n_bytes];
 	struct nvmeib_pet_journalbuf stream = {0};
 	u16 written = 0;
-	u16 const prefix = NVMEIB_PET_ENTITY_HEADER_SIZE;
+	u16 const prefix = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
 	u16 const large_msg_end = prefix + msg_2u64_n_bytes;
 
 	memset(buffer, 0xcc, sizeof(buffer));
@@ -817,11 +817,11 @@ void test_stream_calculate_consumable_n_bytes_for_short_eof_tail(void)
 	enum {
 		header_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header),
 		tail_n_bytes = header_n_bytes - 1,
-		buffer_n_bytes = NVMEIB_PET_ENTITY_HEADER_SIZE + header_n_bytes,
+		buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + header_n_bytes,
 	};
 	u8 buffer[buffer_n_bytes];
 	struct nvmeib_pet_journalbuf stream = {0};
-	u16 const tail_offset = NVMEIB_PET_ENTITY_HEADER_SIZE;
+	u16 const tail_offset = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
 	u16 const eof_offset = tail_offset + tail_n_bytes;
 	u16 consumable_n_bytes = 0;
 
@@ -851,13 +851,13 @@ void test_stream_allocate_rotate_final_update_does_not_extend_eof(void)
 	enum {
 		msg_u8_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u8),
 		msg_2u64_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u64) + sizeof(u64),
-		spacer_buffer_n_bytes = NVMEIB_PET_ENTITY_HEADER_SIZE + msg_2u64_n_bytes + msg_u8_n_bytes,
-		tiny_tail_buffer_n_bytes = NVMEIB_PET_ENTITY_HEADER_SIZE + msg_u8_n_bytes + msg_u8_n_bytes + msg_u8_n_bytes,
+		spacer_buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_2u64_n_bytes + msg_u8_n_bytes,
+		tiny_tail_buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_u8_n_bytes + msg_u8_n_bytes + msg_u8_n_bytes,
 	};
 	u8 spacer_buffer[spacer_buffer_n_bytes];
 	u8 tiny_tail_buffer[tiny_tail_buffer_n_bytes];
 	struct nvmeib_pet_journalbuf stream = {0};
-	u16 const prefix = NVMEIB_PET_ENTITY_HEADER_SIZE;
+	u16 const prefix = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
 	u16 old_max_written_bytes = 0;
 	u8* dest = NULL;
 
@@ -900,12 +900,12 @@ void test_stream_rotation_end_wrap_shrinks_eof_and_writes_from_prefix(void)
 	enum {
 		msg_u8_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u8),
 		msg_2u64_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u64) + sizeof(u64),
-		buffer_n_bytes = NVMEIB_PET_ENTITY_HEADER_SIZE + msg_2u64_n_bytes + msg_u8_n_bytes + msg_u8_n_bytes,
+		buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_2u64_n_bytes + msg_u8_n_bytes + msg_u8_n_bytes,
 	};
 	u8 buffer[buffer_n_bytes];
 	struct nvmeib_pet_journalbuf stream = {0};
 	u16 written = 0;
-	u16 const prefix = NVMEIB_PET_ENTITY_HEADER_SIZE;
+	u16 const prefix = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
 	u16 const first_spacer_offset = prefix + msg_u8_n_bytes;
 	u16 const tail_offset = prefix + msg_u8_n_bytes + msg_2u64_n_bytes;
 	u16 const final_msg_end = prefix + msg_2u64_n_bytes;
@@ -1035,7 +1035,7 @@ void test_journal_random_rotation_retains_last_messages(void)
 		}
 
 		BUG_ON(journal.journalbuf.max_written_bytes > sizeof(buffer));
-		BUG_ON(journal.journalbuf.protected_prefix != NVMEIB_PET_ENTITY_HEADER_SIZE);
+		BUG_ON(journal.journalbuf.protected_prefix != NVMEIB_PET_JOURNALBUF_HEADER_SIZE);
 		readable_n_bytes = journal.journalbuf.max_written_bytes - journal.journalbuf.protected_prefix;
 		n_actual_msgs = __test_read_random_rotation_msgs(&journal.journalbuf, actual_msgs, max_random_msgs, &run_stats);
 		BUG_ON(run_stats.spacer_bytes + run_stats.padding_bytes > readable_n_bytes);
@@ -1711,7 +1711,7 @@ static struct perf_test_stats __test_performance_journal_rotating(struct nvmeib_
 	__test_performance_prepare_rotating_journal(journal);
 	return __test_performance_journal_impl(
 		journal,
-		NVMEIB_PET_MAX_JOURNALBUF_SIZE - NVMEIB_PET_ENTITY_HEADER_SIZE,
+		NVMEIB_PET_MAX_JOURNALBUF_SIZE - NVMEIB_PET_JOURNALBUF_HEADER_SIZE,
 		true);
 }
 
