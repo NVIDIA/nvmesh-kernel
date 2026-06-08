@@ -89,15 +89,15 @@ struct nvmeib_pet_base_controller{
 
 //{{{pet storage - implementation details
 
-struct __attribute__((packed)) nvmeib_pet_stream_header {
+struct __attribute__((packed)) nvmeib_pet_journalbuf_header {
 	u64 commit_id;
-	u16 journal_size;
+	u16 journalbuf_size;
 	struct nvmeib_pet_trace_clock trace_clock;
 };
 
-enum { NVMEIB_PET_ENTITY_HEADER_SIZE = sizeof(struct nvmeib_pet_stream_header) };
+enum { NVMEIB_PET_ENTITY_HEADER_SIZE = sizeof(struct nvmeib_pet_journalbuf_header) };
 
-struct nvmeib_pet_stream{
+struct nvmeib_pet_journalbuf{
 	struct iovec data;
 	/* Highest byte written in data; viewer scans [0, max_written_bytes). */
 	u16 max_written_bytes;
@@ -111,31 +111,31 @@ struct nvmeib_pet_stream{
 	u16 protected_prefix;
 };
 
-enum {NVMEIB_PET_MAX_STREAM_SIZE=64*1024}; //because max_written_bytes is u16
+enum {NVMEIB_PET_MAX_JOURNALBUF_SIZE=64*1024}; //because max_written_bytes is u16
 
-static inline struct nvmeib_pet_stream nvmeib_pet_stream_make(struct iovec data)
+static inline struct nvmeib_pet_journalbuf nvmeib_pet_journalbuf_make(struct iovec data)
 {
-	struct nvmeib_pet_stream stream = {
+	struct nvmeib_pet_journalbuf journalbuf = {
 		.data = data,
 		.max_written_bytes = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 		.write_offset = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 		.protected_prefix = data.iov_base ? NVMEIB_PET_ENTITY_HEADER_SIZE : 0,
 	};
 
-	if (unlikely(NVMEIB_PET_MAX_STREAM_SIZE < data.iov_len)){
-		stream.data.iov_len = NVMEIB_PET_MAX_STREAM_SIZE; //avoid undefined behavior
+	if (unlikely(NVMEIB_PET_MAX_JOURNALBUF_SIZE < data.iov_len)){
+		journalbuf.data.iov_len = NVMEIB_PET_MAX_JOURNALBUF_SIZE; //avoid undefined behavior
 	}
 
-	return stream;
+	return journalbuf;
 }
 
 __attribute__((nonnull (1)))
-static inline void nvmeib_pet_stream_commit(struct nvmeib_pet_stream* self)
+static inline void nvmeib_pet_journalbuf_commit(struct nvmeib_pet_journalbuf* self)
 {
 	if (self->data.iov_base) {
-		struct nvmeib_pet_stream_header const header = {
+		struct nvmeib_pet_journalbuf_header const header = {
 			.commit_id = (u64)COMMIT_ID,
-			.journal_size = self->max_written_bytes,
+			.journalbuf_size = self->max_written_bytes,
 			.trace_clock = nvmeib_pet_trace_clock_get(),
 		};
 
@@ -144,7 +144,7 @@ static inline void nvmeib_pet_stream_commit(struct nvmeib_pet_stream* self)
 	}
 }
 
-struct __attribute__((packed)) nvmeib_pet_msg_header {
+struct __attribute__((packed)) nvmeib_pet_journalbuf_message_header {
 	u16 message_id;
 	union {
 		/* message_id != 0 - stored message record index + 1 */
@@ -165,17 +165,17 @@ enum {
 	NVMEIB_PET_MAX_MSG_ARGS = 12,
 	NVMEIB_PET_MIN_MSG_ARGS_N_BYTES = 1,
 	NVMEIB_PET_MAX_MSG_ARGS_N_BYTES = NVMEIB_PET_MAX_MSG_ARGS * sizeof(u64),
-	NVMEIB_PET_MIN_MSG_N_BYTES = sizeof(struct nvmeib_pet_msg_header) + NVMEIB_PET_MIN_MSG_ARGS_N_BYTES,
-	NVMEIB_PET_MAX_MSG_N_BYTES = sizeof(struct nvmeib_pet_msg_header) + NVMEIB_PET_MAX_MSG_ARGS_N_BYTES,
+	NVMEIB_PET_MIN_MSG_N_BYTES = sizeof(struct nvmeib_pet_journalbuf_message_header) + NVMEIB_PET_MIN_MSG_ARGS_N_BYTES,
+	NVMEIB_PET_MAX_MSG_N_BYTES = sizeof(struct nvmeib_pet_journalbuf_message_header) + NVMEIB_PET_MAX_MSG_ARGS_N_BYTES,
 	NVMEIB_PET_MIN_ROTATABLE_N_BYTES = 2 * NVMEIB_PET_MAX_MSG_N_BYTES,
 	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_ENTITY_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
 };
 
-u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream const* self, u16 physical_offset, u16 eof_offset);
-u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size);
+u16 __nvmeib_pet_journalbuf_calculate_consumable_n_bytes(struct nvmeib_pet_journalbuf const* self, u16 physical_offset, u16 eof_offset);
+u8* __nvmeib_pet_journalbuf_allocate_rotate(struct nvmeib_pet_journalbuf* self, u16 size);
 
 __attribute__((nonnull (1)))
-static inline u8* nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* self, u16 size)
+static inline u8* nvmeib_pet_journalbuf_alloc(struct nvmeib_pet_journalbuf* self, u16 size)
 {
 	u8* msg = NULL;
 	u16 const write_offset = self->write_offset;
@@ -197,7 +197,7 @@ static inline u8* nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* self, u16 si
 		return (u8*)self->data.iov_base + write_offset;
 	}
 
-	msg = __nvmeib_pet_stream_allocate_rotate(self, size);
+	msg = __nvmeib_pet_journalbuf_allocate_rotate(self, size);
 	if (!msg) {
 		return NULL;
 	}
@@ -206,7 +206,7 @@ static inline u8* nvmeib_pet_stream_alloc(struct nvmeib_pet_stream* self, u16 si
 }
 
 __attribute__((nonnull (1)))
-static inline void nvmeib_pet_stream_protect_prefix(struct nvmeib_pet_stream* self)
+static inline void nvmeib_pet_journalbuf_protect_prefix(struct nvmeib_pet_journalbuf* self)
 {
 	if (!self->data.iov_base) {
 		return;
@@ -219,9 +219,9 @@ static inline void nvmeib_pet_stream_protect_prefix(struct nvmeib_pet_stream* se
 	self->write_offset = self->protected_prefix;
 }
 
-static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 message_index, u8 args_n_bytes)
+static inline struct nvmeib_pet_journalbuf_message_header nvmeib_pet_journalbuf_message_header_make(u16 message_index, u8 args_n_bytes)
 {
-	return (struct nvmeib_pet_msg_header){
+	return (struct nvmeib_pet_journalbuf_message_header){
 		.message_id = message_index + 1, /* message_id==0 is reserved for spacers */
 		.msg = {
 			.timestamp = nvmeib_pet_get_trace_time_ticks(),
@@ -231,21 +231,21 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 }
 
 //this is the interface to create message from any supported types
-#define __NVMEIB_PET_STREAM_WRITE1(self, offset, exp1) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE1(self, offset, exp1) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 		}; \
 		\
@@ -255,22 +255,22 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE2(self, offset, exp1, exp2) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE2(self, offset, exp1, exp2) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 		}; \
@@ -281,23 +281,23 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE3(self, offset, exp1, exp2, exp3) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE3(self, offset, exp1, exp2, exp3) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -309,24 +309,24 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE4(self, offset, exp1, exp2, exp3, exp4) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE4(self, offset, exp1, exp2, exp3, exp4) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
 			typeof(exp4) arg4; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -339,25 +339,25 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE5(self, offset, exp1, exp2, exp3, exp4, exp5) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE5(self, offset, exp1, exp2, exp3, exp4, exp5) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
 			typeof(exp4) arg4; \
 			typeof(exp5) arg5; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -371,18 +371,18 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE6(self, offset, exp1, exp2, exp3, exp4, exp5, exp6) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE6(self, offset, exp1, exp2, exp3, exp4, exp5, exp6) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
@@ -390,7 +390,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 			typeof(exp5) arg5; \
 			typeof(exp6) arg6; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -405,18 +405,18 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE7(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE7(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
@@ -425,7 +425,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 			typeof(exp6) arg6; \
 			typeof(exp7) arg7; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -441,18 +441,18 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE8(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE8(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
@@ -462,7 +462,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 			typeof(exp7) arg7; \
 			typeof(exp8) arg8; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -479,18 +479,18 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE9(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE9(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
@@ -501,7 +501,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 			typeof(exp8) arg8; \
 			typeof(exp9) arg9; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -519,18 +519,18 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE10(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE10(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
@@ -542,7 +542,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 			typeof(exp9) arg9; \
 			typeof(exp10) arg10; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -561,18 +561,18 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE11(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE11(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10) + sizeof(exp11); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
@@ -585,7 +585,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 			typeof(exp10) arg10; \
 			typeof(exp11) arg11; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -605,18 +605,18 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 	written; \
 })
 
-#define __NVMEIB_PET_STREAM_WRITE12(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11, exp12) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE12(self, offset, exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11, exp12) \
 ({ \
 	size_t written = 0; \
 	size_t const n_bytes = sizeof(exp1) + sizeof(exp2) + sizeof(exp3) + sizeof(exp4) + sizeof(exp5) + sizeof(exp6) + sizeof(exp7) + sizeof(exp8) + sizeof(exp9) + sizeof(exp10) + sizeof(exp11) + sizeof(exp12); \
-	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_msg_header) + n_bytes; \
-	u8* dest = nvmeib_pet_stream_alloc(self, msg_n_bytes); \
+	size_t const msg_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + n_bytes; \
+	u8* dest = nvmeib_pet_journalbuf_alloc(self, msg_n_bytes); \
 	\
 	BUG_ON(n_bytes > NVMEIB_PET_MAX_MSG_ARGS_N_BYTES); \
 	\
 	if (dest) { \
 		struct __attribute__((packed)) { \
-			struct nvmeib_pet_msg_header header; \
+			struct nvmeib_pet_journalbuf_message_header header; \
 			typeof(exp1) arg1; \
 			typeof(exp2) arg2; \
 			typeof(exp3) arg3; \
@@ -630,7 +630,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 			typeof(exp11) arg11; \
 			typeof(exp12) arg12; \
 		} __tmp = { \
-			.header = nvmeib_pet_msg_header_make(offset, n_bytes), \
+			.header = nvmeib_pet_journalbuf_message_header_make(offset, n_bytes), \
 			.arg1 = (exp1), \
 			.arg2 = (exp2), \
 			.arg3 = (exp3), \
@@ -653,12 +653,12 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 
 //if we know the number of arguments we can decide ourself what macro should be used
 //there is a need for double indirecion in order to convert number of arguments to actual number
-#define __NVMEIB_PET_STREAM_WRITE_IMPL_IMPL(self, offset, n_args, ...) __NVMEIB_PET_STREAM_WRITE##n_args(self, offset, __VA_ARGS__)
-#define __NVMEIB_PET_STREAM_WRITE_IMPL(self, offset, n_args, ...) __NVMEIB_PET_STREAM_WRITE_IMPL_IMPL(self, offset, n_args, __VA_ARGS__)
-#define __NVMEIB_PET_STREAM_WRITE_MSG(self, offset, ...) \
+#define __NVMEIB_PET_JOURNALBUF_WRITE_IMPL_IMPL(self, offset, n_args, ...) __NVMEIB_PET_JOURNALBUF_WRITE##n_args(self, offset, __VA_ARGS__)
+#define __NVMEIB_PET_JOURNALBUF_WRITE_IMPL(self, offset, n_args, ...) __NVMEIB_PET_JOURNALBUF_WRITE_IMPL_IMPL(self, offset, n_args, __VA_ARGS__)
+#define __NVMEIB_PET_JOURNALBUF_WRITE_MSG(self, offset, ...) \
 ({ \
 	__NVMEIB_PET_VALIDATE_MSG_ARGS(__VA_ARGS__); \
-	__NVMEIB_PET_STREAM_WRITE_IMPL(self, offset, NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__); \
+	__NVMEIB_PET_JOURNALBUF_WRITE_IMPL(self, offset, NVMEIB_PET_VA_NARGS(__VA_ARGS__), __VA_ARGS__); \
 })
 
 //severity & verbosity
@@ -670,7 +670,7 @@ static inline struct nvmeib_pet_msg_header nvmeib_pet_msg_header_make(u16 messag
 
 struct nvmeib_pet_journal{
 	struct nvmeib_pet_base_controller const* controller;
-	struct nvmeib_pet_stream stream;
+	struct nvmeib_pet_journalbuf journalbuf;
 	enum nvmeib_pet_severity worst_severity;
 	bool verbose;
 	u8 concurrent_access_detector; //don't bother to remove it in the production build - we have padding here;
@@ -691,7 +691,7 @@ static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pe
 
 	return (struct nvmeib_pet_journal){
 		.controller = controller,
-		.stream = nvmeib_pet_stream_make(buffer.data),
+		.journalbuf = nvmeib_pet_journalbuf_make(buffer.data),
 		.worst_severity = NVMEIB_PET_SEVERITY_NORMAL,
 		.verbose = verbose,
 		.concurrent_access_detector = 0,
@@ -702,7 +702,7 @@ static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pe
 __attribute__((nonnull (1)))
 static inline bool nvmeib_pet_journal_is_activated(struct nvmeib_pet_journal const* self)
 {
-	return self->stream.data.iov_base;
+	return self->journalbuf.data.iov_base;
 }
 
 __attribute__((nonnull (1)))
@@ -739,7 +739,7 @@ static inline void nvmeib_pet_journal_add_msg_verify_format(char const * const f
 
 /* Mark all currently written journal bytes as protected prefix. Call this after
  * writing stable entity context; later rotation may overwrite only bytes after
- * stream.protected_prefix. Inactive journals are ignored.
+ * journalbuf.protected_prefix. Inactive journals are ignored.
  */
 __attribute__((nonnull (1)))
 static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* self)
@@ -752,7 +752,7 @@ static inline void nvmeib_pet_journal_protect_prefix(struct nvmeib_pet_journal* 
 
 	is_in_use = __nvmeib_pet_journal_test_and_set_in_use(self);
 	BUG_ON(is_in_use);
-	nvmeib_pet_stream_protect_prefix(&self->stream);
+	nvmeib_pet_journalbuf_protect_prefix(&self->journalbuf);
 	__nvmeib_pet_journal_clear_in_use(self);
 }
 
@@ -760,13 +760,13 @@ __attribute__((nonnull (1)))
 static inline void nvmeib_pet_journal_commit(struct nvmeib_pet_journal* self)
 {
 	if (likely(nvmeib_pet_journal_is_activated(self))){
-		if (self->stream.max_written_bytes > NVMEIB_PET_ENTITY_HEADER_SIZE) {
-			nvmeib_pet_stream_commit(&self->stream);
-			self->controller->flush(self->controller, self->worst_severity, self->stream.data);
+		if (self->journalbuf.max_written_bytes > NVMEIB_PET_ENTITY_HEADER_SIZE) {
+			nvmeib_pet_journalbuf_commit(&self->journalbuf);
+			self->controller->flush(self->controller, self->worst_severity, self->journalbuf.data);
 		}
 
 		self->controller->put_buffer(self->controller, (struct nvmeib_pet_buffer){
-								       .data = self->stream.data,
+								       .data = self->journalbuf.data,
 								       .release_cpu = self->release_cpu,
 							       });
 	}
@@ -779,10 +779,10 @@ static inline void nvmeib_pet_journal_commit(struct nvmeib_pet_journal* self)
 ({	\
 	u16 msg_written_bytes = 0;	\
 	__auto_type __nvmeib_pet_journal = (self); \
-	struct nvmeib_pet_stream* __nvmeib_pet_stream = &(__nvmeib_pet_journal->stream); \
+	struct nvmeib_pet_journalbuf* __nvmeib_pet_journalbuf = &(__nvmeib_pet_journal->journalbuf); \
 	bool const is_in_use = __nvmeib_pet_journal_test_and_set_in_use(__nvmeib_pet_journal); \
 	BUG_ON(is_in_use);	\
-	msg_written_bytes = __NVMEIB_PET_STREAM_WRITE_MSG(__nvmeib_pet_stream, offset, __VA_ARGS__); \
+	msg_written_bytes = __NVMEIB_PET_JOURNALBUF_WRITE_MSG(__nvmeib_pet_journalbuf, offset, __VA_ARGS__); \
 	if (msg_written_bytes){ \
 		__nvmeib_pet_journal->worst_severity = nvmeib_pet_severity_get_worst(__nvmeib_pet_journal->worst_severity, severity); \
 	} \
@@ -799,17 +799,17 @@ enum {
 	NVMEIB_PET_MESSAGE_FORMAT_N_BYTES = NVMEIB_PET_MESSAGE_N_BYTES - NVMEIB_PET_MESSAGE_ARG_STRUCT_CODE_N_BYTES,
 };
 
-struct __attribute__((packed, aligned(NVMEIB_PET_MESSAGE_N_BYTES))) nvmeib_pet_message {
+struct __attribute__((packed, aligned(NVMEIB_PET_MESSAGE_N_BYTES))) nvmeib_pet_message_description {
 	char arg_struct_code[NVMEIB_PET_MAX_MSG_ARGS + 1];
 	char format[NVMEIB_PET_MESSAGE_FORMAT_N_BYTES];
 };
 
 enum {
-	NVMEIB_PET_MESSAGE_FIELDS_N_BYTES = sizeof(((struct nvmeib_pet_message*)0)->arg_struct_code) +
-					    sizeof(((struct nvmeib_pet_message*)0)->format),
-	NVMEIB_PET_MESSAGE_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message) == NVMEIB_PET_MESSAGE_FIELDS_N_BYTES),
-	NVMEIB_PET_MESSAGE_EXPECTED_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message) == NVMEIB_PET_MESSAGE_N_BYTES),
-	NVMEIB_PET_MESSAGE_NOT_EMPTY_CHECK = 1 / (sizeof(struct nvmeib_pet_message) != 0),
+	NVMEIB_PET_MESSAGE_FIELDS_N_BYTES = sizeof(((struct nvmeib_pet_message_description*)0)->arg_struct_code) +
+					    sizeof(((struct nvmeib_pet_message_description*)0)->format),
+	NVMEIB_PET_MESSAGE_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message_description) == NVMEIB_PET_MESSAGE_FIELDS_N_BYTES),
+	NVMEIB_PET_MESSAGE_EXPECTED_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message_description) == NVMEIB_PET_MESSAGE_N_BYTES),
+	NVMEIB_PET_MESSAGE_NOT_EMPTY_CHECK = 1 / (sizeof(struct nvmeib_pet_message_description) != 0),
 };
 
 #define NVMEIB_IO_PET_MSG(pet_journal, msg, severity,...) \
@@ -817,7 +817,7 @@ enum {
 	u16 __io_pet_msg_written = 0; \
 	__auto_type __io_pet_journal_param = (pet_journal); \
 	if (nvmeib_pet_journal_is_activated(__io_pet_journal_param)) { \
-		static const struct nvmeib_pet_message NVMESH_USED NVMESH_ALIGNED(NVMEIB_PET_MESSAGE_N_BYTES) NVMESH_SECTION(NVMEIB_PET_MESSAGE_SECTION) __io_pet_message = { \
+		static const struct nvmeib_pet_message_description NVMESH_USED NVMESH_ALIGNED(NVMEIB_PET_MESSAGE_N_BYTES) NVMESH_SECTION(NVMEIB_PET_MESSAGE_SECTION) __io_pet_message = { \
 			.arg_struct_code = { __NVMEIB_PET_ARG_STRUCT_CODES(__VA_ARGS__) }, \
 			.format = msg, \
 		}; \

@@ -67,9 +67,71 @@ The proposed solution does NOT use the components above, but provides an alterna
 5. The entity buffer is single threaded.  
 6. The number of messages, sent via PET functionality, should be 0(zero) in production.
 
+### PET data hierarchy
+
+PET is easier to understand as three related views. `journalbuf` belongs to the
+C implementation view; when discussing the archive or viewer, it is usually
+enough to talk about committed journals/entities and messages.
+
+#### Dictionary build-time view
+
+```text
+executable/module
+  1:1    -> nvmeib_pet_messages ELF section
+             1:N -> message_description
+  1:0..1 -> DWARF debug info
+             1:N -> type
+
+dictionary
+  1:N    -> message_description
+  1:0..N -> type
+```
+
+The dictionary is generated from one executable/module. It copies
+`message_description` records from the PET ELF section and the requested
+user-defined `type` records from DWARF.
+
+#### Runtime C implementation view
+
+```text
+journal
+  1:1 -> journalbuf
+         1:N -> message or spacer
+
+message
+  N:1 -> message_description
+```
+
+`struct nvmeib_pet_journal` is the per-entity runtime object. Its
+`struct nvmeib_pet_journalbuf` is the bounded byte buffer that stores the
+physical records, including rotation spacers. A stored message does not copy the
+description; it stores `message_id = message_index + 1`.
+
+#### Archive and viewer view
+
+```text
+archive
+  1:N -> committed journal/entity
+         1:N -> message
+
+committed journal/entity
+  N:1 -> dictionary
+
+message
+  N:1 -> dictionary.message_description
+
+dictionary.message_description
+  N:0..N -> dictionary.type
+```
+
+Each committed journal/entity carries a `commit_id`; the viewer uses it to pick
+the matching dictionary. The message id selects a `message_description` inside
+that dictionary, and struct/union/enum rendering uses the optional
+DWARF-derived `type` entries stored beside the message descriptions.
+
 ### Current journal storage
 
-The current PET stream is a bounded byte journal. A committed entity starts
+The current PET journal buffer is a bounded byte journal. A committed entity starts
 with:
 
 ```c
@@ -78,14 +140,14 @@ struct __attribute__((packed)) nvmeib_pet_trace_clock {
     u32 tsc_khz;
 };
 
-struct __attribute__((packed)) nvmeib_pet_stream_header {
+struct __attribute__((packed)) nvmeib_pet_journalbuf_header {
     u64 commit_id;
-    u16 journal_size;
+    u16 journalbuf_size;
     struct nvmeib_pet_trace_clock trace_clock;
 };
 ```
 
-`journal_size` is the committed scan boundary. The viewer parses only bytes
+`journalbuf_size` is the committed scan boundary. The viewer parses only bytes
 inside this range and treats the records after the header as either normal
 messages or rotation spacers. `trace_clock` lets the viewer convert the raw TSC
 ticks stored in each message header to nanoseconds:
@@ -94,22 +156,101 @@ ticks stored in each message header to nanoseconds:
 ns = (ticks + tsc_offset) * 1000000 / tsc_khz
 ```
 
+Every record in the committed range starts with:
+
+```c
+struct __attribute__((packed)) nvmeib_pet_journalbuf_message_header {
+    u16 message_id;
+    union {
+        struct __attribute__((packed)) {
+            u64 timestamp;
+            u8 args_n_bytes;
+        } msg;
+        struct __attribute__((packed)) {
+            u64 bytes;
+            u8 unused;
+        } spacer;
+    };
+};
+```
+
 Normal messages store a `message_id` value. `message_id == 0` is reserved for a
 spacer record; real messages store `message_index + 1`, where `message_index` is
-the index of a fixed `struct nvmeib_pet_message` record in the
+the index of a fixed `struct nvmeib_pet_message_description` record in the
 `nvmeib_pet_messages` ELF section. A spacer does not describe a message; it
 tells the viewer how many payload bytes to skip.
 
-The stream keeps:
+Normal message record:
 
-* `max_written_bytes` - the highest byte written; committed as `journal_size`
+```text
+message_id != 0
+message_index = message_id - 1
+msg.timestamp = raw TSC ticks
+msg.args_n_bytes = serialized argument payload bytes
+payload follows the header
+```
+
+Spacer record:
+
+```text
+message_id = 0
+spacer.bytes = payload bytes after this spacer header
+spacer.unused = 0
+payload bytes are skipped by the viewer
+```
+
+The journal buffer keeps:
+
+* `max_written_bytes` - the highest byte written; committed as `journalbuf_size`
 * `write_offset` - the next physical byte to allocate
 * `protected_prefix` - the range `[0, protected_prefix)` retained by rotation
 
+### Protected prefix and rotation
+
+PET journals are fixed-size per-entity buffers. Rotation lets a journal keep
+accepting messages after the append pointer reaches the physical end of the
+buffer, while preserving an explicitly protected prefix:
+
+```text
+[ operation context ][ latest execution history ]
+  protected prefix      rotating suffix
+```
+
+The prefix describes the entity: operation type, debug id, topology, LBA range,
+or other context that makes later messages readable. The suffix keeps the most
+recent messages and may overwrite older suffix messages.
+
+At journal buffer creation, all three offsets start at
+`NVMEIB_PET_ENTITY_HEADER_SIZE` for an active journal. The protected area
+initially contains only the journal buffer header.
+
 The user may call `nvmeib_pet_journal_protect_prefix()` after writing the
-messages that describe the entity context. Later messages are written into the
-rotating suffix. If the suffix wraps, older suffix messages may be replaced by
-newer messages or spacers, but the protected prefix stays visible.
+messages that describe the entity context:
+
+```text
+before protect:
+  [ header ][ context messages ][ unwritten suffix ................. ]
+            ^ max_written_bytes
+
+after protect:
+  [ header ][ context messages ][ rotating suffix .................. ]
+                              ^ protected_prefix/write_offset
+```
+
+Later messages are written into the rotating suffix. If the suffix wraps, older
+suffix messages may be replaced by newer messages or spacers, but the protected
+prefix stays visible. Active journals assert that after protection the suffix
+still has room for at least two max-size messages
+(`NVMEIB_PET_MIN_ROTATABLE_N_BYTES`).
+
+The fast allocation path appends at `write_offset`, advances
+`max_written_bytes`, and does not write a spacer because there is no old live
+data after the new message. The slow rotation path is used only when fast append
+cannot cover the write. It wraps to `protected_prefix` when needed, scans
+existing records to find bytes that may be consumed, writes spacers for
+header-sized leftovers, and hides tiny EOF leftovers by reducing
+`max_written_bytes`. Normal messages are never split across the physical end of
+the buffer.
 
 The viewer contract is:
 
@@ -117,9 +258,51 @@ The viewer contract is:
 (msg)(msg|spacer)*(msg|eof)
 ```
 
-where `eof` is `journal_size`. Messages inside one entity are unrotated by
+where `eof` is `journalbuf_size`. Messages inside one entity are unrotated by
 raw tick drop detection and converted to nanoseconds before they are returned
 to higher-level viewer code.
+
+The viewer parses records linearly:
+
+```text
+if message_id != 0:
+    read args_n_bytes payload bytes
+    emit raw message
+
+if message_id == 0:
+    require unused == 0
+    skip spacer.bytes payload bytes
+```
+
+The viewer never searches blindly for the next nonzero offset. Stale payload
+bytes are safe only because the writer either covers them with a spacer or
+moves EOF before them.
+
+Rotation can make physical order differ from logical timestamp order inside one
+entity:
+
+```text
+physical: [ protected ][ newer prefix ][ older suffix ]
+logical:  [ protected ][ older suffix ][ newer prefix ]
+                         ^ timestamp drop
+```
+
+`PetArchiveReader.read_entity()` unrotates messages for each entity by detecting
+the raw tick drop created by rotation, then converts ticks to nanoseconds. This
+is per-entity behavior. Viewer commands may still apply their own global
+timestamp sort across entities unless the user passes `--no-sort`.
+
+API and testing notes:
+
+* `nvmeib_pet_journal_protect_prefix()` should be called after the messages
+  that make the entity understandable are written.
+* Writes to an active rotating journal can continue after the physical buffer
+  fills. Do not treat a zero return as the normal "journal full" signal.
+* `worst_severity` is monotonic once a message is written. A later rotation may
+  remove that message from the visible journal, but it does not lower the
+  recorded worst severity.
+* `make -C nvmesh.kernel/common/pet demo` generates random rotation journals under
+  `build/rotations/` and compares Python viewer output with expected output.
 
 ### Usage example
 

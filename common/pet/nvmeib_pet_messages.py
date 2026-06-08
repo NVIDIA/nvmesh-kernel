@@ -110,7 +110,7 @@ class PetArchiveReader:
 	def __unrotate_messages_by_timestamp(messages: list[PetRawMessage]) -> list[PetRawMessage]:
 		"""Restore timestamp order inside one journal after stream rotation.
 
-		The writer logic lives in `__nvmeib_pet_stream_allocate_rotate()` in
+		The writer logic lives in `__nvmeib_pet_journalbuf_allocate_rotate()` in
 		`nvmeib_pet_specification.h`. The matching C test oracle is
 		`__test_unrotate_random_rotation_msgs_by_time()` in `tests/test.c`.
 
@@ -160,26 +160,26 @@ class PetArchiveReader:
 	def read_entity(self, fname: str, idx: int) -> PetEntity:
 		entity_start = self.__fobj.tell()
 		physical_eof = self.__physical_eof()
-		commit_id, journal_size, tsc_offset, tsc_khz = self.ENTITY_HEADER.unpack(
+		commit_id, journalbuf_size, tsc_offset, tsc_khz = self.ENTITY_HEADER.unpack(
 			self.__read_exact(self.ENTITY_HEADER.size, f'entity {idx} header')
 		)
 		if tsc_khz == 0:
 			raise ValueError(f'Invalid PET entity {idx} trace clock: tsc_khz=0')
-		if journal_size < self.ENTITY_HEADER.size:
+		if journalbuf_size < self.ENTITY_HEADER.size:
 			raise ValueError(
-				f'Invalid PET entity {idx} journal_size={journal_size}: '
+				f'Invalid PET entity {idx} journalbuf_size={journalbuf_size}: '
 				f'minimum={self.ENTITY_HEADER.size}'
 			)
-		entity_end = entity_start + journal_size
+		entity_end = entity_start + journalbuf_size
 		if entity_end > physical_eof:
 			raise EOFError(
-				f'Invalid PET entity {idx} journal_size={journal_size}: '
+				f'Invalid PET entity {idx} journalbuf_size={journalbuf_size}: '
 				f'entity_end={entity_end}, file_end={physical_eof}'
 			)
 		messages: list[PetRawMessage] = []
 		record_idx = 0
 
-		# Records are self-describing inside the committed journal_size range.
+		# Records are self-describing inside the committed journalbuf_size range.
 		while self.__fobj.tell() < entity_end:
 			record_start = self.__fobj.tell()
 			remaining = entity_end - record_start
@@ -917,7 +917,7 @@ class TemplatesLoader:
 	"""Build a PET dictionary from one binary/module.
 
 	The PET message section is intentionally parsed as a fixed ABI:
-	`struct nvmeib_pet_message`, represented by PET_MESSAGE_STRUCT above. Each
+	`struct nvmeib_pet_message_description`, represented by PET_MESSAGE_STRUCT above. Each
 	record embeds its format string, so no pointer or relocation resolution is
 	needed. DWARF is consulted only after the message strings are known, and only
 	for optional `<enum ...>` / `<struct ...>` pretty-printing.
@@ -980,7 +980,7 @@ class TemplatesLoader:
 			elf = ELFFile(fobj)
 			section = self.__load_messages_section(elf)
 			data = section.data()
-			# The section is an array of packed struct nvmeib_pet_message records,
+			# The section is an array of packed struct nvmeib_pet_message_description records,
 			# not a string table. A non-multiple size means the producer/linker did
 			# not emit the section according to the PET ABI.
 			if len(data) % PET_MESSAGE_STRUCT.size != 0:

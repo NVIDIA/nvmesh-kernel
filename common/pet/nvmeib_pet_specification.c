@@ -10,10 +10,10 @@
 
 #include "common/pet/nvmeib_pet_specification.h"
 
-static void __nvmeib_pet_stream_write_spacer(struct nvmeib_pet_stream* self, u16 physical_offset, u16 body_n_bytes)
+static void __nvmeib_pet_journalbuf_write_spacer(struct nvmeib_pet_journalbuf* self, u16 physical_offset, u16 body_n_bytes)
 {
 	/* message_id zero marks a spacer; bytes is the payload after this header. */
-	struct nvmeib_pet_msg_header const spacer = {
+	struct nvmeib_pet_journalbuf_message_header const spacer = {
 		.message_id = 0,
 		.spacer = {
 			.bytes = body_n_bytes,
@@ -25,10 +25,10 @@ static void __nvmeib_pet_stream_write_spacer(struct nvmeib_pet_stream* self, u16
 	memcpy((u8*)self->data.iov_base + physical_offset, &spacer, sizeof(spacer));
 }
 
-u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream const* self, u16 physical_offset, u16 eof_offset)
+u16 __nvmeib_pet_journalbuf_calculate_consumable_n_bytes(struct nvmeib_pet_journalbuf const* self, u16 physical_offset, u16 eof_offset)
 {
 	u16 remaining = 0;
-	struct nvmeib_pet_msg_header header = {0};
+	struct nvmeib_pet_journalbuf_message_header header = {0};
 	u16 msg_n_bytes = 0;
 
 	BUG_ON(physical_offset > eof_offset);
@@ -47,7 +47,7 @@ u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream co
 			return (u16)(sizeof(header) + header.spacer.bytes);
 		}
 
-		/* Bad spacer is a stream invariant violation. */
+		/* Bad spacer is a journal buffer invariant violation. */
 		BUG();
 		return remaining;
 	}
@@ -56,16 +56,16 @@ u16 __nvmeib_pet_stream_calculate_consumable_n_bytes(struct nvmeib_pet_stream co
 	msg_n_bytes = sizeof(header) + header.msg.args_n_bytes;
 	return msg_n_bytes <= remaining ? msg_n_bytes : remaining;
 }
-EXPORT_SYMBOL(__nvmeib_pet_stream_calculate_consumable_n_bytes);
+EXPORT_SYMBOL(__nvmeib_pet_journalbuf_calculate_consumable_n_bytes);
 
 /* Slow allocation path for rotation.
  * Called only when append cannot cover the write. It wraps when needed, writes
  * spacers, and maintains the viewer contract: message/spacer records up to
  * max_written_bytes, never partial records after EOF.
  */
-u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size)
+u8* __nvmeib_pet_journalbuf_allocate_rotate(struct nvmeib_pet_journalbuf* self, u16 size)
 {
-	u16 const header_n_bytes = sizeof(struct nvmeib_pet_msg_header);
+	u16 const header_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header);
 	u16 const msg_and_spacer_n_bytes = size + header_n_bytes;
 	u16 write_offset = self->write_offset;
 	size_t write_end = (size_t)write_offset + size;
@@ -92,7 +92,7 @@ u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size
 
 	/* Middle overwrites need space for the message and a spacer header. */
 	while (write_offset + span < self->max_written_bytes) {
-		u16 const consumable_n_bytes = __nvmeib_pet_stream_calculate_consumable_n_bytes(self, write_offset + span, self->max_written_bytes);
+		u16 const consumable_n_bytes = __nvmeib_pet_journalbuf_calculate_consumable_n_bytes(self, write_offset + span, self->max_written_bytes);
 
 		BUG_ON(!consumable_n_bytes);
 
@@ -114,7 +114,7 @@ u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size
 
 		/* A header-sized leftover is kept parseable by turning it into a spacer. */
 		if (leftover >= header_n_bytes) {
-			__nvmeib_pet_stream_write_spacer(self, leftover_physical_offset, leftover - header_n_bytes);
+			__nvmeib_pet_journalbuf_write_spacer(self, leftover_physical_offset, leftover - header_n_bytes);
 		} else {
 			/* Tiny leftovers are only valid at EOF; hide them by shrinking EOF. */
 			BUG_ON(write_offset + span != self->max_written_bytes);
@@ -127,4 +127,4 @@ u8* __nvmeib_pet_stream_allocate_rotate(struct nvmeib_pet_stream* self, u16 size
 	BUG_ON(self->max_written_bytes < self->write_offset);
 	return (u8*)self->data.iov_base + write_offset;
 }
-EXPORT_SYMBOL(__nvmeib_pet_stream_allocate_rotate);
+EXPORT_SYMBOL(__nvmeib_pet_journalbuf_allocate_rotate);

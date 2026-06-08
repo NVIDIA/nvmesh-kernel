@@ -8,8 +8,8 @@
 
 #include "common/pet/nvmeib_pet_specification.h"
 
-extern struct nvmeib_pet_message const __start_nvmeib_pet_messages[];
-extern struct nvmeib_pet_message const __stop_nvmeib_pet_messages[];
+extern struct nvmeib_pet_message_description const __start_nvmeib_pet_messages[];
+extern struct nvmeib_pet_message_description const __stop_nvmeib_pet_messages[];
 
 #define NVMEIBC_IO_PET_MSG(pet_journal, msg, severity, ...) NVMEIB_IO_PET_MSG(pet_journal, msg, severity, __VA_ARGS__)
 #define NVMEIBC_IO_PET_MSG_NORM(pet_journal, msg, ...) NVMEIB_IO_PET_MSG_NORM(pet_journal, msg, __VA_ARGS__)

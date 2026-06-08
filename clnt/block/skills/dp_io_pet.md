@@ -23,7 +23,7 @@ For the block IO path:
 - Kernel/controller plumbing lives in `clnt/nvmeibc_io_pet.c`.
 - Design docs live under `common/pet/documentation/`.
 
-The IO macro stores one fixed `struct nvmeib_pet_message` record in the common `nvmeib_pet_messages` ELF section. The runtime journal stores `message_id = message_index + 1`, with `0` reserved for rotation spacers. The viewer uses the dictionary layout from that record to decode serialized argument bytes, then uses the format string only for presentation and annotations.
+The IO macro stores one fixed `struct nvmeib_pet_message_description` record in the common `nvmeib_pet_messages` ELF section. The runtime journal stores `message_id = message_index + 1`, with `0` reserved for rotation spacers. The viewer uses the dictionary layout from that record to decode serialized argument bytes, then uses the format string only for presentation and annotations.
 
 ## Message API
 
@@ -173,7 +173,7 @@ Important callsite areas:
 
 ## Rotation And Protected Context
 
-PET journals are bounded. The current stream format keeps:
+PET journals are bounded. The current journal buffer format keeps:
 
 - a protected prefix, usually the entity header plus early context messages
 - a rotating suffix, which retains the latest later messages

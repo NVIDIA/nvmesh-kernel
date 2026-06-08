@@ -31,26 +31,25 @@ The idea should cut the bootstrap phase from few weeks to probably one week or e
 
 ## Current Journal Format
 
-Each flushed PET entity starts with a compact stream header:
+Each flushed PET entity starts with a compact journal buffer header:
 
 ```text
-{ commit_id, journal_size, tsc_offset, tsc_khz }
+{ commit_id, journalbuf_size, tsc_offset, tsc_khz }
 ```
 
-The viewer scans only `journal_size` bytes. `tsc_offset` and `tsc_khz` let the
+The viewer scans only `journalbuf_size` bytes. `tsc_offset` and `tsc_khz` let the
 viewer convert raw per-message TSC ticks to nanoseconds with
 `(ticks + tsc_offset) * 1000000 / tsc_khz`. Records after the header are
 self-describing messages or rotation spacers. A normal message stores
 `message_id = message_index + 1`; `message_id == 0` marks a spacer whose
 `bytes` field tells the viewer how many payload bytes to skip. The message
-index addresses fixed `struct nvmeib_pet_message` records in the
+index addresses fixed `struct nvmeib_pet_message_description` records in the
 `nvmeib_pet_messages` section.
 
 PET journals are bounded. A journal may protect an initial prefix with
 `nvmeib_pet_journal_protect_prefix()`, then rotate only the suffix. This keeps
-the entity context visible while preserving the latest suffix messages. See
-`documentation/pet_message_rotation.md` for the exact writer and viewer
-contract.
+the entity context visible while preserving the latest suffix messages. The
+writer and viewer contract is described in `documentation/pet.md`.
 
 PET format strings must describe the serialized argument payload, not only
 ordinary `printf` vararg compatibility. The planned static validation flow is
