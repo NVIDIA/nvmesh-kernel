@@ -135,26 +135,26 @@ static void __test_stream_reset(struct nvmeib_pet_journalbuf* stream)
 void test_msg_header_layout(void)
 {
 	enum {
-		msg_n_bytes = sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->msg.timestamp) +
-			      sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->msg.args_n_bytes),
-		spacer_n_bytes = sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->spacer.bytes) +
-				 sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->spacer.unused),
-		header_n_bytes = sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->message_id) + msg_n_bytes,
+		msg_n_bytes = sizeof_field(struct nvmeib_pet_journalbuf_message_header, msg.timestamp) +
+			      sizeof_field(struct nvmeib_pet_journalbuf_message_header, msg.args_n_bytes),
+		spacer_n_bytes = sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer.bytes) +
+				 sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer.unused),
+		header_n_bytes = sizeof_field(struct nvmeib_pet_journalbuf_message_header, message_id) + msg_n_bytes,
 	};
 
-	BUG_ON(sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->msg) != msg_n_bytes);
-	BUG_ON(sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->spacer) != spacer_n_bytes);
-	BUG_ON(sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->msg) != sizeof(((struct nvmeib_pet_journalbuf_message_header *)0)->spacer));
+	BUG_ON(sizeof_field(struct nvmeib_pet_journalbuf_message_header, msg) != msg_n_bytes);
+	BUG_ON(sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer) != spacer_n_bytes);
+	BUG_ON(sizeof_field(struct nvmeib_pet_journalbuf_message_header, msg) != sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer));
 	BUG_ON(sizeof(struct nvmeib_pet_journalbuf_message_header) != header_n_bytes);
 }
 
 void test_stream_header_layout(void)
 {
 	enum {
-		trace_clock_n_bytes = sizeof(((struct nvmeib_pet_trace_clock *)0)->tsc_offset) +
-				      sizeof(((struct nvmeib_pet_trace_clock *)0)->tsc_khz),
-		header_n_bytes = sizeof(((struct nvmeib_pet_journalbuf_header *)0)->commit_id) +
-				 sizeof(((struct nvmeib_pet_journalbuf_header *)0)->journalbuf_size) +
+		trace_clock_n_bytes = sizeof_field(struct nvmeib_pet_trace_clock, tsc_offset) +
+				      sizeof_field(struct nvmeib_pet_trace_clock, tsc_khz),
+		header_n_bytes = sizeof_field(struct nvmeib_pet_journalbuf_header, commit_id) +
+				 sizeof_field(struct nvmeib_pet_journalbuf_header, journalbuf_size) +
 				 trace_clock_n_bytes,
 	};
 
@@ -1457,144 +1457,100 @@ static struct perf_test_stats __test_performance_memcpy(struct iovec dest, const
 	};
 }
 
-static size_t __test_performance_journal_iteration_n_bytes(void)
-{
-	size_t const header_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header);
-
-	return
-		header_n_bytes + sizeof((int)0) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
-			sizeof((unsigned short)0 + 5) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
-			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
-			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
-			sizeof(struct perf_test_stats*) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
-			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
-			sizeof(struct perf_test_stats*) + sizeof(struct nvmeib_pet_journal*) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
-			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
-			sizeof(struct perf_test_stats*) + sizeof(struct nvmeib_pet_journal*) +
-			sizeof((signed char)0 + 7) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
-			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
-			sizeof(struct perf_test_stats*) + sizeof(struct nvmeib_pet_journal*) +
-			sizeof((signed char)0 + 7) + sizeof((unsigned char)0 + 8) +
-		header_n_bytes + sizeof((int)0) + sizeof((unsigned)0) + sizeof((long long)0) +
-			sizeof((unsigned long long)0) + sizeof((short)0 + 4) +
-			sizeof((unsigned short)0 + 5) + sizeof((signed char)0 + 6) +
-			sizeof(struct perf_test_stats*) + sizeof(struct nvmeib_pet_journal*) +
-			sizeof((signed char)0 + 7) + sizeof((unsigned char)0 + 8) +
-			sizeof((short)0 + 9);
-}
-
 static struct perf_test_stats __test_performance_journal_impl(struct nvmeib_pet_journal* journal,
 							     size_t target_written_n_bytes,
 							     bool allow_rotation)
 {
 	struct perf_test_stats stats = {0};
-	size_t const iteration_n_bytes = __test_performance_journal_iteration_n_bytes();
 	u32 arg_counter = 0;
 
 	size_t written = 0;
 	struct timespec start_time, end_time;
 	clock_gettime(CLOCK_MONOTONIC, &start_time);
 
-	while (stats.total_bytes + iteration_n_bytes <= target_written_n_bytes) {
-		if (!allow_rotation) {
-			BUG_ON(journal->journalbuf.write_offset != journal->journalbuf.max_written_bytes);
-			BUG_ON((size_t)journal->journalbuf.write_offset + iteration_n_bytes > journal->journalbuf.data.iov_len);
-		}
+	#define TEST_PERF_CAN_WRITE_NEXT() \
+		(allow_rotation || \
+		 (journal->journalbuf.write_offset == journal->journalbuf.max_written_bytes && \
+		  (size_t)journal->journalbuf.write_offset + NVMEIB_PET_MAX_MSG_N_BYTES <= journal->journalbuf.data.iov_len))
+	#define TEST_PERF_WRITE(msg_expr) \
+	do { \
+		if (!TEST_PERF_CAN_WRITE_NEXT()) { \
+			goto done; \
+		} \
+		written = (msg_expr); \
+		BUG_ON(!written); \
+		update_stats_on_msg_written(&stats, written); \
+	} while (0)
 
+	while (stats.total_bytes < target_written_n_bytes) {
 		arg_counter += 1;
 		arg_counter %= 13;
-		written = PET_MSG_NORM(journal, "msg_1arg; val=%d", (int)arg_counter);
-		update_stats_on_msg_written(&stats, written);
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_1arg; val=%d", (int)arg_counter));
 
-		written = PET_MSG_NORM(journal, "msg_2arg; v1=%d v2=%u",
-			(int)arg_counter, (unsigned)arg_counter + 1);
-		update_stats_on_msg_written(&stats, written);
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_2arg; v1=%d v2=%u",
+			(int)arg_counter, (unsigned)arg_counter + 1));
 
-		written = PET_MSG_NORM(journal, "msg_3arg; v1=%d v2=%u v3=%lld",
-			(int)arg_counter, (unsigned)arg_counter + 1, (long long)arg_counter + 2);
-		update_stats_on_msg_written(&stats, written);
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_3arg; v1=%d v2=%u v3=%lld",
+			(int)arg_counter, (unsigned)arg_counter + 1, (long long)arg_counter + 2));
 
-		written = PET_MSG_NORM(journal, "msg_4arg; v1=%d v2=%u v3=%lld v4=%llu",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_4arg; v1=%d v2=%u v3=%lld v4=%llu",
 			(int)arg_counter, (unsigned)arg_counter + 1,
-			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3);
-		update_stats_on_msg_written(&stats, written);
+			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3));
 
-		written = PET_MSG_NORM(journal, "msg_5arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_5arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd",
 			(int)arg_counter, (unsigned)arg_counter + 1,
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
-			(short)arg_counter + 4);
-		update_stats_on_msg_written(&stats, written);
+			(short)arg_counter + 4));
 
-		written = PET_MSG_NORM(journal, "msg_6arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_6arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu",
 			(int)arg_counter, (unsigned)arg_counter + 1,
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
-			(short)arg_counter + 4, (unsigned short)arg_counter + 5);
-		update_stats_on_msg_written(&stats, written);
+			(short)arg_counter + 4, (unsigned short)arg_counter + 5));
 
-		written = PET_MSG_NORM(journal, "msg_7arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_7arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd",
 			(int)arg_counter, (unsigned)arg_counter + 1,
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
 			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
-			(signed char)arg_counter + 6);
-		update_stats_on_msg_written(&stats, written);
+			(signed char)arg_counter + 6));
 
-		written = PET_MSG_NORM(journal, "msg_8arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_8arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p",
 			(int)arg_counter, (unsigned)arg_counter + 1,
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
 			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
-			(signed char)arg_counter + 6, &stats);
-		update_stats_on_msg_written(&stats, written);
+			(signed char)arg_counter + 6, &stats));
 
-		written = PET_MSG_NORM(journal, "msg_9arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_9arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p",
 			(int)arg_counter, (unsigned)arg_counter + 1,
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
 			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
-			(signed char)arg_counter + 6, &stats, journal);
-		update_stats_on_msg_written(&stats, written);
+			(signed char)arg_counter + 6, &stats, journal));
 
-		written = PET_MSG_NORM(journal, "msg_10arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_10arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd",
 			(int)arg_counter, (unsigned)arg_counter + 1,
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
 			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
 			(signed char)arg_counter + 6, &stats, journal,
-			(signed char)arg_counter + 7);
-		update_stats_on_msg_written(&stats, written);
+			(signed char)arg_counter + 7));
 
-		written = PET_MSG_NORM(journal, "msg_11arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd v11=%hhu",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_11arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd v11=%hhu",
 			(int)arg_counter, (unsigned)arg_counter + 1,
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
 			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
 			(signed char)arg_counter + 6, &stats, journal,
-			(signed char)arg_counter + 7, (unsigned char)arg_counter + 8);
-		update_stats_on_msg_written(&stats, written);
+			(signed char)arg_counter + 7, (unsigned char)arg_counter + 8));
 
-		written = PET_MSG_NORM(journal, "msg_12arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd v11=%hhu v12=%hd",
+		TEST_PERF_WRITE(PET_MSG_NORM(journal, "msg_12arg; v1=%d v2=%u v3=%lld v4=%llu v5=%hd v6=%hu v7=%hhd v8=%p v9=%p v10=%hhd v11=%hhu v12=%hd",
 			(int)arg_counter, (unsigned)arg_counter + 1,
 			(long long)arg_counter + 2, (unsigned long long)arg_counter + 3,
 			(short)arg_counter + 4, (unsigned short)arg_counter + 5,
 			(signed char)arg_counter + 6, &stats, journal,
 			(signed char)arg_counter + 7, (unsigned char)arg_counter + 8,
-			(short)arg_counter + 9);
-		update_stats_on_msg_written(&stats, written);
+			(short)arg_counter + 9));
 	}
+
+done:
+	#undef TEST_PERF_WRITE
+	#undef TEST_PERF_CAN_WRITE_NEXT
 
 	clock_gettime(CLOCK_MONOTONIC, &end_time);
 

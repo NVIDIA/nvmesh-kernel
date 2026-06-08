@@ -805,8 +805,8 @@ struct __attribute__((packed, aligned(NVMEIB_PET_MESSAGE_N_BYTES))) nvmeib_pet_m
 };
 
 enum {
-	NVMEIB_PET_MESSAGE_FIELDS_N_BYTES = sizeof(((struct nvmeib_pet_message_description*)0)->arg_struct_code) +
-					    sizeof(((struct nvmeib_pet_message_description*)0)->format),
+	NVMEIB_PET_MESSAGE_FIELDS_N_BYTES = sizeof_field(struct nvmeib_pet_message_description, arg_struct_code) +
+					    sizeof_field(struct nvmeib_pet_message_description, format),
 	NVMEIB_PET_MESSAGE_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message_description) == NVMEIB_PET_MESSAGE_FIELDS_N_BYTES),
 	NVMEIB_PET_MESSAGE_EXPECTED_SIZE_CHECK = 1 / (sizeof(struct nvmeib_pet_message_description) == NVMEIB_PET_MESSAGE_N_BYTES),
 	NVMEIB_PET_MESSAGE_NOT_EMPTY_CHECK = 1 / (sizeof(struct nvmeib_pet_message_description) != 0),
