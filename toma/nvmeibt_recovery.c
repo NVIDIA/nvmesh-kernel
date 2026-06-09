@@ -2630,7 +2630,7 @@ static int recovery_task_print_status(
 		seg_lot = praid_lot->topo_seg_lots[i];
 		(*printf_fn)(printf_ctx, "\t\t\t - [%d] : seg %.8s state=%s node=%s\n",
 					 i, nvmeibt_disk_segment_id_str(seg_lot->my_seg), nvmeibt_seg_topo_dirty_bits_state_str(&(seg_lot->seg_topo)),
-					 nvmeibt_node_name(seg_lot->my_seg->seg_mgmt.its_disk->its_node_config));
+					 nvmeibt_disk_segment_get_node_name(seg_lot->my_seg));
 	}
 
 skip:
