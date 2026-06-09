@@ -82,6 +82,9 @@ struct nvmeib_pet_base_controller{
 	//flush should be callable from the "interrupt context"
 	void (*flush)(struct nvmeib_pet_base_controller const* self, enum nvmeib_pet_severity severity, struct iovec const data);
 	struct nvmeib_pet_buffer (*get_buffer)(struct nvmeib_pet_base_controller const *self);
+	/* PET may return the allocated iovec with a different iov_len; release
+	 * logic must ignore the size and use only the allocation identity.
+	 */
 	void (*put_buffer)(struct nvmeib_pet_base_controller const *self, struct nvmeib_pet_buffer buffer);
 };
 
@@ -115,24 +118,26 @@ enum {NVMEIB_PET_MAX_JOURNALBUF_SIZE=64*1024}; //because max_written_bytes is u1
 
 static inline struct nvmeib_pet_journalbuf nvmeib_pet_journalbuf_make(struct iovec data)
 {
+	bool const is_active = data.iov_len;
 	struct nvmeib_pet_journalbuf journalbuf = {
 		.data = data,
-		.max_written_bytes = data.iov_base ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
-		.write_offset = data.iov_base ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
-		.protected_prefix = data.iov_base ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
+		.max_written_bytes = is_active ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
+		.write_offset = is_active ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
+		.protected_prefix = is_active ? NVMEIB_PET_JOURNALBUF_HEADER_SIZE : 0,
 	};
-
-	if (unlikely(NVMEIB_PET_MAX_JOURNALBUF_SIZE < data.iov_len)){
-		journalbuf.data.iov_len = NVMEIB_PET_MAX_JOURNALBUF_SIZE; //avoid undefined behavior
-	}
 
 	return journalbuf;
 }
 
 __attribute__((nonnull (1)))
+static inline bool nvmeib_pet_journalbuf_is_active(struct nvmeib_pet_journalbuf const* self)
+{
+	return self->data.iov_len;
+}
+
 static inline void nvmeib_pet_journalbuf_commit(struct nvmeib_pet_journalbuf* self)
 {
-	if (self->data.iov_base) {
+	if (likely(nvmeib_pet_journalbuf_is_active(self))) {
 		struct nvmeib_pet_journalbuf_header const header = {
 			.commit_id = (u64)COMMIT_ID,
 			.journalbuf_size = self->max_written_bytes,
@@ -180,10 +185,13 @@ static inline u8* nvmeib_pet_journalbuf_alloc(struct nvmeib_pet_journalbuf* self
 	u16 const write_offset = self->write_offset;
 	size_t const write_end = (size_t)write_offset + size;
 
+	if (unlikely(!nvmeib_pet_journalbuf_is_active(self))) {
+		return NULL;
+	}
+
 	BUG_ON(size < NVMEIB_PET_MIN_MSG_N_BYTES);
 	BUG_ON(size > NVMEIB_PET_MAX_MSG_N_BYTES);
 
-	BUG_ON(!self->data.iov_base);
 	BUG_ON(self->write_offset > self->max_written_bytes);
 	BUG_ON(self->write_offset > self->data.iov_len);
 	BUG_ON(self->max_written_bytes > self->data.iov_len);
@@ -207,7 +215,7 @@ static inline u8* nvmeib_pet_journalbuf_alloc(struct nvmeib_pet_journalbuf* self
 __attribute__((nonnull (1)))
 static inline void nvmeib_pet_journalbuf_protect_prefix(struct nvmeib_pet_journalbuf* self)
 {
-	if (!self->data.iov_base) {
+	if (unlikely(!nvmeib_pet_journalbuf_is_active(self))) {
 		return;
 	}
 
@@ -685,7 +693,9 @@ static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pe
 							     };
 
 	if (buffer.data.iov_base) {
-		BUG_ON(buffer.data.iov_len <= NVMEIB_PET_MIN_JOURNAL_N_BYTES);
+		BUG_ON(!buffer.data.iov_base);
+		BUG_ON(buffer.data.iov_len < NVMEIB_PET_MIN_JOURNAL_N_BYTES);
+		BUG_ON(buffer.data.iov_len > NVMEIB_PET_MAX_JOURNALBUF_SIZE);
 	}
 
 	return (struct nvmeib_pet_journal){
@@ -701,7 +711,7 @@ static inline struct nvmeib_pet_journal nvmeib_pet_journal_make(struct nvmeib_pe
 __attribute__((nonnull (1)))
 static inline bool nvmeib_pet_journal_is_activated(struct nvmeib_pet_journal const* self)
 {
-	return self->journalbuf.data.iov_base;
+	return nvmeib_pet_journalbuf_is_active(&self->journalbuf);
 }
 
 __attribute__((nonnull (1)))
@@ -763,7 +773,9 @@ static inline void nvmeib_pet_journal_commit(struct nvmeib_pet_journal* self)
 			nvmeib_pet_journalbuf_commit(&self->journalbuf);
 			self->controller->flush(self->controller, self->worst_severity, self->journalbuf.data);
 		}
+	}
 
+	if (self->journalbuf.data.iov_base) {
 		self->controller->put_buffer(self->controller, (struct nvmeib_pet_buffer){
 								       .data = self->journalbuf.data,
 								       .release_cpu = self->release_cpu,

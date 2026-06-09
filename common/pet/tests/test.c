@@ -1242,7 +1242,9 @@ struct release_cookie_test_controller {
 	struct iovec buffer;
 	s16 release_cpu;
 	s16 put_release_cpu;
+	struct iovec put_buffer_data;
 	int put_calls;
+	int flush_calls;
 };
 
 static struct nvmeib_pet_buffer __release_cookie_test_get_buffer(struct nvmeib_pet_base_controller const *base)
@@ -1260,14 +1262,16 @@ static void __release_cookie_test_put_buffer(struct nvmeib_pet_base_controller c
 	struct release_cookie_test_controller *self = (struct release_cookie_test_controller *)base;
 	self->put_calls++;
 	self->put_release_cpu = buffer.release_cpu;
+	self->put_buffer_data = buffer.data;
 }
 
 static void __release_cookie_test_flush(struct nvmeib_pet_base_controller const *base,
 					enum nvmeib_pet_severity severity, struct iovec const data)
 {
-	(void)base;
+	struct release_cookie_test_controller *self = (struct release_cookie_test_controller *)base;
 	(void)severity;
 	(void)data;
+	self->flush_calls++;
 }
 
 void test_journal_returns_release_cpu_to_controller(void)
@@ -1299,6 +1303,45 @@ void test_inactive_journal_uses_no_release_cpu(void)
 	BUG_ON(nvmeib_pet_journal_is_activated(&journal));
 	BUG_ON(journal.release_cpu != NVMEIB_PET_NO_RELEASE_CPU);
 	nvmeib_pet_journal_commit(&journal);
+}
+
+void test_zero_length_owned_buffer_is_inactive_but_returned(void)
+{
+	struct release_cookie_test_controller controller = {
+		.base = {
+			.flush = __release_cookie_test_flush,
+			.get_buffer = __release_cookie_test_get_buffer,
+			.put_buffer = __release_cookie_test_put_buffer,
+		},
+		.buffer = iovec_malloc(NVMEIB_PET_MIN_JOURNAL_N_BYTES),
+		.release_cpu = 11,
+		.put_release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+	};
+	struct nvmeib_pet_journal journal = {0};
+	unsigned journal_get_count = 0;
+	int arg_count = 0;
+	u16 written = 0;
+
+	journal = nvmeib_pet_journal_make(&controller.base, true);
+	journal.journalbuf.data.iov_len = 0;
+
+	written = PET_MSG_NORM(
+		test_get_pet_journal(&journal, &journal_get_count),
+		"io_pet_zero_length_buffer(arg=%d)", ++arg_count);
+
+	BUG_ON(nvmeib_pet_journal_is_activated(&journal));
+	BUG_ON(written != 0);
+	BUG_ON(journal_get_count != 1);
+	BUG_ON(arg_count != 0);
+
+	nvmeib_pet_journal_commit(&journal);
+	BUG_ON(controller.flush_calls != 0);
+	BUG_ON(controller.put_calls != 1);
+	BUG_ON(controller.put_release_cpu != 11);
+	BUG_ON(controller.put_buffer_data.iov_base != controller.buffer.iov_base);
+	BUG_ON(controller.put_buffer_data.iov_len != 0);
+
+	free(controller.buffer.iov_base);
 }
 
 static struct nvmeib_pet_journalbuf_message_header __load_msg_header_from(u8 const* msg_start)
@@ -1861,6 +1904,7 @@ int main(int argc, char* argv[]){
 		test_journal_protect_prefix_after_context();
 		test_journal_returns_release_cpu_to_controller();
 		test_inactive_journal_uses_no_release_cpu();
+		test_zero_length_owned_buffer_is_inactive_but_returned();
 		test_journal_timestamp();
 		test_journal_add_msg_accepts_pointer_arg();
 		test_performance();
