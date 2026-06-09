@@ -159,9 +159,12 @@ struct __attribute__((packed)) nvmeib_pet_journalbuf_message_header {
 		} msg;
 		/* message_id == 0 - rotation spacer */
 		struct __attribute__((packed)) {
-			/* payload bytes after this header */
-			u64 bytes;
-			u8 unused;
+			u64 unused;
+			/* Same offset as msg.args_n_bytes; the spacer payload is bounded by
+			 * one record overshoot during rotation, so it is always smaller than
+			 * the maximal message record.
+			 */
+			u8 args_n_bytes;
 		} spacer;
 	};
 };

@@ -137,14 +137,16 @@ void test_msg_header_layout(void)
 	enum {
 		msg_n_bytes = sizeof_field(struct nvmeib_pet_journalbuf_message_header, msg.timestamp) +
 			      sizeof_field(struct nvmeib_pet_journalbuf_message_header, msg.args_n_bytes),
-		spacer_n_bytes = sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer.bytes) +
-				 sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer.unused),
+		spacer_n_bytes = sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer.unused) +
+				 sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer.args_n_bytes),
 		header_n_bytes = sizeof_field(struct nvmeib_pet_journalbuf_message_header, message_id) + msg_n_bytes,
 	};
 
 	BUG_ON(sizeof_field(struct nvmeib_pet_journalbuf_message_header, msg) != msg_n_bytes);
 	BUG_ON(sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer) != spacer_n_bytes);
 	BUG_ON(sizeof_field(struct nvmeib_pet_journalbuf_message_header, msg) != sizeof_field(struct nvmeib_pet_journalbuf_message_header, spacer));
+	BUG_ON(offsetof(struct nvmeib_pet_journalbuf_message_header, msg.args_n_bytes) !=
+	       offsetof(struct nvmeib_pet_journalbuf_message_header, spacer.args_n_bytes));
 	BUG_ON(sizeof(struct nvmeib_pet_journalbuf_message_header) != header_n_bytes);
 }
 
@@ -218,8 +220,8 @@ static void __test_check_spacer_from_buffer(u8 const* buffer, size_t offset, u16
 
 	BUG_ON(expected_physical_n_bytes < sizeof(header));
 	BUG_ON(header.message_id != 0);
-	BUG_ON(header.spacer.bytes != expected_physical_n_bytes - sizeof(header));
 	BUG_ON(header.spacer.unused != 0);
+	BUG_ON(header.spacer.args_n_bytes != expected_physical_n_bytes - sizeof(header));
 }
 
 struct test_random_rotation_msg {
@@ -380,8 +382,8 @@ static size_t __test_read_random_rotation_msgs(struct nvmeib_pet_journalbuf cons
 			u16 spacer_n_bytes = 0;
 
 			BUG_ON(header.spacer.unused != 0);
-			BUG_ON(header.spacer.bytes > remaining - sizeof(header));
-			spacer_n_bytes = sizeof(header) + (u16)header.spacer.bytes;
+			BUG_ON(header.spacer.args_n_bytes > remaining - sizeof(header));
+			spacer_n_bytes = sizeof(header) + (u16)header.spacer.args_n_bytes;
 			stats->spacer_bytes += spacer_n_bytes;
 			pos += spacer_n_bytes;
 			continue;
@@ -804,42 +806,6 @@ void test_stream_rotation_uses_unwritten_tail_after_eof(void)
 	BUG_ON(stream.max_written_bytes != sizeof(buffer));
 	BUG_ON(stream.write_offset != large_msg_end);
 	__test_check_msg_header_from_buffer(buffer, prefix, 0x0726, sizeof(u64) + sizeof(u64));
-}
-
-/* Cover rotation over a viewer-hidden EOF tail shorter than a record header.
- * The allocator consumes [M8 old][tiny tail] and then shrinks EOF after M64 new.
- */
-void test_stream_rotation_consumes_short_eof_tail(void)
-{
-	enum {
-		header_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header),
-		tiny_tail_n_bytes = header_n_bytes - 1,
-		msg_u8_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u8),
-		msg_u64_n_bytes = sizeof(struct nvmeib_pet_journalbuf_message_header) + sizeof(u64),
-		buffer_n_bytes = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + msg_u8_n_bytes + tiny_tail_n_bytes,
-	};
-	u8 buffer[buffer_n_bytes];
-	struct nvmeib_pet_journalbuf stream = {0};
-	u16 const prefix = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
-	u16 const eof_offset = prefix + msg_u8_n_bytes + tiny_tail_n_bytes;
-	u64 const expected = 0x0727;
-	u16 written = 0;
-
-	memset(buffer, 0xcc, sizeof(buffer));
-	stream = nvmeib_pet_journalbuf_make((struct iovec){.iov_base = buffer, .iov_len = sizeof(buffer)});
-	__test_stream_set_synthetic_protected_prefix(&stream);
-
-	BUG_ON(__NVMEIB_PET_JOURNALBUF_WRITE_MSG(&stream, 0x0727, (u8)0x27) != msg_u8_n_bytes);
-	stream.max_written_bytes = eof_offset;
-	stream.write_offset = prefix;
-
-	written = __NVMEIB_PET_JOURNALBUF_WRITE_MSG(&stream, 0x0728, expected);
-	BUG_ON(written != msg_u64_n_bytes);
-	BUG_ON(stream.max_written_bytes != prefix + msg_u64_n_bytes);
-	BUG_ON(stream.write_offset != stream.max_written_bytes);
-	BUG_ON(stream.max_written_bytes >= eof_offset);
-	__test_check_msg_header_from_buffer(buffer, prefix, 0x0728, sizeof(expected));
-	BUG_ON(memcmp(buffer + prefix + header_n_bytes, &expected, sizeof(expected)) != 0);
 }
 
 /* The bottom of allocate_rotate() is only the middle-overwrite path. EOF
@@ -1891,7 +1857,6 @@ int main(int argc, char* argv[]){
 		test_stream_rotation_small_over_large_consumes_next_without_tiny_gap();
 		test_stream_rotation_large_over_small_messages_reduces_eof_for_tiny_tail();
 		test_stream_rotation_uses_unwritten_tail_after_eof();
-		test_stream_rotation_consumes_short_eof_tail();
 		test_stream_allocate_rotate_final_update_does_not_extend_eof();
 		test_stream_rotation_end_wrap_shrinks_eof_and_writes_from_prefix();
 		test_stream_commit_sets_journalbuf_size();

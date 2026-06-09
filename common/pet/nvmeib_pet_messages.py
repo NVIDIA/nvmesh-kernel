@@ -188,17 +188,17 @@ class PetArchiveReader:
 				self.__fobj.seek(entity_end)
 				break
 
-			message_id, timestamp_or_bytes, args_n_bytes_or_unused = self.MSG_HEADER.unpack(
+			message_id, timestamp_or_unused, args_n_bytes = self.MSG_HEADER.unpack(
 				self.__read_exact(self.MSG_HEADER.size, f'entity {idx} record {record_idx} header')
 			)
 			remaining_payload = remaining - self.MSG_HEADER.size
 
 			if message_id == 0:
-				spacer_payload_n_bytes = timestamp_or_bytes
-				if args_n_bytes_or_unused != 0:
+				spacer_payload_n_bytes = args_n_bytes
+				if timestamp_or_unused != 0:
 					raise ValueError(
 						f'Invalid PET spacer in entity {idx} at byte {record_start}: '
-						f'unused={args_n_bytes_or_unused}'
+						f'unused={timestamp_or_unused}'
 					)
 				if spacer_payload_n_bytes > remaining_payload:
 					raise EOFError(
@@ -209,7 +209,6 @@ class PetArchiveReader:
 				record_idx += 1
 				continue
 
-			args_n_bytes = args_n_bytes_or_unused
 			if args_n_bytes > remaining_payload:
 				raise EOFError(
 					f'Invalid PET message in entity {idx} at byte {record_start}: '
@@ -217,7 +216,7 @@ class PetArchiveReader:
 				)
 			payload = self.__read_exact(args_n_bytes, f'entity {idx} record {record_idx} payload')
 			messages.append(
-				PetRawMessage(message_id=message_id, timestamp=timestamp_or_bytes, args_payload=payload)
+				PetRawMessage(message_id=message_id, timestamp=timestamp_or_unused, args_payload=payload)
 			)
 			record_idx += 1
 

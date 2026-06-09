@@ -167,8 +167,8 @@ struct __attribute__((packed)) nvmeib_pet_journalbuf_message_header {
             u8 args_n_bytes;
         } msg;
         struct __attribute__((packed)) {
-            u64 bytes;
-            u8 unused;
+            u64 unused;
+            u8 args_n_bytes;
         } spacer;
     };
 };
@@ -194,8 +194,8 @@ Spacer record:
 
 ```text
 message_id = 0
-spacer.bytes = payload bytes after this spacer header
 spacer.unused = 0
+spacer.args_n_bytes = payload bytes after this spacer header
 payload bytes are skipped by the viewer
 ```
 
@@ -271,7 +271,7 @@ if message_id != 0:
 
 if message_id == 0:
     require unused == 0
-    skip spacer.bytes payload bytes
+    skip args_n_bytes payload bytes
 ```
 
 The viewer never searches blindly for the next nonzero offset. Stale payload
