@@ -990,6 +990,7 @@ static void __release_locks_of_completed_command(struct nvmeibc_block_command *c
 
 		ncmds = nvmeibc_atomic_sub_return(lo->n_siblings*n_refs /* num cmds, each protected by all siblings of owner lock*/, &lo->ncmds);
 		if (unlikely(ncmds < 0)) {
+			NVMEIBC_IO_PET_MSG_ERROR(&o->journal, "lock_ncmds_underflow(lsi=%d, ncmds=%d)", lsi, ncmds);
 			WARN(1, "bvmeibc bug! lsi=%d, ncmds=%d\n", lsi, ncmds);
 			__dump_operation(o);
 		} else if (ncmds) {
@@ -1316,6 +1317,16 @@ _out:
 	*ncmds= n_cmds_in_cur_stage + n_non_exec_cmds;
 }
 
+/* Called when binfo write to data lock finds wrong stage or lock state. */
+void pet_trace_binfo_lock_write_err(const struct nvmeibc_block_command *rldr) {
+	if (!rldr || !rldr->o)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&rldr->o->journal,
+		"binfo_lock_write_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu)",
+		numeric_downcast(u8, rldr->o->op), rldr->rld.pre.all, rldr->rld.post.all,
+		numeric_downcast(u8, rldr->raid_cur_stage));
+}
+
 void nvmeibc_blkset_info_write_pet_describe(struct operation* o, u8 sgmnt, u64 addr, struct nvmeibc_d_rdma_comp *dc)
 {
 	NVMEIBC_IO_PET_MSG_NORM(&o->journal,
@@ -1385,10 +1396,16 @@ static int __send_blkset_info_to_data_lock_cb(struct nvmeibc_d_rdma_comp* dc, st
 	dc->opr = NVMEIBC_LOCK_CMP_AND_SWAP;	// Not mandatory, this is a transport layer field. Just for easier debugability
 	if (1) {    /* Give completion on cmd, Todo: Move to separate func() */
 		struct nvmeibc_block_command *rldr = /* Daniel: Todo save rldr to avoid this search */ nvmeibc_cllink_find_cmd_by_lock(locksets, lsi);
-		WARN(!e_cmds_stage_is_rdma_appendix(rldr->raid_cur_stage), "stage=%d\n", rldr->raid_cur_stage);
+		if (unlikely(!e_cmds_stage_is_rdma_appendix(rldr->raid_cur_stage))) {
+			pet_trace_binfo_lock_write_err(rldr);
+			WARN(1, "stage=%d\n", rldr->raid_cur_stage);
+		}
 		nvmeibc_cmd_lock_response_io_pet_describe(rldr->o, l);
 		if (rv_storage_of_binfo_write(rldr)) {
+			if (unlikely(rv == 0)) {
+				pet_trace_binfo_lock_write_err(rldr);
 			WARN((rv == 0), "nvmeibc bug rldr(my=%d, cur=%d, rv=%d)\n", rldr->my_stage, rldr->raid_cur_stage, rv_storage_of_binfo_write(rldr));
+			}
 		} else if (rv) {
 			rv_storage_of_binfo_write(rldr) = rv;	// Here is a race, a few callbacks may be putting their 'rv' into the same integer, however never will '0' overwrite an error
 			OPERATION_DBG_CNTR_INC(rldr->o, n_write_binfo_failed);
@@ -1411,8 +1428,14 @@ static void __send_blkset_info_to_data_lock(struct nvmeibc_block_command *cmds, 
 	struct nvmeibc_d_rdma_comp *dc = &dl->comp;
 	int rv;
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
-	WARN(((dc->lock_status != NCL_STATUS_TAKEN) && (!((dc->lock_status == NCL_STATUS_CONTENDED || dc->lock_status == NCL_STATUS_DISKDEAD) && prev_rv))) || (dc->opr != NVMEIBC_LOCK_CMP_AND_SWAP), "status=%d, opr=%d, prev_rv=%d\n", dc->lock_status, dc->opr, prev_rv);	// Daniel: if Transferred lock - treat as taken
-	WARN(!e_cmds_stage_is_rdma_appendix(rldr->raid_cur_stage), "stage=%d\n", rldr->raid_cur_stage);
+	if (unlikely(((dc->lock_status != NCL_STATUS_TAKEN) && (!((dc->lock_status == NCL_STATUS_CONTENDED || dc->lock_status == NCL_STATUS_DISKDEAD) && prev_rv))) || (dc->opr != NVMEIBC_LOCK_CMP_AND_SWAP))) {
+		pet_trace_binfo_lock_write_err(rldr);
+		WARN(1, "status=%d, opr=%d, prev_rv=%d\n", dc->lock_status, dc->opr, prev_rv);	// Daniel: if Transferred lock - treat as taken
+	}
+	if (unlikely(!e_cmds_stage_is_rdma_appendix(rldr->raid_cur_stage))) {
+		pet_trace_binfo_lock_write_err(rldr);
+		WARN(1, "stage=%d\n", rldr->raid_cur_stage);
+	}
 	dc->lock_status = NCL_STATUS_NOTISSUED;			// Lock is taken but we use its comp for binfo
 	dc->callback = __send_blkset_info_to_data_lock_cb;		// Safe to change callback, when it is used by unlock - it will be overriden
 

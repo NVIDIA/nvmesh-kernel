@@ -170,3 +170,23 @@ void test_pet_traces_io_req_rel_locks(void)
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
+
+void test_pet_traces_io_generic_cmds(void)
+{
+	struct operation           o;
+	struct nvmeibc_block_command rldr;
+
+	memset(&o,    0, sizeof(o));
+	memset(&rldr, 0, sizeof(rldr));
+	o.journal           = nvmeibc_io_pet_journal_make(sim_get_io_pet_controller());
+	o.op                = NVMEIB_BLOCK_IO_OP_WRITE;
+	rldr.rld.pre.all    = 0x100;
+	rldr.rld.post.all   = 0x200;
+	rldr.raid_cur_stage = E_CMDS_STAGE_POST_IO_RDMA;
+	rldr.o              = &o;
+
+	/* pet_trace_binfo_lock_write_err — ERROR */
+	pet_trace_binfo_lock_write_err(&rldr);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+}

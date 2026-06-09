@@ -7797,6 +7797,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 	test_pet_traces_sync_no_write_hole();
 	test_pet_traces_mirror();
 	test_pet_traces_io_req_rel_locks();
+	test_pet_traces_io_generic_cmds();
 	kr_incs_bit_ops_tests();
 	nvmeib_scatterlist_iter_tests();
 	nvmeibc_management_capi_parse_conf_tests();
