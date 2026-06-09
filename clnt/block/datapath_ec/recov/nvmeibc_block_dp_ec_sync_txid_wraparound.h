@@ -10,4 +10,8 @@ struct recovery_sync_op;
 void dp_ec_sync_txid_wraparound_cb_stg_end(struct recovery_sync_op *so);
 void dp_ec_sync_txid_wraparound_execute_op(struct recovery_sync_op *so);
 
+
+/* PET trace declarations */
+void pet_trace_txid_wrap_err(const struct recovery_sync_op *so);
+
 #endif // NVMEIBC_BLOCK_DP_SYNC_TXID_WRAPAROUND_H

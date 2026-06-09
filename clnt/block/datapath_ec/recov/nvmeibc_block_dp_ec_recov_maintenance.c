@@ -15,6 +15,16 @@
 
 #include "block/datapath_utils_generic/binfo/nvmeibc_block_dp_binfo.inc.c"
 
+/* Captures op, pre/post binfo, and sync stage for EC maintenance error sites. */
+void pet_trace_maintenance_err(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"maintenance_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage));
+}
+
 /*********************** DP maintain virtal functions *************************/
 union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct recovery_sync_op *so)
 {
@@ -30,14 +40,18 @@ union nvmeibc_dbits_entry nvmeibcbdpec_calc_max_dbit_in_ram_md(const struct reco
 	const bool all_pari_degraded = (non_readable_pari == pari_bmp);
 	const bool double_deg_and_deg_parity = (hweight32(non_readable) > 1) && (non_readable_pari);
 
-	WARN((all_pari_degraded && (num_parities > 1)) && (!double_deg_and_deg_parity), "nvmeibc bug, so=%p incorrect topo!, nrp=0%x, ss=%d\n", so, non_readable, slice_start); // sanity
+	if (unlikely((all_pari_degraded && (num_parities > 1)) && (!double_deg_and_deg_parity))) {
+		pet_trace_maintenance_err(so);
+		WARN(1, "nvmeibc bug, so=%p incorrect topo!, nrp=0%x, ss=%d\n", so, non_readable, slice_start); // sanity
+	}
 	if (unlikely(double_deg_and_deg_parity || all_pari_degraded)) { // Exact condition for when on-disk-dbits cannot be used (inaccessible or cannot be trusted). Example: no-whole in the middle of turning-off dbits on D0 in slice -> cold recovery + Q becomes dead, D0 still W and no-whole only turned off the dbits in P (Q has dbits for D0) -> cold recovery needs to turn-on dbits on Q since it's dbits/txid might be invalid.
 		res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(res, topo_traits); /* nowhere to read dbits from */
 		goto _resolved;
 	}
 	// Find the first valid parity metadata with with dirty bits
 	for (; (first_p < so->r1->replicas)&&(c[first_p].do_not_send); first_p++);
-	if (first_p >= so->r1->replicas) {
+	if (unlikely(first_p >= so->r1->replicas)) {
+		pet_trace_maintenance_err(so);
 		WARN(true, "nvmeibc bug, first_p=0x%x, so=%p must exist because readable_pari(0x%x) != all_pari(0x%x)!\n", first_p, so, non_readable_pari, pari_bmp); // sanity
 		res = nvmeibcbdp_binfo_calc_worst_case_dbits_in_topology(res, topo_traits); /* nowhere to read dbits from */
 		goto _resolved;
@@ -63,6 +77,7 @@ _resolved:
 			_NTSO(t_02_ecmint, "seg=@SEG, @DLBA, not_sent=@BOOL_YN, role=@ROLE_INT", c->ds->uuid, c->iocmd->reqs1.disk_address, c->do_not_send, i);
 			nbdpec_md_to_string(c->iocmd->reqs1.md, md_size, c->nlbas, 'P');
 		}
+		pet_trace_maintenance_err(so);
 		WARN(true, "nvmeibc bug, dumping mds!\n");
 	}
 	return res;

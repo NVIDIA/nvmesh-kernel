@@ -47,5 +47,9 @@ void dp_ec_sync_j_gc_execute_op(struct recovery_sync_op *so);
 
 #include "nvmeibc_block_dp_ec_recov_stats.h"
 
+
+/* PET trace declarations */
+void pet_trace_cold_sync_err(const struct recovery_sync_op *so);
+
 #endif  // H beginning
 

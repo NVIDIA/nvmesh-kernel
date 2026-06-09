@@ -13,6 +13,18 @@
 #include "nvmeibc_block_dp_ec_sync_txid_wraparound.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "nvmeibc_io_pet.h"
+#include "nvmeib_utils.h"
+#include "block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.h"
+
+/* Captures op, pre/post binfo, and sync stage for EC recovery common error sites. */
+void pet_trace_ec_recov_err(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"ec_recov_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage));
+}
 
 static int dp_ec_sync_read_write_prepare_op(struct recovery_sync_op *so);
 static int dp_ec_sync_md_read_prepare_op(   struct recovery_sync_op *so); // Called from thread context
@@ -309,7 +321,10 @@ static void __mutate_op_according_to_binfo(struct recovery_sync_op *so)
 		WARN(true, "nvmeibc di bug! op=%d, incorrect mutation\n", op);
 	}
 	if (op != so->o->op) {
-		WARN(is_op_sync_commit_binfo(so->o->op), "commit binfo is never mutated to, if it's the first time don't forget to call mark_blockset_info_not_written(so)\n");
+		if (unlikely(is_op_sync_commit_binfo(so->o->op))) {
+			pet_trace_ec_recov_err(so);
+			WARN(1, "commit binfo is never mutated to, if it's the first time don't forget to call mark_blockset_info_not_written(so)\n");
+		}
 		_NTSO(trace_dp_ec_recovery_common_mutate_op_according_to_binfo, "SO mutated type=@BLOCK_IO_OP-->@BLOCK_IO_OP", op, so->o->op);
 	}
 }
@@ -447,7 +462,6 @@ _func_start:
 	WARN(true, "nvmeibc bug! Illegal sync state. IO can stuck\n!");
 }
 
-#include "block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.h"
 void dp_ec_sync_cmd_cb(struct nvmeibc_block_command *cmd)
 {	/* This state machine starts when all locks are taken and terminates in request to release locks */
 	struct recovery_sync_op *so;
@@ -896,6 +910,7 @@ static inline union nvmeibc_block_dp_ec_data_block_md *__get_valid_pari_md_in_sl
 	union nvmeibc_block_dp_ec_data_block_md *valid_pari_md = (void*)((u8*)valid_pari_cmd->iocmd->reqs1.md + md_size*lba);
 	if (unlikely(!valid_pari_bmp)) {
 		NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: readable_segs=@BITMAP slba_in_blockset=@SLICE", _T, goodpath_nvmeibc_syncs, t04_cmtfp, so->o->dbg_id, readable_segs, lba);
+		pet_trace_ec_recov_err(so);
 		WARN(true, "Trying to get a valid parity while there are no valid parities.\n");
 	}
 	return valid_pari_md;
@@ -929,9 +944,12 @@ static inline bool __is_slice_neverwritten_by_pari(const struct recovery_sync_op
 			if (unlikely(res != nbdpec_md_was_data_never_written(valid_pari_md_i))) {
 				NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: orig_md=@MD_PTR other_pari_md=@MD_PTR other_pari_role=@ROLE slba_in_blockset=@SLICE", _T, goodpath_nvmeibc_syncs, t03_cmtfp,
 				so->o->dbg_id, valid_pari_md, valid_pari_md_i, bit, lba);
-				WARN(nvmeibc_warn_on_parities_sync_missmatch,
-					"nvmeibc bug: volume %s, rlba=0x%llx, slice=0x%llx, One parity is written, other is not! md={0x%llx,0x%llx}\n",
-					so->o->nd->name, so->rlba, lba, valid_pari_md->raw, valid_pari_md_i->raw);
+				if (unlikely(nvmeibc_warn_on_parities_sync_missmatch)) {
+					pet_trace_ec_recov_err(so);
+					WARN(1,
+					 "nvmeibc bug: volume %s, rlba=0x%llx, slice=0x%llx, One parity is written, other is not! md={0x%llx,0x%llx}\n",
+					 so->o->nd->name, so->rlba, lba, valid_pari_md->raw, valid_pari_md_i->raw);
+				}
 				__parities_sync_never_written_missmatch_fix(so, valid_pari_md, valid_pari_md_i);
 				*((bool*)&res) = false;	// This slice is written, but with corrupted parity!
 			}
@@ -946,7 +964,10 @@ static inline u32 __calc_max_txid_from_pari(const struct recovery_sync_op *so, u
 	const u32 res = valid_pari_md->tx_id;
 	if (unlikely(nbdpec_md_was_data_never_written(valid_pari_md))) {
 		NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: slba_in_blockset=@SLICE", _T, goodpath_nvmeibc_syncs, t01cmtxfp, so->o->dbg_id, lba);
-		WARN(nvmeibc_warn_on_parities_sync_missmatch, "Trying to find max_txid in a neverwritten slice!\n");	// This can actually happen if we have a never written slice with 3 bad sectors which causes a destruction of a never written slice.
+		if (unlikely(nvmeibc_warn_on_parities_sync_missmatch)) {
+			pet_trace_ec_recov_err(so);
+			WARN(1, "Trying to find max_txid in a neverwritten slice!\n");	// This can actually happen if we have a never written slice with 3 bad sectors which causes a destruction of a never written slice.
+		}
 	}
 	{	// Sanity, verify txid on all valid parities is identical
 		struct nvmeibc_block_command *rldr = so->cmds;
@@ -962,9 +983,12 @@ static inline u32 __calc_max_txid_from_pari(const struct recovery_sync_op *so, u
 			if (res != txid) {
 				NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: orig_md=@MD_PTR other_pari_md=@MD_PTR other_pari_role=@ROLE slba_in_blockset=@SLICE", _T, goodpath_nvmeibc_syncs, t01_cmtfp,
 						so->o->dbg_id, valid_pari_md, valid_pari_md_i, bit, lba);
-				WARN(nvmeibc_warn_on_parities_sync_missmatch,
-					"nvmeibc bug: volume %s, rlba=0x%llx, slice=0x%llx, Readable parities with different txids: 0x%x != 0x%x\n",
-					so->o->nd->name, so->rlba, lba, res, txid);
+				if (unlikely(nvmeibc_warn_on_parities_sync_missmatch)) {
+					pet_trace_ec_recov_err(so);
+					WARN(1,
+					 "nvmeibc bug: volume %s, rlba=0x%llx, slice=0x%llx, Readable parities with different txids: 0x%x != 0x%x\n",
+					 so->o->nd->name, so->rlba, lba, res, txid);
+				}
 				__parities_sync_never_written_missmatch_fix(so, valid_pari_md, valid_pari_md_i);
 				*((u32*)&res) = valid_pari_md->tx_id;
 			}
@@ -1158,7 +1182,10 @@ static void __update_parity_metadata(struct recovery_sync_op *so, int pi, const 
 	const bool is_slice_destroyed = nvmeibc_sync_sl_by_sl_is_current_slice_destroyed(so);
 	sgmnts_bmp_t dbits_turnon_bmp_pr = rol32_width(so->nwhole_params.dbits_turnon_bmp, slice_start, so->r1->replicas);
 
-    WARN(parity_cmd->do_not_send, "nvmeibc bug, using unread parity MD as valid source src_acm=%d\n", parity_cmd->ds->toma_acm);
+	if (unlikely(parity_cmd->do_not_send)) {
+		pet_trace_ec_recov_err(so);
+		WARN(1, "nvmeibc bug, using unread parity MD as valid source src_acm=%d\n", parity_cmd->ds->toma_acm);
+	}
 
 	if (dbits_op == DBITS_OP_TURN_OFF) {
 		nvmeibc_dbits_tx_init_by_bmp(&tx, &so->r1->calculated_data.topo_traits, 0, nvmeibc_raid1_get_sgmnts_bmp(so->r1, dbits_off_mask), 0);
@@ -1306,7 +1333,10 @@ static void __prep_write_perm_read_fail(struct recovery_sync_op *so)
 		   Now resolve txid will find smaller txid and start working with that. later the block will turn rw (without regen - it doesn't have dbit).
 		   With another cold now we will get the previous max_txid and might miss roll-fwd of the last TX. */
 		max_txid_in_slice = so->cmds->rld.pre.bits.txid;
-		WARN(nvmeibc_warn_on_no_readable_segs, "No readable segs, destroying slice with ram's txid=%u", max_txid_in_slice);
+		if (unlikely(nvmeibc_warn_on_no_readable_segs)) {
+			pet_trace_ec_recov_err(so);
+			WARN(1, "No readable segs, destroying slice with ram's txid=%u", max_txid_in_slice);
+		}
 	}
 	_NTSO(t_01_pwprf, "destroying slice with txid=@TXID, never_written=@BOOL_YN", max_txid_in_slice, is_never_written_slice);
 

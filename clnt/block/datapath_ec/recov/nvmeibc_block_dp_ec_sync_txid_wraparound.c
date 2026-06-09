@@ -13,6 +13,16 @@
 #include "nvmeib_shared.h"
 #include "nvmeib_msgs_shared.h"
 
+/* Captures op, pre/post binfo, and stage for txid wraparound error sites. */
+void pet_trace_txid_wrap_err(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"txid_wrap_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage));
+}
+
 void dp_ec_sync_txid_wraparound_execute_op(struct recovery_sync_op *so) {
 	dp_ec_sync_txid_wraparound_cb_stg_end(so);
 }
@@ -105,10 +115,16 @@ _func_start:
 			const roles_bmp_t read_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, readable_sync);
 			WARN_ON(so->cmds->rld.post.all != so->cmds->rld.pre.all); // the sync assumes pre binfo is the most updated version, so making sure that no one setted post before.
 			WARN_ON(!nvmeibc_raid_is_ec(so->r1)); // No wraparound on mirror
-			WARN(so->cmds->rld.pre.bits.txid != NVMEIBC_DP_EC_MD_TX_ID_MAX,
-				 "nvmeibc bug! txid_wraparound sync is callled but txid in binfo isn't NVMEIBC_DP_EC_MD_TX_ID_MAX, txid=%u\n",
-				 so->cmds->rld.pre.bits.txid);
-			WARN(!so->orig_rldr, "Impossible, TXID Wraparound sm counts on the caller write IO to commit the binfo.");
+			if (unlikely(so->cmds->rld.pre.bits.txid != NVMEIBC_DP_EC_MD_TX_ID_MAX)) {
+				pet_trace_txid_wrap_err(so);
+				WARN(1,
+				  "nvmeibc bug! txid_wraparound sync is callled but txid in binfo isn't NVMEIBC_DP_EC_MD_TX_ID_MAX, txid=%u\n",
+				  so->cmds->rld.pre.bits.txid);
+			}
+			if (unlikely(!so->orig_rldr)) {
+				pet_trace_txid_wrap_err(so);
+				WARN(1, "Impossible, TXID Wraparound sm counts on the caller write IO to commit the binfo.");
+			}
 			ASYNC_AWAIT_AND_RESUME(nvmeibc_sync_send_all_read_cmds(so, &read_bmp, sync_stage_recov_txid_wrap_read_done));
 		}
 

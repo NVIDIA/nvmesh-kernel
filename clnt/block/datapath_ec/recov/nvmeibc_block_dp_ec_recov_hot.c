@@ -944,6 +944,16 @@ out:
 	return rv;
 }
 
+/* Captures op, pre/post binfo, and sync stage for any hot-recovery error with h in scope. */
+void pet_trace_htr_err(const struct htr_ctx *h) {
+	if (!h || !h->so || !h->so->o || !h->so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&h->so->o->journal,
+		"htr_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		numeric_downcast(u8, h->so->o->op), h->so->cmds->rld.pre.all, h->so->cmds->rld.post.all,
+		numeric_downcast(u8, h->so->stage));
+}
+
 static inline int comp_check(struct htr_ctx *h, int comp_code)
 {
 	int rv = 0;
@@ -1304,7 +1314,10 @@ static int scan_jmdc(struct htr_ctx *h, int si, bool is_pivot)
 				continue;
 			}
 			if (is_pivot) {
-			   WARN(h->tx_slba != HTR_INVALID_LBA, "nvmeibc bug\n"); // Sanity
+			   if (unlikely(h->tx_slba != HTR_INVALID_LBA)) {
+			   pet_trace_htr_err(h);
+			   WARN(1, "nvmeibc bug\n"); // Sanity
+			   }
 			   h->tx_slba = slba;
 			} else if (h->tx_slba == HTR_INVALID_LBA) { // Didn't find pivot candidate just need to find the journal to send_recovered on it.
 				h->tx_slba = slba;
@@ -1740,9 +1753,12 @@ static bool does_dmd_match(struct htr_ctx *h, int si)
 	#ifdef DEBUG_SAVE_JENTRY
 	{
 		const u32 d2j_rng = dmd->D.d2j_rng;
-		WARN(d2j_rng != get_jidx_rblk(h, si) && d2j_rng != get_jidx_idx(h, si),
-		     "HTR %px jidx for seg %d jentry is not the same as the one in MD (expected rblk=%d or jidx=%d, md d2j=%d)\n",
-		     h, si, (u32)get_jidx_rblk(h, si), (u32)get_jidx_idx(h, si), d2j_rng);\
+		if (unlikely(d2j_rng != get_jidx_rblk(h, si) && d2j_rng != get_jidx_idx(h, si))) {
+			pet_trace_htr_err(h);
+			WARN(1,
+			     "HTR %px jidx for seg %d jentry is not the same as the one in MD (expected rblk=%d or jidx=%d, md d2j=%d)\n",
+			     h, si, (u32)get_jidx_rblk(h, si), (u32)get_jidx_idx(h, si), d2j_rng);\
+		}
 	}
 	#endif
 
@@ -1786,9 +1802,15 @@ static inline void calc_new_dbits(struct htr_ctx *h)
 	struct dp_topology_traits const *topo_traits = &h->params.raid1->calculated_data.topo_traits;
 
 	/* Use lockset's Dbits as base, They might be pre or post TX depending on when failure occured */
-	WARN(nvmeibc_dbits_get_n_unk(&pre_blkset, topo_traits) != 0, "nvmeibc bug, dbits=0x%x\n", pre_blkset.all_bits);	// Should have resolved them earlier
+	if (unlikely(nvmeibc_dbits_get_n_unk(&pre_blkset, topo_traits) != 0)) {
+		pet_trace_htr_err(h);
+		WARN(1, "nvmeibc bug, dbits=0x%x\n", pre_blkset.all_bits);	// Should have resolved them earlier
+	}
 
-	WARN(h->cur_slice_info.pre_slice_dbits.is_initialized == false, "nvmeibc bug\n"); // Sanity
+	if (unlikely(h->cur_slice_info.pre_slice_dbits.is_initialized == false)) {
+		pet_trace_htr_err(h);
+		WARN(1, "nvmeibc bug\n"); // Sanity
+	}
 	pre_slice = h->cur_slice_info.pre_slice_dbits.dbits;
 
 	{
@@ -1808,7 +1830,10 @@ static inline void calc_new_dbits(struct htr_ctx *h)
 
 	_NTh(trace_dp_ec_recov_hot_calc_new_dbits, h, "Dbits: old=[@DBITS] --> {slice_after_turnon=[@DBITS],slice_final=[@DBITS],binfo=[@DBITS]",
 		pre_blkset.all_bits, h->cur_slice_info.new_dbits.slice_after_turnon.post.all_bits, h->cur_slice_info.new_dbits.slice_after_turnoff.post.all_bits, h->cur_slice_info.new_dbits.binfo.post.all_bits);
-	WARN(h->cur_slice_info.new_dbits.binfo.action.db_conv_map, "nvmeibc bug\n");
+	if (unlikely(h->cur_slice_info.new_dbits.binfo.action.db_conv_map)) {
+		pet_trace_htr_err(h);
+		WARN(1, "nvmeibc bug\n");
+	}
 }
 
 static int check_data_committed_and_calc_dbtis(struct htr_ctx *h)
@@ -2176,7 +2201,10 @@ static void __import_cold_candidate_data_blks_of_cur_slice(struct htr_ctx *h)
 			nvmeibc_tx_get_ptrs_to_blk_in_cmd(so, ci, ofst, &dmd, &src_blk);
 			memcpy(sinfo->dblk.data_addr[h->cur_slice], src_blk, NVMEIBC_SECTOR_SIZE);
 			sinfo->dblk.md[h->cur_slice]->dmd = *dmd;
-			WARN(cmd->o_rv != 0, "nvmeibc bug rv=%d\n", cmd->o_rv);	// If cmd failed, how did we know to set .is_data_commited = 1?
+			if (unlikely(cmd->o_rv != 0)) {
+			pet_trace_htr_err(h);
+			WARN(1, "nvmeibc bug rv=%d\n", cmd->o_rv);	// If cmd failed, how did we know to set .is_data_commited = 1?
+			}
 			if (test_bit(h->cur_slice, loc->is_data_commited)) {
 				sinfo->dblk.valid[h->cur_slice] = true;
 				sinfo->dblk.edic_sts = 0;
@@ -2217,7 +2245,10 @@ static void __simulate_read_jmdc_array(struct htr_ctx *h, struct cl_jour *clj, u
 	//clj->jmdc_size = ...;	// Dont touch, as if read JMDC with a single entry
 	struct jentry_md jent = {.md_arr = &clj->jmdc[jent_idx * h->binje] };
 	int i;
-	WARN(!loc->is_jour_commited, "nvmeibc cold recov passed wrong param\n");
+	if (unlikely(!loc->is_jour_commited)) {
+		pet_trace_htr_err(h);
+		WARN(1, "nvmeibc cold recov passed wrong param\n");
+	}
 	clj->valid = true;
 
 	for (i = 0; i < loc->binje_len; i++) {
@@ -2354,7 +2385,10 @@ static void htr_calc_is_slice_neverwritten(struct htr_ctx *h, u32 valid_bm)
 		struct nvmeibc_raid1 *r1 = h->params.raid1;
 
 		for_each_set_bit(bit, &rw_p_bm, r1->replicas) {
-			WARN(h->cur_slice_info.is_neverwritten_slice && (!nbdpec_md_was_data_never_written(&h->seg_info[bit].dblk.md[h->cur_slice]->dmd)), "One parity neverwritten while other is not\n");
+			if (unlikely(h->cur_slice_info.is_neverwritten_slice && (!nbdpec_md_was_data_never_written(&h->seg_info[bit].dblk.md[h->cur_slice]->dmd)))) {
+				pet_trace_htr_err(h);
+				WARN(1, "One parity neverwritten while other is not\n");
+			}
 		}
 	}
 
@@ -2379,7 +2413,10 @@ static void htr_calc_txid_for_regen(struct htr_ctx *h, u32 valid_bm)
 			int bit;
 			struct nvmeibc_raid1 *r1 = h->params.raid1;
 			for_each_set_bit(bit, &rw_p_bm, r1->replicas) {
-				WARN(h->cur_slice_info.txid_for_regen != h->seg_info[bit].dblk.md[h->cur_slice]->dmd.tx_id, "Readable parities have different txids.\n");
+				if (unlikely(h->cur_slice_info.txid_for_regen != h->seg_info[bit].dblk.md[h->cur_slice]->dmd.tx_id)) {
+				pet_trace_htr_err(h);
+				WARN(1, "Readable parities have different txids.\n");
+				}
 			}
 		}
 
@@ -2921,8 +2958,11 @@ static int htr_rollback_deg_segs(struct htr_ctx *h)
 	w_p_bm = (nvmeibc_raid1_get_parities_bmp(h->params.raid1) & nvmeibc_raid1_get_roles_bmp(h->params.raid1, h->owner_si, w));
 
 	blkset_dbits.all_bits = h->params.lock_ent.blkset_info.bits.dirty;
-	WARN(nvmeibc_dbits_get_n_unk(&blkset_dbits, topo_traits) != 0,
-		 "nvmeibc bug, dbits=0x%x, num_deg=%u\n", blkset_dbits.all_bits, topo_traits->n_degraded);	// Should have resolved them earlier
+	if (unlikely(nvmeibc_dbits_get_n_unk(&blkset_dbits, topo_traits) != 0)) {
+		pet_trace_htr_err(h);
+		WARN(1,
+		  "nvmeibc bug, dbits=0x%x, num_deg=%u\n", blkset_dbits.all_bits, topo_traits->n_degraded);	// Should have resolved them earlier
+	}
 	h->so->nwhole_params = no_writehole_params_default;
 	h->so->nwhole_params.dbits_turnon_bmp = d_p_bm;
 	h->so->nwhole_params.force_rebuild_bmp = w_p_bm;
@@ -2987,17 +3027,25 @@ static int __solve_no_writehole_problem(struct htr_ctx *h)
 
 	if (so->nwhole_params.must_scrub) {
 		op = NVMEIB_BLOCK_IO_OP_RECOVER_SCRUBBING;
-		WARN_ON(has_degraded_seg);					// Todo: Currently scrubbing does nto support degrade mode.
+		if (unlikely(has_degraded_seg)) {
+			pet_trace_htr_err(h);
+			WARN_ON(1);					// Todo: Currently scrubbing does nto support degrade mode.
+		}
 	} else if (can_fix_dbits && !should_postpone) {
 		op = NVMEIB_BLOCK_IO_OP_RECOVER_DB;
 	}
 
 	if (op != NVMEIB_BLOCK_IO_OP_NOP) {
-		WARN(!has_rw_parity(h), "nvmeibc bug - no RW parity and calling no_w_hole sync op=%d\n", op); // when no RW pari we rollback in different flow
+		if (unlikely(!has_rw_parity(h))) {
+			pet_trace_htr_err(h);
+			WARN(1, "nvmeibc bug - no RW parity and calling no_w_hole sync op=%d\n", op); // when no RW pari we rollback in different flow
+		}
 		HTR_STATS_INC(n_dbits_rebuild);
 		rv = __extern_sm_execute_and_wait(h, op);
-		if ((can_fix_dbits)&&(rv == 0))
-			WARN_ON(!should_blockset_info_commit(so)); // Successfull DB sync must set commit binfo if we could clear DBs
+		if (unlikely((can_fix_dbits)&&(rv == 0) && !should_blockset_info_commit(so))) {
+			pet_trace_htr_err(h);
+			WARN_ON(1); // Successfull DB sync must set commit binfo if we could clear DBs
+		}
 	}
 	return rv;
 }
@@ -3556,3 +3604,14 @@ void dp_ec_sync_stale_cb_stg_end(struct nvmeibc_block_command *cmd)
 	_NTh(trace_dp_ec_recov_hot_dp_ec_sync_stale_cb_stg_end, h, "Comp of cmd=@CMD_PTR, h=@HTR_CTX, ctx(kth)=@HTR_KTH_PTR", cmd, h, h->htr_kth.ptr);
 	add_htr_op_comp_event(h, cmd);	// this is cmd: h->seg_info[i].cmd
 }
+
+#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR == 1
+/* Test helper: call pet_trace_htr_err with a minimal htr_ctx wrapping so. */
+void pet_trace_htr_err_with_so(const struct recovery_sync_op *so)
+{
+	struct htr_ctx h;
+	memset(&h, 0, sizeof(h));
+	h.so = (struct recovery_sync_op *)so;
+	pet_trace_htr_err(&h);
+}
+#endif

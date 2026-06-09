@@ -190,3 +190,68 @@ void test_pet_traces_io_generic_cmds(void)
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
+
+void test_pet_traces_ec_recov_hot(void)
+{
+	struct operation           o;
+	struct nvmeibc_block_command cmd;
+	struct recovery_sync_op    so;
+
+	/* pet_trace_htr_err via test helper (htr_ctx definition is internal to .c) */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_htr_err_with_so(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+}
+
+void test_pet_traces_ec_recov_common(void)
+{
+	struct operation           o;
+	struct nvmeibc_block_command cmd;
+	struct recovery_sync_op    so;
+
+	/* pet_trace_ec_recov_err — ERROR */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_ec_recov_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+}
+
+void test_pet_traces_ec_recov_cold_sync(void)
+{
+	struct operation           o;
+	struct nvmeibc_block_command cmd;
+	struct recovery_sync_op    so;
+
+	/* pet_trace_cold_sync_err — ERROR */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_cold_sync_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+}
+
+void test_pet_traces_ec_recov_maintenance(void)
+{
+	struct operation           o;
+	struct nvmeibc_block_command cmd;
+	struct recovery_sync_op    so;
+
+	/* pet_trace_maintenance_err — ERROR */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_maintenance_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+}
+
+void test_pet_traces_ec_txid_wraparound(void)
+{
+	struct operation           o;
+	struct nvmeibc_block_command cmd;
+	struct recovery_sync_op    so;
+
+	/* pet_trace_txid_wrap_err — ERROR */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_txid_wrap_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+}

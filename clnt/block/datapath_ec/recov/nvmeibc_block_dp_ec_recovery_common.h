@@ -177,5 +177,9 @@ const struct nvmibc_tx_candidate* __attribute__((__unused__))
 void nvmeibc_tx_get_ptrs_to_blk_in_cmd(const struct recovery_sync_op *so, u32 ci, u32 ofst,
 		union nvmeibc_block_dp_ec_data_block_md **dmd, void**buf);
 
+
+/* PET trace declarations */
+void pet_trace_ec_recov_err(const struct recovery_sync_op *so);
+
 #endif  // H beginning
 

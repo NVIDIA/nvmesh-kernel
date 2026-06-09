@@ -11,5 +11,10 @@ void test_pet_traces_sync_no_write_hole(void);
 void test_pet_traces_mirror(void);
 void test_pet_traces_io_req_rel_locks(void);
 void test_pet_traces_io_generic_cmds(void);
+void test_pet_traces_ec_recov_hot(void);
+void test_pet_traces_ec_recov_common(void);
+void test_pet_traces_ec_recov_cold_sync(void);
+void test_pet_traces_ec_recov_maintenance(void);
+void test_pet_traces_ec_txid_wraparound(void);
 
 #endif /* NVMEIBC_BLOCK_DP_PET_TRACES_TESTS_H */

@@ -43,6 +43,14 @@
 void dp_ec_sync_stale_execute_op(struct recovery_sync_op *so);
 void dp_ec_sync_stale_cb_stg_end(struct nvmeibc_block_command *cmd); //Daniel: change to so!!!!! Called from Interrupt context, last task (cmd/lock) completed (locks are already taken)
 
+
+/* PET trace declarations */
+struct htr_ctx;
+void pet_trace_htr_err(const struct htr_ctx *h);
+#if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR == 1
+void pet_trace_htr_err_with_so(const struct recovery_sync_op *so);
+#endif
+
 #endif  // NVMEIBC_DP_EC_RECOV_HOT_H
 
 

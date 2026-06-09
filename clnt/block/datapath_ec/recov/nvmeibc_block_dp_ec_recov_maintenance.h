@@ -42,5 +42,9 @@ void dp_ec_mainten_cb_stg_end(struct recovery_sync_op *so);   // Called from Int
 /*********** Ram-only-syncs (do not fix SSD disks, just fix RAM) ***************/
 void dp_ec_mainten_blkset_recov_cb_stg_end(struct recovery_sync_op *so); // Notify Tomas/Serjios that blockset was recovered
 
+
+/* PET trace declarations */
+void pet_trace_maintenance_err(const struct recovery_sync_op *so);
+
 #endif  // H beginning
 

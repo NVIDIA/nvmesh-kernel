@@ -13,6 +13,16 @@
 
 extern void cldr_kfree(void *ptr);
 
+/* Captures op, pre/post binfo, and stage for cold-sync txid/metadata error sites. */
+void pet_trace_cold_sync_err(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"cold_sync_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage));
+}
+
 void nvmibc_blockset_candidates_kfree_deleted(struct nvmibc_blockset_candidates *jcl)
 {
 	struct nvmibc_tx_candidate *cur, *tmp;
@@ -81,7 +91,8 @@ static void __data_slice_d2j_info_init(const struct recovery_sync_op *so, struct
 				d2j_info->txbm[b] = mask;
 			} else if ((!nvmeib_txid_no_journal(max_txid)) && (md->tx_id == max_txid)) {
 				if (unlikely((max_txid_jri_cur_seg != JRI_MARK_NO_JOURNAL) && (md->jri != JRI_MARK_NO_JOURNAL) && (max_txid_jri_cur_seg != md->jri))) { // not all maxTxID blocks are on the same slice.
-					WARN(true, "Invalid data state, same txid in different jris on the same seg: txid=0x%x, one dmd with jri=%u, slice=%u and second with jri=%u, slice=%u\n", max_txid, max_txid_jri_cur_seg, max_txid_slice, md->jri, b);
+					pet_trace_cold_sync_err(so);
+				WARN(true, "Invalid data state, same txid in different jris on the same seg: txid=0x%x, one dmd with jri=%u, slice=%u and second with jri=%u, slice=%u\n", max_txid, max_txid_jri_cur_seg, max_txid_slice, md->jri, b);
 					if (is_op_sync_cold(so->o->op))
 						__dump_cold_state(so);
 					// Dont abort as it is likely that this TxID is not the maximal value in the blockset (during the rest of the scan we will find a higher txid) and bug will be avoided, even though this is a bug
@@ -105,8 +116,10 @@ static void __data_slice_d2j_info_init(const struct recovery_sync_op *so, struct
 			max_txid = NVMEIBC_DP_EC_MD_TX_ID_MAX; // we are potentially failed in the middle of wraparound lazily make new wraparound excute.
 		} // else: Wraparound failed but finished wrapping the txid because all txid are NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS or neverwritte, max_txid = NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS
 	} else if (unlikely(max_txid == NVMEIBC_DP_EC_MD_TX_ID_UNSET)) {  // Sanity, should never happen!
+		pet_trace_cold_sync_err(so);
 		WARN(true, "nvmeibc bug, " PRI_SO_NAME ": (max_txid == 0) and not all mds are neverwritten\n", PRI_SO_NAME_ARGS(so));
 	} else if (unlikely(max_txid > NVMEIBC_DP_EC_MD_TX_ID_MAX)) { // Sanity, should never happen!
+		pet_trace_cold_sync_err(so);
 		WARN(true, "nvmeibc bug, " PRI_SO_NAME ": txid > max id is never directly written\n", PRI_SO_NAME_ARGS(so));
 		max_txid = NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS; // Treat the above WARN(), should never happen!
 	}
@@ -139,8 +152,9 @@ static void __reconstruct_blockset_info_from_md(const struct recovery_sync_op *s
 
 	_NTSO(trace_dp_ec_recov_cold_reconstruct_blockset_info_from_md_2, "Initial binfo values: {TxID=@TXID, dbits=@DBITS}", bi->bits.txid, bi->bits.dirty);
 
-	if ((bi->bits.txid != NVMEIBC_DP_EC_MD_TX_ID_MAX + 1) && (bi->bits.txid != INITIAL_LAZY_READ_TXID)) {
-		WARN(d2j_info->max_txid > bi->bits.txid, "nvmeibc bug, " PRI_SO_NAME ": max_txid in data is greater than ram {data_TxID=%d, ram_TxID=%d} \n", PRI_SO_NAME_ARGS(so), d2j_info->max_txid, bi->bits.txid);
+	if (unlikely((bi->bits.txid != NVMEIBC_DP_EC_MD_TX_ID_MAX + 1) && (bi->bits.txid != INITIAL_LAZY_READ_TXID) && (d2j_info->max_txid > bi->bits.txid))) {
+		pet_trace_cold_sync_err(so);
+		WARN(1, "nvmeibc bug, " PRI_SO_NAME ": max_txid in data is greater than ram {data_TxID=%d, ram_TxID=%d} \n", PRI_SO_NAME_ARGS(so), d2j_info->max_txid, bi->bits.txid);
 	}
 
 	fix->bits.txid = d2j_info->max_txid; // Resolve & Set txid for blockset metadata reconstruction
@@ -181,7 +195,10 @@ static void __filter_candidates_by_txid_j2d_d2j(struct recovery_sync_op *so, con
 
 	// Note: the case when (max_data_txid == NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS) is private case and handled (rollback_possible = true but no max_txid candidate).
 	list_for_each_entry(cur , &jcl->can_list, next) {	// Find valid candidate with highest TxID and check possible rollback
-		WARN(cur->b.tx_id > NVMEIBC_DP_EC_MD_TX_ID_MAX, "Found a candidate with txid > NVMEIBC_DP_EC_MD_TX_ID_MAX, txid=%u\n", cur->b.tx_id);
+		if (unlikely(cur->b.tx_id > NVMEIBC_DP_EC_MD_TX_ID_MAX)) {
+			pet_trace_cold_sync_err(so);
+			WARN(1, "Found a candidate with txid > NVMEIBC_DP_EC_MD_TX_ID_MAX, txid=%u\n", cur->b.tx_id);
+		}
 		if (unlikely(d2j_info->is_txid_wraparound_or_write_called_it_failed)) {
 			// If the write after txid_wraparound potentially failed we need to roll-back all txs with txid greater than NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS which are all valid txid
 			// binfo_txid == NVMEIBC_DP_EC_MD_TX_ID_MAX cause we would like to rerun wraparound again. In this situtation the TX after the wraparound might only written to non-readable segs so need to roll-back them.
@@ -229,14 +246,21 @@ static void __filter_candidates_by_txid_j2d_d2j(struct recovery_sync_op *so, con
 	}
 
 	if (unlikely(n_max_txid_cand > 1)) {
+		pet_trace_cold_sync_err(so);
 		WARN(true, "Found %d max_txid candidates - at most one possible\n", n_max_txid_cand);
 		__dump_cold_state(so);
 	}
 
 	nvmibc_blockset_candidates_kfree_deleted(jcl);		// Remove all the candidates from the list except for 'best'
 
-	WARN(so->nwhole_params.dbits_turnon_bmp, "Found turnon bmp in nwhole params\n"); //Sanity
-	WARN(so->nwhole_params.force_rebuild_bmp, "Found force_rebuild_bmp in nwhole params\n"); //Sanity
+	if (unlikely(so->nwhole_params.dbits_turnon_bmp)) {
+		pet_trace_cold_sync_err(so);
+		WARN(1, "Found turnon bmp in nwhole params\n"); //Sanity
+	}
+	if (unlikely(so->nwhole_params.force_rebuild_bmp)) {
+		pet_trace_cold_sync_err(so);
+		WARN(1, "Found force_rebuild_bmp in nwhole params\n"); //Sanity
+	}
 	if (rollback_possible && rollback_txbm)
 		__set_rollback_action(so, rollback_txbm & topo_bm.dead, rollback_txbm & topo_bm.w); // TODO: for now no_wrtehole regen all w segs so it sufficient to pass only rollback_txbm of dead segs
 
@@ -312,7 +336,10 @@ _func_start:
 
 	case sync_stage_recov_do_rollback: {
 		so->stage = sync_stage_recov_write_cmds_done;
-		WARN(!__should_rollback(so), "Cold recovery - rollback stage with no rollback params, something went wrong\n");
+		if (unlikely(!__should_rollback(so))) {
+			pet_trace_cold_sync_err(so);
+			WARN(1, "Cold recovery - rollback stage with no rollback params, something went wrong\n");
+		}
 		nvmeibcbdpec_push_sm_to_stack(so, dp_ec_sync_cold_cb_stg_end);
 		so->o->op = NVMEIB_BLOCK_IO_OP_RECOVER_ROLLBACK;
 		so->stage = sync_stage_recov_lo_all_taken;

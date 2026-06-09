@@ -313,6 +313,10 @@ static void dp_ec_set_tx_id_update_piggyback(struct nvmeibc_block_command *rldr)
 	const bool is_post_io_rdma_and_pig_required = (jour_pig.all != io_pig.all);
 
 	int column;
+	if (unlikely(!rldr->o->mssa->no_rw_p && (rldr->rld.post.bits.txid == rldr->rld.pre.bits.txid)))
+		NVMEIBC_IO_PET_MSG_ERROR(&rldr->o->journal,
+			"ec_txid_not_incremented(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>)",
+			numeric_downcast(u8, rldr->o->op), rldr->rld.pre.all, rldr->rld.post.all);
 	WARN(!rldr->o->mssa->no_rw_p && (rldr->rld.post.bits.txid == rldr->rld.pre.bits.txid)
 		 , "nvmeibc bug txid=%d\n", rldr->rld.pre.bits.txid);	// txid should be incremented with every write, except the double dead parities case in such case, we don't write journal
 
