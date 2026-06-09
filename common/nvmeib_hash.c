@@ -502,8 +502,8 @@ struct nvmeib_hash_table *nvmeib_hash_create(int log2_of_n_arr_entries, const ch
 	struct nvmeib_hash_table		*hash_tbl = NULL;
 
 	hash_tbl = __nvmeib_hash_create(log2_of_n_arr_entries, description, key_len, is_used_outside_main_thread);
-	if (!all_active_hashs) {
-		all_active_hashs = __nvmeib_hash_create(HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "Hash_of_all_active_hashes", 8, 0);
+	if (!all_active_hashs) {	// Here is a strong assumption that first hashes are created on toma main thread only so all_active_hashs initialization happens before multithreaded access to this function begins
+		all_active_hashs = __nvmeib_hash_create(HASH_MIN_LOG2_OF_N_ARR_ENTRIES, "Hash_of_all_active_hashes", 8, true /* Toma main thread/srm-thread create hashes*/);
 	}
 	nvmeib_hash_add_uint64_t(all_active_hashs, (uint64_t)hash_tbl, hash_tbl);
 	return hash_tbl;
@@ -596,16 +596,20 @@ void nvmeib_hash_dump_tbl(struct nvmeib_hash_table *hash_tbl)
 
 void nvmeib_hash_free_all_tables(void)
 {
-	struct nvmeib_hash_table		*hash_tbl = NULL;
-
-	if (!all_active_hashs) {
-		goto out;
+	if (all_active_hashs) {
+		struct nvmeib_hash_table		*hash_tbl = NULL;
+		NVMEIB_HASH_FOREACH(hash_tbl, all_active_hashs) {
+			nvmeib_hash_tbl_free(hash_tbl);
+		}
+		#if IS_HASH_UNITTEST
+			fprintf(stdout, "nvmeib_hash_tbl_free_all %s\n", all_active_hashs->description);
+		#else	// #if IS_HASH_UNITTEST
+			N_Tf(xbuj6qp, "@STR", all_active_hashs->description);
+		#endif	// #if IS_HASH_UNITTEST
+		free(all_active_hashs->arr);
+		free(all_active_hashs);
+		all_active_hashs = NULL;
 	}
-	NVMEIB_HASH_FOREACH(hash_tbl, all_active_hashs) {
-		nvmeib_hash_tbl_free(hash_tbl);
-	}
-	nvmeib_hash_tbl_free(all_active_hashs);
-out:;
 }
 
 #if IS_EXTERNAL_UNITTEST
