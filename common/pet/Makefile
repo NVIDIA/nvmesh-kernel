@@ -25,7 +25,22 @@ ifeq ($(COVERAGE),1)
 CFLAGS += --coverage -fprofile-abs-path -fprofile-update=atomic
 LDFLAGS += --coverage
 endif
+CFLAGS += $(EXTRA_CFLAGS)
+LDFLAGS += $(EXTRA_LDFLAGS)
 CFLAGS_STAMP := $(BUILD_DIR)/.test.cflags
+
+SANITIZE_CC ?= clang
+SANITIZE_BUILD_DIR := $(BUILD_DIR)/sanitize
+SANITIZE_COMMON_FLAGS := -O1 -g -fno-omit-frame-pointer
+SANITIZE_MEMORY_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=memory -fsanitize-memory-track-origins=2
+SANITIZE_UNDEFINED_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=undefined -fno-sanitize-recover=undefined
+SANITIZE_STACK_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=safe-stack
+SANITIZE_ADDRESS_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=address
+SANITIZE_LEAK_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=leak
+SANITIZE_THREAD_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=thread
+SANITIZE_INTEGER_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=integer -fno-sanitize=implicit-conversion -fno-sanitize-recover=integer
+SANITIZE_BOUNDS_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=bounds -fno-sanitize-recover=bounds
+SANITIZE_OBJECT_SIZE_FLAGS := $(SANITIZE_COMMON_FLAGS) -fsanitize=object-size -fno-sanitize-recover=object-size
 
 PERF ?= perf
 PERF_DATA ?= $(BUILD_DIR)/perf.data
@@ -46,7 +61,7 @@ COVERAGE_DIR := $(BUILD_DIR)/coverage
 COVERAGE_RAW_LCOV := $(COVERAGE_DIR)/coverage.raw.lcov
 COVERAGE_LCOV := $(COVERAGE_DIR)/coverage.lcov
 
-.PHONY: all clean test check dirs demo demo_dict perf coverage fast_build FORCE
+.PHONY: all clean test check dirs demo demo_dict perf coverage sanitize sanitize_memory sanitize_undefined sanitize_stack sanitize_address sanitize_leak sanitize_thread sanitize_integer sanitize_bounds sanitize_object_size ci fast_build FORCE
 
 all: dirs $(TEST_EXE)
 
@@ -126,6 +141,49 @@ coverage:
 		--ignore-errors unmapped
 	@echo "Coverage report: $(COVERAGE_DIR)/index.html"
 	@echo "LCOV tracefile: $(COVERAGE_LCOV)"
+
+sanitize: sanitize_memory sanitize_undefined sanitize_stack sanitize_address sanitize_leak sanitize_thread sanitize_integer sanitize_bounds sanitize_object_size
+
+sanitize_memory:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/memory EXTRA_CFLAGS="$(SANITIZE_MEMORY_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_MEMORY_FLAGS)"
+
+sanitize_undefined:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/undefined EXTRA_CFLAGS="$(SANITIZE_UNDEFINED_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_UNDEFINED_FLAGS)"
+
+sanitize_stack:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/stack EXTRA_CFLAGS="$(SANITIZE_STACK_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_STACK_FLAGS)"
+
+sanitize_address:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/address EXTRA_CFLAGS="$(SANITIZE_ADDRESS_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_ADDRESS_FLAGS)"
+
+sanitize_leak:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/leak EXTRA_CFLAGS="$(SANITIZE_LEAK_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_LEAK_FLAGS)"
+
+sanitize_thread:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/thread EXTRA_CFLAGS="$(SANITIZE_THREAD_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_THREAD_FLAGS)"
+
+sanitize_integer:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/integer EXTRA_CFLAGS="$(SANITIZE_INTEGER_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_INTEGER_FLAGS)"
+
+sanitize_bounds:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/bounds EXTRA_CFLAGS="$(SANITIZE_BOUNDS_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_BOUNDS_FLAGS)"
+
+sanitize_object_size:
+	@command -v $(SANITIZE_CC) >/dev/null || { echo "$(SANITIZE_CC) is required for sanitizer builds"; exit 1; }
+	$(MAKE) test CC=$(SANITIZE_CC) BUILD_DIR=$(SANITIZE_BUILD_DIR)/object_size EXTRA_CFLAGS="$(SANITIZE_OBJECT_SIZE_FLAGS)" EXTRA_LDFLAGS="$(SANITIZE_OBJECT_SIZE_FLAGS)"
+
+ci:
+	$(MAKE) demo
+	$(MAKE) sanitize
+	$(MAKE) perf
 
 clean:
 	rm -rf $(BUILD_DIR)
