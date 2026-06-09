@@ -10,7 +10,7 @@
 
 #include "common/pet/nvmeib_pet_specification.h"
 
-static void __nvmeib_pet_journalbuf_write_spacer(struct nvmeib_pet_journalbuf* self, u16 physical_offset, u16 body_n_bytes)
+static inline void __nvmeib_pet_journalbuf_write_spacer(struct nvmeib_pet_journalbuf* self, u16 physical_offset, u16 body_n_bytes)
 {
 	/* message_id zero marks a spacer; bytes is the payload after this header. */
 	struct nvmeib_pet_journalbuf_message_header const spacer = {
@@ -21,11 +21,12 @@ static void __nvmeib_pet_journalbuf_write_spacer(struct nvmeib_pet_journalbuf* s
 		},
 	};
 
+	//cannot fire - defensive local invariant
 	BUG_ON((size_t)physical_offset + sizeof(spacer) + body_n_bytes > self->data.iov_len);
 	memcpy((u8*)self->data.iov_base + physical_offset, &spacer, sizeof(spacer));
 }
 
-u16 __nvmeib_pet_journalbuf_calculate_consumable_n_bytes(struct nvmeib_pet_journalbuf const* self, u16 physical_offset, u16 eof_offset)
+static inline u16 __nvmeib_pet_journalbuf_calculate_consumable_n_bytes(struct nvmeib_pet_journalbuf const* self, u16 physical_offset, u16 eof_offset)
 {
 	u16 remaining = 0;
 	struct nvmeib_pet_journalbuf_message_header header = {0};
@@ -56,7 +57,6 @@ u16 __nvmeib_pet_journalbuf_calculate_consumable_n_bytes(struct nvmeib_pet_journ
 	msg_n_bytes = sizeof(header) + header.msg.args_n_bytes;
 	return msg_n_bytes <= remaining ? msg_n_bytes : remaining;
 }
-EXPORT_SYMBOL(__nvmeib_pet_journalbuf_calculate_consumable_n_bytes);
 
 /* Slow allocation path for rotation.
  * Called only when append cannot cover the write. It wraps when needed, writes

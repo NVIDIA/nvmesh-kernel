@@ -171,7 +171,6 @@ enum {
 	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
 };
 
-u16 __nvmeib_pet_journalbuf_calculate_consumable_n_bytes(struct nvmeib_pet_journalbuf const* self, u16 physical_offset, u16 eof_offset);
 u8* __nvmeib_pet_journalbuf_allocate_rotate(struct nvmeib_pet_journalbuf* self, u16 size);
 
 __attribute__((nonnull (1)))
