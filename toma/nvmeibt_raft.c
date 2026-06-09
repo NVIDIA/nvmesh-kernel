@@ -1531,7 +1531,7 @@ bool compute_is_configs_and_raft_members_incremental(
 	inc_window_start_kafka_mgmt_config_offset	= max(inc_window_start_kafka_mgmt_config_offset, last_delete_kafka_mgmt_config_offset);
 
 	// A section is eligible for incremental type when it is within window or when leader has no commits at all.
-	// In the latter case, followers are trivially in sync and the incremental section is simply empty.
+	// In the latter case, followers are trivially in sync and the incremental section is simply empty (headers only).
 	if (leader_topo_config_to_commit != nvmeibt_offset_and_idx_uninitialized && peer_topo_config_idx < inc_window_start_topo_config_idx)
 		return false;
 	if (leader_kafka_mgmt_config_to_commit != nvmeibt_offset_and_idx_uninitialized && peer_kafka_mgmt_config_offset < inc_window_start_kafka_mgmt_config_offset)

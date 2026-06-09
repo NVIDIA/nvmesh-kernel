@@ -1115,8 +1115,8 @@ struct mm_mgmt_conf *mm_wire_buf_to_mm_mgmt_conf(const void *in_wire_conf_buf, b
 		conf = NULL;
 		goto out;
 	}
-	if (nvmeibt_offset_and_idx_is_uninitialized(conf->idx)) {	// Did not contain a kafka_offset
-		N_Ef(evsr34a, "Got a conf buf (not json) with no kafka_offset");
+	if (nvmeibt_offset_and_idx_is_uninitialized(conf->idx) && conf->num_vols > 0) {	// Did not contain a kafka_offset
+		N_Ef(evsr34a, "Got a non-empty conf buf (not json) with no kafka_offset");
 	}
 	N_Tf(gvsayum, "n_vols=@INT", conf->num_vols);
 	conf->volumes = (struct mm_vol_conf *)NNVMEIBT_BM_CALLOC(mem_mgmt_32,  conf->num_vols*sizeof(struct mm_vol_conf));
