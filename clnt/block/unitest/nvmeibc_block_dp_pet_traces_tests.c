@@ -120,3 +120,35 @@ void test_pet_traces_sync_no_write_hole(void)
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
+
+void test_pet_traces_mirror(void)
+{
+	struct operation           o;
+	struct nvmeibc_block_command cmd;
+	struct recovery_sync_op    so;
+
+	/* pet_trace_mirror_sync_wrong_state — ERROR */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_mirror_sync_wrong_state(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_mirror_cmd_state_err — ERROR */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_mirror_cmd_state_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_mirror_binfo_write_err — ERROR */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_mirror_binfo_write_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_mirror_lock_state_err — ERROR */
+	__setup_so(&so, &o, &cmd);
+	so.locks[0].n_siblings = 1;
+	pet_trace_mirror_lock_state_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+}

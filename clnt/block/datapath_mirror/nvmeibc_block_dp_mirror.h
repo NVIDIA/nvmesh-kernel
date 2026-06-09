@@ -46,6 +46,12 @@ enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE dp_mirror_no_write_hole_fix(struct recovery
 void                             dp_mirror_no_write_hole_destroy(struct recovery_sync_op *so);
 void                         dp_mirror_no_write_hole_sbs_cleanup(struct recovery_sync_op *so);
 
+/* PET trace declarations */
+void pet_trace_mirror_sync_wrong_state(const struct recovery_sync_op *so);
+void pet_trace_mirror_cmd_state_err(const struct recovery_sync_op *so);
+void pet_trace_mirror_binfo_write_err(const struct recovery_sync_op *so);
+void pet_trace_mirror_lock_state_err(const struct recovery_sync_op *so);
+
 #if defined(BLKDEV_SIMULATOR)
 void dp_mirror_ut_inject_debug_di_sync_info(struct recovery_sync_op *so, int n_cmds_to_do);
 #endif

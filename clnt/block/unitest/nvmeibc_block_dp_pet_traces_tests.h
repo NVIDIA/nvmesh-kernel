@@ -8,5 +8,6 @@
 
 void test_pet_traces_sync_common(void);
 void test_pet_traces_sync_no_write_hole(void);
+void test_pet_traces_mirror(void);
 
 #endif /* NVMEIBC_BLOCK_DP_PET_TRACES_TESTS_H */

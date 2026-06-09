@@ -12,7 +12,54 @@
 #include "../datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
+#include "block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_maintenance.h"			// LKJ: Move maintanances to be in common directory, not EC only
 #include "nvmeibc_io_pet.h"
+
+/******************************* PET trace helpers ****************************/
+
+/* Mirror SM entered illegal state or received unsupported op.
+ * Safe before rld.pre/post are initialized (captures only op, stage, rlba). */
+void pet_trace_mirror_sync_wrong_state(const struct recovery_sync_op *so) {
+	if (!so || !so->o)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"mirror_sync_wrong_state(op=%hhu<enum nvmeib_block_io_op>, stage=%hhu<enum sync_op_stage_e>, rlba=%llu)",
+		numeric_downcast(u8, so->o->op), numeric_downcast(u8, so->stage), so->rlba);
+}
+
+/* Write cmd has unexpected comp_code, do_not_send, op type, or nlbas at setup time. */
+void pet_trace_mirror_cmd_state_err(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"mirror_cmd_state_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, sbs=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->slice_by_slice_index));
+}
+
+/* Binfo write-plan invariant violated: first_write_bmp, cmd count, or parity count wrong. */
+void pet_trace_mirror_binfo_write_err(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"mirror_binfo_write_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, first_write_bmp=0x%x, n_slices=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage), so->nwhole_exec_plan.first_write_bmp,
+		numeric_downcast(u8, so->n_slices));
+}
+
+/* Lock or sibling state is wrong for the current mirror sync operation. */
+void pet_trace_mirror_lock_state_err(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"mirror_lock_state_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu, n_siblings=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->n_slices),
+		numeric_downcast(u8, so->locks->n_siblings));
+}
+
+/******************************************************************************/
 
 static bool __data_could_not_be_read(const struct nvmeibc_block_command *c)
 {
@@ -102,7 +149,10 @@ static int __set_write_buffer_to_valid_source(struct recovery_sync_op *so)
 	const struct nvmeibc_block_command *src_cmd = &so->cmds[src];
 	for (i = 0; i < n_write_cmds(so); i++) {
 		struct nvmeibc_block_command *dst_cmd = &so->cmds[write_start+i];
-		WARN(dst_cmd->iocmd->comp.comp_code, "nvmeibc bug\n");	// Clean on init and cleaned when advancing to next slice
+		if (unlikely(dst_cmd->iocmd->comp.comp_code)) {
+			pet_trace_mirror_cmd_state_err(so);
+			WARN(1, "nvmeibc bug\n");	// Clean on init and cleaned when advancing to next slice
+		}
 		BUG_ON(!nvmeib_block_io_op_is_write(dst_cmd->iocmd->reqs1.op));		// Same as above
 		if (dst_cmd->do_not_send /* Data already OK || SEG == DEAD) */ ||
 			(src == i) /* Write is the same as src */) {
@@ -163,12 +213,24 @@ static void __set_write_buffer_to_bad_sector(struct recovery_sync_op *so)
 	for (i = 0; i < n_write_cmds(so); ++i ) {
 		struct nvmeibc_block_command *dst_cmd = &so->cmds[n_read_cmds(so) + i];
 		struct nvmeibc_block_io_req *req = &dst_cmd->iocmd->reqs1;
-		WARN(dst_cmd->iocmd->comp.comp_code, "nvmeibc: comp_code clean on init and advancing to next slice %d\n", dst_cmd->iocmd->comp.comp_code);
-		WARN(dst_cmd->do_not_send != (dst_cmd->ds->toma_acm == NVMEIBTC_DS_MODE_DEAD), "nvmeibc: do_not_send field should be properly set: %d\n", dst_cmd->do_not_send);
+		if (unlikely(dst_cmd->iocmd->comp.comp_code)) {
+			pet_trace_mirror_cmd_state_err(so);
+			WARN(1, "nvmeibc: comp_code clean on init and advancing to next slice %d\n", dst_cmd->iocmd->comp.comp_code);
+		}
+		if (unlikely(dst_cmd->do_not_send != (dst_cmd->ds->toma_acm == NVMEIBTC_DS_MODE_DEAD))) {
+			pet_trace_mirror_cmd_state_err(so);
+			WARN(1, "nvmeibc: do_not_send field should be properly set: %d\n", dst_cmd->do_not_send);
+		}
 		if (dst_cmd->do_not_send)
 			continue;
-		WARN_ON(!nvmeib_block_io_op_is_write(req->op));						// Cleanup of previous iteration should have put it as 'write'
-		WARN_ON(dst_cmd->nlbas != 1);
+		if (unlikely(!nvmeib_block_io_op_is_write(req->op))) {
+			pet_trace_mirror_cmd_state_err(so);
+			WARN_ON(1);						// Cleanup of previous iteration should have put it as 'write'
+		}
+		if (unlikely(dst_cmd->nlbas != 1)) {
+			pet_trace_mirror_cmd_state_err(so);
+			WARN_ON(1);
+		}
 		__set_wr_cmd_ndb_to_read_cmd_ptr(dst_cmd, &so->cmds[src]);			// Direct write to use actual data block
 		if (nvmeibc_raid1_destroy_force_physical_bad_sector_in_sync || !nvmeibc_is_mirror_md_enabled(dst_cmd)) { // Write physical bad sector as we cant write logical one
 			req->op = NVMEIB_BLOCK_IO_OP_WRITE_UNCOR;						// Change from Write to write-Uncorrectable
@@ -211,7 +273,10 @@ static void __copy_sync_read_to_orig_read_io_sgl(const struct recovery_sync_op *
 		} else if (valid_read->first_rlba > orig_read->first_rlba) { // SBS support
 			const u64 diff = valid_read->first_rlba - orig_read->first_rlba;
 			if (diff < orig_nlbas) {
-				WARN_ON(orig_req->do_512b_sub_block_x);	// Here we handle non-1st block of the original read, and subblock ops are only supported for single block reads
+				if (unlikely(orig_req->do_512b_sub_block_x)) {
+					pet_trace_mirror_cmd_state_err(so);
+					WARN_ON(1);	// Here we handle non-1st block of the original read, and subblock ops are only supported for single block reads
+				}
 				sgl_block_iter_advance(&orig_sbi, diff);
 				orig_nlbas -= diff;
 			}
@@ -292,7 +357,10 @@ static int dp_mirror_write_cmds_prepare(struct recovery_sync_op *so)
 {
 	int ir, n_cmds_to_do = 0;       // Calculate how many writes to do
 	__r1_valid_source_verify(so);
-	WARN_ON((!is_op_sync_stale(so->o->op) && !is_op_sync_no_wr_ho(so->o->op))||(so->r1->slice_size != 1));
+	if (unlikely((!is_op_sync_stale(so->o->op) && !is_op_sync_no_wr_ho(so->o->op))||(so->r1->slice_size != 1))) {
+		pet_trace_mirror_sync_wrong_state(so);
+		WARN_ON(1);
+	}
 	for (ir = 0; ir < n_read_cmds(so); ir++) {
 		const struct nvmeibc_block_command *read_cmd = &so->cmds[ir];
 		const int iw = n_read_cmds(so) + ir;
@@ -309,11 +377,17 @@ static int dp_mirror_write_cmds_prepare(struct recovery_sync_op *so)
 		}
 	}
 	if (n_cmds_to_do == 0) { /* Entire slice is already synced. */
-		WARN(so->nwhole_exec_plan.first_write_bmp != 0, "nvmeibc bug! Need to write bmp=0x%x, but zero cmds will be sent!", so->nwhole_exec_plan.first_write_bmp);
+		if (unlikely(so->nwhole_exec_plan.first_write_bmp != 0)) {
+			pet_trace_mirror_binfo_write_err(so);
+			WARN(1, "nvmeibc bug! Need to write bmp=0x%x, but zero cmds will be sent!", so->nwhole_exec_plan.first_write_bmp);
+		}
 		so->stage = sync_stage_recov_no_write_hole_sbs_loop_end;
 	} else {
 		int n_cmds_ready = __set_write_buffer_to_valid_source(so);
-		WARN_ON(n_cmds_ready != n_cmds_to_do);
+		if (unlikely(n_cmds_ready != n_cmds_to_do)) {
+			pet_trace_mirror_binfo_write_err(so);
+			WARN_ON(1);
+		}
 		__inject_debug_di_with_sync_info(so, n_cmds_to_do);
 	}
 	return n_cmds_to_do;
@@ -381,7 +455,10 @@ void __mirror_sync_calc_post_binfo(struct recovery_sync_op *so, struct nvmeibc_r
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, dbits_on_topo_bmp, 0                              , 0);
 		}
 	} else if (so->o->op == NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE) {
-		WARN_ON(topo_traits->n_parities <= 1);	// In 2-mirror pre and post dbits are always 0, no reason to call this function
+		if (unlikely(topo_traits->n_parities <= 1)) {
+			pet_trace_mirror_binfo_write_err(so);
+			WARN_ON(1);	// In 2-mirror pre and post dbits are always 0, no reason to call this function
+		}
 		BUG_ON(has_unknown_dbits);				// Dbits for 'W' seg cant exists, so naturally unknowns cannot exist as well
 		if (has_stale_lock)		// Copy stale lock to all writable ram segs, turn dbits on for all dead. Extended version of stale2dirty sync
 			nvmeibc_dbits_tx_init_by_bmp(&tx, topo_traits, dbits_on_topo_bmp, 0, 0);
@@ -524,8 +601,6 @@ int dp_mirror_sync_prepare_op(struct recovery_sync_op *so)
 	return 0;
 }
 
-#include "block/datapath_ec/recov/nvmeibc_block_dp_ec_recov_maintenance.h"			// LKJ: Move maintanances to be in common directory, not EC only
-
 void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 {
 	struct nvmeibc_block_command *rldr = so->cmds;
@@ -535,7 +610,10 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 	const bool had_stale_lock = (holder.bits.is_stale);
 	const enum nvmeib_block_io_op op = so->o->op;
 	__ndump_operation(mirror_sync_execute, &so->o);
-	WARN(so->stage != sync_stage_recov_lo_all_taken, "so=" PRI_SO_NAME ", stage=%d\n", PRI_SO_NAME_ARGS(so), so->stage);
+	if (unlikely(so->stage != sync_stage_recov_lo_all_taken)) {
+		pet_trace_mirror_sync_wrong_state(so);
+		WARN(1, "so=" PRI_SO_NAME ", stage=%d\n", PRI_SO_NAME_ARGS(so), so->stage);
+	}
 	rldr->rld.post.all = rldr->rld.pre.all = binfo.all;	// Commit possibly broken binfo to rldr
 	rldr->rld.post.bits.txid = __gen_mirror_txid_sync(so);
 	if (unlikely(nvmeibc_raid_is_jbod(so->r1)))
@@ -554,8 +632,14 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 		nvmeibc_sync_send_all_read_cmds(so, NULL, next_stage);
 		BLKCMP_SO_ASYNC_RESUME_SND(dp_mirror_sync_resume_op(so));
 	} else if (op == NVMEIB_BLOCK_IO_OP_REC_R1_COMMIT_STALE) {
-		WARN_ON(so->n_slices != 0);				// we dont fix any slice
-		WARN_ON(so->locks->n_siblings == 1);	// with single primary owner, nowhere to copy it! Bug in design, should have called stale-2-dirty sync
+		if (unlikely(so->n_slices != 0)) {
+			pet_trace_mirror_lock_state_err(so);
+			WARN_ON(1);				// we dont fix any slice
+		}
+		if (unlikely(so->locks[0].n_siblings == 1)) {
+			pet_trace_mirror_lock_state_err(so);
+			WARN_ON(1);	// with single primary owner, nowhere to copy it! Bug in design, should have called stale-2-dirty sync
+		}
 		if (unlikely(rldr->rld.pre.bits.dirty)) {
 			const int num_deg =  nvmeibc_praid_get_num_deg_segs(so->r1);
 			// This situation is illegal for single-degrade mode (always illegal for 2 mirror)
@@ -600,6 +684,7 @@ void dp_mirror_sync_execute_op(struct recovery_sync_op *so)
 		}
 		return dp_maintenance_execute_op(so);
 	} else {
+		pet_trace_mirror_sync_wrong_state(so);
 		WARN(true, "nvmeibc bug! so=" PRI_SO_NAME " unsupported\n", PRI_SO_NAME_ARGS(so));
 	}
 }
@@ -632,7 +717,10 @@ enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE dp_mirror_no_write_hole_fix(struct recovery
 // Virtual function called from so->destroy_function
 void dp_mirror_no_write_hole_destroy(struct recovery_sync_op *so) {
 	const bool should_destroy = (so->R1.valid_read_index < 0) || ((int)hweight32(so->nwhole_exec_plan.invalid_sources) != n_read_cmds(so));
-	WARN(!should_destroy, "nvmeibc bug: no need to destroy slice. Source=%d, invalid_bmp=0x%x, n_segs=%d\n", so->R1.valid_read_index, so->nwhole_exec_plan.invalid_sources, n_read_cmds(so));
+	if (unlikely(!should_destroy)) {
+		pet_trace_mirror_lock_state_err(so);
+		WARN(1, "nvmeibc bug: no need to destroy slice. Source=%d, invalid_bmp=0x%x, n_segs=%d\n", so->R1.valid_read_index, so->nwhole_exec_plan.invalid_sources, n_read_cmds(so));
+	}
 	__set_write_buffer_to_bad_sector(so);
 }
 
@@ -648,7 +736,10 @@ void dp_mirror_no_write_hole_sbs_cleanup(struct recovery_sync_op *so)
 			if (so->cmds[i].do_not_send) { // Was the previous source segment
 				so->cmds[i].do_not_send = false;
 				// Clear write's NDB, needs to come from source
-				WARN_ON(req->ndb && !so->cmds[i].is_not_ndb_owner); // Going to leak NDB or wrong ownership
+				if (unlikely(req->ndb && !so->cmds[i].is_not_ndb_owner)) {
+				pet_trace_mirror_lock_state_err(so);
+				WARN_ON(1); // Going to leak NDB or wrong ownership
+				}
 				req->ndb = NULL;
 			}
 			req->op = NVMEIB_BLOCK_IO_OP_WRITE;	// In case we destroyed the previous slice, revert to default write
@@ -678,6 +769,7 @@ void dp_mirror_sync_resume_op(struct recovery_sync_op *so)
 		dp_sync_no_write_hole_cb_stg_end(so);
 		break;
 	default:
+		pet_trace_mirror_sync_wrong_state(so);
 		WARN(1, "nvmeibc bug! so=" PRI_SO_NAME ", stage=%d, op=0x%x\n", PRI_SO_NAME_ARGS(so), so->stage, so->o->op);
 	}
 }
