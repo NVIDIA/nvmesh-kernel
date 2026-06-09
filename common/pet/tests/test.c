@@ -128,7 +128,9 @@ static void __test_mkdir_if_needed(char const* path)
 
 static void __test_stream_reset(struct nvmeib_pet_journalbuf* stream)
 {
-	memset(__test_message_x_memory, 0, sizeof(__test_message_x_memory));
+	u8 const stale_byte = (u8)random() | 1;
+
+	memset(__test_message_x_memory, stale_byte, sizeof(__test_message_x_memory));
 	*stream = nvmeib_pet_journalbuf_make(__test_message_iovec);
 }
 
@@ -1310,6 +1312,66 @@ void test_zero_length_owned_buffer_is_inactive_but_returned(void)
 	free(controller.buffer.iov_base);
 }
 
+void test_corrupted_rotation_deactivates_journalbuf(void)
+{
+	struct release_cookie_test_controller controller = {
+		.base = {
+			.flush = __release_cookie_test_flush,
+			.get_buffer = __release_cookie_test_get_buffer,
+			.put_buffer = __release_cookie_test_put_buffer,
+		},
+		.buffer = iovec_malloc(NVMEIB_PET_MIN_JOURNAL_N_BYTES),
+		.release_cpu = 13,
+		.put_release_cpu = NVMEIB_PET_NO_RELEASE_CPU,
+	};
+	struct nvmeib_pet_journalbuf_message_header const corrupted_header = {
+		.message_id = 1,
+		.msg = {
+			.timestamp = 1,
+			.args_n_bytes = NVMEIB_PET_MAX_MSG_ARGS_N_BYTES,
+		},
+	};
+	struct nvmeib_pet_journal journal = nvmeib_pet_journal_make(&controller.base, true);
+	unsigned journal_get_count = 0;
+	int arg_count = 0;
+	u16 written = 0;
+	u16 const prefix = NVMEIB_PET_JOURNALBUF_HEADER_SIZE;
+
+	/* The visible record header claims a payload that extends past EOF.
+	 * Rotation must drop the write and deactivate the journalbuf.
+	 */
+	memcpy((u8*)journal.journalbuf.data.iov_base + prefix, &corrupted_header, sizeof(corrupted_header));
+	journal.journalbuf.protected_prefix = prefix;
+	journal.journalbuf.write_offset = prefix;
+	journal.journalbuf.max_written_bytes = prefix + sizeof(corrupted_header) + 2 * sizeof(u8);
+
+	written = PET_MSG_NORM(
+		test_get_pet_journal(&journal, &journal_get_count),
+		"io_pet_corrupted_rotation(arg=%u)", (u8)++arg_count);
+
+	BUG_ON(written != 0);
+	BUG_ON(nvmeib_pet_journal_is_activated(&journal));
+	BUG_ON(journal_get_count != 1);
+	BUG_ON(arg_count != 0);
+
+	written = PET_MSG_NORM(
+		test_get_pet_journal(&journal, &journal_get_count),
+		"io_pet_after_corrupted_rotation(arg=%u)", (u8)++arg_count);
+
+	BUG_ON(written != 0);
+	BUG_ON(journal_get_count != 2);
+	BUG_ON(arg_count != 0);
+
+	nvmeib_pet_journal_commit(&journal);
+	BUG_ON(controller.flush_calls != 0);
+	BUG_ON(controller.put_calls != 1);
+	BUG_ON(controller.put_release_cpu != 13);
+	BUG_ON(controller.put_buffer_data.iov_base != controller.buffer.iov_base);
+	BUG_ON(controller.put_buffer_data.iov_len != 0);
+
+	free(controller.buffer.iov_base);
+}
+
 static struct nvmeib_pet_journalbuf_message_header __load_msg_header_from(u8 const* msg_start)
 {
 	struct nvmeib_pet_journalbuf_message_header header = {0};
@@ -1870,6 +1932,7 @@ int main(int argc, char* argv[]){
 		test_journal_returns_release_cpu_to_controller();
 		test_inactive_journal_uses_no_release_cpu();
 		test_zero_length_owned_buffer_is_inactive_but_returned();
+		test_corrupted_rotation_deactivates_journalbuf();
 		test_journal_timestamp();
 		test_journal_add_msg_accepts_pointer_arg();
 		test_performance();

@@ -135,6 +135,13 @@ static inline bool nvmeib_pet_journalbuf_is_active(struct nvmeib_pet_journalbuf 
 	return self->data.iov_len;
 }
 
+__attribute__((nonnull (1)))
+static inline void nvmeib_pet_journalbuf_deactive(struct nvmeib_pet_journalbuf * self)
+{
+	self->data.iov_len = 0;
+}
+
+__attribute__((nonnull (1)))
 static inline void nvmeib_pet_journalbuf_commit(struct nvmeib_pet_journalbuf* self)
 {
 	if (likely(nvmeib_pet_journalbuf_is_active(self))) {
@@ -179,6 +186,9 @@ enum {
 	NVMEIB_PET_MIN_JOURNAL_N_BYTES = NVMEIB_PET_JOURNALBUF_HEADER_SIZE + NVMEIB_PET_MAX_MSG_N_BYTES,
 };
 
+/* Slow rotation allocator. Returns NULL if journalbuf state is inconsistent and
+ * the next record cannot be placed safely.
+ */
 u8* __nvmeib_pet_journalbuf_allocate_rotate(struct nvmeib_pet_journalbuf* self, u16 size);
 
 __attribute__((nonnull (1)))
@@ -192,12 +202,16 @@ static inline u8* nvmeib_pet_journalbuf_alloc(struct nvmeib_pet_journalbuf* self
 		return NULL;
 	}
 
+	//cannot fire - defensive local invariants
 	BUG_ON(size < NVMEIB_PET_MIN_MSG_N_BYTES);
 	BUG_ON(size > NVMEIB_PET_MAX_MSG_N_BYTES);
 
-	BUG_ON(self->write_offset > self->max_written_bytes);
-	BUG_ON(self->write_offset > self->data.iov_len);
-	BUG_ON(self->max_written_bytes > self->data.iov_len);
+	if(unlikely((self->write_offset > self->max_written_bytes)
+				|| (self->write_offset > self->data.iov_len)
+				|| (self->max_written_bytes > self->data.iov_len))){
+		nvmeib_pet_journalbuf_deactive(self);
+		return NULL;
+	}
 
 	/* Fast append: the new message reaches EOF, so no spacer is needed. */
 	if (likely(write_end >= self->max_written_bytes &&
@@ -209,7 +223,7 @@ static inline u8* nvmeib_pet_journalbuf_alloc(struct nvmeib_pet_journalbuf* self
 
 	msg = __nvmeib_pet_journalbuf_allocate_rotate(self, size);
 	if (!msg) {
-		return NULL;
+		nvmeib_pet_journalbuf_deactive(self);
 	}
 
 	return msg;
@@ -222,10 +236,14 @@ static inline void nvmeib_pet_journalbuf_protect_prefix(struct nvmeib_pet_journa
 		return;
 	}
 
-	BUG_ON(self->protected_prefix > self->max_written_bytes);
-	BUG_ON(self->max_written_bytes > self->data.iov_len);
+	if(unlikely((self->protected_prefix > self->max_written_bytes)
+				|| (self->max_written_bytes > self->data.iov_len)
+				|| (((size_t)self->data.iov_len - self->max_written_bytes) < NVMEIB_PET_MIN_ROTATABLE_N_BYTES))){
+		nvmeib_pet_journalbuf_deactive(self);
+		return;
+	};
+
 	self->protected_prefix = self->max_written_bytes;
-	BUG_ON(((size_t)self->data.iov_len - self->protected_prefix) < NVMEIB_PET_MIN_ROTATABLE_N_BYTES);
 	self->write_offset = self->protected_prefix;
 }
 
