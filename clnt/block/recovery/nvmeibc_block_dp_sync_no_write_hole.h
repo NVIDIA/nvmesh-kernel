@@ -72,4 +72,11 @@ enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE {
 	NO_WRITE_HOLE_DONE = 3				// Blockset is fully correct, nothing to fix. In EC-QLC: Carrier volume cannot access data to complete write hole, end recovery
 };
 
+
+/* PET trace declarations */
+void pet_trace_binfo_commit_unexpected(const struct recovery_sync_op *so);
+void pet_trace_binfo_commit_missing(const struct recovery_sync_op *so);
+void pet_trace_binfo_entry_mismatch(const struct recovery_sync_op *so);
+void pet_trace_nwhole_param_err(const struct recovery_sync_op *so);
+
 #endif // NVMEIBC_BLOCK_DP_SYNC_NO_WRITE_HOLE_H

@@ -154,6 +154,7 @@ SOURCES += nvmeibc_block_dp_dbgdi_tests.c
 SOURCES += error_tags_tests.c
 SOURCES += kr_incs_bit_ops_test.c
 SOURCES += io_pet_traces_controller_tests.c
+SOURCES += nvmeibc_block_dp_pet_traces_tests.c
 SOURCES += io_pet_traces_controller.c
 SOURCES += ./clnt/nvmeibc_cli_scripts_simu.c ./clnt/nvmeibc_user_space_simu.c
 SOURCES += ./clnt/nvmeibc_nvmeiba_kapi_sim.c

@@ -491,10 +491,41 @@ static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync write binfo: PRE: @BINFO POST: @BINFO", _T, goodpath_nvmeibc_syncs, compressed_sync_op_write_binfo, so->o->dbg_id, bi_pre, bi_post);
 }
 
-static void __pet_trace_binfo_commit_rejected(const struct recovery_sync_op *so, const union nvmeib_blkset_info post, char ver_action) {
+void pet_trace_binfo_commit_rejected_nover(const struct recovery_sync_op *so, const union nvmeib_blkset_info post) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_CRIT(&so->o->journal,
+		"binfo_commit_rejected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all, numeric_downcast(u8, so->n_slices));
+}
+
+void pet_trace_binfo_commit_rejected(const struct recovery_sync_op *so, const union nvmeib_blkset_info post, char ver_action) {
+	if (!so || !so->o || !so->cmds)
+		return;
 	NVMEIBC_IO_PET_MSG_CRIT(&so->o->journal,
 		"binfo_commit_rejected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, ver=%c, n_slices=%hhu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all, ver_action, numeric_downcast(u8, so->n_slices));
+}
+
+/* Called when commit binfo is invoked from a context that does not hold the lock or
+ * should_blockset_info_commit() is unexpectedly false. */
+void pet_trace_binfo_wrong_call_context(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"binfo_wrong_call_context(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage));
+}
+
+/* Called when EC post-binfo carries INITIAL_LAZY_READ_TXID at commit time — unresolved txid. */
+void pet_trace_binfo_unknown_txid(const struct recovery_sync_op *so, const union nvmeib_blkset_info post) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_CRIT(&so->o->journal,
+		"binfo_unknown_txid(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all,
+		numeric_downcast(u8, so->n_slices));
 }
 
 static void __compressed_sync_op_trace_end(const struct recovery_sync_op *so) {
@@ -809,7 +840,10 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 	struct nvmeibc_cmd_lock *ow_l = &so->locks[0];
 	const bool expect_taken_lock = (NCL_do_i_have_lock(ow_l->status) || did_caller_of_so_took_this_lock(ow_l));
 	__compressed_sync_op_trace_write_binfo(so);
-	WARN(!expect_taken_lock || !should_blockset_info_commit(so), "nvmeibc bug, op=%p, calling commit binfo from wrong context: tkn=%d, cmmit=%d\n", so, expect_taken_lock, should_blockset_info_commit(so));
+	if (unlikely(!expect_taken_lock || !should_blockset_info_commit(so))) {
+		pet_trace_binfo_wrong_call_context(so);
+		WARN(1, "nvmeibc bug, op=%p, calling commit binfo from wrong context: tkn=%d, cmmit=%d\n", so, expect_taken_lock, should_blockset_info_commit(so));
+	}
 	// Trap, incorrect binfo!
 	if (nvmeibc_raid_is_ec(so->r1)) {
 		const union nvmeib_blkset_info binfo = so->cmds->rld.post;
@@ -817,22 +851,28 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 		const bool should_post_txid_be_correct = (so->o->op != NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON);			// This is the only sync which will not resolve TxID. It just does not care
 		const bool should_post_dbit_be_correct = ((so->o->op != NVMEIB_BLOCK_IO_OP_REC_COLD) && !is_so_nested(so));	// EC has multiple stages of dbit manipulation, including turning on dbits, only last step guranteed to be without DBITs on 'W'
 		if (is_origininal_sync_should_resolved_binfo) {		// Verify the precondition to launching this state machine. rldr.pre, not post!
-			WARN_ON(nvmeibcbdp_binfo_has_unknown_dbits(so->cmds, &so->r1->calculated_data.topo_traits));		// Was already resolved, and cannot appear, test unknowns in pre-binfo
-			if ((so->o->op == NVMEIB_BLOCK_IO_OP_REC_COMMIT_BINFO) && (!is_so_nested(so)) && (dp_ec_can_fix_dbits(so->cmds))) {
+			/* It was already resolved and cannot appear. Test unknowns in pre-binfo. */
+			if (unlikely(nvmeibcbdp_binfo_has_unknown_dbits(so->cmds, &so->r1->calculated_data.topo_traits)))
+				pet_trace_binfo_wrong_call_context(so);
+			WARN_ON(nvmeibcbdp_binfo_has_unknown_dbits(
+				so->cmds, &so->r1->calculated_data.topo_traits));
+			if (unlikely((so->o->op == NVMEIB_BLOCK_IO_OP_REC_COMMIT_BINFO) && (!is_so_nested(so)) && (dp_ec_can_fix_dbits(so->cmds)))) {
+				pet_trace_binfo_commit_rejected_nover(so, binfo);
 				WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x copied instead of turning dbits off. n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 				nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 			}
 		}
 		if (should_post_dbit_be_correct) {
 			const char ver_action = (so->o->op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) ? 'r' : 's';	// Commandless: pre may carry a dbit on W that this sync cannot clear
-			if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action)) {
-				__pet_trace_binfo_commit_rejected(so, binfo, ver_action);
+			if (unlikely(!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action))) {
+				pet_trace_binfo_commit_rejected(so, binfo, ver_action);
 				WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing wrong dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 				nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 			}
 		}
-		if (should_post_txid_be_correct) {
-			WARN(binfo.bits.txid == INITIAL_LAZY_READ_TXID, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing unknown TxID! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
+		if (unlikely(should_post_txid_be_correct && (binfo.bits.txid == INITIAL_LAZY_READ_TXID))) {
+			pet_trace_binfo_unknown_txid(so, binfo);
+			WARN(1, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing unknown TxID! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 		}
 	} else if (so->cmds->rld.post.bits.dirty != 0) {		// R1, verify dirty bits
 		const union nvmeib_blkset_info binfo = so->cmds->rld.post;
@@ -843,22 +883,24 @@ void dp_sync_write_all_blocksets_info_op(struct recovery_sync_op *so) {
 		const char ver_action = (so->o->op == NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON) ? 'r' :		// Commandless: only adds convicts on W-; pre may carry a dbit on W that cannot be cleared
 								no_dbits_for_w_segs ? 'w' :											// W- and W must not include any dbits
 								'r';																// 3+ Mirror, W seg in partial syncs can have dbits
-		if (!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action)) {
-			__pet_trace_binfo_commit_rejected(so, binfo, ver_action);
+		if (unlikely(!verify_binfo_is_legal(so->locks->ds, binfo, so->locks->address, ver_action))) {
+			pet_trace_binfo_commit_rejected(so, binfo, ver_action);
 			WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing wrong dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 			nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 		}
 		if ((num_unknown != 0) && no_dbits_for_w_segs) {		// R1 uses still preserves unknown dbits to prefer reads from W seg over writes + in future we might used metadata dbits so unknowns can be resolved
+			pet_trace_binfo_commit_rejected(so, binfo, ver_action);
 			WARN(true, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing unknown dbits! n_slices=%u\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all, so->n_slices);
 			nvmeibcb_dp_io_fail_mgr_binfo_err(&so->o->nd->dp.io_stats.mgr);
 		}
-		if (special_2mirror_case) {
+		if (special_2mirror_case && (so->o->op != NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON)) {
 			// R1 2-mirror, special case where writing/turning-on dbits is allowed only by 2 syncs:
 			// 	Stale2dirty in {RW,D} - not using this function
 			// 	Dirty_convict_turn_on in {RW, W-}
 			// 	Note: in {RW, W}, This is a plain bug, must fix dirtybit.
 			// 	When more than 2 replicas: commit_stale_lock and other syncs can write dbits. Especially in {RW,W,D} topo
-			WARN(so->o->op != NVMEIB_BLOCK_IO_OP_REC_DCONVICT_TURN_ON, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing dbits!\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all);
+			pet_trace_binfo_commit_rejected(so, binfo, ver_action);
+			WARN(1, "Data corruption: so=" PRI_SO_NAME ", o=%p, binfo=0x%x committing dbits!\n", PRI_SO_NAME_ARGS(so), &so->o, binfo.all);
 		}
 	}
 	so->o->op = NVMEIB_BLOCK_IO_OP_MAINTAIN_COMMIT_BINFO;

@@ -427,4 +427,12 @@ static inline void nvmeibc_erase_rv_and_comp_codes_of_cur_stage_cmds(struct reco
 /* Fixup original IO 'pre' and Caller SO 'pre' with our 'post' */
 void nvmeibcbdpec_inject_binfo_back_to_caller(struct recovery_sync_op *so);
 
+
+/* PET trace declarations */
+union nvmeib_blkset_info;
+void pet_trace_binfo_commit_rejected_nover(const struct recovery_sync_op *so, union nvmeib_blkset_info post);
+void pet_trace_binfo_commit_rejected(const struct recovery_sync_op *so, union nvmeib_blkset_info post, char ver_action);
+void pet_trace_binfo_wrong_call_context(const struct recovery_sync_op *so);
+void pet_trace_binfo_unknown_txid(const struct recovery_sync_op *so, union nvmeib_blkset_info post);
+
 #endif // NVMEIBC_BLOCK_DP_SYNC_COMMON_H

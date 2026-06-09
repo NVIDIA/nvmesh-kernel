@@ -58,6 +58,48 @@
 	3. TODO: Rollback needs to regen also W segs with no dbits on them, Today DB recovery regens all W segs so it's ok. Needs to be changed in the future
 */
 
+/******************************* PET trace helpers ****************************/
+
+/* should_blockset_info_commit() is set at a stage where it must be clear. */
+void pet_trace_binfo_commit_unexpected(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"binfo_commit_unexpected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->n_slices));
+}
+
+/* should_blockset_info_commit() is clear at a stage where it must be set. */
+void pet_trace_binfo_commit_missing(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"binfo_commit_missing(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->n_slices));
+}
+
+/* post != pre at EC SM entry — caller must not have modified post before entry. */
+void pet_trace_binfo_entry_mismatch(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"binfo_entry_mismatch(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
+		numeric_downcast(u8, so->n_slices));
+}
+
+/* nwhole params or exec-plan invariant violated — captures params and stage for post-mortem. */
+void pet_trace_nwhole_param_err(const struct recovery_sync_op *so) {
+	if (!so || !so->o || !so->cmds)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
+		"nwhole_param_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, params=0x%llx<union no_writehole_params>)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all,
+		numeric_downcast(u8, so->stage), so->nwhole_params.raw);
+}
+
 /******************************* SBS *****************************************/
 u32 nvmeibc_sync_sl_by_sl_is_get_current_slice_index(const struct recovery_sync_op *so)
 {
@@ -102,7 +144,10 @@ static void nvmeibc_sync_sl_by_sl_start(struct recovery_sync_op *so)
 	int i;
 	struct nps_block_iter nbi = NPS_BLOCK_ITER_INIT(so->pages);
 
-	WARN(so->is_sbs_mode, "nvmeibc bug, wrong flow=%d, already in sbs mode\n", so->slice_by_slice_index);
+	if (unlikely(so->is_sbs_mode)) {
+		pet_trace_nwhole_param_err(so);
+		WARN(1, "nvmeibc bug, wrong flow=%d, already in sbs mode\n", so->slice_by_slice_index);
+	}
 	_NTSO(trace_dp_sync_no_write_hole_sl_by_sl_start, "Starting slice by slice mode");
 	so->slice_by_slice_index = so->n_slices;	// Start from last slice towards first slice. +1, becasue we call next() after this function.
 	so->n_cmds = n_read_cmds(so);
@@ -145,7 +190,10 @@ static void __log_corruption(const struct recovery_sync_op *so, const char* str)
 static void __notify_toma_on_slice_by_slice_comp(const struct recovery_sync_op *so, int err)
 {
 	int i, n_reads = n_read_cmds(so);
-	WARN_ON(n_reads != so->r1->replicas);
+	if (unlikely(n_reads != so->r1->replicas)) {
+		pet_trace_nwhole_param_err(so);
+		WARN_ON(1);
+	}
 	if (!nvmeibc_notify_toma_on_slice_by_slice_destruction_in_sync)
 		return;
 	for (i = 0; i < n_reads; i++) {
@@ -298,10 +346,16 @@ static void __calc_new_binfo_dbits_turnoff(struct recovery_sync_op *so) {
 			dp_sync_calc_new_binfo_dbits_turnon(so, tx_turnon.action.db_turn_on_bmp);  /* Prepares lock DB values for dbits turnon due to rollback */
 		}
 
-		WARN((pre.all_bits == 0)||(so->nwhole_exec_plan.ram_dbits_after_turnoff.all_bits == rld->pre.bits.dirty),
-			 "nvmeibc bug: pre=%d, post=%d\n", rld->pre.bits.dirty, rld->post.bits.dirty);	// Just a sanity check..
+		if (unlikely((pre.all_bits == 0)||(so->nwhole_exec_plan.ram_dbits_after_turnoff.all_bits == rld->pre.bits.dirty))) {
+			pet_trace_nwhole_param_err(so);
+			WARN(1,
+			  "nvmeibc bug: pre=%d, post=%d\n", rld->pre.bits.dirty, rld->post.bits.dirty);	// Just a sanity check..
+		}
 	} else { /* We are in read-fail fixup and no dbits can be turned off */
-		WARN(so->nwhole_params.raw == no_writehole_params_default.raw, "No write hole sync called with only turnoff dbits params but there are no dbits to turnoff\n");
+		if (unlikely(so->nwhole_params.raw == no_writehole_params_default.raw)) {
+			pet_trace_nwhole_param_err(so);
+			WARN(1, "No write hole sync called with only turnoff dbits params but there are no dbits to turnoff\n");
+		}
 	}
 }
 
@@ -435,7 +489,10 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 		const roles_bmp_t dead_bmp = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dead);
 		const roles_bmp_t any_write = (so->nwhole_exec_plan.first_write_bmp | so->nwhole_exec_plan.second_write_bmp);
 		const bool wrong_usage_of_dead_seg = ((dead_bmp & (readfail_bmp | any_write | so->nwhole_params.force_rebuild_bmp)) != 0);
-		WARN(wrong_usage_of_dead_seg, "nvmeibc bug using data from dead seg! bmp{d=0x%x, w1=0x%x, w2=0x%x, rf=0x%x, force=0x%x}\n", dead_bmp, so->nwhole_exec_plan.first_write_bmp, so->nwhole_exec_plan.second_write_bmp, readfail_bmp, so->nwhole_params.force_rebuild_bmp);
+		if (unlikely(wrong_usage_of_dead_seg)) {
+			pet_trace_nwhole_param_err(so);
+			WARN(1, "nvmeibc bug using data from dead seg! bmp{d=0x%x, w1=0x%x, w2=0x%x, rf=0x%x, force=0x%x}\n", dead_bmp, so->nwhole_exec_plan.first_write_bmp, so->nwhole_exec_plan.second_write_bmp, readfail_bmp, so->nwhole_params.force_rebuild_bmp);
+		}
 		if (__is_raid1_mirror(so)) {	// Check if we need to restore blocks (need to write something we could not read)
 			extern void __find_best_valid_source_for_data(struct recovery_sync_op *so);
 			__find_best_valid_source_for_data(so);	// Finding 1 seg with source of data is the restore step and a single algorithm for all r1 problems
@@ -517,6 +574,7 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 	} else if (so->nwhole_exec_plan.first_write_bmp) {
 		so->stage = sync_stage_recov_no_write_hole_restore_complete;
 	} else if (so->nwhole_exec_plan.second_write_bmp) {
+		pet_trace_nwhole_param_err(so);
 		WARN(true, "If first_write_bmp=0 it's impossible to have second_write_bmp cause we havne't restored nothing.\n");
 		so->stage = sync_stage_recov_no_write_hole_sent_restore_data_and_turnon_parity_md_dbits_done;
 	} else if (so->is_sbs_mode) {
@@ -525,7 +583,10 @@ static enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE __analyze_no_write_hole_read(struct 
 		so->stage = sync_stage_recov_write_cmds_done;  // This blockset only needed scurbbing, Nothing should be written
 	} else {  // !so->is_sbs_mode and nothing todo
 		const bool is_turnon_with_no_writable_pari = so->nwhole_params.dbits_turnon_bmp && !(nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, has_writable_pari));
-		WARN(!is_turnon_with_no_writable_pari && ec_8005_enable_warning, "EC-8005 - EC No write hole sync with nothing to do - with very low chances can be a bad sector fixed by itself before current read.\n");
+		if (unlikely(!is_turnon_with_no_writable_pari && ec_8005_enable_warning)) {
+			pet_trace_nwhole_param_err(so);
+			WARN(1, "EC-8005 - EC No write hole sync with nothing to do - with very low chances can be a bad sector fixed by itself before current read.\n");
+		}
 		so->stage = sync_stage_recov_write_cmds_done;
 	}
 out:
@@ -536,8 +597,14 @@ static inline void __validate_nwhole_params(struct recovery_sync_op *so)
 {
 	const int slice_start = so_get_owner_seg(so);
 	const roles_bmp_t dead = nvmeibc_raid1_get_roles_bmp(so->r1, slice_start, dead);        // Todo: Here use per slice info in metadata if there is no convictness!
-	WARN(so->nwhole_params.force_rebuild_bmp & dead, "nvmeibc bug! no write hole was called with rebuild_bmp on dead segs.\n");
-	WARN(so->nwhole_params.must_scrub && so->nwhole_params.dbits_turnon_bmp, "nvmeibc bug! should never get here since there is no impl for scrub and dbits turnon.\n");
+	if (unlikely(so->nwhole_params.force_rebuild_bmp & dead)) {
+		pet_trace_nwhole_param_err(so);
+		WARN(1, "nvmeibc bug! no write hole was called with rebuild_bmp on dead segs.\n");
+	}
+	if (unlikely(so->nwhole_params.must_scrub && so->nwhole_params.dbits_turnon_bmp)) {
+		pet_trace_nwhole_param_err(so);
+		WARN(1, "nvmeibc bug! should never get here since there is no impl for scrub and dbits turnon.\n");
+	}
 	BUG_ON(so->nwhole_params.reserved);
 	BUG_ON(so->nwhole_params.must_fix_bad_sectors && (!so->nwhole_params.must_turn_off_dbits)); //nvmeibc bug! no whole sync expects that must_fix_bad_sector==true => must_turn_off_dbits=true for the simplicity of implementation.
 }
@@ -634,12 +701,24 @@ _func_start:
 		case sync_stage_recov_lo_all_taken: {	// EC Entry point (mirror starts at read cmds sent)
 			// Equivallent to All locks taken - SBS index is 32 (more than possible)
 			__dump_nwhole_params(so);
-			WARN_ON(so->cmds->rld.post.all != so->cmds->rld.pre.all); // the sync assumes pre binfo is the most updated version, so making sure that no one setted post before.
-			WARN_ON(__is_raid1_mirror(so)); // mirror starts from stage: sync_stage_recov_no_write_hole_read_done, needed for dbits in metadata
-			WARN_ON(should_blockset_info_commit(so));
+			if (unlikely(so->cmds->rld.post.all != so->cmds->rld.pre.all)) {
+				pet_trace_binfo_entry_mismatch(so);
+				WARN_ON(1); // the sync assumes pre binfo is the most updated version, so making sure that no one setted post before.
+			}
+			if (unlikely(__is_raid1_mirror(so))) {
+				pet_trace_binfo_entry_mismatch(so);
+				WARN_ON(1); // mirror starts from stage: sync_stage_recov_no_write_hole_read_done, needed for dbits in metadata
+			}
+			if (unlikely(should_blockset_info_commit(so))) {
+				pet_trace_binfo_commit_unexpected(so);
+				WARN_ON(1);
+			}
 			__validate_nwhole_params(so);
 			__validate_write_cmds_do_not_send_vals(so);
-			WARN_ON(so->is_sbs_mode);
+			if (unlikely(so->is_sbs_mode)) {
+				pet_trace_nwhole_param_err(so);
+				WARN_ON(1);
+			}
 			memset(&so->nwhole_exec_plan, 0, sizeof(so->nwhole_exec_plan)); // starting with empty execution plan
 
 			if (so->nwhole_params.dbits_turnon_bmp) {
@@ -661,14 +740,20 @@ _func_start:
 		}
 
 		case sync_stage_recov_no_write_hole_turnon_ram_dbits: {
-			WARN_ON(!should_blockset_info_commit(so));
+			if (unlikely(!should_blockset_info_commit(so))) {
+				pet_trace_binfo_commit_missing(so);
+				WARN_ON(1);
+			}
 			so->stage = sync_stage_recov_no_write_hole_turnon_ram_dbits_done;
 			nvmeibcbdpec_push_sm_to_stack(so, dp_sync_no_write_hole_cb_stg_end);
 			ASYNC_AWAIT_AND_RESUME(dp_sync_write_all_blocksets_info_op(so));
 		}
 
 		case sync_stage_recov_no_write_hole_turnon_ram_dbits_done: {
-			WARN_ON(should_blockset_info_commit(so));
+			if (unlikely(should_blockset_info_commit(so))) {
+				pet_trace_binfo_commit_unexpected(so);
+				WARN_ON(1);
+			}
 			nvmeibcbdpec_inject_binfo_back_to_caller(so);
 			ASYNC_AWAIT_AND_RESUME(nvmeibc_sync_send_all_read_cmds(so, NULL, sync_stage_recov_no_write_hole_read_done));
 		}
@@ -700,7 +785,10 @@ _func_start:
 		}
 
 		case sync_stage_recov_no_write_hole_turnon_ram_dbits_before_turnoff: {
-			WARN_ON(!should_blockset_info_commit(so));
+			if (unlikely(!should_blockset_info_commit(so))) {
+				pet_trace_binfo_commit_missing(so);
+				WARN_ON(1);
+			}
 			so->stage = sync_stage_recov_no_write_hole_restore_complete;
 			so->cmds->rld.post.bits.dirty = so->nwhole_exec_plan.ram_dbits_after_first_turnon.all_bits;
 			nvmeibcbdpec_push_sm_to_stack(so, dp_sync_no_write_hole_cb_stg_end);
@@ -718,7 +806,10 @@ _func_start:
 
 			/* Just before turning dbits off: it is possible we have another step here - to commit ram dirty bits first */
 			if (so->nwhole_exec_plan.should_write_ram_dbits_first) { // Commit binfo before sync
-				WARN_ON(!should_blockset_info_commit(so));
+				if (unlikely(!should_blockset_info_commit(so))) {
+					pet_trace_binfo_commit_missing(so);
+					WARN_ON(1);
+				}
 				so->stage = sync_stage_recov_no_write_hole_turnon_ram_dbits_before_turnoff;
 				so->nwhole_exec_plan.should_write_ram_dbits_first = false; /* Make sure we get here only once */
 				goto _func_start;
@@ -749,7 +840,10 @@ _func_start:
 
 		case sync_stage_recov_no_write_hole_turoff_parity_md_dbits_done: {
 			const int write_rv =  nvmeibcbdpec_get_rv_cur_stage_cmds(so); // Get write errors
-			WARN_ON(should_blockset_info_commit(so));
+			if (unlikely(should_blockset_info_commit(so))) {
+				pet_trace_binfo_commit_unexpected(so);
+				WARN_ON(1);
+			}
 			if (unlikely(write_rv)) {
 				BUG_ON(so->error);
 				so->error = write_rv;

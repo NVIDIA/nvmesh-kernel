@@ -45,6 +45,7 @@
 #include "clnt/nvmeibc_wq_metrics.h"
 #include "error_tags_tests.h"
 #include "io_pet_traces_controller_tests.h"
+#include "nvmeibc_block_dp_pet_traces_tests.h"
 #include "kr_incs_bit_ops_test.h"
 #include "nvmeib_scatterlist_iter_test.h"
 #include "nvmeibc_management_capi_parse_conf_test.h"
@@ -7792,6 +7793,8 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 	test_memmgr_metrics();
 	test_error_tags();
 	test_io_pet_controller_admission();
+	test_pet_traces_sync_common();
+	test_pet_traces_sync_no_write_hole();
 	kr_incs_bit_ops_tests();
 	nvmeib_scatterlist_iter_tests();
 	nvmeibc_management_capi_parse_conf_tests();
