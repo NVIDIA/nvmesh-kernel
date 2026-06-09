@@ -274,5 +274,8 @@ void dp_locks_trace_lock_release(const struct operation *o, const struct nvmeibc
 void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock);
 void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock);
 
+/* PET trace declarations */
+void pet_trace_lock_state_err(const struct operation *o, const struct nvmeibc_cmd_lock *l);
+
 #endif  // H beginning
 

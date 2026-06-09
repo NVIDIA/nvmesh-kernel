@@ -123,6 +123,18 @@ static inline struct nvmeibc_profiler *__raid_gp_profile_for_rwt_op_locks(const 
 //2. the sync operations do some ugly tricks, by replacing the lock commands pointer with something else;
 //   thus getting the operation via replaced commands will not gave us the desired result.
 
+/* Called on lock state machine invariant violations (status, count, txid) where o is in scope. */
+void pet_trace_lock_state_err(const struct operation *o, const struct nvmeibc_cmd_lock *l) {
+	if (!o || !l)
+		return;
+	NVMEIBC_IO_PET_MSG_ERROR(&o->journal,
+		"lock_state_err(op=%hhu<enum nvmeib_block_io_op>, binfo=0x%x<union nvmeib_blkset_info>, lock_status=%hhu, lock_type=%hhu)",
+		numeric_downcast(u8, o->op),
+		(u32)nvmeibc_cmd_lock_get_bi(l).all,
+		numeric_downcast(u8, l->status),
+		numeric_downcast(u8, l->type));
+}
+
 __attribute__((nonnull(2)))
 void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock)
 {
@@ -1119,7 +1131,10 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 
 	__squash_transport_lock_status(l, dc->lock_status);
 	BUG_ON((l->status != dc->lock_status) || (l->type == NVMEIBC_CMD_PREDISCARD));		// Just sanity
-	WARN(!(NCL_is_failed_to_acquire(l->status) || (l->status == NCL_STATUS_CONTENDED) || (l->status == NCL_STATUS_TAKEN)), "nvmeibc bug: locks=%p[%d].status=%d", locksets, lock_i, l->status);
+	if (unlikely(!(NCL_is_failed_to_acquire(l->status) || (l->status == NCL_STATUS_CONTENDED) || (l->status == NCL_STATUS_TAKEN)))) {
+		pet_trace_lock_state_err(o, l);
+		WARN(1, "nvmeibc bug: locks=%p[%d].status=%d", locksets, lock_i, l->status);
+	}
 	#ifdef DEBUG_CONTENDED_LOCKS
 		l->curr_txid = nvmeibc_d_rdma_comp_get_bi(dc).bits.txid;
 		if (dc->lock_status == NCL_STATUS_CONTENDED) {
@@ -1223,7 +1238,10 @@ static void __check_lock_actions(struct nvmeibc_cmd_lock *locksets, int lock_i)
 		__invoke_crash_on_lock_corruption(locksets, lock_i, "take", +1);
 		pending = nvmeibc_atomic_dec_return(&owner_lock->pending);			// WARN: If pending != 0, Locks can get kfree(), trust only stack variables
 		_ND(tr_6_check_lock_actions, "locksets=@LOCKSETS[@LSI|ow=@OWNER_ID] pending=@PENDING_INT", locksets, lock_i, owner_id, pending);
-		WARN(pending < 0, "nvmeibc bug: locks=%p[%d|ow=%d], pend=%d", locksets, lock_i, owner_id, pending);
+		if (unlikely(pending < 0)) {
+			pet_trace_lock_state_err(o, owner_lock);
+			WARN(1, "nvmeibc bug: locks=%p[%d|ow=%d], pend=%d", locksets, lock_i, owner_id, pending);
+		}
 		if (pending == 0) {
 			int sibling_idx = 0;
 			for (sibling_idx = 1; sibling_idx < owner_lock->n_siblings; ++sibling_idx) {
@@ -1308,7 +1326,10 @@ static void __request_lock(struct nvmeibc_cmd_lock *locksets, int lsi)
 	struct nvmeibc_icore_ops const* icore_ops = nvmeibc_core_ops_get();
 
 	nvmeibc_profiling_start_take_cmd_stats_for_op(__raid_gp_profile_for_rwt_op_locks(l, locksets), seg->lock_operation_profiler, locksets->cmds->o, l->type, l);
-	WARN(l->status != NCL_STATUS_NOTISSUED, "nvmeibc bug: locks=%p[%d].status=%d", locksets, lsi, l->status); // Incorrect flow initialized
+	if (unlikely(l->status != NCL_STATUS_NOTISSUED)) {
+		pet_trace_lock_state_err(locksets->cmds->o, l);
+		WARN(1, "nvmeibc bug: locks=%p[%d].status=%d", locksets, lsi, l->status); // Incorrect flow initialized
+	}
 	_ND(trace_req_lock, "locks=@LOCKSETS[@LSI] status=@STATUS_STR @DLBA", locksets, lsi, ncl_status_str(l->status), l->address);
 	started = jiffies;
 	if (!l->retries) { // Owner (primary/second/copy)
@@ -1393,7 +1414,10 @@ void dp_locks_send_all(struct nvmeibc_cmd_lock *locksets)
 		}
 		case NVMEIBC_CMD_LOCK_READ_PB:
 		case NVMEIBC_CMD_LOCK_READ_DR:
-			WARN(l->n_siblings != 1, "nvmeibc bug. n_sibs=%d\n", l->n_siblings);
+			if (unlikely(l->n_siblings != 1)) {
+				pet_trace_lock_state_err(locksets->cmds->o, l);
+				WARN(1, "nvmeibc bug. n_sibs=%d\n", l->n_siblings);
+			}
 			break;		/* Just skip it, it was initialized/piggibacked */
 		default:
 			WARN_ON_ONCE(true);	/* Other types of locks should not be sent */
@@ -1461,7 +1485,10 @@ void dp_locks_put_TxID_dbits(struct nvmeibc_cmd_lock *locksets, int owner_i, uni
 	for (i = 0; i < n_sibs; i++) {
 		const bool wrong_txid = (binfo.bits.txid > NVMEIBC_DP_EC_MD_TX_ID_MAX) ||
 						(!can_put_unknown_txid && (binfo.bits.txid == INITIAL_LAZY_READ_TXID));
-		WARN(wrong_txid, "NVMesh Bug: volume %s: o{%u32}.op=%u, Attempt to inject invalid txid=0x%x to locks\n", o->nd->name, o->dbg_id, o->op, binfo.bits.txid);
+		if (unlikely(wrong_txid)) {
+			pet_trace_lock_state_err(o, lo);
+			WARN(1, "NVMesh Bug: volume %s: o{%u32}.op=%u, Attempt to inject invalid txid=0x%x to locks\n", o->nd->name, o->dbg_id, o->op, binfo.bits.txid);
+		}
 		nvmeibc_cmd_lock_set_bi(&lo[i], binfo);
 	}
 }

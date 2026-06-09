@@ -152,3 +152,21 @@ void test_pet_traces_mirror(void)
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
+
+void test_pet_traces_io_req_rel_locks(void)
+{
+	struct operation        o;
+	struct nvmeibc_cmd_lock l;
+
+	memset(&o, 0, sizeof(o));
+	memset(&l, 0, sizeof(l));
+	o.journal  = nvmeibc_io_pet_journal_make(sim_get_io_pet_controller());
+	o.op       = NVMEIB_BLOCK_IO_OP_WRITE;
+	l.status   = NCL_STATUS_TAKEN;
+	l.type     = NVMEIBC_CMD_LOCK_OWNER;
+
+	/* pet_trace_lock_state_err — ERROR */
+	pet_trace_lock_state_err(&o, &l);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+}
