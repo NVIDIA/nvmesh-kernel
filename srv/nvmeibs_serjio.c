@@ -938,6 +938,7 @@ static void sync_jmdc_range_to_all_nics(
 	struct nvmeibs_serjio_disk_private_data *serjio_pd, int range_idx);
 static int alloc_jmdc(struct nvmeibs_serjio_disk_private_data *serjio_pd);
 static void free_jmdc_memory(struct nvmeibs_serjio_disk_private_data *serjio_pd);
+static void jmdc_unmap_all(struct nvmeibs_serjio_disk_private_data *serjio_pd);
 
 static int chk_wait_ret_cln_disk_rng(struct jrange_entry *jrange_entry);
 
@@ -3089,15 +3090,39 @@ static int alloc_jmdc(struct nvmeibs_serjio_disk_private_data *serjio_pd)
 	int rv;
 	int i;
 	size_t alloc_size = 0;
+	size_t new_len;
+	int new_n_pages;
 
 	NFIN;
 #if !ALLOC_JMDC_AFTER_RD_GPT
-	serjio_pd->jmdc_mem.len = (NVMEIB_EC_MAX_JOURNAL_RANGES << NVMEIB_EC_JOURNAL_MAX_BLKS_PER_RANGE_SHIFT) * sizeof(union jblock_md);
+	new_len = (NVMEIB_EC_MAX_JOURNAL_RANGES << NVMEIB_EC_JOURNAL_MAX_BLKS_PER_RANGE_SHIFT) * sizeof(union jblock_md);
 #else
-	serjio_pd->jmdc_mem.len = DISK_LBAS_TO_JOURNAL_BLKS(serjio_pd->di, serjio_pd->disk_ranges.journal.len_nlbas) * sizeof(union jblock_md);
+	new_len = DISK_LBAS_TO_JOURNAL_BLKS(serjio_pd->di, serjio_pd->disk_ranges.journal.len_nlbas) * sizeof(union jblock_md);
 #endif
+	new_n_pages = DIV_ROUND_UP(new_len, PAGE_SIZE);
 
-	serjio_pd->jmdc_mem.n_pages = DIV_ROUND_UP(serjio_pd->jmdc_mem.len, PAGE_SIZE);
+	/* SERJIO rd-gpt can re-enter init (INIT/GPT_INIT) on reinstate+format
+	 * without a teardown; reuse the buffer when size is unchanged, else a
+	 * re-init of jmdc_mem.refcount under live mappings underflows it and
+	 * leaks the old pages (NVMESH-9072). */
+	if (serjio_pd->jmdc_mem.pages) {
+		if (new_n_pages == serjio_pd->jmdc_mem.n_pages) {
+			_NTs(trace_1_serjio_alloc_jmdc, serjio_pd, "jmdc already allocated; reuse");
+			NFOUT;
+			return 0;
+		}
+		/* Journal partition resized by the format: drop the old mappings
+		 * and buffer before reallocating at the new size. */
+		_NTs(trace_2_serjio_alloc_jmdc, serjio_pd,
+			"jmdc journal resized (old n_pages=@N_PAGES); realloc",
+			serjio_pd->jmdc_mem.n_pages);
+		jmdc_unmap_all(serjio_pd);
+		free_jmdc_memory(serjio_pd);
+		serjio_pd->jmdc_mem.pages = NULL;
+	}
+
+	serjio_pd->jmdc_mem.len = new_len;
+	serjio_pd->jmdc_mem.n_pages = new_n_pages;
 	_NTs(trace_serjio_alloc_jmdc, serjio_pd, "jmdc memory n_pages=@N_PAGES", serjio_pd->jmdc_mem.n_pages);
 
 	serjio_pd->jmdc_mem.pages = kcalloc(serjio_pd->jmdc_mem.n_pages, sizeof(*serjio_pd->jmdc_mem.pages), GFP_KERNEL);
