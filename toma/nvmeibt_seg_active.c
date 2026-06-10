@@ -808,7 +808,7 @@ out:
 }
 
 /************************ Stale locks hash map. ********/
-static void remove_stale_lock_from_seg_stale_locks_hash(struct stale_lock_ctx *stale_lock)
+static void remove_stale_lock_from_seg_stale_locks_hash_and_free_it(struct stale_lock_ctx *stale_lock)
 {
 	struct nvmeibt_seg_active		*seg_active;
 	struct nvmeibt_registrant_ctx	*stale_reg_ctx;
@@ -817,8 +817,7 @@ static void remove_stale_lock_from_seg_stale_locks_hash(struct stale_lock_ctx *s
 	// We get here after (inside) lock_stale_locks_hash(seg_active);
 	stale_reg_ctx = stale_lock->reg_ctx;
 	seg_active = stale_reg_ctx->seg_active;
-	N_Tf(t_s1_tslh, "Deleting " STALE_BLKSET_FMT,
-		stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(stale_reg_ctx->reg_lock_id));
+	N_Tf(t_s1_tslh, "Deleting " STALE_BLKSET_FMT, stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(stale_reg_ctx->reg_lock_id));
 	nvmeib_hash_delete_uint64_t(seg_active->stale_locks_hash_by_seg_blkset_no, stale_lock->seg_blkset_no);
 	NNVMEIBT_BM_FREE(__AUTOID__, stale_lock);
 	// is_processing_registrant_removal only between launch_existing_active_registrant_removal and its finalize
@@ -838,7 +837,7 @@ void nvmeibt_seg_active_delete_all_stale_locks_of_registrant(
 	lock_stale_locks_hash(seg_active);
 	NVMEIB_HASH_FOREACH(stale_lock, seg_active->stale_locks_hash_by_seg_blkset_no) {
 		if (stale_lock->reg_ctx == reg_ctx) {
-			remove_stale_lock_from_seg_stale_locks_hash(stale_lock);
+			remove_stale_lock_from_seg_stale_locks_hash_and_free_it(stale_lock);
 		}
 	}
 	unlock_stale_locks_hash(seg_active);
@@ -864,7 +863,7 @@ static void __del_stale_lock_by_blkset_no(struct nvmeibt_seg_active *seg_active,
 				nvmeibt_abort(ES_FATAL);
 			}
 		}
-		remove_stale_lock_from_seg_stale_locks_hash(stale_lock);
+		remove_stale_lock_from_seg_stale_locks_hash_and_free_it(stale_lock);
 	} else {
 		if (lockid.all != 0) {	// Client says there is a stale lock here
 			N_Wf(tstkrec, "No stale_lock, " STALE_BLKSET_FMT ". Ignoring", seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), lockid.all);
@@ -913,7 +912,8 @@ struct stale_lock_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash(struct 
 					 nvmeib_lockid_purify(reg_ctx->reg_lock_id),
 					existing_stale_lock->reg_ctx->client->net.host_name);
 				N_Tf(omjsy37, "Erasing the old entry, and adding the new one. The old one is definitely wrong");
-				remove_stale_lock_from_seg_stale_locks_hash(existing_stale_lock);
+				remove_stale_lock_from_seg_stale_locks_hash_and_free_it(existing_stale_lock);
+				existing_stale_lock = NULL;
 			}
 		}
 	}
