@@ -1655,9 +1655,9 @@ static int read_cmdl(int argc, char *argv[], bool is_logable)
 	return rv;
 }
 
-int print_status_time(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, const struct timespec ts)
+int print_status_time_ex(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, const struct timespec ts, bool with_date)
 {
-	char time_str[32];		// 13[B] used: HH:MM:SS.msc + \0
+	char time_str[32];		// 24[B] used: YYYY-MM-DD HH:MM:SS.msc + \0
 	size_t strf_len;
 	struct tm	tmp_tm;
 	struct timespec ts_real;
@@ -1667,11 +1667,21 @@ int print_status_time(int (*printf_fn)(void *ctx, const char *fmt, ...), void *p
 	} else {
 		getnstimeofday_convert_boot_to_real(&ts, &ts_real);
 		localtime_r(&ts_real.tv_sec, &tmp_tm);
-		strf_len = strftime(time_str, sizeof(time_str), "%H:%M:%S", &tmp_tm);
+		strf_len = strftime(time_str, sizeof(time_str), with_date ? "%Y-%m-%d %H:%M:%S" : "%H:%M:%S", &tmp_tm);
 		snprintf(time_str + strf_len, sizeof(time_str) - strf_len , ".%03lld", NSEC_TO_MSEC(ts_real.tv_nsec));
 		(*printf_fn)(printf_ctx, "%s", time_str);
 	}
 	return 0;
+}
+
+int print_status_time(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, const struct timespec ts)
+{
+	return print_status_time_ex(printf_fn, printf_ctx, ts, false); // time of day only
+}
+
+int print_status_time_and_date(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx, const struct timespec ts)
+{
+	return print_status_time_ex(printf_fn, printf_ctx, ts, true);  // also include date
 }
 
 static void print_open_fds(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
@@ -1737,7 +1747,7 @@ int last_time_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), vo
 	print_open_fds(printf_fn, printf_ctx);
 
 	(*printf_fn)(printf_ctx, "\n\tToma start: ");
-	print_status_time(printf_fn, printf_ctx, nvmeibt_global_get_startup_timespec());
+	print_status_time_and_date(printf_fn, printf_ctx, nvmeibt_global_get_startup_timespec());
 	(*printf_fn)(printf_ctx, "\n\tToma Wakeup: ");
 	print_status_time(printf_fn, printf_ctx, last_toma_wakeup_event_timespec);
 	(*printf_fn)(printf_ctx, "\tWQ: ");
