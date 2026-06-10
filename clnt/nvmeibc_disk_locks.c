@@ -2428,7 +2428,9 @@ int nvmeibc_disk_locks_on_completion(struct nvmeibc_locks_channel *ch,
 	if (opr_ip->version != wc_version) {
 		_NE(nvmeibc_disk_locks_on_completion_ver_mismatch,
 		    "LOCKS: ch @CH_PTR opr_ip @OPR_IP index @INDEX version @VERSION does not match wr_id @WR_ID version @VERSION", ch, opr_ip, opr_ip->index, opr_ip->version, nvmeib_wr_id_from_wc(wc), wc_version);
-		BUG();
+		BUG_NON_PRODUCTION(9153);
+		nvmeibc_locks_channel_spin_unlock_irqrestore(ch, flags);
+		goto out;
 	}
 
 	lock_comp = opr_ip->comp;

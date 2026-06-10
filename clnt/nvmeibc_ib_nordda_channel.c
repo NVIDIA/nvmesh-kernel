@@ -2115,9 +2115,7 @@ static int process_rsp(struct nvmeibc_ib_nordda_channel *ch,
 		_NW(warn_ib_nordda_channel_process_rsp,
 			"OOPS: ch @BASE_NAME(@CH_PTR), tag=@TAG, index=@REQ_INDEX, version=@VERSION, ch_version=@VERSION, opcode=@OPCODE",
 			ch->base.name, ch, rsp_tag, req_index, req_version, req_ch_version, rsp->opcode);
-		//WARN_ON_ONCE(1);
-		BUG_ON(1);
-		put_back = 0;
+		BUG_NON_PRODUCTION(9153);
 		goto out;
 	}
 
