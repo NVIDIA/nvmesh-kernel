@@ -169,3 +169,8 @@ common/pet/build/
 !toma/toma.d
 !tools/lz4
 clnt/block/unitest/blk_unitest
+
+# Local assistant/tool state
+.claude/
+.agents/
+.codex/
