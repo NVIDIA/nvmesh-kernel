@@ -278,8 +278,8 @@ static inline void getnstimeofday_convert_boot_to_real(const struct timespec *ts
 
 	getnstimeofday_boot(&ts_boot_now);
 	getnstimeofday_real(&ts_real_now);
-	*ts_real = timespec_add(ts_real_now, ts_boot_now);
-	*ts_real = timespec_sub(*ts_real, *ts_boot);
+	*ts_real = timespec_add(ts_real_now, *ts_boot);
+	*ts_real = timespec_sub(*ts_real, ts_boot_now);
 }
 
 /******************************************************************************/
