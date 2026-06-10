@@ -820,7 +820,7 @@ static void remove_stale_lock_from_seg_stale_locks_hash(struct stale_lock_ctx *s
 	N_Tf(t_s1_tslh, "Deleting " STALE_BLKSET_FMT,
 		stale_lock->seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), nvmeib_lockid_purify(stale_reg_ctx->reg_lock_id));
 	nvmeib_hash_delete_uint64_t(seg_active->stale_locks_hash_by_seg_blkset_no, stale_lock->seg_blkset_no);
-	NNVMEIBT_BM_FREE(trace_1_seg_active_remove_stale_lock_from_seg_stale_locks_hash, stale_lock);
+	NNVMEIBT_BM_FREE(__AUTOID__, stale_lock);
 	// is_processing_registrant_removal only between launch_existing_active_registrant_removal and its finalize
 	// During this time, stale_locks can be added/deleted, and an interim n_stale_locks==0 should not terminate_reg_ctx()
 	if (--(stale_reg_ctx->n_stale_locks) == 0 && !nvmeibt_register_is_processing_registrant_removal(stale_reg_ctx)) {
@@ -845,8 +845,7 @@ void nvmeibt_seg_active_delete_all_stale_locks_of_registrant(
 	NFOUT;
 }
 
-static struct stale_lock_ctx *get_stale_lock_by_blkset_no(
-	struct nvmeibt_seg_active *seg_active, unsigned long long seg_blkset_no, union nvmeib_lock_id lockid)
+static void __del_stale_lock_by_blkset_no(struct nvmeibt_seg_active *seg_active, unsigned long long seg_blkset_no, union nvmeib_lock_id lockid)
 {
 	struct stale_lock_ctx			*stale_lock = NULL;
 	const union nvmeib_lock_id		pure_recovered_lid = {.all = nvmeib_lockid_purify(lockid) };
@@ -865,19 +864,17 @@ static struct stale_lock_ctx *get_stale_lock_by_blkset_no(
 				nvmeibt_abort(ES_FATAL);
 			}
 		}
+		remove_stale_lock_from_seg_stale_locks_hash(stale_lock);
 	} else {
 		if (lockid.all != 0) {	// Client says there is a stale lock here
-			N_Wf(tstkrec, "No stale_lock, " STALE_BLKSET_FMT ". Ignoring",
-				 seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), lockid.all);
+			N_Wf(tstkrec, "No stale_lock, " STALE_BLKSET_FMT ". Ignoring", seg_blkset_no, nvmeibt_seg_active_UUID_8(seg_active), lockid.all);
 		}
 	}
 	unlock_stale_locks_hash(seg_active);
 	NFOUT;
-	return stale_lock;
 }
 
-struct stale_lock_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash(
-	struct nvmeibt_registrant_ctx *reg_ctx, unsigned long long seg_blkset_no, const union nvmeib_lock_id existing_lock_id)
+struct stale_lock_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash(struct nvmeibt_registrant_ctx *reg_ctx, unsigned long long seg_blkset_no, const union nvmeib_lock_id existing_lock_id)
 {
 	struct stale_lock_ctx			*existing_stale_lock = NULL;
 	struct stale_lock_ctx			*stale_lock_to_restore;
@@ -930,12 +927,11 @@ struct stale_lock_ctx *nvmeibt_seg_active_add_blkset_to_stale_locks_hash(
 out:
 	unlock_stale_locks_hash(seg_active);
 	NFOUT;
-	return existing_stale_lock;
+	return existing_stale_lock;	// This looks unsafe that lock is returned outside of hash table lock, but no one can remove this entry from hash table (and delete the lock) as we will process it and remove afterwards.
 }
 
 int nvmeibt_seg_active_handle_blkset_recovered(struct nvmeibs_msg_s2t_blkset_recovered *blkset_recovered_msg)
 {
-	struct stale_lock_ctx			*stale_lock;
 	struct nvmeibt_seg_active		*seg_active;
 	union nvmeib_lock_blkset_entry	*pre_recov_lock_ent = (union nvmeib_lock_blkset_entry *)&blkset_recovered_msg->pre_recov_lock_val;
 	const union nvmeib_lock_id		recovered_stale_lockid = pre_recov_lock_ent->lock_id;
@@ -946,18 +942,10 @@ int nvmeibt_seg_active_handle_blkset_recovered(struct nvmeibs_msg_s2t_blkset_rec
 	seg_active = nvmeibt_global_get_seg_active_through_seg_by_urn_uuid_str(blkset_recovered_msg->disk_segment_urn_uuid_str);
 	if (!seg_active) {
 		N_Ef(hu8hs03, "Bad blkset_recovered message received, UUID @STR does not point to an active segment!", blkset_recovered_msg->disk_segment_urn_uuid_str);
-		goto out;
+	} else {
+		__del_stale_lock_by_blkset_no(seg_active, blkset_recovered_msg->blkset_no, recovered_stale_lockid);
+		rv = 0;
 	}
-	stale_lock = get_stale_lock_by_blkset_no(seg_active, blkset_recovered_msg->blkset_no, recovered_stale_lockid);
-
-	if (stale_lock) {
-		lock_stale_locks_hash(seg_active);
-		remove_stale_lock_from_seg_stale_locks_hash(stale_lock);
-		unlock_stale_locks_hash(seg_active);
-	}
-	rv = 0;
-
-out:
 	NFOUT;
 	return rv;
 }
