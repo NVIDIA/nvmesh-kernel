@@ -687,17 +687,17 @@ static void terminate_toma(int rv)
 		nvmeibt_local_disk_free_stock_fds();
 	}
 
-	nvmeibt_topology_free_resources();
 	nvmeibt_server_lib_destroy();
 	nvmeibt_toma_cleanup_single_instance();
 
 	nvmeibt_wq_drain(stat_wq);
 	nvmeibt_wq_destroy(stat_wq);
 	stat_wq = NULL;
-	if (atomic_read(&n_entries_in_the_toma_wakeup_pipe)) {	// All 'wq' drained, they put completion wake-up requests for Toma main thread, wakeup last time just to clean the memory. Avoiding this will create a harmless mem leak
+	if (atomic_read(&n_entries_in_the_toma_wakeup_pipe)) {	// All 'wq' drained and destroyed. But they already put completion wake-up requests for Toma main thread, wakeup last time just to clean the memory. Avoiding this will create a harmless mem leak
 		N_Tf(__AUTOID__, "WQs drained, @INT wakupes await processing", atomic_read(&n_entries_in_the_toma_wakeup_pipe));
 		toma_wakeup_event();
 	}
+	nvmeibt_topology_free_resources();				// Only After all finalize/destructors from wq's processed we can destroy the global topology.
 	NNVMEIBT_CLOSE(tonecfd0, epoll_fd);
 	rsrm_destroy_after_run();
 	NFOUT;
