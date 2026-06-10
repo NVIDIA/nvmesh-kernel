@@ -92,6 +92,15 @@ rebuild_initrd_if_needed() {
 }
 
 # -------- main --------
+# --permanent installs into /updates (survives OFED reinstall) instead of /extra/nvmesh/ib_core.
+permanent=0
+for arg in "$@"; do
+  case "$arg" in
+    --permanent) permanent=1 ;;
+    *) log "Unknown option: $arg" && exit 1 ;;
+  esac
+done
+
 # shellcheck disable=SC1091  # (if you run shellcheck elsewhere)
 if [ -r /etc/os-release ]; then
   . /etc/os-release
@@ -139,9 +148,14 @@ for f in $REPO_BASE/*/ib_core_modules.tar.gz; do
     continue
   fi
 
-  install_dir=$MODULES_BASE/$kver/extra/nvmesh/ib_core
+  if [ "$permanent" -eq 1 ]; then
+    install_dir=$MODULES_BASE/$kver/updates
+  else
+    install_dir=$MODULES_BASE/$kver/extra/nvmesh/ib_core
+  fi
 
-  if [ -d "$install_dir" ]; then
+  # In permanent mode install_dir is the shared /updates dir; don't wipe it.
+  if [ "$permanent" -eq 0 ] && [ -d "$install_dir" ]; then
     log "Removing existing install directory $install_dir"
     rm -rf "$install_dir"
   fi
