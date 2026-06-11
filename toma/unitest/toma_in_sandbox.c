@@ -49,8 +49,8 @@ static bool _recv_always_has_data(void) { return true; }
 struct user_rpc_simu {
 	int n_sent, n_recv, n_total;	// Todo: Here toma_rpc exe simulator should actually hold a list of rpcs and unitest env can add to it
 	int sender_fd;
-	const char* cmds[16];			// Todo: This should be a circular buffer to which unit-test env injects rpc and toma extracts them 1 by 1.	return g_rpc_sim;
-	unsigned    reps[16];			// Amount of bytes to print to log from the reply prefix.
+	const char* cmds[24];			// Todo: This should be a circular buffer to which unit-test env injects rpc and toma extracts them 1 by 1.	return g_rpc_sim;
+	unsigned    reps[24];			// Amount of bytes to print to log from the reply prefix.
 	struct TSB_fd_otherside o;
 };
 static struct user_rpc_simu *g_rpc_sim = NULL;
