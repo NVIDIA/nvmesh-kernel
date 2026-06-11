@@ -1208,6 +1208,12 @@ cflags += $(call grep_ksrc_func_var, \
 		, \
 		include/net/tcp.h)
 
+cflags += $(call grep_ksrc_func_var, \
+		KS_HAS_SENDPAGE_OK, \
+		sendpage_ok, \
+		, \
+		include/linux/net.h)
+
 cflags += $(call grep_ksrc_func_var, KS_HAS_RDMA_FOR_EACH_PORT, rdma_for_each_port, , include/rdma/ib_verbs.h)
 # ---------------------------------------------------------------------------- #
 # Kernel 6.9
