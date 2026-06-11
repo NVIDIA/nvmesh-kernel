@@ -44,6 +44,9 @@ MODULE_AUTHOR("Sean Hefty");
 MODULE_DESCRIPTION("Generic RDMA CM Agent");
 MODULE_LICENSE("Dual BSD/GPL");
 
+/* -nv1: Fix NVMESH-6447. Backport 45f5dcdd049719 from upstream kernel */
+MODULE_VERSION("k6.9-nv1");
+
 #define CMA_CM_RESPONSE_TIMEOUT 20
 #define CMA_MAX_CM_RETRIES 15
 #define CMA_CM_MRA_SETTING (IB_CM_MRA_FLAG_DELAY | 24)
