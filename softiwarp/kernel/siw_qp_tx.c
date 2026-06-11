@@ -709,15 +709,15 @@ static int tcp_sendpage(struct socket *sock, struct page *page,
 	int ret;
 
 	/*
-	 * MSG_SPLICE_PAGES cannot properly handle pages with page_count == 0,
-	 * we need to fall back to sendmsg if that's the case.
-	 *
-	 * Same goes for slab pages: skb_can_coalesce() allows
-	 * coalescing neighboring slab objects into a single frag which
-	 * triggers one of hardened usercopy checks.
+	 * Splice can't handle !sendpage_ok pages (page_ref_count==0, incl.
+	 * compound tail pages, and slab). @more may already carry
+	 * MSG_SPLICE_PAGES via MSG_SENDPAGE_NOTLAST, so clear it explicitly
+	 * to force the sendmsg copy fallback (NVMESH-9238).
 	 */
 	if (sendpage_ok(page))
 		msg.msg_flags |= MSG_SPLICE_PAGES;
+	else
+		msg.msg_flags &= ~MSG_SPLICE_PAGES;
 
 	bvec_set_page(&bvec, page, size, offset);
 	iov_iter_bvec(&msg.msg_iter, ITER_SOURCE, &bvec, 1, size);
