@@ -97,6 +97,14 @@ static inline int siw_crc_txhdr(struct siw_iwarp_tx *ctx)
 #define MSG_SENDPAGE_NOTLAST MSG_MORE
 #endif
 
+#if !KS_HAS_SENDPAGE_OK
+/* sendpage_ok() arrived in v5.9; older kernels with tcp_sendpage lack it. */
+static inline bool sendpage_ok(struct page *page)
+{
+	return !PageSlab(page) && page_count(page) >= 1;
+}
+#endif
+
 //omril: 32
 #define MAX_HDR_INLINE					\
 	(((uint32_t)(sizeof(struct siw_rreq_pkt) -	\
@@ -714,15 +722,17 @@ static int tcp_sendpage(struct socket *sock, struct page *page,
 	int ret;
 
 	/*
-	 * Splice can't handle !sendpage_ok pages (page_ref_count==0, incl.
-	 * compound tail pages, and slab). @more may already carry
-	 * MSG_SPLICE_PAGES via MSG_SENDPAGE_NOTLAST, so clear it explicitly
-	 * to force the sendmsg copy fallback (NVMESH-9238).
+	 * !sendpage_ok pages (slab, or high-order __get_free_pages without
+	 * __GFP_COMP -> page_count 0, e.g. XFS log/metadata) can't be spliced.
+	 * @more may already carry MSG_SPLICE_PAGES via MSG_SENDPAGE_NOTLAST,
+	 * so clear it to force the sendmsg copy fallback (NVMESH-9238).
 	 */
-	if (sendpage_ok(page))
+	if (sendpage_ok(page)) {
+		BUG_ON(page_count(page) < 1);
 		msg.msg_flags |= MSG_SPLICE_PAGES;
-	else
+	} else {
 		msg.msg_flags &= ~MSG_SPLICE_PAGES;
+	}
 
 	bvec_set_page(&bvec, page, size, offset);
 	iov_iter_bvec(&msg.msg_iter, ITER_SOURCE, &bvec, 1, size);
@@ -782,9 +792,23 @@ static int siw_tcp_sendpages(struct socket *s, struct page **page,
 				flags = last_flags;
 		}
 
-		BUG_ON(page_count(page[i]) < 1);
 #if KS_HAS_TCP_SENDPAGE
-		rv = tcp_sendpage(s->sk, page[i], page_off[i], bytes, flags);
+		if (sendpage_ok(page[i])) {
+			rv = tcp_sendpage(s->sk, page[i], page_off[i],
+					  bytes, flags);
+		} else {
+			/* High-order/slab pages (page_count 0) can't be
+			 * 0-copied: tcp_sendpage() get/put_page()s them.
+			 * Copy via sendmsg instead (NVMESH-9238). */
+			struct kvec iov;
+			struct msghdr msg = { .msg_flags = flags };
+			char *kaddr = kmap(page[i]);
+
+			iov.iov_base = kaddr + page_off[i];
+			iov.iov_len = bytes;
+			rv = kernel_sendmsg(s, &msg, &iov, 1, bytes);
+			kunmap(page[i]);
+		}
 #else
 		rv = tcp_sendpage(s, page[i], page_off[i], bytes, flags);
 #endif

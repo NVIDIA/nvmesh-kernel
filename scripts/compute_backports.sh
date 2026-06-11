@@ -643,6 +643,9 @@ grep_ksrc_func_var "KS_HAS_BIO_SET_OP_ATTRS" "bio_set_op_attrs" "" "include/linu
 grep_ksrc_func_var "KS_HAS_BDEV_OPEN_BY_PATH" "bdev_open_by_path" "" "include/linux/blkdev.h"
 grep_ksrc_func_var "KS_HAS_BLK_CLEANUP_DISK" "blk_cleanup_disk" "" "include/linux/genhd.h"
 grep_ksrc_func_var "KS_HAS_TCP_SENDPAGE" "tcp_sendpage" "" "include/net/tcp.h"
+# sendpage_ok() landed in v5.9; kernels older than that (still having
+# tcp_sendpage) lack it, so siw provides a fallback.
+grep_ksrc_func_var "KS_HAS_SENDPAGE_OK" "sendpage_ok" "" "include/linux/net.h"
 grep_ksrc_func_var "KS_HAS_RDMA_FOR_EACH_PORT" "rdma_for_each_port" "" "include/rdma/ib_verbs.h"
 
 # ---------------------------------------------------------------------------- #
