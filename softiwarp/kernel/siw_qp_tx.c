@@ -728,7 +728,7 @@ static int tcp_sendpage(struct socket *sock, struct page *page,
 	 * so clear it to force the sendmsg copy fallback (NVMESH-9238).
 	 */
 	if (sendpage_ok(page)) {
-		BUG_ON(page_count(page) < 1);
+		SIW_BUG_ON_NON_PRODUCTION(page_count(page) < 1, 9238);
 		msg.msg_flags |= MSG_SPLICE_PAGES;
 	} else {
 		msg.msg_flags &= ~MSG_SPLICE_PAGES;
@@ -791,9 +791,12 @@ static int siw_tcp_sendpages(struct socket *s, struct page **page,
 			if (bytes >= size)
 				flags = last_flags;
 		}
-
+	
 #if KS_HAS_TCP_SENDPAGE
 		if (sendpage_ok(page[i])) {
+		
+			SIW_BUG_ON_NON_PRODUCTION(page_count(page[i]) < 1, 9238);
+			
 			rv = tcp_sendpage(s->sk, page[i], page_off[i],
 					  bytes, flags);
 		} else {
