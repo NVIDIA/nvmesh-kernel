@@ -89,7 +89,12 @@ static inline int siw_crc_txhdr(struct siw_iwarp_tx *ctx)
 }
 
 #ifndef MSG_SENDPAGE_NOTLAST
-#define MSG_SENDPAGE_NOTLAST MSG_SPLICE_PAGES
+/*
+ * "more sendpages coming" hint; MSG_MORE is its modern equivalent. Must
+ * NOT alias MSG_SPLICE_PAGES, which would force zero-copy splice via the
+ * @more flags and splice unsafe pages (NVMESH-9238).
+ */
+#define MSG_SENDPAGE_NOTLAST MSG_MORE
 #endif
 
 //omril: 32
