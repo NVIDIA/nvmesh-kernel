@@ -17,13 +17,13 @@
 #include "block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi.h"
 
 /* Captures op, pre/post binfo, and sync stage for EC recovery common error sites. */
-void pet_trace_ec_recov_err(const struct recovery_sync_op *so) {
+void pet_trace_ec_recov_err_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"ec_recov_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		"ec_recov_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
-		numeric_downcast(u8, so->stage));
+		numeric_downcast(u8, so->stage), line);
 }
 
 static int dp_ec_sync_read_write_prepare_op(struct recovery_sync_op *so);

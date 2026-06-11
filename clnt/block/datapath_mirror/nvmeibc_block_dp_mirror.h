@@ -47,14 +47,21 @@ void                             dp_mirror_no_write_hole_destroy(struct recovery
 void                         dp_mirror_no_write_hole_sbs_cleanup(struct recovery_sync_op *so);
 
 /* PET trace declarations */
-void pet_trace_mirror_sync_wrong_state(const struct recovery_sync_op *so);
-void pet_trace_mirror_cmd_state_err(const struct recovery_sync_op *so);
-void pet_trace_mirror_binfo_write_err(const struct recovery_sync_op *so);
-void pet_trace_mirror_lock_state_err(const struct recovery_sync_op *so);
+void pet_trace_mirror_sync_wrong_state_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_mirror_sync_wrong_state(so) \
+	pet_trace_mirror_sync_wrong_state_at((so), (u16)__LINE__)
+void pet_trace_mirror_cmd_state_err_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_mirror_cmd_state_err(so) \
+	pet_trace_mirror_cmd_state_err_at((so), (u16)__LINE__)
+void pet_trace_mirror_binfo_write_err_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_mirror_binfo_write_err(so) \
+	pet_trace_mirror_binfo_write_err_at((so), (u16)__LINE__)
+void pet_trace_mirror_lock_state_err_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_mirror_lock_state_err(so) \
+	pet_trace_mirror_lock_state_err_at((so), (u16)__LINE__)
 
 #if defined(BLKDEV_SIMULATOR)
 void dp_mirror_ut_inject_debug_di_sync_info(struct recovery_sync_op *so, int n_cmds_to_do);
 #endif
 
 #endif  // H beginning
-

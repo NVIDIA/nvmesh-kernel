@@ -16,13 +16,13 @@
 #include "block/datapath_utils_generic/binfo/nvmeibc_block_dp_binfo.inc.c"
 
 /* Captures op, pre/post binfo, and sync stage for EC maintenance error sites. */
-void pet_trace_maintenance_err(const struct recovery_sync_op *so) {
+void pet_trace_maintenance_err_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"maintenance_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		"maintenance_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
-		numeric_downcast(u8, so->stage));
+		numeric_downcast(u8, so->stage), line);
 }
 
 /*********************** DP maintain virtal functions *************************/

@@ -61,43 +61,43 @@
 /******************************* PET trace helpers ****************************/
 
 /* should_blockset_info_commit() is set at a stage where it must be clear. */
-void pet_trace_binfo_commit_unexpected(const struct recovery_sync_op *so) {
+void pet_trace_binfo_commit_unexpected_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"binfo_commit_unexpected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu)",
+		"binfo_commit_unexpected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
-		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->n_slices));
+		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->n_slices), line);
 }
 
 /* should_blockset_info_commit() is clear at a stage where it must be set. */
-void pet_trace_binfo_commit_missing(const struct recovery_sync_op *so) {
+void pet_trace_binfo_commit_missing_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"binfo_commit_missing(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu)",
+		"binfo_commit_missing(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
-		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->n_slices));
+		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->n_slices), line);
 }
 
 /* post != pre at EC SM entry — caller must not have modified post before entry. */
-void pet_trace_binfo_entry_mismatch(const struct recovery_sync_op *so) {
+void pet_trace_binfo_entry_mismatch_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"binfo_entry_mismatch(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu)",
+		"binfo_entry_mismatch(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
-		numeric_downcast(u8, so->n_slices));
+		numeric_downcast(u8, so->n_slices), line);
 }
 
 /* nwhole params or exec-plan invariant violated — captures params and stage for post-mortem. */
-void pet_trace_nwhole_param_err(const struct recovery_sync_op *so) {
+void pet_trace_nwhole_param_err_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"nwhole_param_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, params=0x%llx<union no_writehole_params>)",
+		"nwhole_param_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, params=0x%llx<union no_writehole_params>, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all,
-		numeric_downcast(u8, so->stage), so->nwhole_params.raw);
+		numeric_downcast(u8, so->stage), so->nwhole_params.raw, line);
 }
 
 /******************************* SBS *****************************************/

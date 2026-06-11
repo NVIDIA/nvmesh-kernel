@@ -430,9 +430,17 @@ void nvmeibcbdpec_inject_binfo_back_to_caller(struct recovery_sync_op *so);
 
 /* PET trace declarations */
 union nvmeib_blkset_info;
-void pet_trace_binfo_commit_rejected_nover(const struct recovery_sync_op *so, union nvmeib_blkset_info post);
-void pet_trace_binfo_commit_rejected(const struct recovery_sync_op *so, union nvmeib_blkset_info post, char ver_action);
-void pet_trace_binfo_wrong_call_context(const struct recovery_sync_op *so);
-void pet_trace_binfo_unknown_txid(const struct recovery_sync_op *so, union nvmeib_blkset_info post);
+void pet_trace_binfo_commit_rejected_nover_at(const struct recovery_sync_op *so, union nvmeib_blkset_info post, u16 line);
+#define pet_trace_binfo_commit_rejected_nover(so, post) \
+	pet_trace_binfo_commit_rejected_nover_at((so), (post), (u16)__LINE__)
+void pet_trace_binfo_commit_rejected_at(const struct recovery_sync_op *so, union nvmeib_blkset_info post, char ver_action, u16 line);
+#define pet_trace_binfo_commit_rejected(so, post, ver_action) \
+	pet_trace_binfo_commit_rejected_at((so), (post), (ver_action), (u16)__LINE__)
+void pet_trace_binfo_wrong_call_context_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_binfo_wrong_call_context(so) \
+	pet_trace_binfo_wrong_call_context_at((so), (u16)__LINE__)
+void pet_trace_binfo_unknown_txid_at(const struct recovery_sync_op *so, union nvmeib_blkset_info post, u16 line);
+#define pet_trace_binfo_unknown_txid(so, post) \
+	pet_trace_binfo_unknown_txid_at((so), (post), (u16)__LINE__)
 
 #endif // NVMEIBC_BLOCK_DP_SYNC_COMMON_H

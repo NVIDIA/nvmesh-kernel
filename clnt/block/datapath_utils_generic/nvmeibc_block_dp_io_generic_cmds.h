@@ -279,7 +279,8 @@ void nvmeibc_blkset_info_write_pet_describe(struct operation* o, u8 sgmnt, u64 a
 
 
 /* PET trace declarations */
-void pet_trace_binfo_lock_write_err(const struct nvmeibc_block_command *rldr);
+void pet_trace_binfo_lock_write_err_at(const struct nvmeibc_block_command *rldr, u16 line);
+#define pet_trace_binfo_lock_write_err(rldr) \
+	pet_trace_binfo_lock_write_err_at((rldr), (u16)__LINE__)
 
 #endif  // H beginning
-

@@ -491,41 +491,43 @@ static void __compressed_sync_op_trace_write_binfo(const struct recovery_sync_op
 	NVMEIB_LOG_GOODPATH("{@O_DBG_ID}: Sync write binfo: PRE: @BINFO POST: @BINFO", _T, goodpath_nvmeibc_syncs, compressed_sync_op_write_binfo, so->o->dbg_id, bi_pre, bi_post);
 }
 
-void pet_trace_binfo_commit_rejected_nover(const struct recovery_sync_op *so, const union nvmeib_blkset_info post) {
+void pet_trace_binfo_commit_rejected_nover_at(const struct recovery_sync_op *so, const union nvmeib_blkset_info post, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_CRIT(&so->o->journal,
-		"binfo_commit_rejected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu)",
-		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all, numeric_downcast(u8, so->n_slices));
+		"binfo_commit_rejected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu, line=%hu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all,
+		numeric_downcast(u8, so->n_slices), line);
 }
 
-void pet_trace_binfo_commit_rejected(const struct recovery_sync_op *so, const union nvmeib_blkset_info post, char ver_action) {
+void pet_trace_binfo_commit_rejected_at(const struct recovery_sync_op *so, const union nvmeib_blkset_info post, char ver_action, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_CRIT(&so->o->journal,
-		"binfo_commit_rejected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, ver=%c, n_slices=%hhu)",
-		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all, ver_action, numeric_downcast(u8, so->n_slices));
+		"binfo_commit_rejected(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, ver=%c, n_slices=%hhu, line=%hu)",
+		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all,
+		ver_action, numeric_downcast(u8, so->n_slices), line);
 }
 
 /* Called when commit binfo is invoked from a context that does not hold the lock or
  * should_blockset_info_commit() is unexpectedly false. */
-void pet_trace_binfo_wrong_call_context(const struct recovery_sync_op *so) {
+void pet_trace_binfo_wrong_call_context_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"binfo_wrong_call_context(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		"binfo_wrong_call_context(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
-		numeric_downcast(u8, so->stage));
+		numeric_downcast(u8, so->stage), line);
 }
 
 /* Called when EC post-binfo carries INITIAL_LAZY_READ_TXID at commit time — unresolved txid. */
-void pet_trace_binfo_unknown_txid(const struct recovery_sync_op *so, const union nvmeib_blkset_info post) {
+void pet_trace_binfo_unknown_txid_at(const struct recovery_sync_op *so, const union nvmeib_blkset_info post, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_CRIT(&so->o->journal,
-		"binfo_unknown_txid(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu)",
+		"binfo_unknown_txid(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, n_slices=%hhu, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, post.all,
-		numeric_downcast(u8, so->n_slices));
+		numeric_downcast(u8, so->n_slices), line);
 }
 
 static void __compressed_sync_op_trace_end(const struct recovery_sync_op *so) {

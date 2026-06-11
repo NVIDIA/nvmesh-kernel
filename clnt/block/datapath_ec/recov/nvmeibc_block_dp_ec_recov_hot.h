@@ -46,11 +46,13 @@ void dp_ec_sync_stale_cb_stg_end(struct nvmeibc_block_command *cmd); //Daniel: c
 
 /* PET trace declarations */
 struct htr_ctx;
-void pet_trace_htr_err(const struct htr_ctx *h);
+void pet_trace_htr_err_at(const struct htr_ctx *h, u16 line);
+#define pet_trace_htr_err(h) \
+	pet_trace_htr_err_at((h), (u16)__LINE__)
 #if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR == 1
-void pet_trace_htr_err_with_so(const struct recovery_sync_op *so);
+void pet_trace_htr_err_with_so_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_htr_err_with_so(so) \
+	pet_trace_htr_err_with_so_at((so), (u16)__LINE__)
 #endif
 
 #endif  // NVMEIBC_DP_EC_RECOV_HOT_H
-
-

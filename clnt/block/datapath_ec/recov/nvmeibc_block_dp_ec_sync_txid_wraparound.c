@@ -14,13 +14,13 @@
 #include "nvmeib_msgs_shared.h"
 
 /* Captures op, pre/post binfo, and stage for txid wraparound error sites. */
-void pet_trace_txid_wrap_err(const struct recovery_sync_op *so) {
+void pet_trace_txid_wrap_err_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"txid_wrap_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		"txid_wrap_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
-		numeric_downcast(u8, so->stage));
+		numeric_downcast(u8, so->stage), line);
 }
 
 void dp_ec_sync_txid_wraparound_execute_op(struct recovery_sync_op *so) {

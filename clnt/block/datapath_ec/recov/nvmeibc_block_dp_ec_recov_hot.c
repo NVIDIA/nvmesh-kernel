@@ -945,13 +945,13 @@ out:
 }
 
 /* Captures op, pre/post binfo, and sync stage for any hot-recovery error with h in scope. */
-void pet_trace_htr_err(const struct htr_ctx *h) {
+void pet_trace_htr_err_at(const struct htr_ctx *h, u16 line) {
 	if (!h || !h->so || !h->so->o || !h->so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&h->so->o->journal,
-		"htr_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>)",
+		"htr_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, line=%hu)",
 		numeric_downcast(u8, h->so->o->op), h->so->cmds->rld.pre.all, h->so->cmds->rld.post.all,
-		numeric_downcast(u8, h->so->stage));
+		numeric_downcast(u8, h->so->stage), line);
 }
 
 static inline int comp_check(struct htr_ctx *h, int comp_code)
@@ -3607,11 +3607,11 @@ void dp_ec_sync_stale_cb_stg_end(struct nvmeibc_block_command *cmd)
 
 #if defined(BLKDEV_SIMULATOR) && BLKDEV_SIMULATOR == 1
 /* Test helper: call pet_trace_htr_err with a minimal htr_ctx wrapping so. */
-void pet_trace_htr_err_with_so(const struct recovery_sync_op *so)
+void pet_trace_htr_err_with_so_at(const struct recovery_sync_op *so, u16 line)
 {
 	struct htr_ctx h;
 	memset(&h, 0, sizeof(h));
 	h.so = (struct recovery_sync_op *)so;
-	pet_trace_htr_err(&h);
+	pet_trace_htr_err_at(&h, line);
 }
 #endif

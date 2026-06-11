@@ -19,44 +19,44 @@
 
 /* Mirror SM entered illegal state or received unsupported op.
  * Safe before rld.pre/post are initialized (captures only op, stage, rlba). */
-void pet_trace_mirror_sync_wrong_state(const struct recovery_sync_op *so) {
+void pet_trace_mirror_sync_wrong_state_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"mirror_sync_wrong_state(op=%hhu<enum nvmeib_block_io_op>, stage=%hhu<enum sync_op_stage_e>, rlba=%llu)",
-		numeric_downcast(u8, so->o->op), numeric_downcast(u8, so->stage), so->rlba);
+		"mirror_sync_wrong_state(op=%hhu<enum nvmeib_block_io_op>, stage=%hhu<enum sync_op_stage_e>, rlba=%llu, line=%hu)",
+		numeric_downcast(u8, so->o->op), numeric_downcast(u8, so->stage), so->rlba, line);
 }
 
 /* Write cmd has unexpected comp_code, do_not_send, op type, or nlbas at setup time. */
-void pet_trace_mirror_cmd_state_err(const struct recovery_sync_op *so) {
+void pet_trace_mirror_cmd_state_err_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"mirror_cmd_state_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, sbs=%hhu)",
+		"mirror_cmd_state_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, sbs=%hhu, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
-		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->slice_by_slice_index));
+		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->slice_by_slice_index), line);
 }
 
 /* Binfo write-plan invariant violated: first_write_bmp, cmd count, or parity count wrong. */
-void pet_trace_mirror_binfo_write_err(const struct recovery_sync_op *so) {
+void pet_trace_mirror_binfo_write_err_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"mirror_binfo_write_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, first_write_bmp=0x%x, n_slices=%hhu)",
+		"mirror_binfo_write_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, first_write_bmp=0x%x, n_slices=%hhu, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
 		numeric_downcast(u8, so->stage), so->nwhole_exec_plan.first_write_bmp,
-		numeric_downcast(u8, so->n_slices));
+		numeric_downcast(u8, so->n_slices), line);
 }
 
 /* Lock or sibling state is wrong for the current mirror sync operation. */
-void pet_trace_mirror_lock_state_err(const struct recovery_sync_op *so) {
+void pet_trace_mirror_lock_state_err_at(const struct recovery_sync_op *so, u16 line) {
 	if (!so || !so->o || !so->cmds)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&so->o->journal,
-		"mirror_lock_state_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu, n_siblings=%hhu)",
+		"mirror_lock_state_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu<enum sync_op_stage_e>, n_slices=%hhu, n_siblings=%hhu, line=%hu)",
 		numeric_downcast(u8, so->o->op), so->cmds->rld.pre.all, so->cmds->rld.post.all,
 		numeric_downcast(u8, so->stage), numeric_downcast(u8, so->n_slices),
-		numeric_downcast(u8, so->locks->n_siblings));
+		numeric_downcast(u8, so->locks->n_siblings), line);
 }
 
 /******************************************************************************/

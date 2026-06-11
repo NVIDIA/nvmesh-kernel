@@ -74,9 +74,17 @@ enum NO_WRITE_HOLE_NEXT_STAGE_CHOICE {
 
 
 /* PET trace declarations */
-void pet_trace_binfo_commit_unexpected(const struct recovery_sync_op *so);
-void pet_trace_binfo_commit_missing(const struct recovery_sync_op *so);
-void pet_trace_binfo_entry_mismatch(const struct recovery_sync_op *so);
-void pet_trace_nwhole_param_err(const struct recovery_sync_op *so);
+void pet_trace_binfo_commit_unexpected_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_binfo_commit_unexpected(so) \
+	pet_trace_binfo_commit_unexpected_at((so), (u16)__LINE__)
+void pet_trace_binfo_commit_missing_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_binfo_commit_missing(so) \
+	pet_trace_binfo_commit_missing_at((so), (u16)__LINE__)
+void pet_trace_binfo_entry_mismatch_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_binfo_entry_mismatch(so) \
+	pet_trace_binfo_entry_mismatch_at((so), (u16)__LINE__)
+void pet_trace_nwhole_param_err_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_nwhole_param_err(so) \
+	pet_trace_nwhole_param_err_at((so), (u16)__LINE__)
 
 #endif // NVMEIBC_BLOCK_DP_SYNC_NO_WRITE_HOLE_H

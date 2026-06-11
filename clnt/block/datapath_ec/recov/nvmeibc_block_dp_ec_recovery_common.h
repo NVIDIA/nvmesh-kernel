@@ -179,7 +179,8 @@ void nvmeibc_tx_get_ptrs_to_blk_in_cmd(const struct recovery_sync_op *so, u32 ci
 
 
 /* PET trace declarations */
-void pet_trace_ec_recov_err(const struct recovery_sync_op *so);
+void pet_trace_ec_recov_err_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_ec_recov_err(so) \
+	pet_trace_ec_recov_err_at((so), (u16)__LINE__)
 
 #endif  // H beginning
-

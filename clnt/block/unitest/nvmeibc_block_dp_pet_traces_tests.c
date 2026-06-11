@@ -65,27 +65,51 @@ void test_pet_traces_sync_common(void)
 	struct recovery_sync_op    so;
 	union nvmeib_blkset_info   binfo = { .all = 0xDEADBEEF };
 
-	/* pet_trace_binfo_commit_rejected_nover — CRIT */
+	/* pet_trace_binfo_commit_rejected_nover — CRIT, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_binfo_commit_rejected_nover(&so, binfo);
 	ASSERT_PET_CRITICAL(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_binfo_commit_rejected — CRIT */
+	/* pet_trace_binfo_commit_rejected_nover_at — CRIT, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_binfo_commit_rejected_nover_at(&so, binfo, 1234);
+	ASSERT_PET_CRITICAL(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_binfo_commit_rejected — CRIT, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_binfo_commit_rejected(&so, binfo, 's');
 	ASSERT_PET_CRITICAL(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_binfo_wrong_call_context — ERROR */
+	/* pet_trace_binfo_commit_rejected_at — CRIT, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_binfo_commit_rejected_at(&so, binfo, 's', 1234);
+	ASSERT_PET_CRITICAL(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_binfo_wrong_call_context — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_binfo_wrong_call_context(&so);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_binfo_unknown_txid — CRIT */
+	/* pet_trace_binfo_wrong_call_context_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_binfo_wrong_call_context_at(&so, 1234);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_binfo_unknown_txid — CRIT, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_binfo_unknown_txid(&so, binfo);
+	ASSERT_PET_CRITICAL(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_binfo_unknown_txid_at — CRIT, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_binfo_unknown_txid_at(&so, binfo, 1234);
 	ASSERT_PET_CRITICAL(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -96,27 +120,51 @@ void test_pet_traces_sync_no_write_hole(void)
 	struct nvmeibc_block_command cmd;
 	struct recovery_sync_op    so;
 
-	/* pet_trace_binfo_commit_unexpected — ERROR */
+	/* pet_trace_binfo_commit_unexpected — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_binfo_commit_unexpected(&so);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_binfo_commit_missing — ERROR */
+	/* pet_trace_binfo_commit_unexpected_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_binfo_commit_unexpected_at(&so, 1234);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_binfo_commit_missing — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_binfo_commit_missing(&so);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_binfo_entry_mismatch — ERROR */
+	/* pet_trace_binfo_commit_missing_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_binfo_commit_missing_at(&so, 1234);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_binfo_entry_mismatch — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_binfo_entry_mismatch(&so);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_nwhole_param_err — ERROR */
+	/* pet_trace_binfo_entry_mismatch_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_binfo_entry_mismatch_at(&so, 1234);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_nwhole_param_err — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_nwhole_param_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_nwhole_param_err_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_nwhole_param_err_at(&so, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -127,28 +175,53 @@ void test_pet_traces_mirror(void)
 	struct nvmeibc_block_command cmd;
 	struct recovery_sync_op    so;
 
-	/* pet_trace_mirror_sync_wrong_state — ERROR */
+	/* pet_trace_mirror_sync_wrong_state — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_mirror_sync_wrong_state(&so);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_mirror_cmd_state_err — ERROR */
+	/* pet_trace_mirror_sync_wrong_state_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_mirror_sync_wrong_state_at(&so, 1234);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_mirror_cmd_state_err — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_mirror_cmd_state_err(&so);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_mirror_binfo_write_err — ERROR */
+	/* pet_trace_mirror_cmd_state_err_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_mirror_cmd_state_err_at(&so, 1234);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_mirror_binfo_write_err — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_mirror_binfo_write_err(&so);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 
-	/* pet_trace_mirror_lock_state_err — ERROR */
+	/* pet_trace_mirror_binfo_write_err_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_mirror_binfo_write_err_at(&so, 1234);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_mirror_lock_state_err — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	so.locks[0].n_siblings = 1;
 	pet_trace_mirror_lock_state_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_mirror_lock_state_err_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	so.locks[0].n_siblings = 1;
+	pet_trace_mirror_lock_state_err_at(&so, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -165,8 +238,20 @@ void test_pet_traces_io_req_rel_locks(void)
 	l.status   = NCL_STATUS_TAKEN;
 	l.type     = NVMEIBC_CMD_LOCK_OWNER;
 
-	/* pet_trace_lock_state_err — ERROR */
+	/* pet_trace_lock_state_err — ERROR, macro captures call-site line */
 	pet_trace_lock_state_err(&o, &l);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	memset(&o, 0, sizeof(o));
+	memset(&l, 0, sizeof(l));
+	o.journal  = nvmeibc_io_pet_journal_make(sim_get_io_pet_controller());
+	o.op       = NVMEIB_BLOCK_IO_OP_WRITE;
+	l.status   = NCL_STATUS_TAKEN;
+	l.type     = NVMEIBC_CMD_LOCK_OWNER;
+
+	/* pet_trace_lock_state_err_at — ERROR, explicit line */
+	pet_trace_lock_state_err_at(&o, &l, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -185,8 +270,22 @@ void test_pet_traces_io_generic_cmds(void)
 	rldr.raid_cur_stage = E_CMDS_STAGE_POST_IO_RDMA;
 	rldr.o              = &o;
 
-	/* pet_trace_binfo_lock_write_err — ERROR */
+	/* pet_trace_binfo_lock_write_err — ERROR, macro captures call-site line */
 	pet_trace_binfo_lock_write_err(&rldr);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	memset(&o,    0, sizeof(o));
+	memset(&rldr, 0, sizeof(rldr));
+	o.journal           = nvmeibc_io_pet_journal_make(sim_get_io_pet_controller());
+	o.op                = NVMEIB_BLOCK_IO_OP_WRITE;
+	rldr.rld.pre.all    = 0x100;
+	rldr.rld.post.all   = 0x200;
+	rldr.raid_cur_stage = E_CMDS_STAGE_POST_IO_RDMA;
+	rldr.o              = &o;
+
+	/* pet_trace_binfo_lock_write_err_at — ERROR, explicit line */
+	pet_trace_binfo_lock_write_err_at(&rldr, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -197,9 +296,15 @@ void test_pet_traces_ec_recov_hot(void)
 	struct nvmeibc_block_command cmd;
 	struct recovery_sync_op    so;
 
-	/* pet_trace_htr_err via test helper (htr_ctx definition is internal to .c) */
+	/* pet_trace_htr_err via test helper, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_htr_err_with_so(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_htr_err_at via test helper, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_htr_err_with_so_at(&so, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -210,9 +315,15 @@ void test_pet_traces_ec_recov_common(void)
 	struct nvmeibc_block_command cmd;
 	struct recovery_sync_op    so;
 
-	/* pet_trace_ec_recov_err — ERROR */
+	/* pet_trace_ec_recov_err — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_ec_recov_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_ec_recov_err_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_ec_recov_err_at(&so, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -223,9 +334,15 @@ void test_pet_traces_ec_recov_cold_sync(void)
 	struct nvmeibc_block_command cmd;
 	struct recovery_sync_op    so;
 
-	/* pet_trace_cold_sync_err — ERROR */
+	/* pet_trace_cold_sync_err — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_cold_sync_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_cold_sync_err_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_cold_sync_err_at(&so, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -236,9 +353,15 @@ void test_pet_traces_ec_recov_maintenance(void)
 	struct nvmeibc_block_command cmd;
 	struct recovery_sync_op    so;
 
-	/* pet_trace_maintenance_err — ERROR */
+	/* pet_trace_maintenance_err — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_maintenance_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_maintenance_err_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_maintenance_err_at(&so, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }
@@ -249,9 +372,15 @@ void test_pet_traces_ec_txid_wraparound(void)
 	struct nvmeibc_block_command cmd;
 	struct recovery_sync_op    so;
 
-	/* pet_trace_txid_wrap_err — ERROR */
+	/* pet_trace_txid_wrap_err — ERROR, macro captures call-site line */
 	__setup_so(&so, &o, &cmd);
 	pet_trace_txid_wrap_err(&so);
+	ASSERT_PET_ERROR(o.journal);
+	COMMIT_JOURNAL(o);
+
+	/* pet_trace_txid_wrap_err_at — ERROR, explicit line */
+	__setup_so(&so, &o, &cmd);
+	pet_trace_txid_wrap_err_at(&so, 1234);
 	ASSERT_PET_ERROR(o.journal);
 	COMMIT_JOURNAL(o);
 }

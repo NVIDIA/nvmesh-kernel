@@ -49,7 +49,8 @@ void dp_ec_sync_j_gc_execute_op(struct recovery_sync_op *so);
 
 
 /* PET trace declarations */
-void pet_trace_cold_sync_err(const struct recovery_sync_op *so);
+void pet_trace_cold_sync_err_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_cold_sync_err(so) \
+	pet_trace_cold_sync_err_at((so), (u16)__LINE__)
 
 #endif  // H beginning
-

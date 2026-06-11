@@ -44,7 +44,8 @@ void dp_ec_mainten_blkset_recov_cb_stg_end(struct recovery_sync_op *so); // Noti
 
 
 /* PET trace declarations */
-void pet_trace_maintenance_err(const struct recovery_sync_op *so);
+void pet_trace_maintenance_err_at(const struct recovery_sync_op *so, u16 line);
+#define pet_trace_maintenance_err(so) \
+	pet_trace_maintenance_err_at((so), (u16)__LINE__)
 
 #endif  // H beginning
-

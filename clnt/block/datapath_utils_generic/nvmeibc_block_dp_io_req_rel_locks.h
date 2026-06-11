@@ -275,7 +275,8 @@ void nvmeibc_cmd_lock_request_io_pet_describe(struct operation const* o, struct 
 void nvmeibc_cmd_lock_response_io_pet_describe(struct operation const* o, struct nvmeibc_cmd_lock const* lock);
 
 /* PET trace declarations */
-void pet_trace_lock_state_err(const struct operation *o, const struct nvmeibc_cmd_lock *l);
+void pet_trace_lock_state_err_at(const struct operation *o, const struct nvmeibc_cmd_lock *l, u16 line);
+#define pet_trace_lock_state_err(o, l) \
+	pet_trace_lock_state_err_at((o), (l), (u16)__LINE__)
 
 #endif  // H beginning
-

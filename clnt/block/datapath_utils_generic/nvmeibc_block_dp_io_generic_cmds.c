@@ -1318,13 +1318,13 @@ _out:
 }
 
 /* Called when binfo write to data lock finds wrong stage or lock state. */
-void pet_trace_binfo_lock_write_err(const struct nvmeibc_block_command *rldr) {
+void pet_trace_binfo_lock_write_err_at(const struct nvmeibc_block_command *rldr, u16 line) {
 	if (!rldr || !rldr->o)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&rldr->o->journal,
-		"binfo_lock_write_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu)",
+		"binfo_lock_write_err(op=%hhu<enum nvmeib_block_io_op>, pre=0x%x<union nvmeib_blkset_info>, post=0x%x<union nvmeib_blkset_info>, stage=%hhu, line=%hu)",
 		numeric_downcast(u8, rldr->o->op), rldr->rld.pre.all, rldr->rld.post.all,
-		numeric_downcast(u8, rldr->raid_cur_stage));
+		numeric_downcast(u8, rldr->raid_cur_stage), line);
 }
 
 void nvmeibc_blkset_info_write_pet_describe(struct operation* o, u8 sgmnt, u64 addr, struct nvmeibc_d_rdma_comp *dc)

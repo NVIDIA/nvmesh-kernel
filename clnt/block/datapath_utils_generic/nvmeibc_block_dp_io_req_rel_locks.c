@@ -124,15 +124,16 @@ static inline struct nvmeibc_profiler *__raid_gp_profile_for_rwt_op_locks(const 
 //   thus getting the operation via replaced commands will not gave us the desired result.
 
 /* Called on lock state machine invariant violations (status, count, txid) where o is in scope. */
-void pet_trace_lock_state_err(const struct operation *o, const struct nvmeibc_cmd_lock *l) {
+void pet_trace_lock_state_err_at(const struct operation *o, const struct nvmeibc_cmd_lock *l, u16 line) {
 	if (!o || !l)
 		return;
 	NVMEIBC_IO_PET_MSG_ERROR(&o->journal,
-		"lock_state_err(op=%hhu<enum nvmeib_block_io_op>, binfo=0x%x<union nvmeib_blkset_info>, lock_status=%hhu, lock_type=%hhu)",
+		"lock_state_err(op=%hhu<enum nvmeib_block_io_op>, binfo=0x%x<union nvmeib_blkset_info>, lock_status=%hhu, lock_type=%hhu, line=%hu)",
 		numeric_downcast(u8, o->op),
 		(u32)nvmeibc_cmd_lock_get_bi(l).all,
 		numeric_downcast(u8, l->status),
-		numeric_downcast(u8, l->type));
+		numeric_downcast(u8, l->type),
+		line);
 }
 
 __attribute__((nonnull(2)))
