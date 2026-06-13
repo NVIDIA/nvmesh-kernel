@@ -815,8 +815,12 @@ _func_start:
 				goto _func_start;
 			}
 
-			// Must be a better check (do not repeat for SBS)
-			nvmeibcbdpec_inject_binfo_back_to_caller(so); // After possibly turnon ram dbits need to inject to caller.
+			/*
+			 * Do not inject binfo to the caller here. In SBS mode the caller is
+			 * the sync itself, so publishing cleaned post binfo as pre would let
+			 * later slices trust a stale W copy. Inject once all writes complete.
+			 */
+
 			ASYNC_AWAIT_AND_RESUME(nvmeibc_sync_send_all_write_cmds(so, so->nwhole_exec_plan.first_write_bmp, sync_stage_recov_no_write_hole_sent_restore_data_and_turnon_parity_md_dbits_done));
 		}
 
