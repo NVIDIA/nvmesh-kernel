@@ -29,7 +29,7 @@
 
 #elif defined(__KERNEL__)
 
-	unsigned nvmeibc_io_pet_minimal_severity = NVMEIB_PET_SEVERITY_WARNING;
+	unsigned nvmeibc_io_pet_minimal_severity = NVMEIB_PET_SEVERITY_ERROR;
 	module_param(nvmeibc_io_pet_minimal_severity, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_minimal_severity, "Defines the minimal severity for IO per-entity trace buffers to be written.");
 
@@ -37,7 +37,7 @@
 	module_param(nvmeibc_io_pet_verbose, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_verbose, "A non-zero value will allow IO per-entity trace buffers to provide even more information such as the first 8 bytes and metadata for every block. This may hurt performance and the buffer size should be taken into account.");
 
-	unsigned nvmeibc_io_pet_disable = 0;
+	unsigned nvmeibc_io_pet_disable = 1;
 	module_param(nvmeibc_io_pet_disable, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_disable, "A non-zero value will disable IO per-entity trace functionality.");
 
@@ -143,7 +143,7 @@
 
 	//TODO: in simulator we should understand for a single pass max consumed bytes (bad and good flow)
 	//single pass: [start, complete] or [start, resubmit]
-	unsigned nvmeibc_io_pet_buffer_size = 1024;
+	unsigned nvmeibc_io_pet_buffer_size = 4096;
 	module_param(nvmeibc_io_pet_buffer_size, uint, 0644);
 	MODULE_PARM_DESC(nvmeibc_io_pet_buffer_size, "IO per-entity trace buffer size.");
 
