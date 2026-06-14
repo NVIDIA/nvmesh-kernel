@@ -1337,19 +1337,22 @@ try_load_module() {
 
 unload_module() {
         output=$(modprobe -r "$@" 2>&1)
-        RETVAL=$?
+        local ret=$?
 
-        if [ $RETVAL -ne 0 ]; then
+        if [ "$ret" -ne 0 ]; then
                 if echo "$output" | grep -q "FATAL: Module .* not found"; then
+                        echo "INFO: Module not loaded, return OK: " "$@"
+                        ret=0
                         # Ignore module not found errors
                         :
                 else
+                        RETVAL=$ret
                         echo "Error: failed to unload module(s): $* (exit code: $RETVAL)"
                         echo "modprobe output: $output"
                 fi
         fi
 
-        return $RETVAL
+        return $ret
 }
 
 rmmod_module() {
