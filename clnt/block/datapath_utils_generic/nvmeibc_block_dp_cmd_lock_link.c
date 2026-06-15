@@ -34,8 +34,10 @@ int nvmeibc_clmat_allocate(struct operation *o, bool use_kv_alloc, int n_locks, 
 			o->locks = my_kzalloc( alloc_size, GFP_NOFS);
 
 		if (!o->flags.is_clmat_embedded) {
-			o->locks->mem_allocated_size = alloc_size;
 			nvmesh_memmgr_metric_on_alloc_update(dp_commands_locks_matrix, alloc_size, o->locks);
+			if (!o->locks)
+				return -ENOMEM;
+			o->locks->mem_allocated_size = alloc_size;
 		}
 
 		if (o->locks) {
