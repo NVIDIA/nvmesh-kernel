@@ -35,9 +35,12 @@ struct t_ec_recov_tx *_p;								// Same as above
 
 void ec_tx_boomtrah(struct t_ec_tx_history* hist, char const *file, char const* function, int line, char const * condition)
 {
-	struct charvec buffer = {.base = malloc(4*1024*1024), .len = 4*1024*1024};
-	struct jdr jdr = jdr_make(buffer);
+	struct jdr jdr;
 	struct charvec json = {0};
+	struct charvec buffer = {.base = malloc(4*1024*1024), .len = 4*1024*1024};
+	if (!buffer.base)
+		return;
+	jdr = jdr_make(buffer);
 	jdr_write_ec_tx_history(&jdr, "history", hist);
 	jdr_write_var(&jdr, file, file);
 	jdr_write_var(&jdr, function, function);
