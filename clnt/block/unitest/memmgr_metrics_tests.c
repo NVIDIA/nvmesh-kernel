@@ -37,6 +37,7 @@ void __ut_mm_test_section(void)
 void __ut_mm_test_json_serialize(void)
 {
 	struct charvec buffer = {.base = malloc(1024*1024), .len = 1024*1024};
+	BUG_ON(!buffer.base);
 	nvmesh_memmgr_metrics_json_serialize(buffer, true /* dump_all_cpus */, false /* dump_each_cpu_separately */, __start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 
 #ifdef DO_JSON_DUMP

@@ -1269,12 +1269,21 @@ NLRPC_SRV_ASYNC(corecomm_pd_free_jrnl_ents_, ctx, (cdisk_handle, cdisk),
 	free_ents_comp->ents = nvmeib_alloc(
 	    &free_ents_comp->ents_ai,
 	    free_ents_comp->num_ents * sizeof(struct nvmeib_free_ents_data), NULL);
+	if (!free_ents_comp->ents) {
+		kfree(op_ctx);
+		return -ENOMEM;
+	}
 	free_ents_comp->ents[0].rng_idx    = jrange;
 	free_ents_comp->ents[0].rng_gen_id = dinfo->disk->jour.rng_gen_id;
 	free_ents_comp->ents[0].ent_idx    = jentry;
 	free_ents_comp->ents[0].ent_md = (struct nvmeib_jrnl_ent_md){jentry_gen_id};
 	free_ents_comp->ents_enc_buf = nvmeib_alloc(&free_ents_comp->ents_enc_ai,
 						    free_ents_comp->num_ents * sizeof(struct wire_free_ents_entry), NULL);
+	if (!free_ents_comp->ents_enc_buf) {
+		nvmeib_release(&free_ents_comp->ents_ai, free_ents_comp->ents, NULL);
+		kfree(op_ctx);
+		return -ENOMEM;
+	}
 	free_ents_comp->ents_enc_buf_sz = free_ents_comp->ents_enc_ai.n << PAGE_SHIFT;
 	free_ents_comp->callback       = corecomm_pd_free_jrnl_ents_cb_;
 
