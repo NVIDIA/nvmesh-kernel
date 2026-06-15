@@ -30,8 +30,11 @@ struct nvmesh_memmgr_metrics {
 
 static inline void nvmesh_memmgr_metric_on_alloc_update(struct nvmesh_memmgr_metrics *mgr, size_t size, bool success)
 {
-	struct nvmesh_memmgr_metric_counters *self = per_cpu_ptr(mgr->counters, get_cpu());
+	struct nvmesh_memmgr_metric_counters *self;
+	if (!mgr->counters)
+		return;
 
+	self = per_cpu_ptr(mgr->counters, get_cpu());
 	if (success) {
 		nvmesh_metric_update(self->active_allocations, +1);
 		nvmesh_metric_update(self->allocated, size);
@@ -45,8 +48,11 @@ static inline void nvmesh_memmgr_metric_on_alloc_update(struct nvmesh_memmgr_met
 
 static inline void nvmesh_memmgr_metric_on_free_update(struct nvmesh_memmgr_metrics *mgr, size_t size)
 {
-	struct nvmesh_memmgr_metric_counters *self = per_cpu_ptr(mgr->counters, get_cpu());
+	struct nvmesh_memmgr_metric_counters *self;
+	if (!mgr->counters)
+		return;
 
+	self = per_cpu_ptr(mgr->counters, get_cpu());
 	nvmesh_metric_update(self->active_allocations, -1);
 	nvmesh_metric_update(self->allocated, -size);
 
