@@ -1580,7 +1580,7 @@ static inline struct siw_mr *siw_mem2mr(struct siw_mem *m)
 
 #if defined(NVMESH_IS_PRODUCTION_COMPILATION) && (NVMESH_IS_PRODUCTION_COMPILATION==1)
 	#define SIW_BUG_NON_PRODUCTION(bug_num) WARN(1, NVMESH_BUG_PREFIX_FMT, bug_num)
-	#define SIW_BUG_ON_NON_PRODUCTION(cond, bug_num) WARN_ON(cond, NVMESH_BUG_PREFIX_FMT, bug_num)
+	#define SIW_BUG_ON_NON_PRODUCTION(cond, bug_num) WARN(cond, NVMESH_BUG_PREFIX_FMT, bug_num)
 #else
 	#define SIW_BUG_NON_PRODUCTION(bug_num) do { \
 		pr_err("KERNEL WARNING TRIGGERED AT %s:%d - Bug Number: %d, BUG_ON for debug", __FILE__, __LINE__, bug_num); \
