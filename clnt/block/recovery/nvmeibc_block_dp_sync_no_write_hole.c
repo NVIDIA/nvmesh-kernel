@@ -246,11 +246,19 @@ static void nvmeibc_sync_sl_by_sl_finish(struct recovery_sync_op *so)
 				so->o->dbg_id, so->o->nd->name, so->o->topo->debug_unique_index, tr->ch, tr->r1, so->rlba, so->write_fix_mask, so->write_unco_mask);
 			__log_corruption(so, "multiple disasters data loss");			// Or else we would not enter slice by slice mode
 			__notify_toma_on_slice_by_slice_comp(so, EPERM_READ_FAIL_NO_RETRY);
-			so->error = EPERM_READ_FAIL_NO_RETRY; // No!!!! This is a bug! Caller should verify if the requested slice is uncorrectable
-			// TODO for above line, add another counterpart with the error, i.e. Non-sync error, rather data error,
-			// where the caller must analyze both values, (if failed-> handle failure, if write_uncor -> is requested data affected (use the mask)
-			// mark original IO as EPERM_READ_FAIL_NO_RETRY (not from the so->error, rather a parallel mechanizm)
-			nvmeibcb_dp_io_fail_mgr_inspect(so->cmds, 0);        // LKJ: First command, might not have any error, just using it as api to function
+			/*
+			 * RECOVER_DB is mandatory dirty rebuild. The destroyed slice was
+			 * reported through TOMA above, but the sync must complete so the
+			 * recovery iterator clears the dirty blockset instead of retrying it.
+			 */
+			if (!is_op_sync_db(so->o->op)) {
+				so->error = EPERM_READ_FAIL_NO_RETRY;
+				/*
+				 * TODO: Add a data-error counterpart to so->error, so the
+				 * caller can distinguish sync failure from affected user data.
+				 */
+				nvmeibcb_dp_io_fail_mgr_inspect(so->cmds, 0 /* i */);
+			}
 		} else if (so->write_fix_mask) { // Some slices fixed, no slices are broken, We fixed some read fail error, use EPERM_READ_FAIL to notify TOMA
 			__notify_toma_on_slice_by_slice_comp(so, EPERM_READ_FAIL);
 		}
@@ -637,7 +645,15 @@ static inline void __dump_nwhole_params(const struct recovery_sync_op *so) {
 static void __update_no_whole_counters(const struct recovery_sync_op *so)
 {
 	struct nvmeibc_nowhole_stats *nowh = &get_so_fctr(so)->nowh;
-	if (!so->error) {  // No writehole succeeded.
+	if (so->write_unco_mask) {
+		atomic_inc(&nowh->n_destoyed);			// Some data loss occured
+		if (so->write_fix_mask) {
+			atomic_inc(&nowh->n_bdsec_fix);		// But at least some slices were fixed
+		}
+		if (!so->error && is_op_sync_db(so->o->op)) {
+			atomic_inc(&nowh->n_dbits_fix);
+		}
+	} else if (!so->error) {  // No writehole succeeded.
 		if (so->nwhole_exec_plan.encountered_bad_sectors) {	// Regardless of so->o->op
 			atomic_inc(&nowh->n_bdsec_fix);
 			__log_corruption(so, "found and fixed bad sector"); // Otherwise, already printed this
@@ -660,10 +676,6 @@ static void __update_no_whole_counters(const struct recovery_sync_op *so)
 		if (so->nwhole_exec_plan.is_blkset_corrupted) {
 			atomic_inc(&nowh->n_di_fix);
 		}
-	} else if (so->write_unco_mask) {
-		atomic_inc(&nowh->n_destoyed);			// Some data loss occured
-		if (so->write_fix_mask)
-			atomic_inc(&nowh->n_bdsec_fix);		// But at least some slices were fixed
 	}
 }
 
