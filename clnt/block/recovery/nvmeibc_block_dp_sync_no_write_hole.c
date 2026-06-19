@@ -171,9 +171,14 @@ static void nvmeibc_sync_sl_by_sl_start(struct recovery_sync_op *so)
 			else
 				nvmeibc_fill_ndb(								  ndb, 1, &nbi);
 		} else if (ndb) {
-			// Write NDB should be shared with read and already updated
-			BUG_ON(!cmd->is_not_ndb_owner);
-			BUG_ON(ndb->length != NVMEIBC_SECTOR_SIZE);
+			if (cmd->is_not_ndb_owner) {
+				// EC: write shares the read's ndb (already refilled to 1 block).
+				BUG_ON(ndb->length != NVMEIBC_SECTOR_SIZE);
+			} else {
+				// Mirror: write owns a private sgl, re-cloned per slice in prepare (NVMESH-9300).
+				ndb->table.nents = 0;
+				ndb->length = 0;
+			}
 		}
 		__cmd_clean_comp_val(cmd);					// Reset all cmds rv
 	}
@@ -226,9 +231,15 @@ static inline void __transition_from_slice_back_to_sync_mode(struct recovery_syn
 			} else nvmeibc_fill_ndb(cmd->iocmd->reqs1.ndb, so->n_slices /* nlbas */, &nbi);
 		}
 		else if (cmd->iocmd->reqs1.ndb) {
-			// Write NDB should be shared with read and already updated
-			BUG_ON(!cmd->is_not_ndb_owner);
-			BUG_ON(cmd->iocmd->reqs1.ndb->length != (u32)NVMEIBC_SECTOR_SIZE * so->n_slices);
+			struct nvmeib_data_buffer *wndb = cmd->iocmd->reqs1.ndb;
+			if (cmd->is_not_ndb_owner) {
+				// EC: write shares the read's ndb (restored to n_slices blocks).
+				BUG_ON(wndb->length != (u32)NVMEIBC_SECTOR_SIZE * so->n_slices);
+			} else {
+				// Mirror: write owns a private sgl, re-cloned per slice in prepare (NVMESH-9300).
+				wndb->table.nents = 0;
+				wndb->length = 0;
+			}
 		}
 	}
 	so->is_sbs_mode = false;

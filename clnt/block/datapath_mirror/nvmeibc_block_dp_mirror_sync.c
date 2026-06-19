@@ -108,13 +108,36 @@ static void __inject_debug_di_with_sync_info(struct recovery_sync_op *so, int n_
 	}
 }
 
+/* Clone the chosen read source's sgl into the write leg's own (pre-allocated)
+ * sgl over the SAME pages. Each parallel write leg needs private sg_dma_address
+ * storage, else they double-map one IOVA under an IOMMU (NVMESH-9300). */
+static void __clone_read_ndb_pages_into_write(struct nvmeibc_block_command *cmd, const struct nvmeibc_block_command *src_cmd)
+{
+	struct nvmeib_data_buffer *dst = cmd->iocmd->reqs1.ndb;
+	const struct nvmeib_data_buffer *src = src_cmd->iocmd->reqs1.ndb;
+	struct scatterlist *dsg = dst->table.sgl, *ssg;
+	const unsigned int n = src->table.nents;
+	unsigned int i;
+	BUG_ON(n == 0 || n > dst->table.orig_nents);	// dst sized for n_slices >= source nents
+	dst->length = src->length;
+	for_each_sg(src->table.sgl, ssg, n, i) {
+		sg_set_page(dsg, sg_page(ssg), ssg->length, ssg->offset);
+		if (i + 1 == n)
+			sg_mark_end(dsg);
+		else
+			sg_unmark_end(dsg);
+		dsg = sg_next(dsg);
+	}
+	dst->table.nents = n;
+}
+
 static void __set_wr_cmd_ndb_to_read_cmd_ptr(struct nvmeibc_block_command *cmd, const struct nvmeibc_block_command *src_cmd)
 {
 	extern u32 nvmeibc_calculate_edic_from_data_and_rlba(const u64 rlba, const unsigned char *data, const bool debug_di_enabled);
-	BUG_ON(cmd->iocmd->reqs1.ndb && !cmd->is_not_ndb_owner); // Write commands never own the NDBs
+	BUG_ON(!cmd->iocmd->reqs1.ndb);		// Write owns its own ndb/sgl (NVMESH-9300)
+	BUG_ON(cmd->is_not_ndb_owner);		// Mirror writes own their sgl, never alias the read's
 	BUG_ON(!src_cmd->iocmd->reqs1.ndb);
-	cmd->iocmd->reqs1.ndb = src_cmd->iocmd->reqs1.ndb;
-	cmd->is_not_ndb_owner = true;
+	__clone_read_ndb_pages_into_write(cmd, src_cmd);
 	if (nvmeibc_is_mirror_md_enabled(cmd)) {
 		if (nvmeibc_is_mirror_md_enabled(src_cmd)) {
 			nvmeibc_fill_metadata_from_command(cmd, src_cmd);
@@ -521,7 +544,15 @@ static int __mirror_sync_data_fill_cmds(struct recovery_sync_op *so)
 			nvmeibc_fill_ndb(ndb, so->n_slices /* nlbas */, &nbi);
 			BUG_ON(c[i].is_not_ndb_owner);
 		} else {
-			c[i].iocmd->reqs1.ndb = NULL; // All write cmds use NULL NDBs (set a trap). Later write cmds will point to read cmd ndb to commit the correct data
+			// Each write leg owns a private sgl, re-cloned from the chosen read
+			// source per slice (see __clone_read_ndb_pages_into_write). nents==0
+			// is the "no source yet" trap that NULL used to provide (NVMESH-9300).
+			struct nvmeib_data_buffer *ndb = nvmeib_get_ndb(&c[i], so->n_slices /* nentries */, gfp);
+			if (unlikely(!ndb))
+				return -ENOMEM;
+			ndb->table.nents = 0;
+			ndb->length = 0;
+			BUG_ON(c[i].is_not_ndb_owner);
 		}
 	}
 	return 0;
@@ -735,12 +766,13 @@ void dp_mirror_no_write_hole_sbs_cleanup(struct recovery_sync_op *so)
 			struct nvmeibc_block_io_req *req = &so->cmds[i].iocmd->reqs1;
 			if (so->cmds[i].do_not_send) { // Was the previous source segment
 				so->cmds[i].do_not_send = false;
-				// Clear write's NDB, needs to come from source
-				if (unlikely(req->ndb && !so->cmds[i].is_not_ndb_owner)) {
+				// Write keeps its own sgl; mark "needs fresh source for next slice".
+				if (unlikely(!req->ndb || so->cmds[i].is_not_ndb_owner)) {
 				pet_trace_mirror_lock_state_err(so);
-				WARN_ON(1); // Going to leak NDB or wrong ownership
+				WARN_ON(1); // Write leg must own a private ndb (NVMESH-9300)
 				}
-				req->ndb = NULL;
+				req->ndb->table.nents = 0;
+				req->ndb->length = 0;
 			}
 			req->op = NVMEIB_BLOCK_IO_OP_WRITE;	// In case we destroyed the previous slice, revert to default write
 		}
