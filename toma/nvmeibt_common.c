@@ -190,7 +190,7 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 	int			i, j;
 	static int	n_printing_now;
 	int			n_were_printing;
-	size_t		total_alloc_minus_free_bytes;
+	long long	total_alloc_minus_free_bytes;
 
 	NFIN;
 	lock_alloc_free_table();
@@ -199,8 +199,8 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 	if (n_were_printing) {
 		goto skip;
 	}
-	total_alloc_minus_free_bytes = (nvmeibt_alloc_free_summary_table[0].sum_allocated_size + nvmeibt_alloc_free_summary_table[1].sum_allocated_size);
-	(*printf_fn)(printf_ctx, "total_alloc_minus_free=%jdM\n", total_alloc_minus_free_bytes >> 20);
+	total_alloc_minus_free_bytes = nvmeibt_get_alloc_minus_free_bytes();
+	(*printf_fn)(printf_ctx, "total_alloc_minus_free=%lldM\n", total_alloc_minus_free_bytes >> 20);
 	(*printf_fn)(printf_ctx, "\n- - - - -   MEM alloc and free   - - - - -\n");
 	(*printf_fn)(printf_ctx, "File                          [Line] Type    n_calls|       sum_sizes[B]|  sum_allocated[MB]|\n");
 	for (j = 0; j < 2; j++) {
@@ -237,20 +237,30 @@ static inline long get_current_rss_bytes(void)
 		fclose(fp);
 		return ((rss_pages > 0) && (page_bytes > 0)) ? rss_pages * page_bytes : -2;
 	#else
-		return (nvmeibt_alloc_free_summary_table[0].sum_allocated_size + nvmeibt_alloc_free_summary_table[1].sum_allocated_size);	// Only Toma internal allocator. Good enough for now
+		return nvmeibt_get_alloc_minus_free_bytes();	// Only Toma internal allocator. Good enough for now
 	#endif
+}
+
+long long nvmeibt_get_alloc_minus_free_bytes(void)
+{	// Net allocated-minus-freed bytes. Signed: this sums two counters via two separate loads, so a concurrent alloc+free between them can read slightly negative even when balanced -- callers must tolerate that, not treat it as a leak.
+	return nvmeibt_alloc_free_summary_table[0].sum_allocated_size + nvmeibt_alloc_free_summary_table[1].sum_allocated_size;
+}
+
+bool nvmeibt_mem_alloc_over_limit(long long net_bytes, long long max_bytes)
+{	// Signed compare on purpose: net can be transiently negative (see above), so an unsigned compare would turn a tiny negative into a huge over-limit value.
+	return net_bytes >= max_bytes;
 }
 
 extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
 void nvmeibt_validate_alloc_free_summary_table(void)
 {
-	const size_t MAX_UNFREED_BYTES = (30UL << 30);	// N[GB] mem. Todo: make configurable like raft_leader_heartbeat_timeout_usec
-	const size_t total_alloc_minus_free_bytes = get_current_rss_bytes();
-	if (total_alloc_minus_free_bytes >= MAX_UNFREED_BYTES) {		// Crash...
+	const long long MAX_UNFREED_BYTES = (30LL << 30);	// N[GB] mem. Todo: make configurable like raft_leader_heartbeat_timeout_usec
+	const long long total_alloc_minus_free_bytes = nvmeibt_get_alloc_minus_free_bytes();
+	if (nvmeibt_mem_alloc_over_limit(total_alloc_minus_free_bytes, MAX_UNFREED_BYTES)) {		// Crash...
 		struct nvmeibt_Str *mem_print = NNVMEIBT_STR_ALLOC(ttvafst0);
 		NNVMEIBT_STR_RESIZE_BUF(ttvafst1, mem_print, (1<<14));
 		print_status_str(NVMEIBS_TOMA_STATUS_MEM_ALLOC, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, mem_print);
-		N_Ef(ttvafst4, "OOPS! total_alloc_minus_free=@ZU[MB], Crashing.... @STR", total_alloc_minus_free_bytes >> 20, mem_print->text_buf);
+		N_Ef(ttvafst4, "OOPS! total_alloc_minus_free=@ZU[MB], Crashing.... @STR", ((size_t)total_alloc_minus_free_bytes) >> 20, mem_print->text_buf);
 		nvmeibt_abort(ES_FATAL);
 		NNVMEIBT_STR_FREE(ttvafst2, mem_print);
 	}

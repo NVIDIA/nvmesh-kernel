@@ -191,6 +191,10 @@ static inline int nvmeibt_toma_posix_memalign(void **memptr, size_t alignment, s
 
 void nvmeibt_validate_alloc_free_summary_table(void);
 
+// Split out so the over-limit decision is testable without the fatal abort path.
+long long nvmeibt_get_alloc_minus_free_bytes(void);
+bool nvmeibt_mem_alloc_over_limit(long long net_bytes, long long max_bytes);
+
 int nvmeibt_get_alloc_free_table_idx(void);
 #define ALLOC_FREE_FNAME_LEN 50
 #define ALLOC_FREE_TABLE_SIZE 1000
