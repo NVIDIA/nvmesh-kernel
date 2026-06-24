@@ -46,9 +46,11 @@ bool nvmeibc_disk_locks_use_system_pcpu_wq = false;
 module_param_named(disk_locks_use_system_pcpu_wq, nvmeibc_disk_locks_use_system_pcpu_wq, bool, 0444);
 MODULE_PARM_DESC(disk_locks_use_system_pcpu_wq, "Defines whether disk locks use the system per-cpu workqueues for requests completion handling.");
 
-bool nvmeibc_disk_locks_use_max_rd_atomic_limit = false;
-module_param_named(disk_locks_use_max_rd_atomic_limit, nvmeibc_disk_locks_use_max_rd_atomic_limit, bool, 0644);
-MODULE_PARM_DESC(disk_locks_use_max_rd_atomic_limit, "If true, use max_rd_atomic as limit for atomic read operations. If false (default), use total_num_opr as limit.");
+/* Stay on the address-sharded channel until it backs up past this many
+   outstanding ops; only then scan for a less-loaded one (NVMESH-7726). */
+int nvmeibc_disk_locks_ch_overflow_threshold = 32;
+module_param_named(disk_locks_ch_overflow_threshold, nvmeibc_disk_locks_ch_overflow_threshold, int, 0644);
+MODULE_PARM_DESC(disk_locks_ch_overflow_threshold, "Outstanding-op count on the address-sharded lock channel above which selection spills to the least-loaded channel. <=0 always spills (least-loaded), INT_MAX never spills (pure sharding).");
 
 enum nvmeibc_module_param_shard_type {
 	NVMEIB_MODULE_PARAM_SHARD_TYPE_HASH_MODULO,
@@ -1266,9 +1268,7 @@ static int lock_prepare_and_send(struct nvmeibc_locks_channel *ch,
 	}
 
 	while (DEBUG_BYPASS_ATOMIC_OPS || !ch->atomic_cap ||
-		   (nvmeibc_disk_locks_use_max_rd_atomic_limit ?
-		    (ch->num_of_atom_read_ip < ch->net.max_rd_atomic) :
-		    (ch->num_of_atom_read_ip < ch->total_num_opr))) {
+		   ch->num_of_atom_read_ip < (ch->net.max_dest_rd_atomic)) {
 		if (!list_empty(&ch->defered) &&
 				(opr_ip = nvmeibc_locks_channel_get_free_opr_ip(ch))) {
 			nvmeib_completion_noise_start(NVMEIB_NOISE_SUBMISSION);
@@ -1527,52 +1527,58 @@ end_2nd_ch_coremask:
 		goto out;
 	}
 	if (primary_ch->n_2nd_ch > 0) {
-		int i, min_tot_op = INT_MAX;
-		struct nvmeibc_locks_channel *ch;
-		struct nvmeibc_locks_channel *sharding_ch;
-		/* Get sharding-based channel once using hint (for tie-breaking) */
-		sharding_ch = get_lock_channel_by_sharding(primary_ch, hint);
-		
-		/* Iterate through primary channel (i=-1) and all secondary channels (i=0..n_2nd_ch-1) */
-		for (i = -1; i < primary_ch->n_2nd_ch; i++) {
-			int _2nd_tot_op;
-			ch = (i < 0) ? primary_ch : primary_ch->_2nd_ch[i];
-			if (!ch)
-				continue;
-			
-			_2nd_tot_op = ch->num_of_atom_read_ip;
-			_ND(trace_9_disk_locks_choose_locks_channel, "channel @PTR has @INT in_progress and @INT deferred, total=@INT", ch, ch->num_in_progress, ch->num_defered, _2nd_tot_op);
-			if (DEBUG_2ND_LOCK_CH_KA && nvmeibc_locks_channel_is_ka_timeout(ch)) {
-				chosen_ch = NULL;
-				goto out;
-			}
-			if (nvmeibc_channel_already_locked(&ch->base)) {
-				chosen_ch = ch;
-				goto out;
-			}
-			if (DEBUG_2ND_LOCK_CH_KA) {
-				u64 ka_from_comp = jiffies - ch->ka_comp_jif;
-				if (!(ch->n_comp_llp_ka && ka_from_comp < HZ * 30)) {
-					_NI(trace_choose_locks_channel, "Lock-ch @CH_NAME (@CH_PTR), No KA comp"
-						"(n_post=@LLU, n_comp=@LLU, comp_jif=@LLU,"
-						"from_comp=@LLU(@LLU)), skip (@LLU)..."
-						"n_comp_llp={o=@LLU, k=@LLU, t=@LLU}\n",
-						ch->base.name, ch,
-						ch->ka_post_cnt, ch->n_comp_llp_ka, ch->ka_comp_jif,
-						ka_from_comp, ka_from_comp / HZ, ch->ka_skip_use,
-						ch->n_comp_llp_opr, ch->n_comp_llp_ka, ch->n_comp_llp_test);
-					ch->ka_skip_use++;
+		struct nvmeibc_locks_channel *sharded = get_lock_channel_by_sharding(primary_ch, hint);
+
+		/* Common path: keep address locality on the sharded channel unless it
+		   is backed up, so we avoid reading every channel's hot counters. */
+		if (!DEBUG_2ND_LOCK_CH_KA && sharded &&
+			sharded->num_in_progress + sharded->num_defered <
+				nvmeibc_disk_locks_ch_overflow_threshold) {
+			chosen_ch = sharded;
+			goto out;
+		}
+
+		/* Overflow path: sharded channel is hot (or KA debug on); shed load to
+		   the least-loaded channel across primary + secondaries. */
+		{
+			int i, min_tot_op = INT_MAX;
+			for (i = -1; i < primary_ch->n_2nd_ch; i++) {
+				struct nvmeibc_locks_channel *ch = (i < 0) ? primary_ch : primary_ch->_2nd_ch[i];
+				int _2nd_tot_op;
+				if (!ch)
 					continue;
+				_2nd_tot_op = ch->num_in_progress + ch->num_defered;
+				if (DEBUG_2ND_LOCK_CH_KA && nvmeibc_locks_channel_is_ka_timeout(ch)) {
+					chosen_ch = NULL;
+					goto out;
+				}
+				if (nvmeibc_channel_already_locked(&ch->base)) {
+					chosen_ch = ch;
+					goto out;
+				}
+				if (DEBUG_2ND_LOCK_CH_KA) {
+					u64 ka_from_comp = jiffies - ch->ka_comp_jif;
+					if (!(ch->n_comp_llp_ka && ka_from_comp < HZ * 30)) {
+						_NI(trace_choose_locks_channel, "Lock-ch @CH_NAME (@CH_PTR), No KA comp"
+							"(n_post=@LLU, n_comp=@LLU, comp_jif=@LLU,"
+							"from_comp=@LLU(@LLU)), skip (@LLU)..."
+							"n_comp_llp={o=@LLU, k=@LLU, t=@LLU}\n",
+							ch->base.name, ch,
+							ch->ka_post_cnt, ch->n_comp_llp_ka, ch->ka_comp_jif,
+							ka_from_comp, ka_from_comp / HZ, ch->ka_skip_use,
+							ch->n_comp_llp_opr, ch->n_comp_llp_ka, ch->n_comp_llp_test);
+						ch->ka_skip_use++;
+						continue;
+					}
+				}
+				if (_2nd_tot_op < min_tot_op) {
+					min_tot_op = _2nd_tot_op;
+					chosen_ch = ch;
 				}
 			}
-			
-			if (_2nd_tot_op < min_tot_op) {
-				min_tot_op = _2nd_tot_op;
-				chosen_ch = ch;
-			} else if (_2nd_tot_op == min_tot_op && ch == sharding_ch) {
-				/* Tie-breaker: if same min operations, prefer sharding-based channel */
-				chosen_ch = ch;
-			}
+			/* All candidates skipped (KA): fall back to the sharded channel. */
+			if (!chosen_ch)
+				chosen_ch = sharded;
 		}
 	}
 out:
