@@ -71,7 +71,7 @@ int dp_ec_journal_alloc_all_areas(struct nvmeibc_block_command *rldr)
 	rv = nvmeibc_jam_lbas_alloc(n_disks, disks, rldr->rld.pre.bits.txid + 1 /* First TxID */, dlbas, res_jlbas,
 			should_block_on_abandoned, &rldr->o->cpu_mask_info,
 			deadline_jiffies 	/* deadline */,
-			deadline_jiffies	/* priority (prioritize by IO expiry) */,
+			rldr->o->jiffies1	/* priority (prioritize by IO total age) */,
 			rldr);
 
 	if (rv != -EINPROGRESS) { // Synchronous answer
