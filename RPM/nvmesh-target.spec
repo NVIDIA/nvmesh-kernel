@@ -59,6 +59,7 @@ cp -rf %{_builddir}/%{name}/scripts/target %{buildroot}/opt/nvmesh/target-repo/s
 cp -rf %{_builddir}/%{name}/upgrade_scripts/nvmesh-target %{buildroot}/opt/nvmesh/target-repo
 mv %{buildroot}/opt/nvmesh/target-repo/nvmesh-target %{buildroot}/opt/nvmesh/target-repo/upgrade_scripts
 mv -n %{buildroot}/opt/nvmesh/target-repo/target_*/tools/toma_rpc %{buildroot}/opt/nvmesh/common-repo/tools/
+rm -f %{buildroot}/opt/nvmesh/target-repo/target_*/tools/toma_rpc
 cp -rf %{_builddir}/%{name}/toma/toma.d/* %{buildroot}/opt/nvmesh/common-repo/toma.d/
 cp -rf %{_builddir}/%{name}/toma/toma_trace.config %{buildroot}/var/log/nvmesh/
 cp -rnf %{buildroot}/opt/nvmesh/target-repo/*/toma/bin/*/nvmeibt_toma_src_tar.pgp %{buildroot}/var/log/nvmesh/ #-n stands to prevent errors on more than once copies
