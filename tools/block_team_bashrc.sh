@@ -38,6 +38,7 @@ alias gg=git_grep
 alias gb=git_branch
 alias gbl='git_branch log'
 alias view='less -RN'
+alias codex='~/.vscode-server/extensions/*/bin/linux-x86_64/codex';
 [ -z "$(which pssh)" ] && PSSH_UTIL='parallel-ssh' || PSSH_UTIL='pssh';
 
 function echo_red() {    echo -e "\e[0;31m$*\e[0m"; }
@@ -60,7 +61,7 @@ function NVMESH_help() {
 	echo "ssh opc@infra-jump-ashburn;          ssh nvmesh-ci-8012-n{1-10}  : NVRocks OCI";
 	echo "    ssh client-5010-n{1-10}          ssh      in-c99021-n{1-10}  : NVRocks Luster";
 	echo " * Mgmt UI: From lapotop: ssh -f -N -L 4034:localhost:4000 n34;   Type in chrome: http://localhost:4034/";
-	echo " * Jenkins/Logs: ssh mtv-excelero1; cd /auto/nvmesh_jenkins/jenkins-builds/; cd /auto/nvmesh_log/logs/;  grep __copyCI";
+	echo " * Jenkins/Logs: ssh mtv-excelero1; CI=/auto/nvmesh_jenkins/jenkins/logs/<hash-id/run-num>; QA_bugs=/auto/nvmesh_log/logs/;  grep __copyCI";
 	echo "ssh opc@infra-jump-madrid;           ssh nvmesh-ci-1646-n{1-10}, ssh -f -N -L 1646:nvmesh-ci-1646-n1:4000 opc@infra-jump-madrid;  https://localhost:1646/";
 	echo "ssh root@10.65.34.67;                ssh in-c{1000-1015}-n{1-10}";
 	echo " * Orange:  Ctrl+B + [0-9] to select window, dd skip=in, seek=out";
@@ -85,7 +86,7 @@ function NVMESH_perf() {
 	#sudo perf top
 }
 
-BASHRC_VER='1.22';
+BASHRC_VER='1.24';
 [ -f /usr/bin/git ] && GIT_USER=`git config --get user.name` || GIT_USER="???";
 if [[ -f /usr/lib64/openmpi/bin/orted ]]; then
 	module purge; module load mpi/openmpi-x86_64;
@@ -171,7 +172,7 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		elif [ "$1" == "squash" ]; then			# Squash n top commits. Very useful for code review
 			local VVV=$2; git reset --hard HEAD~$VVV; git merge --squash HEAD@{1}; git commit; return 0;
 		elif [ "$1" == "log" ]; then			# use --all -1000 to show all
-			if [[ -z "$2" ]]; then local branches_flags="wip_work origin/master danielhsh/wip_work"; else local branches_flags="${@:2}"; fi
+			if [[ -z "$2" ]]; then local branches_flags="--branches origin/master danielhsh/wip_work danielhsh/tmp"; else local branches_flags="${@:2}"; fi
 			git log --color --graph --pretty=format:'%C(yellow)%h%C(bold red)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative ${branches_flags};
 			return 0;
 		elif [ "$1" == "latest" ]; then
@@ -290,6 +291,8 @@ if [[ $IS_LOCAL == "Y" ]]; then
 			rmv_rpms="${MY_PROJECTS_DIR}/$cur_branch/nvmesh-core*"
 			echo -e "-------\e[34m ${rmv_rpms}.rpms removing from $cluster \e[39m--------"
 			${PSSH_UTIL} $cluster "rm -f $rmv_rpms"
+		elif [[ $1 == toma37* ]]; then
+			cmd="rsync --compress --cvs-exclude --include=core --ignore-errors --exclude-from=excludes -rlpgoDz --checksum . -e ssh n37:projects/${cur_branch}"; echo $cmd; eval $cmd;
 		elif [[ $1 == s* ]]; then
 			./build.sh simulator
 		elif [[ $1 == g* ]]; then
@@ -490,18 +493,17 @@ if [[ $IS_LOCAL == "Y" ]]; then
 	function APP_launch() {
 		cmd="";
 		if [[ $1 == [Bb]ackup* ]]; then
-			DST="~/Documents/LocalGDrive/99\ Backups/Linux/Nvidia";
+			DST="/mnt/d/GDrive/99\ Backups/Linux/Nvidia";
 			clear; echo_title  "Copying to gDrive";
 			cmd="rsync $THIS_FILE ${DST}/home/zshrc"; echo $cmd; eval $cmd;
 			cmd="rsync  ~/.gitconfig ${DST}/home/.gitconfig"; echo $cmd; eval $cmd;
 			cmd="rsync  ~/.config/Code/User/*.json ${DST}/home/_config/Code_User/"; echo $cmd; eval $cmd;
 			cmd="rsync  ~/.config/git/* ${DST}/home/_config/git/"; echo $cmd; eval $cmd;
 			cmd="rsync  ~/.ssh/* ${DST}/home/_ssh/"; echo $cmd; eval $cmd;
-			cmd="rsync /etc/hosts ${DST}/etc/hosts"; echo $cmd; eval $cmd;
-			cmd="rsync /etc/resolv.conf* ${DST}/etc/"; echo $cmd; eval $cmd;
+			#cmd="rsync /etc/hosts ${DST}/etc/hosts"; echo $cmd; eval $cmd;
+			#cmd="rsync /etc/resolv.conf* ${DST}/etc/"; echo $cmd; eval $cmd;
 			#cmd="sudo rsync /etc/netplan/* ${DST}/etc/netplan/"; echo $cmd; eval $cmd;
-			echo_title "Syncing gDrive to cloud";
-			cmd="cd ~/Documents; rclone sync ./LocalGDrive Gdrive: --verbose --drive-acknowledge-abuse; #sync -> check;"
+			#echo_title "Syncing gDrive to cloud"; cmd="cd ~/Documents; rclone sync ./LocalGDrive Gdrive: --verbose --drive-acknowledge-abuse; #sync -> check;"
 		elif [[ $1 == vs* ]]; then	# vscode
 			cmd="code . --remote wsl+Ubuntu";
 		elif [[ $1 == sle* ]]; then	# sleep, suspend
@@ -516,7 +518,7 @@ if [[ $IS_LOCAL == "Y" ]]; then
 			prev_cor_pat=`cat ${core_pat_file}`;
 			sudo bash -c "echo 'core.%e.%p' > ${core_pat_file}";
 			new_cor_pat=`cat ${core_pat_file}`;
-			echo "$prev_cor_pat --> $new_cor_pat"
+			echo "$prev_cor_pat --> $new_cor_pat";
 			cmd="ulimit -c";
 		elif [[ $1 == nvi* ]]; then
 			nvinit ssh -user danielhe;		# nvssh
@@ -534,8 +536,10 @@ if [[ $IS_LOCAL == "Y" ]]; then
 			APP_launch core;
 			cmd="konsole --tabs-from-file ~/Documents/LocalGDrive/99\ Backups/Linux/kconsole_tabs.txt &"; echo $cmd; eval $cmd;
 			cmd="/usr/bin/google-chrome-stable &";
+		elif [[ $1 == ai* ]]; then
+			cd ~/projects/nvmesh; APP_help name AI; echo "Starting codex..."; codex;
 		else
-			echo "params: Backup /core / ping / find (proc by window) / boot / nvinit";
+			echo "params: Backup / ai / core / ping / find (proc by window) / boot / nvinit";
 			echo "Disable Line Wrap: $DISABLE_LINE_WRAP";
 		fi
 		echo $cmd; eval $cmd;
@@ -592,25 +596,17 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		ZZOUT="grep -v -e '.DS_Store' -e 'desktop.ini' zz_out.txt | grep '^[^\.]'";
 		echo "cd ~/Documents; $RSYNC './LocalGDrive/' '/media/${USER}/Seagate Expansion Drive/01 DanielDocs/Google Drive/' > zz_out.txt; $ZZOUT"
 		#echo "vim ~/.config/rclone/rclone.conf"
-		# echo "---------------------- MAC --------------------"
-		# echo "Search   : Apps alt+{F1,F2,F3, F5}, in aps alt+F"
-		# echo "Spectacle: Ctrl+Shift+ {qawsdfc3,<-,->}"
-		#echo_title "Ubunto";
-		#echo "Heb/Eng  : alt+space,        Alt + F2: Run Cmd";
-		#echo "Workspaces: Win+A: Show all, Win+Pgup/Pgdn cycle, Win+Shift+Pgup/Pgdn move app to workspace"
-		#echo "Spectacle: Win+ <-,->, Win+Shift+<-,->, Alt+F7/F8: Window Move/Resize, Hold Shift"
-		#echo "Terminal: Ctrl+Shit+  {T-newTab, .-CopyInput /-StopCopy}"
 		echo_title "Find";
 		echo "find . -type f -regex '.*/proc[^/]*$'"
 		echo "find . -name \"core.[0123456789]*\" # -type f -delete"
 		echo -e "  \e[0;31mRed\e[0;39m  \e[0;32mgreen\e[0;39m  \e[16;34mBlue\e[0;39m  \e[1;31mBold\e[0;39m  \e[2;31mDark\e[0;39m  \e[4mUnd\e[0;39m  \e[5mBlink\e[0m  "
 		echo "LineWrap off: " 'echo -ne "\x1b[?7l"' " LineWrap on: " 'echo -ne "\x1b[?7h"';
 		echo_title "GOODIES";
-		echo "* Employee ID 49355, Desk: 31-268, IT 24x7: 074-7238000 ext 1, " 'Wifi: NV-Mobile: 99$@2000';
+		echo "* Employee ID 49355, Desk: 31-263, IT 24x7: 074-7238000 ext 1, " 'Wifi: NV-Mobile: 99$@2000';
 		echo "* Ahmash: 0747236000/3, RSOC-Israel@nvidia.com"
 		echo "* DEV: $MY_DEV_SERVER";
 		#eval ${DISABLE_LINE_WRAP};
-		wsl.exe -l -v; echo "wsl.exe --shutdown";
+		wsl.exe -l -v; echo "wsl.exe --shutdown;      wt.exe;";
 		if [[ $1 == na* ]]; then
 			export PS1='\[\e]0;'$2'\a\]\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$';
 		fi
@@ -872,7 +868,7 @@ else
 				echo_title "Excluded drives";
 				cat /etc/nvmesh/target_devices.conf | grep -v '^#';
 				echo_title "Fix Toma persistency";
-				echo "/opt/nvmesh/target-repo/target*/toma/scripts/toma_persistence_to_JSON.sh";
+				echo "${NVMESH_DIR_SRC}/target-repo/target*/toma/scripts/toma_persistence_to_JSON.sh";
 				local toma_trace_conf="/var/log/nvmesh/toma_trace.config";
 				echo "cp ${toma_trace_conf} ${toma_trace_conf}.ORIG_`date +%d%b%Y_%H%M%S`";
 				echo "echo '+ all' > ${toma_trace_conf}";
@@ -1484,7 +1480,7 @@ else
 			grep 'Call Trace' $logs_dir/z_jctl_5min.txt > $logs_dir/z_jctl_5min_warn.txt;
 			[ -s $logs_dir/z_jctl_5min_warn.txt ] && echo_red "journalctl Has errors!" || echo "0";
 			echo_title "Saving new logs";
-			cmd="sudo /opt/nvmesh/common-repo/scripts/nvmesh_snapshot_logs.sh --toma"; echo $cmd; eval $cmd;
+			cmd="sudo ${NVMESH_DIR_SRC}/common-repo/scripts/nvmesh_snapshot_logs.sh --toma"; echo $cmd; eval $cmd;
 			cmd="sudo $pg_path $tr_path --clnt $param > $logs_dir/z_clnt_5min.txt"; echo $cmd; eval $cmd;
 			cmd="sudo $pg_path $tr_path -l nvmeibp_trace_long nvmeibm_trace_long $param > $logs_dir/z_comn_5min.txt"; echo $cmd; eval $cmd;
 			cmd="sudo $pg_path $tr_path -l nvmeibp_trace_long nvmeibs_trace_long $param > $logs_dir/z_srvr_5min.txt"; echo $cmd; eval $cmd;

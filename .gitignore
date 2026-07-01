@@ -159,6 +159,10 @@ io_pet_messages.txtlog
 error_tags_run_end.json
 common/pet/.venv-py3/
 common/pet/build/
+toma/scripts/persist_3/.venv-py3/
+toma/scripts/persist_3/.venv-py*/
+toma/scripts/persist_272/.venv-test-py*/
+toma/scripts/persist_272/build/
 !azure/modprobe.d
 !clnt/block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o
 !config/nvmesh.conf.d
