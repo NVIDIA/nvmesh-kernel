@@ -27,7 +27,8 @@ for x in $optional_target_transfer_list; do
 	fi
 done
 
-tar czf target.tgz $target_transfer_list $toma_symbols $target_opt
+tar -czf target.tgz --transform='s#^tools/toma_rpc/toma_rpc$#tools/toma_rpc#' \
+	$target_transfer_list $toma_symbols $target_opt
 #	cat install-node node.tgz > install-node.ses.sh
 #	chmod +x install-node.ses.sh
 
