@@ -1367,10 +1367,14 @@ class VolumeAttachLastCont2IOEnabled(BasePhase):
         # End condition. Ignore any "Enabling I/O" that predates our start:
         # it is a stale enable from before the volume was re-attached and would
         # produce an invalid (negative) interval if bound as this phase's end.
+        # Keep the LAST enable (overwrite): the pager can repeat "Enabling I/O"
+        # per-segment, and the aggregate IO-disabled span is anchored to the
+        # max enable - so tolerate the duplicate instead of aborting on the
+        # strict setter's overwrite guard.
         if "Enabling I/O" in msg:
             if self._start is not None and entry.timestamp < self._start:
                 return False
-            self.set_end(entry.timestamp, source_msg=entry.message)
+            self.set_end(entry.timestamp, source_msg=entry.message, overwrite=True)
             return True
 
         return False
