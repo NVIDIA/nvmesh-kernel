@@ -927,11 +927,33 @@ class SimpleSystemdPhase(CompositePhase):
             if entry.message.startswith(self.start_msg_prefix):
                 self.set_start(entry.timestamp, source_msg=entry.message)
                 consumed_by_self = True
-            elif entry.message.startswith(self.end_msg_prefix):
-                self.set_end(entry.timestamp, source_msg=entry.message)
+            elif self._is_end_message(entry.message):
+                # Keep the LAST end marker (overwrite): on a plain stop systemd
+                # logs both "<unit>: Succeeded." and "Stopped <desc>." ~1ms
+                # apart; keeping the last preserves the historical "Stopped"
+                # timing and tolerates the double match without aborting.
+                self.set_end(entry.timestamp, source_msg=entry.message, overwrite=True)
                 consumed_by_self = True
 
         return consumed_by_self or consumed_by_child
+
+    def _is_end_message(self, message: str) -> bool:
+        """
+        True if `message` marks the end of this phase.
+
+        The normal marker is `end_msg_prefix` ("Started"/"Stopped"). But on a
+        *restart*, systemd emits no separate "Stopped <desc>." between the stop
+        and the following start - the only stop-completion line is the unit
+        result ("<unit>: Succeeded." on el8 systemd, or "<unit>: Deactivated
+        successfully." on newer systemd). Accept those as the end of a stop
+        phase so "CM/TD restart" isn't left with a missing end.
+        """
+        if message.startswith(self.end_msg_prefix):
+            return True
+        if self.start_msg_prefix == "Stopping":
+            return (message.startswith(f"{self.service_name}: Succeeded")
+                    or message.startswith(f"{self.service_name}: Deactivated successfully"))
+        return False
 
 class ClientStopPhase(SimpleSystemdPhase):
     """Tracks the 'client stop' phase (Stopping... to Stopped...)."""
@@ -1202,12 +1224,20 @@ class VolumeDetachPhase(BasePhase):
         msg = entry.message
 
         # 2. Logic
+        # Detach start: keep the FIRST "Disabling I/O". That is when IO was
+        # actually disabled, and it is what the IO-disabled measurement is
+        # anchored to. The pager can emit the marker again later in the same
+        # detach (per-segment / retry); ignore repeats rather than aborting on
+        # the strict setter's overwrite guard.
         if "Disabling I/O" in msg:
-            self.set_start(entry.timestamp, source_msg=entry.message)
+            if self._start is None:
+                self.set_start(entry.timestamp, source_msg=entry.message)
             return True
 
+        # Detach end: keep the LAST terminal event, so a repeated
+        # "Detach finished"/"Detach failed" updates the end instead of aborting.
         if "Detach finished" in msg or "Detach failed" in msg:
-            self.set_end(entry.timestamp, source_msg=entry.message)
+            self.set_end(entry.timestamp, source_msg=entry.message, overwrite=True)
             return True
 
         return False
@@ -1286,9 +1316,12 @@ class VolumeAttachConf2LastCont(BasePhase):
 
         msg = entry.message
 
-        # Start condition
+        # Start condition: keep the FIRST "Attach finished" (attach begins
+        # there). The pager can repeat this marker per-segment; ignore repeats
+        # rather than aborting on the strict setter's overwrite guard.
         if "Attach finished" in msg:
-            self.set_start(entry.timestamp, source_msg=entry.message)
+            if self._start is None:
+                self.set_start(entry.timestamp, source_msg=entry.message)
             return True
 
         # End condition (Update repeatedly to find the *last* one)
@@ -1319,13 +1352,24 @@ class VolumeAttachLastCont2IOEnabled(BasePhase):
         msg = entry.message
 
         # Start condition (Update repeatedly to match the *last* CONT disk)
-        # This ensures this phase starts exactly where the previous one ended
+        # This ensures this phase starts exactly where the previous one ended.
         if "CONT disk" in msg:
             self.set_start(entry.timestamp, source_msg=entry.message, overwrite=True)
+            # A CONT disk seen after we already recorded an end means that end
+            # belonged to an earlier IO-enable (e.g. the pre-NDU steady state),
+            # not to the enable that follows this re-attach. Drop it so we
+            # re-match the "Enabling I/O" that comes *after* this start;
+            # otherwise end < start yields a negative-duration interval.
+            if self._end is not None and self._end < self._start:
+                self._end = None
             return True
 
-        # End condition
+        # End condition. Ignore any "Enabling I/O" that predates our start:
+        # it is a stale enable from before the volume was re-attached and would
+        # produce an invalid (negative) interval if bound as this phase's end.
         if "Enabling I/O" in msg:
+            if self._start is not None and entry.timestamp < self._start:
+                return False
             self.set_end(entry.timestamp, source_msg=entry.message)
             return True
 
