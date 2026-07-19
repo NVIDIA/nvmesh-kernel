@@ -138,7 +138,7 @@ if ! $isUpgrade; then
 		/bin/rm -fr /lib/modules/*/extra/nvmesh
 	fi
 
-	compressed_kos=`find -L $MDIR -name '*.ko.xz' -type f`
+	compressed_kos=`find -L $MDIR -name '*.ko.xz*' -type f 2>/dev/null`
 	# if compressed kos found then remove old decompressed kos
 	if [ ! -z "$compressed_kos" ]; then
 		find -L $MDIR -name '*.ko' -type f -exec rm -f {} +
