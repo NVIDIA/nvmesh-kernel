@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # View IO-PET traces produced by blk_unitest.
 # Wraps common/pet/pet_messages.sh view (which runs under poetry).
 #

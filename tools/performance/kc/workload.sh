@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Benchmark raid-1 randwrite-4K with optional system-wide perf flamegraph collection.
 # Usage: ./run_raid1_perf.sh OUTPUT_DIR [--vol-name NAME] [--capacity SIZE] [--runs N] [--no-perf]
 set -euo pipefail
