@@ -33,7 +33,6 @@
 		"nvmeibs_toma.h": "c",
 		"nvmeibs_disk_locks.h": "c",
 		"random": "c",
-		"nvmeibc_ib_net_io.h": "c",
 		"nvmeibc_raid_recov_itr.h": "c",
 		"nvmeibc_jam.h": "c",
 		"nvmeibc_block_dp_dbits.h": "c",

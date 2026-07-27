@@ -220,8 +220,7 @@ It did **not** protect:
 3. `__inject_debug_di_with_sync_info` for mirror sync writes that share an
    NDB via `__set_write_buffer_to_valid_source`.
 4. `dp_dbgdi_do_add_info_core_pre` / `core_post` — called per leg from
-   `nvmeibc_disk.c`, `nvmeibc_ib_net.c`, `nvmeibc_ib_net_io.c`,
-   `nvmeibc_ib_net_nordda.c`.
+   `nvmeibc_disk.c`, `nvmeibc_ib_net.c`, `nvmeibc_ib_net_nordda.c`.
 
 NVMESH-4505 was sufficient to clear the most obvious symptom (the FIFO MD
 corruption it was reported against) because that symptom involved the
