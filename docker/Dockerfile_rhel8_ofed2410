@@ -1,6 +1,6 @@
 FROM rockylinux:8
 
-WORKDIR /excelero
+WORKDIR /nvmesh
 
 RUN yum groupinstall -y "Development Tools"
 RUN yum install -y rsync rdma-core rdma-core-devel kernel kernel-devel kernel-headers
@@ -20,7 +20,7 @@ RUN yum install -y gcc-gfortran kernel-modules-extra tcl fuse-libs tk tcsh numac
 RUN curl -f https://content.mellanox.com/ofed/MLNX_OFED-24.10-4.1.4.0/MLNX_OFED_LINUX-24.10-4.1.4.0-rhel8.9-x86_64.tgz | tar -xz
 RUN ./MLNX_OFED_LINUX-24.10-4.1.4.0-rhel8.9-x86_64/mlnxofedinstall -k $(basename $(rpm -ql kernel-devel | head -1)) --add-kernel-support --skip-repo
 
-WORKDIR /excelero
+WORKDIR /nvmesh
 
 
 

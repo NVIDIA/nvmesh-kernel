@@ -1,7 +1,7 @@
 # Use Ubuntu 22.04 (Jammy Jellyfish) as the base image with Azure Kernel 5.15.0-1052
 FROM ubuntu:22.04
 
-ENV DIRPATH /excelero
+ENV DIRPATH /nvmesh
 WORKDIR $DIRPATH
 
 # Avoid prompts from apt

@@ -130,7 +130,7 @@ if [ -z $GIT_DESCRIBE ] ; then
 fi
 
 if [ -z $BUILD_DIR ]; then
-	BUILD_DIR="/excelero"
+	BUILD_DIR="/nvmesh"
 fi
 
 if [ -z $RPM_PATH ] ; then

@@ -1,6 +1,6 @@
 FROM centos:7
 
-ENV DIRPATH /excelero
+ENV DIRPATH /nvmesh
 WORKDIR $DIRPATH
 
 RUN yum groupinstall -y "Development Tools"

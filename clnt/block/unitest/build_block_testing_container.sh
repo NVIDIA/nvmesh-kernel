@@ -19,7 +19,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # Defaults
 DISTRO="aks"
 CT="podman"
-BUILD_DIR="/excelero"
+BUILD_DIR="/nvmesh"
 PLATFORM="linux/amd64"
 CONTAINER_NAME=""
 IMAGE_NAME=""
@@ -36,7 +36,7 @@ Options (before command):
   -d, --distro <name>   Linux distro, default: aks (matches docker/Dockerfile_<name>)
       --platform <p>    Container platform, default: linux/amd64 (use linux/arm64 for native)
       --docker          Use Docker instead of Podman
-      --build-dir <dir> Mount point inside container, default: /excelero
+      --build-dir <dir> Mount point inside container, default: /nvmesh
   -h, --help            Print this help
 
 Commands:

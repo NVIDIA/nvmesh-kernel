@@ -1,6 +1,6 @@
 FROM rockylinux/rockylinux:10
 
-WORKDIR /excelero
+WORKDIR /nvmesh
 
 RUN dnf groupinstall -y "Development Tools"
 RUN dnf install -y rsync kernel kernel-devel kernel-headers

@@ -1,6 +1,6 @@
 FROM rockylinux:8
 
-WORKDIR /excelero
+WORKDIR /nvmesh
 
 RUN yum groupinstall -y "Development Tools"
 RUN yum install -y rsync rdma-core rdma-core-devel kernel kernel-devel kernel-headers

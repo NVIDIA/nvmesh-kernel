@@ -1121,4 +1121,4 @@ No fundamental changes to prepare/execute logic needed for 3-way - the code is a
 ### References
 
 [^1]: Block [book](./clients_block_device_overview.md).
-[^2]: Excelero [README](../../../README.md).
+[^2]: NVMesh [README](../../../README.md).

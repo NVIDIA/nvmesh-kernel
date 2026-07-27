@@ -1852,7 +1852,7 @@ out:
 
 
 /**
- * Locates the Excelero metadata partition in the GPT, return NULL if non found.
+ * Locates the NVMesh metadata partition in the GPT, return NULL if non found.
  *
  * @author max (6/25/17)
  *
@@ -1866,7 +1866,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_gpt_ent
 }
 
 /**
- * Locates the Excelero journal data partition in the Journal-GPT, return NULL
+ * Locates the NVMesh journal data partition in the Journal-GPT, return NULL
  * if non found.
  *
  * @author max (6/25/17)
@@ -1882,7 +1882,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_journal
 
 
 /**
- * Locates the Excelero serjio_db partition in the Journal-GPT, return NULL if
+ * Locates the NVMesh serjio_db partition in the Journal-GPT, return NULL if
  * non found.
  *
  * @author max (6/25/17)
@@ -1896,7 +1896,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_serjio_
 	return get_gpt_entry_by_type_uuid(gpt, &NVMESH_SERJIO_DB_PARTITION_TYPE_GUID);}
 
 /**
- * Locates the Excelero disk_metadata partition in the metadata GPT, return NULL
+ * Locates the NVMesh disk_metadata partition in the metadata GPT, return NULL
  * if non found.
  *
  * @author max (6/25/17)
@@ -2176,15 +2176,15 @@ struct partition_guid_name {
 static struct partition_guid_name partition_mapping[] = {
 	{ .uuid = {.ll = {0x0000000000000000, 0x0000000000000000}}, .partition_type_name = "Unused entry" },
 	//
-	{ .uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero metadata
-	{ .uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero Serjio
-	{ .uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST,		.partition_type_name = "excelero_metadata" },	// Excelero Journal
+	{ .uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// NVMesh metadata
+	{ .uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// NVMesh Serjio
+	{ .uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST,		.partition_type_name = "excelero_metadata" },	// NVMesh Journal
 	{ .uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
 	{ .uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_OLD_CONST,	.partition_type_name = "excelero_metadata" },	// OLD
 	{ .uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
 	//
-	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST,	.partition_type_name = "data" },				// Excelero Segment Journaled
-	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST,	.partition_type_name = "data" },				// Excelero Segment non-Journaled
+	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST,	.partition_type_name = "data" },				// NVMesh Segment Journaled
+	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST,	.partition_type_name = "data" },				// NVMesh Segment non-Journaled
 	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_DATA_OLD_CONST,		.partition_type_name = "data" },				// OLD
 	//
 	{ .uuid = {.ll = {0x024DEE4133E711D3, 0x9D690008C781F39F}}, .partition_type_name = "MBR partition scheme" },

@@ -1,7 +1,7 @@
 # Use Ubuntu 24.04 (Noble Numbat) as the base image
 FROM ubuntu:24.04
 
-ENV DIRPATH /excelero
+ENV DIRPATH /nvmesh
 WORKDIR $DIRPATH
 
 # Avoid prompts from apt
@@ -87,7 +87,7 @@ RUN make install
 RUN curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py
 RUN python2.7 get-pip.py
 
-WORKDIR /excelero
+WORKDIR /nvmesh
 
 # Set the default command for the container
 #CMD ["/bin/bash"]
