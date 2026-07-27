@@ -602,8 +602,6 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		echo -e "  \e[0;31mRed\e[0;39m  \e[0;32mgreen\e[0;39m  \e[16;34mBlue\e[0;39m  \e[1;31mBold\e[0;39m  \e[2;31mDark\e[0;39m  \e[4mUnd\e[0;39m  \e[5mBlink\e[0m  "
 		echo "LineWrap off: " 'echo -ne "\x1b[?7l"' " LineWrap on: " 'echo -ne "\x1b[?7h"';
 		echo_title "GOODIES";
-		echo "* Employee ID 49355, Desk: 31-263, IT 24x7: 074-7238000 ext 1, " 'Wifi: NV-Mobile: 99$@2000';
-		echo "* Ahmash: 0747236000/3, RSOC-Israel@nvidia.com"
 		echo "* DEV: $MY_DEV_SERVER";
 		#eval ${DISABLE_LINE_WRAP};
 		wsl.exe -l -v; echo "wsl.exe --shutdown;      wt.exe;";
