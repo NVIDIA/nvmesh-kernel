@@ -226,10 +226,6 @@ enum nvmeib_dev_type nvmeib_get_device_type(struct ib_device *ib_dev);
 bool nvmeib_device_sup_cap(enum nvmeib_dev_type t, enum nvmeib_dev_cap cap);
 int nvmeib_device_get_max_rd_atom_on_wire(enum nvmeib_dev_type t);
 
-/* Used for memory usage calculation */
-ssize_t nvmeib_ibdr_get_mr_usage(struct ib_device *ib_dev, struct ib_mr *ib_mr,
-								 enum nvmeib_cnt_mem_type mem_type);
-
 /*option to enable capability of a given device type*/
 void nvmeib_ib_driver_enable_cap(enum nvmeib_dev_type t, enum nvmeib_dev_cap cap, bool enable);
 
