@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 A test application for user mode RDMA connection management.
 The current code can only be used with IP addresses set to the RDMA NICS.
 To run the code please follow the current steps:

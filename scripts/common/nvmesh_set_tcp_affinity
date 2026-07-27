@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # This script configures receive steering for SIW to optimize performance and throughput
 # Needs to be run as root
 
@@ -41,7 +38,7 @@ function usage()
 	echo -e "\t[-b]--baseq] <base-rx-queue>"
 	echo -e "\t[-p|--port] <siw-base-port>"
 	echo -e "\t[-e|--entries] <rps-sock-flow-entries>"
-	echo -e "\t[-m|--domain] <affinity-domain - pernuma, persocket, fullspread, pernuma_thread0, persocket_thread0, list-of-cpus e.g. \"16,17,18,19,20,21,22,23,24\" or \`seq -c, 0 15\` >"
+	echo -e "\t[-m|--domain] <affinity-domain - pernuma, persocket, fullspread, list-of-cpus e.g. \"16,17,18,19,20,21,22,23,24\" or \`seq -c, 0 15\` >"
 	echo -e "\t[-n|--noirq] Don't set IRQ affinity"
 	echo -e "\t[-f|--flowsteer] <flow-steering-mode - rfs, ntuple, none> (none falls back to RSS if enabled)"
 	echo -e "\t[-s|--rpsmode] <rps-mode - alldomain, irq_range_wrap, irq_neighbour, off, donttouch>"
@@ -51,8 +48,8 @@ function usage()
 	exit 1
 }
 
-SHORT_OPTIONS="hnx" # no args
-SHORT_OPTIONS+="d:q:p:e:b:m:c:r:f:s:" # with arg
+SHORT_OPTIONS="hn" # no args
+SHORT_OPTIONS+="d:q:p:e:b:m:c:r:f:s:x:" # with arg
 
 LONG_OPTIONS="help,noirq,setrxq,dryrun,clean" # no args
 LONG_OPTIONS+=",device:"
@@ -302,7 +299,7 @@ function is_integer() {
 # Increase number of Rx/Combined Queues/Channels via ethtool -L option
 # ------------------------------------------------------------------------------
 # Example:
-# root@nvmesh1:/root# ethtool -l $BASE_DEVICE
+# root@nvsmesh1:/home/excelero# ethtool -l $BASE_DEVICE
 # Channel parameters for enP40275s1:
 # Pre-set maximums:
 # RX:             48
@@ -315,7 +312,7 @@ function is_integer() {
 # Other:          0
 # Combined:       0
 #
-# root@nvmesh1:/root# ethtool -l eth0
+# root@nvmesh1:/home/excelero# ethtool -l eth0
 # Channel parameters for eth0:
 # Pre-set maximums:
 # RX:             0
@@ -451,32 +448,13 @@ NIC_N_CPU=0
 #
 # persocket - All CPUs with the same socket as the NIC
 #
-# pernuma_thread0 - One logical CPU per physical core (first HT) in the NIC's NUMA node
-#
-# persocket_thread0 - One logical CPU per physical core (first HT) in the NIC's socket
-#
 # fullspread - All CPUs
 #
 # custom-list - List of CPUs separated by commas eg "16,17,18,19" - can be generated using seq -c,
 #
 # ------------------------------------------------------------------------------
 NIC_NUMA_NODE=$(cat /sys/class/net/$BASE_DEVICE/device/numa_node)
-
-# If the NIC has no NUMA affinity (e.g. virtio/passthrough in a VM), neither
-# pernuma nor persocket has a meaningful answer. Negative array indices in
-# bash silently return the last-written slot, which would pin every IRQ to
-# whatever CPU happens to be in that "socket". Fall back to fullspread so the
-# IRQs at least get distributed.
-if [ "$NIC_NUMA_NODE" -lt 0 ]; then
-	case $AFFINITY_DOMAIN in
-		pernuma|persocket|pernuma_thread0|persocket_thread0)
-			warn_log "$BASE_DEVICE reports numa_node=$NIC_NUMA_NODE;"\
-			         " falling back from $AFFINITY_DOMAIN to fullspread"
-			AFFINITY_DOMAIN=fullspread
-			;;
-	esac
-fi
-
+NIC_SOCKET=${NUMA_2_SOCK[$NIC_NUMA_NODE]}
 case $AFFINITY_DOMAIN in
 	pernuma)
 		NIC_N_CPU=${NUM_CPUS_PER_NUMA[$NIC_NUMA_NODE]}
@@ -485,23 +463,9 @@ case $AFFINITY_DOMAIN in
 		done
 		;;
 	persocket)
-		NIC_SOCKET=${NUMA_2_SOCK[$NIC_NUMA_NODE]}
 		NIC_N_CPU=${NUM_CPUS_PER_SOCK[$NIC_SOCKET]}
 		for ((i=0;i<$NIC_N_CPU;i++)); do
 			CPU_ARRAY[$i]=${TBL_CPUS_PER_SOCK[$NIC_SOCKET,$i]}
-		done
-		;;
-	pernuma_thread0)
-		NIC_N_CPU=${NUM_CPUS_PER_NUMA_THREAD0[$NIC_NUMA_NODE]}
-		for ((i=0;i<$NIC_N_CPU;i++)); do
-			CPU_ARRAY[$i]=${TBL_CPUS_PER_NUMA_THREAD0[$NIC_NUMA_NODE,$i]}
-		done
-		;;
-	persocket_thread0)
-		NIC_SOCKET=${NUMA_2_SOCK[$NIC_NUMA_NODE]}
-		NIC_N_CPU=${NUM_CPUS_PER_SOCK_THREAD0[$NIC_SOCKET]}
-		for ((i=0;i<$NIC_N_CPU;i++)); do
-			CPU_ARRAY[$i]=${TBL_CPUS_PER_SOCK_THREAD0[$NIC_SOCKET,$i]}
 		done
 		;;
 	fullspread)

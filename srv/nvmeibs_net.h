@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBS_NET_H
 #define NVMEIBS_NET_H
 
@@ -99,6 +94,8 @@ struct nvmeibs_net_init {
 	bool use_atomic;
 	/*pointer to receive queue when no SRQ */
 	struct nvmeib_recvq *recv_q;
+	/*use special create_rdda_qp to create the QP */
+	bool rdda_qp;
 	/*free on net release instead of client release (Secondary Lock Channels) */
 	bool free_on_net_rls;
 

@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 MGMT_MDIR=/opt/NVMesh/management
 MGMT_PID_FILE=/var/run/NVMesh/nvmeshmgr/management.pid
 TOMA_PID_FILE=/var/run/NVMesh/nvmeshtarget/toma.pid
@@ -224,7 +221,7 @@ create_nvmesh_repo() {
 
 	echo "[NVMesh]
 name=NVMesh repository
-baseurl=https://$user:$password@repo.acme.com/nvmesh/1.3/$os/$os_ver/x86_64
+baseurl=https://$user:$password@repo.excelero.com/nvmesh/1.3/$os/$os_ver/x86_64
 gpgcheck=0
 enabled=1" > $nvmesh_repo_file
 

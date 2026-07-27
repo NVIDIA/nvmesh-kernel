@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_DISK_H
 #define NVMEIBC_DISK_H
 
@@ -175,9 +170,9 @@ struct nvmeibc_disk_channel_rsc {
 	/* the current entry from the list */
 	struct lock_seg_info *cur_lsi;
 
-	/* the io channel - removed */
+	/* the io channel */
 	union {
-		void *ch;
+		struct nvmeibc_ib_io_channel *ch;
 	};
 
 	/* admin stuff */
@@ -475,9 +470,9 @@ struct nvmeibc_disk {
 	char name[NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE];				// like: S3HCNX0K501681.1
 	char full_name[NVMEIB_HOST_NAME_LEN +
 		NVMEIB_DISK_MAX_NVMEXPRESS_ID_SIZE + 2];				// Exactly: disk_host-disk_name+
-	char disk_host[NVMEIB_HOST_NAME_LEN];				// like: n111.acme.com,
+	char disk_host[NVMEIB_HOST_NAME_LEN];				// like: n111.excelero.com,
 	/*node that holds the disk*/
-	char config_node_id[NVMEIB_HOST_NAME_LEN];			// like: n111.acme.com,
+	char config_node_id[NVMEIB_HOST_NAME_LEN];			// like: n111.excelero.com,
 	/* The disk's admin nics - remote and local.
 	   dup of all nics from configuration (see arnic-dup) */
 	struct list_head arnics;
@@ -503,7 +498,6 @@ struct nvmeibc_disk {
 	   List is maintained separately from disk->rionics list so not to
 	   be effected from its IO channels load-balancing (lists rotation) */
 	struct list_head nr_rionics;
-	unsigned n_nr_rionics;
 	/* First non-prefered no-rdda rionic */
 	struct list_head *nr_np_head;
 	/* main disk guard */
@@ -950,6 +944,9 @@ void nvmeibc_disk_reused_bb_release(struct nvmeibc_disk *disk,
 struct nvmeibc_disk_gen_cmd;
 int nvmeibc_disk_execute_gen(struct nvmeibc_disk *disk,
 	struct nvmeibc_disk_gen_cmd *gen_cmd);
+struct nvmeibc_ib_io_channel;
+int nvmeibc_disk_kill_channel(struct nvmeibc_disk *disk,
+	struct nvmeibc_ib_io_channel *ch, struct list_head *bailed_cmds);
 struct nvmeibc_disk_io_command * nvmeibc_disk_get_block_cmd_rdda(
 	struct nvmeibc_disk *disk, struct nvmeibc_channel *ch, u32 version);
 struct nvmeibc_volume_req_info;

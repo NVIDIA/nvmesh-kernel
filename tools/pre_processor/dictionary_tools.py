@@ -1,8 +1,5 @@
 #!/usr/bin/python3
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import argparse
 import json
 import sys
@@ -61,7 +58,7 @@ C_DMESG_TYPE_FORMATS = {
     'uuid_le': r'.*\%pU(?:L|l).*',
     'bitmap': r'.*\%[0-9]*pbl.*',
     'hex': r'.*\%[0-9]*ph.*',
-    'symbol': r'.*\%(?:pf|pF).*',
+    'symbol': r'.*\%(?:pf|pF|ps|pS).*',
     'stack_trace': r'.*\%(?:p).*',
 }
 

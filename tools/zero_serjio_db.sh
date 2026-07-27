@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # Writes to Journal MD
 # Usage:
 # zero_serjio_db.sh <disk_id> [db_entry]

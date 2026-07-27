@@ -57,15 +57,15 @@
 
 static bool panic_on_rx_err = false;
 module_param(panic_on_rx_err, bool, 0644);
-MODULE_PARM_DESC(panic_on_rx_err, "Panic on RX Error (bool).");
+MODULE_PARM_DESC(panic_on_rx_err, "Panic on RX Error\n");
 
 static unsigned int wait_rqe_delay_ms = 10;
 module_param(wait_rqe_delay_ms, int, 0644);
-MODULE_PARM_DESC(wait_rqe_delay_ms, "Delay to wait on empty S(RQ) (in ms) (int).");
+MODULE_PARM_DESC(wait_rqe_delay_ms, "Delay to wait on empty S(RQ) (in ms)\n");
 
 static unsigned int wait_rqe_max_retries = 10;
 module_param(wait_rqe_max_retries, int, 0644);
-MODULE_PARM_DESC(wait_rqe_max_retries, "Number of retries on empty S(RQ) (int).");
+MODULE_PARM_DESC(wait_rqe_max_retries, "Number of retries on empty S(RQ)\n");
 
 extern struct workqueue_struct *siw_rx_wq;
 
@@ -1979,7 +1979,7 @@ int siw_do_rx_work(struct siw_qp* qp)
 			if (tcp_inq(sk) < 1) {
 				/* Nothing to receive */
 				up_read(&qp->state_lock);
-				dprint(DBG_RX, "(QP%d): Nothing to receive\n", QP_ID(qp));
+				dprint(DBG_RX | DBG_ON, "(QP%d): Nothing to receive\n", QP_ID(qp));
 				rv = 0;
 				goto done;
 			}
@@ -2055,24 +2055,8 @@ void siw_rx_work_handler(struct work_struct* work)
 {
 	struct siw_iwarp_rx *rctx = container_of(work, struct siw_iwarp_rx, rx_work.work);
 	struct siw_qp *qp = RX_QP(rctx);
-	struct socket *s = READ_ONCE(qp->attrs.llp_stream_handle);
-	struct sock *sk;
-	unsigned long rq_flags;
+	struct sock *sk = qp->attrs.llp_stream_handle->sk;
 	int rv;
-
-	if (unlikely(!s)) {
-		goto put;
-	}
-
-	sk = s->sk;
-	lock_rq_rxsave(qp, rq_flags);
-	if (rctx->rx_in_progress) {
-		unlock_rq_rxsave(qp, rq_flags);
-		siw_qp_put(qp);
-		return;
-	}
-	rctx->rx_in_progress = 1;
-	unlock_rq_rxsave(qp, rq_flags);
 
 	lock_sock(sk);
 	if ((rv = siw_do_rx_work(qp)) < 0) {
@@ -2080,14 +2064,8 @@ void siw_rx_work_handler(struct work_struct* work)
 		"siw_do_rx_work() returned error %d\n",
 		       QP_ID(qp), rv);
 	}
-	lock_rq_rxsave(qp, rq_flags);
-	rctx->rx_in_progress = 0;
-	unlock_rq_rxsave(qp, rq_flags);
-
-	release_sock(sk);
-
-put:
 	siw_qp_put(qp); /* Put ref from siw_rx_queue_work */
+	release_sock(sk);
 }
 
 void siw_rx_queue_work(struct siw_qp *qp, unsigned long delay)

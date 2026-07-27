@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_disk_local_dma_pools.h"
 
 #include "nvmeibc_disk.h"
@@ -133,7 +128,7 @@ static void __local_free_reqs_llist_add(struct nvmeib_pool_local_free_llist *thi
 	if (threshold_met_for_local_free_reqs_llist(this_cpu_llist_for_target_cpu)) {
 		node = __llist_del_all(&this_cpu_llist_for_target_cpu->head);
 		if (node) {
-			llist_add_batch(node, this_cpu_llist_for_target_cpu->last, &target_pools->reqs_free_list);
+			nvmeib_public_llist_add_batch(node, this_cpu_llist_for_target_cpu->last, &target_pools->reqs_free_list);
 			schedule_work_on(target_cpu, &target_pools->dma_pool_free_reqs_work);
 			__local_free_reqs_llist_init(this_cpu_llist_for_target_cpu);
 		}
@@ -455,7 +450,7 @@ static void __empty_target_local_llist(int target_cpu, struct nvmeib_pool_local_
 	if (target_cpu_local_llist) {
 		node = llist_del_all(&target_cpu_local_llist->head);
 		if (node) {
-			llist_add_batch(node, target_cpu_local_llist->last, &target_cpu_pools_struct->reqs_free_list);
+			nvmeib_public_llist_add_batch(node, target_cpu_local_llist->last, &target_cpu_pools_struct->reqs_free_list);
 		}
 	}
 
@@ -478,7 +473,7 @@ void free_percpu_pools(struct nvmeibc_disk *disk, struct nvmeib_dma_percpu_pools
 	// as we are disconnecting, it is assumed here that the reqs_free_list cant grow at this point, only shrink. Cancel all outstanding works and free everything here.
 	for_each_possible_cpu(cpu) {
 		this_cpu_pools_struct = per_cpu_ptr(percpu_pools, cpu);
-		cancel_work_sync(&this_cpu_pools_struct->dma_pool_free_reqs_work);
+		nvmeib_public_cancel_work_sync(&this_cpu_pools_struct->dma_pool_free_reqs_work);
 	}
 
 	// now that there's no inflight works, we can empty all percpu percpu local free lists into their target cpu free list without the fear from race

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_IB_NORDDA_CHANNEL_H
 #define NVMEIBC_IB_NORDDA_CHANNEL_H
 
@@ -275,9 +270,8 @@ static inline bool ri_already_locked(struct nvmeibc_volume_req_info *ri)
 }
 
 #define REUSE_SG_FR_STORE(_req) \
-	({ \
+	do { \
 		extern bool nvmeibc_nr_store_fr; \
-		int _sgcount = (_req)->req.sgcount; \
 		if (nvmeibc_nr_store_fr && (_req)->req.sgcount) { \
 			BUG_ON((_req)->reuse_orig.sgcount || (_req)->reuse_orig.nmdesc || (_req)->reuse_orig.fr_list); \
 			(_req)->reuse_orig.sgcount = (_req)->req.sgcount; \
@@ -289,8 +283,7 @@ static inline bool ri_already_locked(struct nvmeibc_volume_req_info *ri)
 				(_req)->req.nmdesc = 0; \
 			} \
 		} \
-		_sgcount; \
-	})
+	} while (0)
 
 #define REUSE_FR_RESTORE(_req) \
 	do { \
@@ -365,10 +358,5 @@ void nvmeibc_ib_nordda_channel_reused_context(struct nvmeibc_ib_nordda_channel *
 bool nvmeibc_ib_nordda_channel_alive(struct nvmeibc_ib_nordda_channel *ch);
 
 int nvmeibc_ib_nordda_channel_poll_cqs(struct nvmeibc_ib_nordda_channel *ch, bool notify);
-
-/* Workqueue management */
-int nvmeibc_nordda_channel_wq_init(void);
-void nvmeibc_nordda_channel_wq_destroy(void);
-struct workqueue_struct *nvmeibc_nordda_channel_get_wq(void);
 
 #endif

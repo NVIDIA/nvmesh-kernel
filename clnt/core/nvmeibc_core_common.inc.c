@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "module/instance/nvmeibc_cinst_params.h"
 #include "core/nvmeibc_core_ibdev.inc.c"			// Todo replace by .h
 
@@ -34,7 +29,6 @@ int t_core_clnt_globals_create(const struct nvmeibc_cinst_params_core *p, const 
 	int rv = -ENOMEM, cpu;
 	extern void* nvmeibc_jam_init(const struct nvmeibc_cinst_params_core *p);
 	struct t_core_clnt_globals *cg = kzalloc(sizeof(*cg), GFP_KERNEL);
-	_NI(t_00_coreg, "@NDU client globals create (core) - start", 0);
 	if (!cg)
 		goto _out;
 	(*p->_private) = cg;
@@ -56,8 +50,8 @@ int t_core_clnt_globals_create(const struct nvmeibc_cinst_params_core *p, const 
 		_NE(t_02_coreg, "Failed to init watch dog");
 		goto _out;
 	}
-	if (!(cg->intr_shaper = nvmeib_get_intr_shaper())) {
-		_NE(t_03_coreg, "Failed to get interrupts shaper");
+	if (!(cg->intr_shaper = nvmeib_intr_shaper_create(p->shaper_fs, p->shaper_burst, p->shaper_max_pct_cpu))) {
+		_NE(t_03_coreg, "Failed to allocate interrupts shaper");
 		goto _out;
 	}
 	if (!(cg->pcpu_wds = kcalloc(nr_cpu_ids, sizeof(*cg->pcpu_wds), GFP_KERNEL))) {
@@ -83,7 +77,6 @@ int t_core_clnt_globals_create(const struct nvmeibc_cinst_params_core *p, const 
 	nvmeibc_core_set_local_server_notification(p, true);
 	rv = 0;
 _out:
-	_NI(t_07_coreg, "@NDU client globals create (core) - done", 0);
 	return rv;
 }
 
@@ -93,7 +86,6 @@ void t_core_clnt_globals_destroy(const struct nvmeibc_cinst_params_core *p)
 	extern void nvmeibc_jam_exit(const struct nvmeibc_cinst_params_core *p);
 	struct t_core_clnt_globals *cg = get_core_cints(p);
 	int cpu;
-	_NI(trace_1_c_core_destroy, "@NDU client globals destroy (core) - start", 0);
 	if (cg) {
 		remove_ib(p);
 		/* [NVMESH-4452]: Check for NULL cg->pcpu_wds before deref */
@@ -104,6 +96,8 @@ void t_core_clnt_globals_destroy(const struct nvmeibc_cinst_params_core *p)
 			}
 			kfree(cg->pcpu_wds);
 		}
+		/* nvmeib_intr_shaper_destroy() checks for NULL ptr internally */
+		nvmeib_intr_shaper_destroy(cg->intr_shaper); cg->intr_shaper = NULL;
 		/* nvmeib_wd_remove() checks for NULL ptr internally */
 		nvmeib_wd_remove(cg->wd_commands);           cg->wd_commands = NULL;
 		nvmeib_free_used_dev_list(&cg->devs_lists.used);
@@ -117,7 +111,6 @@ void t_core_clnt_globals_destroy(const struct nvmeibc_cinst_params_core *p)
 		get_core_cints(p) = NULL;
 	}
 	t_core_clnt_globals_params_free((struct nvmeibc_cinst_params_core *)p);
-	_NI(trace_2_c_core_destroy, "@NDU client globals destroy (core) - end", 0);
 }
 
 /************************* Free/Update Params IOctls **************************/

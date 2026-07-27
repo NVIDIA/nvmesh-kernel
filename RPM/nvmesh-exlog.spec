@@ -2,9 +2,9 @@ Name:				nvmesh-exlog
 Version:			%{version}
 Release:			%{release}
 Group:				System Environment/Kernel
-Summary:			"nvmesh-exlog" by NVIDIA
+Summary:			"nvmesh-exlog" by Excelero
 
-License:			GPL-2.0-only OR Apache-2.0 at your choice
+License:			Commercial Non OSI
 URL:				http://www.nvidia.com
 Source0:			%{name}
 
@@ -12,9 +12,9 @@ Requires:			%{requires_pkgs}
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+© Copyright 2025 Nvidia Corporation. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
 
-"Nvidia nvmesh-exlog" component.
+"Excelero nvmesh-exlog" component.
 	Branch: %{branch}
 	Commit: %{commit_id}
 	Kernel: %{kern_ver}

@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 source ../transfer_lists
 MONITOR_ROOT=$(dirname $(readlink -e $0))/..
 NVMESH_ROOT=$MONITOR_ROOT/..
@@ -31,8 +28,6 @@ usage:
 --build-number              package build number
 
 --ubuntu		    create deb package for ubuntu
-
---distroless		    build distroless container with the deb package
 EOF
 }
 
@@ -106,7 +101,6 @@ pkgDeb() {
 }
 
 isUbuntu=false
-buildDistroless=false
 buildNum="buildnumber" #default place holder for non-official build
 tools_to_make="nvmesh_exporter"
 
@@ -148,10 +142,6 @@ case $key in
     ;;
     --ubuntu)
     isUbuntu=true
-    ;;
-    --distroless)
-    buildDistroless=true
-    isUbuntu=true  # distroless requires deb package for now
     ;;
     --infra-branch)
     infraBranchName="$2"
@@ -299,15 +289,3 @@ if [ "$rpm_creation_retval" -eq "0" ] && [ "$signRPM" == true ]; then
 fi
 
 pkgDeb
-
-if [ "$buildDistroless" = true ]; then
-    deb_file=$(ls -1 ${packageName}*.deb 2>/dev/null | head -1)
-    
-    if [ -z "$deb_file" ]; then
-        echo "ERROR: No deb file found for distroless container build"
-        exit 1
-    fi
-    
-    SCRIPT_DIR=$(dirname $(readlink -e $0))
-    "$SCRIPT_DIR/build_distroless.sh" "$deb_file"
-fi

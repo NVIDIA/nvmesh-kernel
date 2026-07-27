@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "clnt/nvmeibt_client.h"
 #include "nvmeibt_topology.h"
 #include "nvmeibt_raft.h"
@@ -422,7 +417,7 @@ int nvmeibt_topology_add_seg_active_to_both_mem_gpts(struct nvmeibt_local_disk *
 	seg_metadata_gpt_entry = nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&local_disk->metadata_gpt,
 																seg_active_metadata_size,
 																local_disk->from_config.pblk_size,
-																&NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID,
+																&EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID,
 																nvmeibt_seg_active_UUID(seg_active),
 																nvmeibt_seg_active_id_str(seg_active),
 																URN_UUID_STR_LENGTH,
@@ -447,7 +442,7 @@ int nvmeibt_topology_add_seg_active_to_both_mem_gpts(struct nvmeibt_local_disk *
 	// Add seg to MAIN GPT
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&local_disk->main_gpt,
 											(nvmeibt_seg_active_is_config_EC(seg_active) ?
-											 &NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED : &NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL),
+											 &EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED : &EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL),
 											nvmeibt_seg_UUID(disk_segment),
 											disk_segment->seg_mgmt.pba_s,
 											disk_segment->seg_mgmt.pba_e,
@@ -1509,13 +1504,13 @@ static void leader_remove_node_disks_whose_segs_are_not_in_remote_applied(struct
 					remote_node->raft_ctx.last_local_serialization_version);
 */
 				// We didn't get it in this report
+				nvmeibt_seg_remote_reset(&(disk_segment->seg_leader.remote_seg_topo), disk_segment);
+				NVMEIBT_PRAID_MARK_TOPO_RECALC_REQUIRED(cjcf55q, praid);
+				seg_leader->is_removed_from_remote_applied = 1;
 				if (	(!nvmeibt_disk_segment_is_x_done(&seg_leader->baseline_seg_lot.seg_topo) &&
 						 !nvmeibt_disk_segment_is_mem_tbl_init_FIRST_USE_EVER(&seg_leader->baseline_seg_lot.seg_topo))) {
 					N_Tf(t_03_toma_nirap, "seg=@UUID_8 is not X_DONE nor FIRST_USE_EVER and missing from ldisk=@STR",
 						 nvmeibt_seg_UUID_8(disk_segment), nvmeibt_disk_get_ldisk_id_str(disk));
-					nvmeibt_seg_remote_reset(&(disk_segment->seg_leader.remote_seg_topo), disk_segment);
-					NVMEIBT_PRAID_MARK_TOPO_RECALC_REQUIRED(cjcf55q, praid);
-					seg_leader->is_removed_from_remote_applied = 1;
 /*
 					N_Wf(t_13_toma_nirap, "vol=@VOL praid=@PRAID disk_segment=@UUID_8 "
 						 "last_remote_applied_node_local_serialization_version=@INT last_local_serialization_version=@INT",

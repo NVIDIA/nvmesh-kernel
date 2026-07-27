@@ -1,8 +1,4 @@
 #/bin/sh
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # usage: switch_env_to_git_branch.sh <branch_name>
 # Saves and restores all of the modified files. Remember to save the files in the editor first
 #

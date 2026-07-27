@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBS_CLIENT_H
 #define NVMEIBS_CLIENT_H
 
@@ -43,6 +38,27 @@ struct nvmeibs_io_metadata {
     u32 rkey;
 };
 
+struct nvmeibs_io_channel {
+	/* qp number */
+	int id;
+	u64 cs_gid;
+	u64 cs_gid_last_sent;
+	/* nvme-q id */
+	int disk_rsc_id;
+	struct nvmeibs_rionic *rionic;
+	struct list_head link;
+	struct nvmeibs_net *net;
+	struct nvmeib_qp_rsc qp_rsc;
+	struct page_list_info pli;
+	struct nvmeib_alloc_n_map bb_map;
+
+	dma_addr_t ib_sq_db_dma;
+
+	bool io_ka_enabled;
+
+	void *jrange_handle;
+	void *jmdc_map_handle;
+};
 
 struct nvmeibs_rionic_ka {
 	struct mutex lock;
@@ -64,6 +80,8 @@ struct nvmeibs_rionic {
 	struct nvmeibs_lionic *lionic;
 	union ib_gid gid;
 	struct list_head link;
+	int n_io_channels;
+	struct nvmeibs_io_channel *io_channels;
 	int n_nr_channels;
 	struct nvmeibs_nr_channel *nr_channels;
 	/* true if rionic's gid was reported as
@@ -104,6 +122,7 @@ struct nvmeibs_lionic {
 	   when they become active without doing
 	   rediscovery */
 	bool may_access;
+	bool supports_rdda;
 	struct nvmeibs_ib_port *port;
 };
 

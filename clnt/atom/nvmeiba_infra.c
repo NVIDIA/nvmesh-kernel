@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeiba_infra.h"
 
 /******************** Tiny read only proc files *******************************/
@@ -78,7 +73,7 @@ void nvmeiba_proc_remove(void *p)
 
 static bool verbose_debug = !NVMESH_IS_PRODUCTION_COMPILATION;
 module_param(verbose_debug, bool, 0644);
-MODULE_PARM_DESC(verbose_debug, "Defines logging level. For production environments, it is recommended to set explicitly to false, in case a non-production compiled version is used.");
+MODULE_PARM_DESC(verbose_debug, "affects logging level");
 
 bool is_verbose_mode(void)
 {

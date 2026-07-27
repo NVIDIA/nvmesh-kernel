@@ -1,7 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
 #
 
 ARG="/sys/class/clt_infiniband_port/nvmeib-mlx4_0-1/start_test"

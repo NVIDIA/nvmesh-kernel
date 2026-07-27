@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 CC=gcc
 CFLAGS=-Wall -g -O0 -I/usr/include/infiniband -I/usr/include/infiniband/opensm
 LDFLAGS= -libcm -libverbs -losmvendor -losmcomp -lopensm -libumad -lpthread

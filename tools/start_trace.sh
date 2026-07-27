@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 DIR=$(dirname $0)
 lttng create ephemeral1 --snapshot
 lttng create ephemeral2 --snapshot

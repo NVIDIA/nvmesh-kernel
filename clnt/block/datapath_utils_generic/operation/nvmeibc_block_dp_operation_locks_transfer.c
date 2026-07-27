@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_req_rel_locks.h"	// Stale special value
 #include "block/datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
@@ -24,7 +19,7 @@
 
 static uint per_cpu_lock_transfer_num = NVMEIBC_NUM_PREV_OWNERS;
 module_param(per_cpu_lock_transfer_num, uint, 0444);
-MODULE_PARM_DESC(per_cpu_lock_transfer_num, "The number of lock transfer candidates or slots per CPU. Lock transfers are used to optimize serial writes and transfer lock ownership from one IO to another to avoid having to wait for it to be released and then acquired again. For production clusters, it is often recommended to set to 32.");
+MODULE_PARM_DESC(per_cpu_lock_transfer_num, "Number of lock transfer candidates per CPU");
 
 
 //why using hdr->good_path_profile? It was used before, before moving here.

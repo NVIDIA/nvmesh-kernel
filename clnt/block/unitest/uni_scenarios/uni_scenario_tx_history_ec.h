@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #pragma once
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "block/datapath_ec/recov/nvmeibc_block_dp_ec_recovery_common.h"

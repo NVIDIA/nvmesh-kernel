@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_CPU_MASKS_H
 #define NVMEIB_CPU_MASKS_H
 
@@ -101,7 +96,5 @@ struct nvmeib_cpu_mask_info {
 	struct nvmeib_cpu_mask mask;
 	u64 gen;	// Mask generation number (if mask is not empty, zero otherwise)
 };
-
-#define NVMEIB_CPU_MASK_INFO_IS_EMPTY(_mask_info) (!(_mask_info).gen)
 
 #endif//NVMEIB_CPU_MASKS_H

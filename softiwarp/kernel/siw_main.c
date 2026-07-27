@@ -54,11 +54,6 @@
 
 #include <net/tcp.h>
 #include <net/addrconf.h>
-#include <linux/topology.h>
-#include <linux/cpumask.h>
-#include <linux/numa.h>
-#include <linux/if_vlan.h>
-#include <linux/if_macvlan.h>
 
 #include "siw.h"
 #include "siw_obj.h"
@@ -92,22 +87,22 @@ MODULE_VERSION("0.2");
 #define SIW_MAX_IF 12
 static char *iface_list[SIW_MAX_IF];
 module_param_array(iface_list, charp, NULL, 0444);
-MODULE_PARM_DESC(iface_list, "Interface list SIW attaches to if present (array of characters).");
+MODULE_PARM_DESC(iface_list, "Interface list siw attaches to if present");
 
 static bool loopback_enabled = 1;
 module_param(loopback_enabled, bool, 0644);
-MODULE_PARM_DESC(loopback_enabled, "Enable loopback (bool).");
+MODULE_PARM_DESC(loopback_enabled, "enable_loopback");
 
 #if SIW_ENABLE_PANIC_REMOTE_ON_RX_ERR
 bool panic_remote_on_rx_err = 0;
 module_param(panic_remote_on_rx_err, bool, 0644);
-MODULE_PARM_DESC(panic_remote_on_rx_err, "Panic remote on RX Error (bool) using TCP OOB.");
+MODULE_PARM_DESC(panic_remote_on_rx_err, "panic remote on rx error");
 #endif
 
 #if SIW_CQ_NOTIFY_WORK_QP_INDEPENDENT
 bool cq_notify_tasklet = true;
 module_param(cq_notify_tasklet, bool, 0444);
-MODULE_PARM_DESC(cq_notify_tasklet, "Use tasklet (instead of WQ) for CQ notify (bool).");
+MODULE_PARM_DESC(cq_notify_tasklet, "Use tasklet (instead of WQ) for CQ notify");
 #else
 bool cq_notify_tasklet = false;
 #endif
@@ -117,19 +112,11 @@ DECLARE_RWSEM(siw_dev_lock);
 
 #ifdef USE_SQ_KTHREAD
 static char tx_cpu_list[1024] = "";
-module_param_string(tx_cpu_list, tx_cpu_list, 1024, 0444);
+module_param_string(tx_cpu_list,tx_cpu_list, 1024, 0444);
 MODULE_PARM_DESC(tx_cpu_list, "List of CPUs siw TX thread shall be bound to (format: comma separated no spaces)");
 
-/* 0=tx_cpu_list, 1=all CPUs, 2=choose TX thread NUMA-local to NIC (threads still on all/cpu_list) */
-int tx_cpus = 1;
-module_param(tx_cpus, int, 0444);
-MODULE_PARM_DESC(tx_cpus, "TX CPU selection: 0=tx_cpu_list, 1=all CPUs, 2=NUMA local to NIC when choosing TX thread");
-
-static bool tx_one_ht_per_core = false;
-module_param(tx_one_ht_per_core, bool, 0444);
-MODULE_PARM_DESC(tx_one_ht_per_core, "Use only one hyperthread per physical core for TX threads");
-
 int default_tx_cpu = -1;
+static int tx_on_all_cpus = 1;
 extern int siw_run_sq(void *);
 struct task_struct *qp_tx_thread[NR_CPUS];
 int num_tx_vector = 0;
@@ -374,11 +361,6 @@ static void siw_device_destroy(struct siw_dev *sdev)
 	dprint(DBG_DM, ": destroy siw device at %s\n", sdev->netdev->name);
 
 	siw_idr_release(sdev);
-#ifdef USE_SQ_KTHREAD
-	kfree(sdev->tx_vector_cpu);
-	sdev->tx_vector_cpu = NULL;
-	sdev->num_tx_vector = 0;
-#endif
 #if KS_IB_DEVICE_HAS_IWCM
 	kfree(sdev->ofa_dev.iwcm);
 #endif
@@ -417,37 +399,27 @@ static struct siw_dev *siw_dev_from_netdev(struct net_device *dev)
 #ifdef USE_SQ_KTHREAD
 static int siw_tx_qualified(int cpu)
 {
-	static char __tx_cpu_list[sizeof(tx_cpu_list) + 2];
-	char cpustr[32];
+	static char __tx_cpu_list[sizeof(tx_cpu_list) + 1];
+	int i = 0;
 
-	/* Only use one hyperthread per physical core if requested */
-	if (tx_one_ht_per_core) {
-		const struct cpumask *sib = topology_sibling_cpumask(cpu);
+	if (tx_on_all_cpus)
+		return 1;
 
-		if (cpumask_first(sib) != cpu)
-			return 0;
-	}
+	scnprintf(__tx_cpu_list, sizeof(__tx_cpu_list), "%s,", tx_cpu_list);
 
-	switch (tx_cpus) {
-	case 0:
-		/* tx_cpu_list only */
-		scnprintf(__tx_cpu_list, sizeof(__tx_cpu_list), ",%s,", tx_cpu_list);
+	for (i = 0; i < NR_CPUS; i++) {
+		char cpustr[32];
+		scnprintf(cpustr, sizeof(cpustr), "%u,", cpu);
+		if (!strncmp(cpustr, __tx_cpu_list, strlen(cpustr))) return 1;
 		scnprintf(cpustr, sizeof(cpustr), ",%u,", cpu);
-		if (strstr(__tx_cpu_list, cpustr))
-			return 1;
-		return 0;
-	case 1:
-	case 2:
-		/* 2 = still create threads on all/cpu_list; NUMA preference applied in siw_qp_to_tx */
-		return 1;
-	default:
-		return 1;
+		if (strstr(__tx_cpu_list, cpustr)) return 1;
 	}
+	return 0;
 }
 
 static ulong tx_thread_high_prio_bmp = 0;
 module_param(tx_thread_high_prio_bmp, ulong, 0644);
-MODULE_PARM_DESC(tx_thread_high_prio_bmp, "A bitmap of CPU Tx Threads to set to high priority.");
+MODULE_PARM_DESC(tx_thread_high_prio_bmp, "bitmap of CPU tx-threads to set to high priority");
 
 #ifndef BITS_PER_TYPE
 #define BITS_PER_TYPE(type)	(sizeof(type) * BITS_PER_BYTE)
@@ -471,7 +443,7 @@ static int siw_create_tx_threads(int max_threads, int check_qualified)
 			qp_tx_thread[cpu] =
 				kthread_create(siw_run_sq,
 					(unsigned long *)(long)cpu,
-					"qp_tx_siw/%d", cpu);
+					"qp_tx_thread/%d", cpu);
 			kthread_bind(qp_tx_thread[cpu], cpu);
 			if (IS_ERR(qp_tx_thread)) {
 				rv = PTR_ERR(qp_tx_thread);
@@ -667,53 +639,6 @@ static inline void siw_init_ofa_dev_ops(struct ib_device *ofa_dev)
 	ofa_devops->drain_rq = siw_rq_flush_ofa;
 }
 #endif // KS_IB_DEVICE_HAS_DEVICE_OPS
-
-/*
- * NUMA node for @netdev placement: peel vlan/macvlan (any order). Caller must
- * hold a ref on @netdev; we take an extra dev_hold during the walk and always
- * dev_put the final walk pointer.
- */
-static int siw_netdev_numa_node_resolved(struct net_device *netdev)
-{
-	struct net_device *walk;
-	int depth;
-	int node;
-
-	if (!netdev)
-		return NUMA_NO_NODE;
-
-	dev_hold(netdev);
-	walk = netdev;
-
-	for (depth = 0; depth < 8; depth++) {
-		if (is_vlan_dev(walk)) {
-			struct net_device *real = vlan_dev_real_dev(walk);
-
-			if (!real || real == walk)
-				break;
-			dev_hold(real);
-			dev_put(walk);
-			walk = real;
-			continue;
-		}
-		if (netif_is_macvlan(walk)) {
-			struct net_device *real = macvlan_dev_real_dev(walk);
-
-			if (!real || real == walk)
-				break;
-			dev_hold(real);
-			dev_put(walk);
-			walk = real;
-			continue;
-		}
-		break;
-	}
-
-	node = dev_to_node(&walk->dev);
-	dev_put(walk);
-	return node;
-}
-
 static struct siw_dev *siw_device_create(struct net_device *netdev)
 {
 	struct siw_dev *sdev;
@@ -854,47 +779,7 @@ static struct siw_dev *siw_device_create(struct net_device *netdev)
 #endif
 
 #ifdef USE_SQ_KTHREAD
-	sdev->tx_vector_cpu = NULL;
-	sdev->num_tx_vector = 0;
-	if (tx_cpus == 2 && netdev) {
-		int dev_numa_node = siw_netdev_numa_node_resolved(netdev);
-		int n_numa = 0;
-		int i;
-		int *vec;
-
-		for (i = 0; i < num_tx_vector; i++) {
-			int c = qp_tx_vector_cpu[i];
-
-			if (dev_numa_node != NUMA_NO_NODE &&
-			    cpu_to_node(c) != dev_numa_node)
-				continue;
-			if (tx_one_ht_per_core && cpumask_first(topology_sibling_cpumask(c)) != c)
-				continue;
-			n_numa++;
-		}
-		if (n_numa > 0) {
-			vec = kmalloc_array(n_numa, sizeof(*vec), GFP_KERNEL);
-			if (vec) {
-				int j = 0;
-
-				for (i = 0; i < num_tx_vector && j < n_numa; i++) {
-					int c = qp_tx_vector_cpu[i];
-
-					if (dev_numa_node != NUMA_NO_NODE &&
-					    cpu_to_node(c) != dev_numa_node)
-						continue;
-					if (tx_one_ht_per_core && cpumask_first(topology_sibling_cpumask(c)) != c)
-						continue;
-					vec[j++] = c;
-				}
-				sdev->tx_vector_cpu = vec;
-				sdev->num_tx_vector = j;
-			}
-		}
-		ofa_dev->num_comp_vectors = sdev->num_tx_vector ? : 1;
-	}
-	if (!sdev->tx_vector_cpu)
-		ofa_dev->num_comp_vectors = num_tx_vector;
+	ofa_dev->num_comp_vectors = num_tx_vector;
 #else
 	ofa_dev->num_comp_vectors = num_online_cpus();
 #endif
@@ -1407,6 +1292,9 @@ static __init int siw_init_module(void)
 	siw_debug_init();
 	
 #ifdef USE_SQ_KTHREAD
+	if (tx_cpu_list[0])
+		tx_on_all_cpus = 0;
+
 	if (siw_create_tx_threads(NR_CPUS, 1) == 0) {
 		dprint(DBG_KEYP, "Try starting default TX thread\n");
 		if (siw_create_tx_threads(1, 0) == 0) {

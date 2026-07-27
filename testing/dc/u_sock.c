@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "u.h"
 #include "u_sock.h"
 
@@ -107,7 +102,7 @@ static int advance_rx(struct per_socket *sock)
 			 * being under to over */
 			if (sock->page_off == sizeof(struct test_msg)) {
 				hdr = page_address(sock->page);
-				if (be16_to_cpu(hdr->data_len) > NVMESH_MAX_PAYLOAD_BYTES)
+				if (be16_to_cpu(hdr->data_len) > EXCELERO_MAX_PAYLOAD_BYTES)
 					ret = -EOVERFLOW;
 			}
 		}
@@ -341,8 +336,8 @@ struct info * init_info(struct info *info, const char *name,
 	else
 		allocated = false;
 	INIT_LIST_HEAD(&info->sockets);
-	info->keepalive_delay_ms = NVMESH_KEEPALIVE_DELAY_MS_DEFAULT;
-	info->idle_timeout_ms = NVMESH_IDLE_TIMEOUT_MS_DEFAULT;
+	info->keepalive_delay_ms = EXCELERO_KEEPALIVE_DELAY_MS_DEFAULT;
+	info->idle_timeout_ms = EXCELERO_IDLE_TIMEOUT_MS_DEFAULT;
 	if (!(info->dir = proc_mkdir(DC_PROC_STR, NULL))) {
 		trace("fail to create /proc/%s dir\n", DC_PROC_STR);
 		goto err;
@@ -372,7 +367,7 @@ out:
 
 int set_nodelay(struct socket *sock)
 {
-	int val = NVMESH_TCP_NODELAY;
+	int val = EXCELERO_TCP_NODELAY;
 	int rv;
 
 	FIN;
@@ -384,7 +379,7 @@ int set_nodelay(struct socket *sock)
 
 int set_usertimeout(struct socket *sock)
 {
-	int val = NVMESH_TCP_USER_TIMEOUT;
+	int val = EXCELERO_TCP_USER_TIMEOUT;
 	int rv;
 
 	FIN;

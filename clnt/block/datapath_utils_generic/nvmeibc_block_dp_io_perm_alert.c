@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_io_perm_alert.h"
 #include "block/nvmeibc_topology.h"
 #include "block/nvmeibc_block_common.h"
@@ -66,15 +61,10 @@ void nvmeibc_io_perm_alert_periodic_wakeup(struct nvmeibc_block_device *dev, nvm
 {
 	struct nvmeibc_io_perm_alert *iod = &dev->dp.io_perm_alert;
 
-	if ((iod->arm_stable != iod->arm)) {
-		bool const is_stabilization_period_end = (iod->last_armed_at + iod->config.stabilization_period) < now;
-		bool const is_first_ok = (iod->arm_stable == NVMEIBC_IO_PERM_ARM_DEV_INIT) && ((iod->arm & NVMEIBC_IO_PERM_ARM_BIO_OK) == NVMEIBC_IO_PERM_ARM_BIO_OK);
- 		if (is_stabilization_period_end || is_first_ok){
-			iod->arm_stable = iod->arm;
-			if (iod->config.notify_io_changed) {
-				iod->config.notify_io_changed(dev, iod->arm_stable);
-			}
-		}
+	if ((iod->arm_stable != iod->arm) && ((iod->last_armed_at + iod->config.stabilization_period) < now)) {
+		iod->arm_stable = iod->arm;
+		if (iod->config.notify_io_changed)
+			iod->config.notify_io_changed(dev, iod->arm_stable);
 	}
 
 	if (__should_send_detaching_alert(iod, now)){
@@ -101,7 +91,7 @@ void nvmeibc_io_perm_alert_periodic_wakeup(struct nvmeibc_block_device *dev, nvm
 
 unsigned long nvmeibc_unprotected_write_period_seconds = jfs2secs(infinite_jiffies);		// Talekd with Josh, 2019/04, Said it is 10[min]
 module_param_named(unprotected_write_period_seconds, nvmeibc_unprotected_write_period_seconds, ulong, 0644);
-MODULE_PARM_DESC(unprotected_write_period_seconds, "Deprecated. Timeout in seconds for an unprotected volume until it becomes read-only.");
+MODULE_PARM_DESC(unprotected_write_period_seconds, "Timeout in seconds for an unprotected volume until it is become read only");
 
 #define __unprotected_countdown_clear(iod)      ({(iod)->unprotected_write_to_read_only_at = 0; })
 #define __unprotected_countdown_start(iod, now) ({(iod)->unprotected_write_to_read_only_at = ((now) + (iod)->config.unprotected_write_period);})

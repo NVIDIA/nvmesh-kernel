@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "linux/completion.h"
 #include "linux/gfp.h"
@@ -587,7 +582,7 @@ static int post_msg(struct nlmsghdr *nlh)
 	e->e.free = free_nle;
 	e->pid = nlh->nlmsg_pid;
 	e->p = p;
-	e->latency_ns = ktime_get();
+	e->latency_ns = nvmeib_public_ktime_get();
 	_ND(trace_um_comm_post_msg, "Posting usermode message...");
 	if (nvmeib_public_kth_add_event(&e->e)) {
 		_NE(error_1_um_comm_post_msg, "No recipient for detach_all message @TOPOLOGY_INT", e->e.id.t);
@@ -2674,7 +2669,7 @@ static int reply_usermode_payload(struct nvmeibs_um_comm *p,
 	struct nvmeib_nl_uk_comm_rep *rep;
 	int pid;
 	int rv;
-	ktime_t t = ktime_get();
+	ktime_t t = nvmeib_public_ktime_get();
 
 	NFIN;
 	_ND(trace_um_comm_reply_usermode_payload, "Send reply to usermode request...");
@@ -2963,7 +2958,7 @@ static void free_req(
 		req->es = NULL;
 	}
 	if (req->vaddr) {
-		vunmap(req->vaddr);
+		nvmeib_public_vunmap(req->vaddr);
 		req->vaddr = 0;
 	}
 	if (req->pages) {
@@ -3573,7 +3568,7 @@ static void clear_io_op(struct per_disk *pd, struct io_op *w)
 
 	NFIN;
 	if (w->vaddr) {
-		vunmap(w->vaddr);
+		nvmeib_public_vunmap(w->vaddr);
 		w->vaddr = 0;
 	}
 	if (w->pages) {
@@ -4367,7 +4362,6 @@ static void wait_pd_events(struct per_disk *pd)
 				break;
 			case umc_identify_end:
 				handle_identify_end(pd);
-				FALLTHRU;
 			default:
 				break;
 			}

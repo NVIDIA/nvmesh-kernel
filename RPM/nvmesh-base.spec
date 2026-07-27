@@ -7,9 +7,9 @@ Name:				nvmesh-base
 Version:			%{version}
 Release:			%{release}
 Group:				System Environment
-Summary:			"nvmesh-base" by NVIDIA
+Summary:			"nvmesh-base" by Nvidia
 
-License:			GPL-2.0-only OR Apache-2.0 at your choice
+License:			Commercial Non OSI
 URL:				http://www.nvidia.com
 Source0:			%{name}
 
@@ -18,7 +18,7 @@ Autoreq:                        0
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+© Copyright 2025 Nvidia Corporation. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
 
 "Nvidia nvmesh-base" includes NVMesh base communication and environment tools.
 	Branch: %{branch}
@@ -31,6 +31,7 @@ cp -rf %{_sourcedir}/%{name} %{_builddir}/
 
 %install
 mkdir -pv %{buildroot}/opt/nvmesh/client-repo
+mkdir -pv %{buildroot}/opt/nvmesh/public
 mkdir -pv %{buildroot}/usr/bin
 mkdir -pv %{buildroot}/lib/systemd/system
 mkdir -pv %{buildroot}/var/run/nvmesh
@@ -41,6 +42,7 @@ mkdir -pv %{buildroot}/var/opt/nvmesh
 mkdir -pv %{buildroot}/opt/nvmesh/bin
 mkdir -pv %{buildroot}/opt/nvmesh/common-repo/tools
 
+cp -rf %{_builddir}/%{name}/public/ %{buildroot}/opt/nvmesh
 cp -rf %{_builddir}/%{name}/system.d/nvmeshagent.service %{buildroot}/lib/systemd/system/
 cp -rf %{_builddir}/%{name}/system.d/nvmeshcm.service %{buildroot}/lib/systemd/system/
 cp -rf %{_builddir}/%{name}/bin/* %{buildroot}/usr/bin/
@@ -48,6 +50,7 @@ cp -rf %{_builddir}/%{name}/management_cm %{buildroot}/opt/nvmesh/client-repo
 cp -rf %{_builddir}/%{name}/config/nvmesh.conf %{buildroot}/etc/nvmesh/
 cp -rf %{_builddir}/%{name}/config/nvmesh.conf.d/* %{buildroot}/etc/nvmesh/nvmesh.conf.d/
 cp -rf %{_builddir}/%{name}/dist/pytools/* %{buildroot}/opt/nvmesh/bin
+cp -rf %{_builddir}/%{name}/tools/humanize_json.py %{buildroot}/opt/nvmesh/common-repo/tools/humanize_json.py
 
 echo "version=\"%{version}-%{release}\"" > %{buildroot}/opt/nvmesh/client-repo/base-version
 echo "commit=\"%{commit_id}\"" >> %{buildroot}/opt/nvmesh/client-repo/base-version

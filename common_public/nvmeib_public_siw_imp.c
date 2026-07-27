@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_public.h"
 #define nvmeib_debug_level nvmeib_public_siw_debug_level
 #include "nvmeib_utils.h"
@@ -65,7 +60,7 @@ static int siw_alloc_n_map(struct nvmeib_alloc_n_map *mem)
 	mr->device = pd->device;
 
 	/* MRs with huge-pages are not supported */
-	mr->page_size = PAGE_SIZE;
+	BUG_ON(mr->page_size != PAGE_SIZE);
 	siw_mr = siw_mr_ofa2siw(mr);
 	siw_mr->pbl->pbe_fixed_shift = PAGE_SHIFT;
 	pble = siw_mr->pbl->pbe;
@@ -85,17 +80,6 @@ static int siw_alloc_n_map(struct nvmeib_alloc_n_map *mem)
 	mr->iova = ioaddr;
 	mr->length = mem->n_pages * PAGE_SIZE;
 	mr->page_size = PAGE_SIZE;
-
-	/*
-	 * Mirror what siw_map_mr() / siw_map_mr_sg() do: propagate the
-	 * caller's iova/length into siw_mr->mem so that siw_check_mem()'s
-	 * bounds check ([mem.va, mem.va + mem.len)) is correct. Without
-	 * this, mem.va/mem.len remain at the (now-zero) placeholder values
-	 * set by __siw_alloc_mr() and any inbound RDMA WRITE / RREAD-RESP
-	 * targeting this MR fails with -EINVAL.
-	 */
-	siw_mr->mem.va = mr->iova;
-	siw_mr->mem.len = mr->length;
 
 	if ((rv = siw_mr_enable(mr, access)) < 0) {
 		_NE(error_3_nvmeib_public_siw_imp_siw_alloc_n_map, "Fail to enable memory region @RV", rv);
@@ -221,8 +205,8 @@ static int siw_map_mr(struct ib_device *ibdev, struct ib_mr *ofa_mr,
 	}
 
 	first_offset = ofa_mr->iova & (mr_page_size - 1);
+	first_size = mr_page_size - first_offset;
 	if (n_pages > 1) {
-		first_size = mr_page_size - first_offset;
 		last_size = ofa_mr->length - first_size - (n_pages - 2) * mr_page_size;
 		if (last_size <= 0 || last_size > mr_page_size) {
 			_NE(error_1_nvmeib_public_siw_imp_siw_map_mr,
@@ -233,21 +217,6 @@ static int siw_map_mr(struct ib_device *ibdev, struct ib_mr *ofa_mr,
 			goto out;
 		}
 	} else {
-		/* Single-page MR: the entire transfer is contained within one
-		 * mr_page_size-sized page starting at first_offset. The sole
-		 * PBL entry's size is ofa_mr->length, NOT (mr_page_size -
-		 * first_offset); otherwise the pbl_size == length check below
-		 * rejects every sub-page transfer (e.g. a 4 KiB direct-IO on
-		 * a 64 KiB-page ARM client where mr_page_size == 64 KiB).
-		 */
-		if (!ofa_mr->length || ofa_mr->length > mr_page_size - first_offset) {
-			_NE(error_2_nvmeib_public_siw_imp_siw_map_mr,
-				"Bad single-page MR: length=@LENGTH mr_page_size=@MR_PAGE_SIZE first_offset=@OFFSET_INT",
-				(u64)(ofa_mr->length), mr_page_size, (unsigned long)first_offset);
-			rv = -EINVAL;
-			goto out;
-		}
-		first_size = ofa_mr->length;
 		last_size = 0;
 	}
 
@@ -255,7 +224,7 @@ static int siw_map_mr(struct ib_device *ibdev, struct ib_mr *ofa_mr,
 	for (i = 0; i < n_pages; i++) {
 		unsigned long page_vaddr = virt_addr_valid(((void *)pages[i])) ? pages[i] : (unsigned long)phys_to_virt(pages[i]);
 
-		if (page_vaddr & (mr_page_size - 1)) {
+		if (page_vaddr & (PAGE_SIZE - 1)) {
 			_NT(trace_5_nvmeib_public_siw_imp_siw_map_mr, "page @PAGE_NUM is not aligned @PHYS", i, page_vaddr);
 			rv = -EINVAL;
 			goto out;

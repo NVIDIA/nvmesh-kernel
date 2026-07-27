@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_public_raid.h"
 #include "nvmeib_utils.h"
 #include "nvmeibp_trace.h"
@@ -184,7 +179,7 @@ enum gf_return_val nvmeib_raid_decode(int len, int k, int rows, unsigned char **
                 are desired. Ptr 0 means we want it. Ptr -1 means we don't.
        Anything else (k > 2) comes later, and probably requires matrix inversion.
     */
-    int i, d_index, p_index, d[2], d_notme;
+    int i, d_index, p_index, d[k], d_notme;
 
 	RET_ON_GF_ERROR_AND_WARN(irqs_disabled());
 	RET_ON_GF_ERROR_AND_WARN(in_interrupt());
@@ -303,8 +298,6 @@ EXPORT_SYMBOL(nvmeib_raid_kernel_builtin_supported);
 
 #ifdef __x86_64__
 u32 nvmeib_raid_ec_crc(u32 init_crc, const u8 *buf, unsigned int len) {
-#elif KS_CRC32C_USES_SIZE_T
-u32 nvmeib_raid_ec_crc(u32 init_crc, const void *buf, size_t len) {
 #else
 u32 nvmeib_raid_ec_crc(u32 init_crc, const void *buf, unsigned int len) {
 #endif

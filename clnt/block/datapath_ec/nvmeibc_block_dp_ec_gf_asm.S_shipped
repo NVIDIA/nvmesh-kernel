@@ -1,11 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*
-* Deprecated: superseded by nvmeibc_block_dp_ec_gf_avx2.c (C + AVX2 intrinsics).
-* Kept in-tree for reference and optional legacy builds; new work should target the C file.
-*/
-
 # NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE
 #
 # Increment gf_asm_count every time you modify this file!

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 /* nvmeibc_main.c - NVMe IB attached block driver */
 #include "nvmeibc_block.h"					// Must be first for simulator
 #include "nvmeib_public.h"
@@ -25,9 +20,6 @@
 #include "core/nvmeibc_core_common.h"
 #include "nvmeib_ib_driver.h"
 #include "management_utils_common/nvmeibc_management_capi_parse_conf.h"
-#include "block/nvmeibc_nvmeiba_kapi.h"
-#include "nvmeibc_ib_nordda_channel.h"
-#include "nvmeibc_locks_channel.h"
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
 #include "nvmeib_public.h"
@@ -37,16 +29,14 @@
 #include "common/proc_epilog.h"
 #include "nvmeibc_memmgr_metrics.h"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMe block device over Infiniband");
-MODULE_LICENSE("GPL and additional rights");
-/*
- * Do not use MODULE_SOFTDEP("pre: nvmeiba"): modprobe -r nvmeibc can consult
- * softdeps and attempt to remove nvmeiba while nvmeibc still holds __symbol_get
- * refs from nvmeibc_nvmeiba_kapi_init(), yielding "Module nvmeiba is in use".
- * Load order: request_module("nvmeiba") in nvmeibc_nvmeiba_kapi_init().
- * Unload order: scripts (e.g. nvmeshclient) must remove nvmeibc before nvmeiba.
- */
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+MODULE_LICENSE("Dual BSD/GPL");
+#else
+MODULE_LICENSE("Proprietary");
+#endif
 
 #define PROCFS_VOLUMES_STR "volumes"
 #define PROCFS_DISKS_STR "disks"
@@ -85,32 +75,31 @@ bool nvmeibc_local_bypass_enabled = true;
 bool nvmeibc_iommu_enabled = false;
 
 module_param_named(debug_level, nvmeibc_debug_level, int, 0644);
-MODULE_PARM_DESC(debug_level, "Enables debug logging (to the system log not NVMesh tracer) if set above 1. Deprecated.");
+MODULE_PARM_DESC(debug_level, "Deprecated Debug tracing level [0..2]");
 
 module_param_named(tracer_debug_level, tracer_nvmeibc_debug_level, int, 0644);
-MODULE_PARM_DESC(tracer_debug_level, "This determines the level of tracing for this module. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(tracer_debug_level, "Control path tracing debug level [0..4]");
 
 module_param_named(goodpath_debug_level, goodpath_nvmeibc_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_debug_level, "This determines the level of tracing for the regular data path. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(goodpath_debug_level, "Data path tracing debug level");
 
 module_param_named(goodpath_syncs_debug_level, goodpath_nvmeibc_syncs_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_syncs_debug_level, "This determines the level of tracing for data path syncs. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(goodpath_syncs_debug_level, "Data path syncs tracing debug level");
 
 module_param_named(goodpath_locks_debug_level, goodpath_nvmeibc_locks_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_locks_debug_level, "This determines the level of tracing for the regular data path locks. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(goodpath_locks_debug_level, "Data path locks tracing debug level");
 
 module_param_named(goodpath_transport_debug_level, goodpath_nvmeibc_transport_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_transport_debug_level, "This determines the level of tracing for the regular data path networking. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(goodpath_transport_debug_level, "Data path transport layer tracing debug level");
 
 module_param_named(topology_debug_level, topology_debug_level, int, 0644);
-MODULE_PARM_DESC(topology_debug_level, "This determines the level of tracing for topology operations, i.e. changes to volume health and layout, for this module. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(topology_debug_level, "Topology path tracing debug level");
 
 module_param_named(recovery_debug_level, recovery_debug_level, int, 0644);
-MODULE_PARM_DESC(recovery_debug_level, "This determines the level of tracing for recovery operations for this module. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(recovery_debug_level, "Recovery tracing debug level");
 
 module_param_named(iommu_enabled, nvmeibc_iommu_enabled, bool, 0444);
-MODULE_PARM_DESC(iommu_enabled, "Informs the internal NVMesh NVMe driver that the IOMMU is enabled on the node.");
-EXPORT_SYMBOL(nvmeibc_iommu_enabled);
+MODULE_PARM_DESC(iommu_enabled, "Used to tell client that IOMMU is enabled");
 
 NVMEIB_DECLARE_KERNEL_WARNINGS_TRAP;
 
@@ -129,7 +118,7 @@ bool nvmeib_serial_console(void) { return false; }
 
 bool profiling_enabled = ~true;
 module_param(profiling_enabled, bool, 0644);
-MODULE_PARM_DESC(profiling_enabled, "Enable statistics gathering, should be turned off if the clocksource is not tsc.");
+MODULE_PARM_DESC(profiling_enabled, "Enable statistics gathering, should be 0 if clocksource != tsc");
 
 static const char* nvmeibc_mod_state_to_string(enum nvmeibc_mod_state state)
 {
@@ -1046,9 +1035,9 @@ static void nvmeibc_profile_event_register(void)
 {
 	int rv;
 #if KS_HAS_PROFILE_EVENT_REGISTER
-	rv = profile_event_register(PROFILE_TASK_EXIT, &task_exit_nb);
+	rv = nvmeib_public_profile_event_register(PROFILE_TASK_EXIT, &task_exit_nb);
 #else
-	rv = register_kprobe(&kp_on_do_exit);
+	rv = nvmeib_public_register_kprobe(&kp_on_do_exit);
 #endif
 	if (rv) {
 		_NI(t_00_cper, DMESG_MOD_PREFIX ": Failed to register to profile-events, mini-elevator will not be usable (rv=@INT)", rv);
@@ -1061,9 +1050,9 @@ static void nvmeibc_profile_event_unregister(void)
 {
 	if (nvmeibc_prof_evt_registered) {
 #if KS_HAS_PROFILE_EVENT_REGISTER
-		profile_event_unregister(PROFILE_TASK_EXIT, &task_exit_nb);
+		nvmeib_public_profile_event_unregister(PROFILE_TASK_EXIT, &task_exit_nb);
 #else
-		unregister_kprobe(&kp_on_do_exit);
+		nvmeib_public_unregister_kprobe(&kp_on_do_exit);
 #endif
 		nvmeibc_prof_evt_registered = false;
 	}
@@ -1078,14 +1067,11 @@ static void __nvmeibc_exit(void)
 	nvmeibc_profile_event_unregister();
 	nvmeibc_instance_do_blocking(NULL, mw_inst_del_all_blocking, false);
 	nvmeib_public_set_debug_level(NULL);
-	nvmeibc_nordda_channel_wq_destroy();
-	nvmeibc_locks_channel_wq_destroy();
 	main_module_single_instance_globals_destroy();
 
 #if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR != 1)
 	nvmesh_memmgr_metrics_free_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 #endif
-	nvmeibc_nvmeiba_kapi_fini();
 	NFOUT;
 }
 
@@ -1109,47 +1095,33 @@ static int __init nvmeibc_init(void) /* Constructor */
 	BUILD_BUG_ON(sizeof(struct nvmeibc_login_request) > NVMEIB_MAX_CM_REQ_PAYLOAD_SIZE);
 	_NI(trace_1_nvmeibc_init, DMESG_MOD_PREFIX ": Load --> Version: commit_id=@COMMIT_ID_LONG, ports=@PORTS, guids=@GUIDS", (ulong)COMMIT_ID, nvmeibc_filter_ports, nvmeibc_filter_guids);
 	main_module_single_instance_globals_init();
-	if (nvmeibc_nvmeiba_kapi_init()) {
-		_NE(nvmeibc_init_nvmeiba_kapi, "Failed to resolve nvmeiba symbols");
-		goto err;
-	}
 	nvmeib_set_debug_level(nvmeib_debug_level);
 	nvmeib_public_set_debug_level(nvmeib_debug_level);
-
-	if (nvmeibc_nordda_channel_wq_init() < 0) {
-		_NE(nvmeibc_init_nordda_wq, "Failed to initialize nordda channel workqueue");
-		goto err;
-	}
-
-	if (nvmeibc_locks_channel_wq_init() < 0) {
-		_NE(nvmeibc_init_locks_wq, "Failed to initialize locks channel SCQ workqueue");
-		goto err;
-	}
 
 #if !defined(BLKDEV_SIMULATOR) || (BLKDEV_SIMULATOR != 1)
 	rv = nvmesh_memmgr_metrics_alloc_pcpu(__start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 	if (rv < 0) {
 		_NE(nvmeibc_init_pcpu_alloc, "Failed to initialize memmgr metrics");
-		goto err;
+		goto out;
 	}
 #endif
 
 	if (!nvmeibc_use_pcpu_cq && !nvmeibc_gf_calc_in_irq_ctx()) {
 		_NE_dmesg(nvmeibc_init_pcpu_must_be_on, "Invalid configuration: EC parity calculations on ARM is done via kernel primitive which require irqs enabled, for that nvmeibc module must use CQ pollers i.e. use_pcpu_cq=1");
-		goto err;
+		goto out;
 	}
 
 	if (nvmeibc_tcp_mode && nvmeibc_use_pcpu_cq) {
 		_NE_dmesg(nvmeibc_init_pcpu_tcp_err, "Invalid configuration: pcpu-cqs is not supported over TCP");
-		goto err;
+		goto out;
 	}
 
 	if (nvmeibc_disk_prefix_priority_masks_validate_module_params()) {
-		goto err;
+		goto out;
 	}
 
 	if (!(p = nvmeibc_cinst_params_get_default()))
-		goto err;
+		goto out;
 	nvmeibc_instance_init_module_params(p);
 	if (nvmeibc_instance_do_blocking(p, mw_inst_add_blocking, false) < 0) /* calls nvmeibc_instance_create_on_modwq */
 		goto err;

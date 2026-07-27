@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include <time.h>
 #include <sys/time.h>
 #include "nvmeibt_common.h"
@@ -1805,9 +1800,8 @@ void nvmeibt_register_move_all_longing_registrants_no_seg_to_seg(struct nvmeibt_
 			XDLIST_DEL(&(longing_registrant->longing_link));
 			// Add registrant as longing on current segment.
 			add_longing_registrant_on_seg(longing_registrant);
-			// Free the reg_ctx (when adding registrant as longing to segment new reg_ctx is allocated.
-			longing_registrant->seg_active = NULL;
-			free_reg_ctx(longing_registrant);
+			// Free memory (when adding registrant as longing to segment new memory is allocated.
+			NNVMEIBT_TOMA_FREE(trace_register_nvmeibt_register_move_all_logging_registrants_no_seg_to_seg, longing_registrant);
 		}
 	}
 	NFOUT;
@@ -2638,10 +2632,6 @@ static BOOL is_valid_register_req(struct nvmeibt_registrant_ctx *incoming_reg_ct
 		goto toma_not_ready;
 	}
 
-	if (existing_reg_ctx && existing_reg_ctx->is_processing_registrant_removal) {
-		refusal_reason = NVMEIBT_CLIENT_TR_REASON_UNREGISTER_IN_PROGRESS;
-		goto toma_not_ready;
-	}
 	if (!existing_reg_ctx && lock_id_cache_is_lockid_taken(seg_active, incoming_reg_ctx->reg_lock_id)) {
 		// No active registrant, but its journal entries were not fully cleaned yet
 		refusal_reason = NVMEIBT_CLIENT_TR_REASON_LOCKID_ALREADY_TAKEN;

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #ifndef NVMEIBT_IMPORTANT_LOGS
 #define NVMEIBT_IMPORTANT_LOGS
 #include "nvmeibt_common.h"

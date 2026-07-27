@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #ifndef RDMA_DEV_H_INCLUDED
 #define RDMA_DEV_H_INCLUDED
 
@@ -10,9 +5,9 @@
 #include "xib_incs.h"
 #include "utils.h"
 
-#define NVMESH_SERVICE_ID 6988676976697999ULL
-#define NVMESH_SERVICE_ID_MASK (~RDMA_IB_IP_PS_MASK)
-#define NVMESH_PKEY 0xffff
+#define EXCELERO_SERVICE_ID 6988676976697999ULL
+#define EXCELERO_SERVICE_ID_MASK (~RDMA_IB_IP_PS_MASK)
+#define EXCELERO_PKEY 0xffff
 
 struct manager;
 struct ib_device;

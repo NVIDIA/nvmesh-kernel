@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_JAM_H
 #define NVMEIBC_JAM_H
 /* This file is an interim layer between block layer and pausable layer.
@@ -37,7 +32,7 @@ void nvmeibc_jam_disk_del(struct nvmeibc_disk *disk);
  *                    if any entry to be bound is ABANDONED. */
 struct nvmeib_cpu_mask_info;
 int nvmeibc_jam_lbas_alloc(int n_disks, struct nvmeibc_disk *disks[], u32 txid,
-	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long deadline_jiffies, unsigned long priority, void *ctx);
+	u64 dlbas[], u64 res_jlbas[], bool wait_bound_abnd, const struct nvmeib_cpu_mask_info *cpu_mask_info, unsigned long timeout_jiffies, void *ctx);
 
 /* @wr_sts_bm - bit i is O if journal-write of jlba=jlbas[i]
  *  		    (on disk=disks[i]) was issued && completed OK.

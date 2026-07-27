@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # Config file (default: build_sh_conf) may contain all build options.
 # Alternatively some or all options may be supplied on command line.
 #
@@ -436,7 +433,7 @@ if $COMPILE_NVMFT; then
 	if ! $IS_COMPILATOR; then
 		SPDK_BRANCH_NAME="master"
 		echo "Cloning NVMfT/spdk repo branch $SPDK_BRANCH_NAME"
-		git clone -b "$SPDK_BRANCH_NAME" git@gitlab.acme.com:acme/spdk.git
+		git clone -b "$SPDK_BRANCH_NAME" git@gitlab.excelero.com:excelero/spdk.git
 		cd spdk
 	fi
 
@@ -593,17 +590,10 @@ MAKE_OPTS=$(arr_entries_leave_unique "${MAKE_OPTS}")
 MAKE_OPTS=$(arr_entries_sort_for_make "${MAKE_OPTS}")
 
 # check used tools options support
-# On macOS, disable filtering to avoid buffering issues
-if [ `uname -s` = "Darwin" ]; then
-	FILTER_OUT=false
-	SED_UNBUF="sed"
-	GREP_UNBUF="grep"
-else
-	SED_UNBUF="sed --unbuffered"
-	`echo | ${SED_UNBUF} 's/$//' 2> /dev/null` || SED_UNBUF="sed"
-	GREP_UNBUF="grep --line-buffered"
-	`echo | ${GREP_UNBUF} '$' 2> /dev/null` || GREP_UNBUF="grep"
-fi
+SED_UNBUF="sed --unbuffered"
+`echo | ${SED_UNBUF} 's/$//' 2> /dev/null` || SED_UNBUF="sed"
+GREP_UNBUF="grep --line-buffered"
+`echo | ${GREP_UNBUF} '$' 2> /dev/null` || GREP_UNBUF="grep"
 
 # print build opts final values
 echo "Build start: `date '+%a %d-%b-%y %H.%M.%S'`"

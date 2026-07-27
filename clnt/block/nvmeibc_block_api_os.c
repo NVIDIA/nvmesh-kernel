@@ -1,13 +1,7 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_error_report.h"
 #include "nvmeibc_block_common.h"
 #include "nvmeibc_block.h"		/* external API of the block */
 #include "nvmeibc_block_api_os.h"
-#include "nvmeibc_nvmeiba_kapi.h"
 #include "nvmeib_json.h"
 #include "nvmeib_io_stats.h"
 #include "nvmeib_utils.h"
@@ -27,20 +21,20 @@
 
 unsigned max_trim_size_mirrored = 128;		 // 128 locks, 16[megabytes]
 module_param(max_trim_size_mirrored, uint, 0644);
-MODULE_PARM_DESC(max_trim_size_mirrored, "Maximum size of a single NVMesh internal TRIM operation for mirrored volumes. The value is for multiples of 128 KB.");
+MODULE_PARM_DESC(max_trim_size_mirrored, "Max longest supported trim on mirrored volumes. units of 128KB");
 
 unsigned max_trim_size_non_mirrored = 16384;	 // 256[locks]=32[Mb], 16K[locks]=2[Gb]
 module_param(max_trim_size_non_mirrored, uint, 0644);
-MODULE_PARM_DESC(max_trim_size_non_mirrored, "Maximum size of a single NVMesh internal TRIM operation for non-mirrored volumes.");
+MODULE_PARM_DESC(max_trim_size_non_mirrored, "Max longest supported trim on unprotected volumes. units of 128KB");
 
 /************************ Minor ID allocator for volume ***********************/
-bool nvmeibc_use_block_external_major = false;	// Use internal allocator of minors instead of kernel built in
-module_param_named(use_block_external_major, nvmeibc_use_block_external_major, bool, 0444);	// Can be set only when module is going up
-MODULE_PARM_DESC(use_block_external_major, "Determines whether to use a dedicated block external major for the NVMesh block devices. This is rarely required.");
+bool nvmeibc_use_block_extrenal_major = false;	// Use internal allocator of minors instead of kernel built in
+module_param_named(use_block_extrenal_major, nvmeibc_use_block_extrenal_major, bool, 0444);	// Can be set only when module is going up
+MODULE_PARM_DESC(use_block_extrenal_major, "Use a dedicated block external major");
 
 uint nvmeibc_max_num_partitions_on_vol = DISK_MAX_PARTS;	// Used in internal allocator of minors
 module_param_named(max_num_partitions_on_vol, nvmeibc_max_num_partitions_on_vol, uint, 0444);	// Can be set only when module is going up
-MODULE_PARM_DESC(max_num_partitions_on_vol, "Defines the maximum number of external partitions reserved as minors range.");
+MODULE_PARM_DESC(max_num_partitions_on_vol, "Max number of external partitions reserved as minors range");
 
 void disk_id_allocator_init(struct disk_id_allocator_t* al)
 {
@@ -53,7 +47,7 @@ void disk_id_allocator_init(struct disk_id_allocator_t* al)
 
 void disk_id_allocator_alloc(struct disk_id_allocator_t* al, struct gendisk *disk, const char* vol_name)
 {
-	if (nvmeibc_use_block_external_major) {
+	if (nvmeibc_use_block_extrenal_major) {
 		disk->minors = disk->first_minor = 0;
 		if (disk->minors == 0)// This will cause the gendisk to be minor of  'cat /proc/devices | grep blkext' driver
 			disk->flags	|= GENHD_FL_EXT_DEVT;	// minors == 0 indicates to use ext devt from part0
@@ -72,7 +66,7 @@ void disk_id_allocator_alloc(struct disk_id_allocator_t* al, struct gendisk *dis
 
 void disk_id_allocator_free(struct disk_id_allocator_t* al, struct gendisk *disk)
 {
-	if (!nvmeibc_use_block_external_major) {
+	if (!nvmeibc_use_block_extrenal_major) {
 		const int new_minor = disk->first_minor / nvmeibc_max_num_partitions_on_vol;
 		_NT(t_dia1, "DIA: -@INT, bmp=@LX, vol=@DEV_NAME", new_minor, al->bmp[0], disk->disk_name);		// pr_emerg("DIA: - %u, 0x%lx disk=%p, vol=%s\n", new_minor, al->bmp[0], disk, disk->disk_name);
 		WARN(!test_bit(new_minor, al->bmp), "nvmeibc: Unexpected Internal error during detach, %d minor of disk %s not registered for removal!\n", new_minor, disk->disk_name);
@@ -82,7 +76,7 @@ void disk_id_allocator_free(struct disk_id_allocator_t* al, struct gendisk *disk
 
 void disk_id_allocator_mark(struct disk_id_allocator_t* al, struct gendisk *disk)
 {
-	if (!nvmeibc_use_block_external_major) {
+	if (!nvmeibc_use_block_extrenal_major) {
 		const int new_minor = disk->first_minor / nvmeibc_max_num_partitions_on_vol;
 		const int is_already_allocated = test_bit(new_minor, al->bmp);
 		_NT(t_dia2, "DIA: u@INT, bmp=@LX, vol=@DEV_NAME, is_a=@BOOL_YN", new_minor, al->bmp[0], disk->disk_name, is_already_allocated);		// pr_emerg("DIA: u %u, 0x%lx disk=%p, vol=%s\n", new_minor, al->bmp[0], disk, disk->disk_name);
@@ -99,10 +93,12 @@ void disk_id_allocator_mark(struct disk_id_allocator_t* al, struct gendisk *disk
 
 #define __is_kernel_dev_err(bdev) 	((bdev == NULL) || IS_ERR(bdev))
 
+static int bdev_holder = 1;
+
 #if KS_HAS_BDEV_FILE_OPEN_BY_PATH
 static struct file * __get_safe_kern_dev(const char *path, BLK_MODE_T mode)
 {
-	struct file *f = bdev_file_open_by_path(path, mode, NULL /* holder */, NULL);
+	struct file *f = bdev_file_open_by_path(path, mode, &bdev_holder, NULL);
 	struct block_device *bdev = IS_ERR(f) ? (struct block_device *)f : file_bdev(f);
 	if (__is_kernel_dev_err(bdev)) {
 		_NT(t_gskvae_00, "path lookup for @STR found @PTR and it is@YES_NO_STATUS err, @YES_NO_STATUS null",
@@ -118,7 +114,7 @@ static struct file * __get_safe_kern_dev(const char *path, BLK_MODE_T mode)
 // Note: This function does open() on our os.
 static struct bdev_handle * __get_safe_kern_dev(const char *path, BLK_MODE_T mode)
 {
-	struct bdev_handle *bdh = bdev_open_by_path( path, mode, NULL /* holder */, NULL);
+	struct bdev_handle *bdh = bdev_open_by_path( path, mode, &bdev_holder, NULL);
 	struct block_device *bdev = IS_ERR(bdh) ? (struct block_device *)bdh : bdh->bdev;
 	if (__is_kernel_dev_err(bdev)) {
 		_NT(t_gskvae_00, "path lookup for @STR found @PTR and it is@YES_NO_STATUS err, @YES_NO_STATUS null",
@@ -129,8 +125,6 @@ static struct bdev_handle * __get_safe_kern_dev(const char *path, BLK_MODE_T mod
 }
 
 #else // KS_HAS_BDEV_OPEN_BY_PATH
-
-static int bdev_holder = 1;
 
 static struct block_device * __get_safe_kern_dev(const char *path, BLK_MODE_T mode)
 {
@@ -241,9 +235,9 @@ int block_api_os_get(struct nvmeibc_os_api *os, const char *owner_name)
 		goto _critical_error;
 	}
 #if KS_HAS_BLKMODE
-	if (nvmeiba_kapi.atom_open(bdev->bd_disk, owner_name) != 0) {
+	if (nvmeiba_atom_open(bdev->bd_disk, owner_name) != 0) {
 #else // KS_HAS_BLKMODE
-	if (nvmeiba_kapi.atom_open(bdev, owner_name) != 0) {
+	if (nvmeiba_atom_open(bdev, owner_name) != 0) {
 #endif // KS_HAS_BLKMODE
 		reason = "Cannot open()";
 		goto _critical_error;
@@ -305,7 +299,7 @@ void block_api_os_put(struct nvmeibc_os_api *os)
 	}
 	disk = bdev->bd_disk;           // atom->disk may already be NULL
 	os->unsafe_self_ref.bdev_during_detach = NULL;// Will do -1 on bdev below. Ptr is unsafe
-	nvmeiba_kapi.atom_close(disk);
+	nvmeiba_atom_close(disk);
 	os = NULL;					// BEWARE: os_api object might be freed now.
 #if KS_HAS_BDEV_FILE_OPEN_BY_PATH
 		bdev_fput(bdev_file);
@@ -334,7 +328,7 @@ struct _read_part_t {						// Async work for reading partitions
 
 bool no_part_scan = false;
 module_param(no_part_scan, bool, 0644);
-MODULE_PARM_DESC(no_part_scan, "Disable partition scan on nvmesh block devices.");	// Disable both internally triggered and externally triggered
+MODULE_PARM_DESC(no_part_scan, "Disable partition scan on nvmesh block devices");	// Disable both internally triggered and externally triggered
 #define N_READ_PART_DISABLED  100000				// When disabled counter becomes negative with this factor
 #define __is_self_read_part_enabled(n)  ((n) >= 0)	// False means internally cannot trigger read partition but externally can do that
 static void __read_part_t_destroy(struct _read_part_t *rp)
@@ -372,7 +366,7 @@ static int __ioctl_by_bdev(struct block_device *bdev, unsigned cmd, unsigned lon
 	res = blkdev_ioctl(bdev, 0, cmd, arg);
 	set_fs(old_fs);
 #else
-	res = blkdev_ioctl(bdev, 0, cmd, arg);
+	res = nvmeib_blkdev_ioctl(bdev, 0, cmd, arg);
 #endif
 	return res;
 }
@@ -383,7 +377,7 @@ static RP_RETURN_TYPE __read_partitions_work(RP_ARG_TYPE *param)
 	struct work_struct *_work = (struct work_struct *)param;
 	struct _read_part_t *rp = container_of(_work, struct _read_part_t, work);
 #if KS_HAS_BDEV_FILE_OPEN_BY_PATH
-	const BLK_MODE_T mode = BLK_OPEN_READ | BLK_OPEN_WRITE;
+	const BLK_MODE_T mode = FMODE_READ|FMODE_LSEEK|FMODE_PREAD|FMODE_PWRITE; // 0x1d //FMODE_NDELAY| FMODE_WRITE;
 	struct file *bdev_file = __get_safe_kern_dev(rp->path, mode);
 	struct block_device *bdev = __is_kernel_dev_err(bdev_file) ? (void *)bdev_file : file_bdev(bdev_file);
 #elif KS_HAS_BDEV_OPEN_BY_PATH
@@ -637,13 +631,11 @@ static int __device_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd,
 
 /******************************************************************************/
 static REQ_RET nvmeibc_b_req_make_no_q(  struct bio *bio);
-#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
 static REQ_RET nvmeibc_b_req_reject_no_q(struct bio *bio);
-#endif
 
 static void __nvmeibc_os_api_layer_destroy(struct nvmeibc_os_apis_container *c)
 {
-	nvmeiba_kapi.os_do_on_nvmeibc_down();			// Disconenct from nvmeiba
+	nvmeiba_os_do_on_nvmeibc_down();			// Disconenct from nvmeiba
 	nvmeibc_driver_version_unreg(&c->drv_ver);		// Todo: Share this with ATOM
 	// disk_id_allocator_init(&c->dia);			// Todo: Here, verify that bitmap is empty if none of the volumes were abandoned
 	kfree(c);
@@ -681,18 +673,15 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 		goto _out;
 	}
 	nvmeibc_cinst_get_blok_p(c) = p;
-	H = nvmeiba_kapi.os_do_on_nvmeibc_up();			// Connect to nvmeiba
+	H = nvmeiba_os_do_on_nvmeibc_up();			// Connect to nvmeiba
 	nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_io);
 #if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
-	#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
-		nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_de);
-		c->bdev_fops_de.submit_bio = nvmeibc_b_req_reject_no_q; // This pointer will replace IO when detaching
-	#endif
+	nvmeibc_block_device_operations_init(H.fops, &c->bdev_fops_de);
+	c->bdev_fops_de.submit_bio = nvmeibc_b_req_reject_no_q; // This pointer will replace IO when detaching
 	c->bdev_fops_io.submit_bio = nvmeibc_b_req_make_no_q;	// This pointer will be used to issue IOs
 #endif
 	nvmeibc_driver_version_init(&c->drv_ver, p);
 	nvmeibc_driver_version_clear(&c->drv_ver);
-	c->atom_protocol_version = H.protocol_version;
 	c->proc_root = nvmeibc_get_proc_dir_volumes(nvmeibc_isnt_params_blk2main(p));
 	atomic_set(&c->num_read_part_in_flight, 0);
 	if (nvmeibc_driver_version_register(&c->drv_ver) <= 0) {
@@ -701,7 +690,7 @@ struct nvmeibc_os_apis_container * nvmeibc_os_api_layer_init(const struct nvmeib
 	} else {
 		disk_id_allocator_init(&c->dia);	// Occupy the minors of atoms in nvmeiba
 		if (H.n_orphan_osapi > 0)
-			nvmeiba_kapi.os_api_exec_for_each_atom(c->drv_ver.dir_lsblk, __probe_my_atoms_from_nvmeiba, c);
+			nvmeiba_os_api_exec_for_each_atom(c->drv_ver.dir_lsblk, __probe_my_atoms_from_nvmeiba, c);
 	}
 _out:
 	return c;
@@ -742,7 +731,7 @@ static void start_stats(struct bio *bio)
 
 	if (blk_queue_io_stat(disk->queue)) {
 		#if KS_HAS_BIO_START_IO_ACCT
-			bio_start_io_acct(bio);
+			nvmeib_public_bio_start_io_acct(bio);
 		#elif KS_GENERIC_IO_ACCT
 			#if KS_GENERIC_IO_ACCT_REQ_Q
 				generic_start_io_acct(disk->queue, bio_data_dir(bio), bio_sectors(bio), &disk->part0);
@@ -786,7 +775,7 @@ static void end_stats(struct bio *bio, struct gendisk *disk, unsigned long start
 {
 	if (blk_queue_io_stat(disk->queue)) {
 		#if KS_HAS_BIO_START_IO_ACCT
-			bio_end_io_acct(bio, start_time);
+			nvmeib_public_bio_end_io_acct(bio, start_time);
 		#else
 			#if KS_GENERIC_IO_ACCT
 				#if KS_GENERIC_IO_ACCT_REQ_Q
@@ -827,7 +816,7 @@ static void end_stats(struct bio *bio, struct gendisk *disk, unsigned long start
 #include "../../common/nvmeib_scalabale_refcount.h"
 struct reqq_data {								// Saved in kernel's "struct request_queue"->queuedata
 	struct scalabale_refcount	io_refcount;	// Counter of IO's currently active on the volume. also indicates the need to fail requests when it refuses the provide a reference.
-	/*Daniel: Todo, here put NVMesh's elevator*/
+	/*Daniel: Todo, here put Excelero elevator*/
 	bio_exec_fn *bio_executor;
 	u16 vol_refcount;							// Debug only field. How many vols use this ref count
 };
@@ -899,7 +888,7 @@ static void __end_bio_common(struct gendisk *disk, struct bio *bio, int rv){
 	const struct nvmeiba_atom_os_api *atom = &block_api_os_get_os(bio)->atom;
 
 	reqq_data_end_io(q);
-	if (unlikely((rv) && nvmeiba_kapi.os_api_is_queue_orphan(atom))) {
+	if (unlikely((rv) && nvmeiba_os_api_is_queue_orphan(atom))) {
 		CALL_SUBMIT_BIO_FN(q, disk, bio);		// Last chance to save bio from error by upgrading to new nvmeibc
 	} else {
 		bio_endio(bio, rv);
@@ -938,7 +927,7 @@ static void __end_rider_to_carrier_bio(struct bio *bio, ulong start_time, int rv
 	struct request_queue *q = atom->queue;
 	(void)start_time;
 	reqq_data_end_io(q);
-	if (unlikely((rv) && nvmeiba_kapi.os_api_is_queue_orphan(atom))) {
+	if (unlikely((rv) && nvmeiba_os_api_is_queue_orphan(atom))) {
 		CALL_SUBMIT_BIO_FN(q, atom->disk, bio);		// Last chance to save bio from error by upgrading to new nvmeibc
 	} else {
 		extern void rider_bio_endio(struct bio *bio, int rv);	// Carrier responds with this function
@@ -983,7 +972,6 @@ static const struct gendisk* block_api_os_get_gendisk(const struct bio *bio)
 	return disk ? disk : block_api_os_get_os(bio)->atom.disk;
 }
 
-#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
 /* request_queue callback, Autofails all IO's. Replaces the real cb when volume is unsafe-detaching */
 static REQ_RET nvmeibc_b_req_reject(struct request_queue *q, struct bio *bio)
 {
@@ -999,11 +987,10 @@ static __attribute__((unused)) REQ_RET nvmeibc_b_req_reject_no_q(struct bio *bio
 {
 	return nvmeibc_b_req_reject(block_api_os_get_gendisk(bio)->queue, bio);
 }
-#endif
 
 bool nvmeibc_bio_noexec = 0;
 module_param_named(bio_noexec, nvmeibc_bio_noexec, bool, 0644);
-MODULE_PARM_DESC(bio_noexec, "This is for debugging. When set to true, BIOs (kernel block IOs) are ignored instead of being executed.");
+MODULE_PARM_DESC(bio_noexec, "Ignore all bios. 0 do not ignore, 1 ignore (complete with success)");
 
 /* request_queue callback, Using this method OS reads/write/trims the disk */
 static REQ_RET nvmeibc_b_req_make(struct request_queue *q, struct bio *bio)
@@ -1047,7 +1034,6 @@ static __attribute__((unused)) REQ_RET nvmeibc_b_req_make_no_q(struct bio *bio)
 
 #define __dirver_ctx_of(atom) container_of(atom, struct nvmeibc_os_api, atom)->driver_context
 
-#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
 static int __set_make_req_to_reject(struct nvmeiba_atom_os_api *atom)
 {
 #if KS_REQUEST_QUEUE_HAS_REQUEST_FN
@@ -1057,30 +1043,15 @@ static int __set_make_req_to_reject(struct nvmeiba_atom_os_api *atom)
 #endif
 	return 0;
 }
-#endif
 
 void block_api_os_stop_accepting_kernel_io(struct nvmeibc_os_api *os, u32 reason)
 {
 	struct nvmeiba_atom_os_api *atom = &os->atom;
 	if (!os->is_io_api_disabled) {
 		if (reason == 'D') {
-#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING
-			int (*set_detaching_fn)(struct nvmeiba_atom_os_api *atom) = (void *)os->atom.reserved[0];
-
-			if (os->driver_context->atom_protocol_version > NVMEIBA_2_C_PROTO_VERSION_V_2_0) {
-				BUG_ON(!set_detaching_fn);
-			}
-
-			if (set_detaching_fn) {
-				__exec_for_carrier_and_sub_vols(atom, set_detaching_fn);
-			} else {
-				__exec_for_carrier_and_sub_vols(atom, __set_make_req_to_reject);
-			}
-#else
-			__exec_for_carrier_and_sub_vols(atom, nvmeiba_kapi.os_api_set_detaching);
-#endif
+			__exec_for_carrier_and_sub_vols(atom, __set_make_req_to_reject);
 		} else {	// If carrier, abandones queue for itself and all sub volumes
-			__exec_for_carrier_and_sub_vols(atom, nvmeiba_kapi.os_api_orphan_abandon);
+			__exec_for_carrier_and_sub_vols(atom, nvmeiba_os_api_orphan_abandon);
 		}
 		wmb();	// make sure all cores see this ASAP
 	}
@@ -1217,7 +1188,7 @@ void block_api_os_drain_io(struct nvmeibc_os_api *os)
 		ASSERT_ATOM_STATUS(atom, nvmeiba_status_live);
 		WARN(!__is_nvmeibc_bdev_destroying(NULL, CALL_BIO_Q_CONTEXT(atom)), "nvmeibc bug\n");	// Wrong draining sequence. First call block_api_os_stop_accepting_kernel_io(), then drain the rest
 		rv = __exec_for_carrier_and_sub_vols(atom, nvmeiba_atom_drain_io);
-		is_abandoning = nvmeiba_kapi.os_api_is_queue_orphan(atom);
+		is_abandoning = nvmeiba_os_api_is_queue_orphan(atom);
 		_NT(trace_1_api_os_block_api_os_drain_io, "@DEV_NAME: Draining ios=@RV. q=@QUEUE", atom->dev_name, rv, atom->queue);
 	}
 	if (is_abandoning) {
@@ -1458,7 +1429,7 @@ int block_api_os_init(struct nvmeibc_os_api *os, bio_exec_fn *fn, ulong size,
 	__request_queue_set_default_params(q, atom->dev_name, __init_request_queue_params(os));
 	atom->conf.enforce_readonly = true;		// Default is true
 	disk = atom->disk;			/* Just for short writing */
-	disk->major = nvmeibc_use_block_external_major ? 0 : c->drv_ver.nvmeibc_major;	// In kernel 5.15+ setting major without minors is illegal: https://elixir.bootlin.com/linux/v5.15.165/source/block/genhd.c#L416
+	disk->major = nvmeibc_use_block_extrenal_major ? 0 : c->drv_ver.nvmeibc_major;	// In kernel 5.15+ setting major without minors is illegal: https://elixir.bootlin.com/linux/v5.15.165/source/block/genhd.c#L416
 	disk_id_allocator_alloc(get_dia(atom), atom->disk, atom->dev_name);
 	if (no_part_scan || IS_PATH_VDISK(atom->dev_name)) {
 		/* Avoid udevd reading our volumes as it not handle io disable well and may stuck */
@@ -1704,7 +1675,7 @@ void block_api_os_destroy(struct nvmeibc_os_api *os)
 	os = NULL; 					// Dont use 'OS' anymore. It does not exist, and might kfree thorugh atom destructor asyncronously!
 
 	if (!can_other_threads_open_atom)	{	// Free atom inline. LKJ: Replace the condition and destructor to ref_put()
-		nvmeiba_kapi.os_api_destructor(atom); /* Kernel does not use us. No unsafe detach */
+		nvmeiba_os_api_destructor(atom); /* Kernel does not use us. No unsafe detach */
 		atom = NULL;		 /* Both were kfree(), dont use them */
 	} else if (atom->status == nvmeiba_status_orphan) {
 		/* Dont call __exec_for_carrier_and_sub_vols(atom,destructor). Each atom holds resources for future adoption or will free itelf on adoption error */
@@ -1869,7 +1840,7 @@ static int __proc_create(struct nvmeibc_os_api *os, struct nvmeibc_procfs_cb cb)
 
 	p->io_st_sum= RO_proc_open("iostats"    ,      p, iostats_to_non_json         , os);
 	p->j_io_st  = RO_proc_open("iostats.json",     p, iostats_detailed_to_json , os);
-	p->opens    = RO_proc_open("client_processes", p, nvmeiba_kapi.atom_users_to_string, os);
+	p->opens    = RO_proc_open("client_processes", p, nvmeiba_atom_users_to_string, os);
 	p->throttle = RO_proc_open("io_throttle",      p, io_throttle_to_string    , os->dev);
 	p->status   = RO_proc_open("status"     ,      p, cb.dev_status_to_txt     , os->dev);
 	p->stalocks = RO_proc_open("recov_stats",      p, cb.dev_recovs_to_txt     , os->dev);
@@ -1940,7 +1911,7 @@ static struct nvmeibc_os_api *__kzalloc_os_api(void)
 
 static struct nvmeibc_os_api *__get_mem_for_os_api(const char* dev_dir, const char* dev_name)
 {
-	struct nvmeiba_atom_os_api *orphan = nvmeiba_kapi.os_api_orphan_adopt(dev_dir, dev_name);
+	struct nvmeiba_atom_os_api *orphan = nvmeiba_os_api_orphan_adopt(dev_dir, dev_name);
 	struct nvmeibc_os_api *os = NULL;
 	BUILD_BUG_ON(&((struct nvmeibc_os_api *)0)->atom != NULL); 			// Incorrect inheritance
 	BUILD_BUG_ON(sizeof(os->atom.dev_name) != NVMEIBC_BD_NAME_LEN); 	// Incorrect inheritance
@@ -1971,7 +1942,7 @@ static void nvmeibc_atom_constructor(struct nvmeiba_atom_os_api *atom, const cha
 	__atom_set_self_parent(atom);
 	atom->status = nvmeiba_status_hidden;	// Atom is hidden until registration with OS
 	atom->attach_jiff = jiffies;
-	nvmeiba_kapi.os_api_constructor(atom);
+	nvmeiba_os_api_constructor(atom);
 }
 
 static void __set_dev_and_uuid(struct nvmeibc_os_api *os, void* dev, const char* dev_uuid, const struct nvmeibc_os_apis_container *c)
@@ -2018,7 +1989,7 @@ struct nvmeibc_os_api *block_api_os_create(const struct nvmeibc_cinst_params_blk
 			   but hidden attach happened before regular attach. Fail hidden attach, or else we risk DI due to wron reservation version */
 			_NT(t_baoc_01, "@DEV_NAME: Failing hidden attach. Volume during upgrade! Reabandoning", dev_name);
 			os->atom.status = nvmeiba_status_live;		// We mistakenly adopted the atom, so abandon it again. Sorry bro...
-			nvmeiba_kapi.os_api_orphan_abandon(&os->atom);	// Note: No need to call '__exec_for_carrier_and_sub_vols' because we havent adopted the sub volumes yet
+			nvmeiba_os_api_orphan_abandon(&os->atom);	// Note: No need to call '__exec_for_carrier_and_sub_vols' because we havent adopted the sub volumes yet
 			__set_atom_status_orphan(&os->atom);
 			rv = -EACCES;
 			os = NULL;
@@ -2047,7 +2018,7 @@ _out:
 
 ssize_t block_api_os_dump_users(struct nvmeibc_os_api *os, char *buf, size_t len)
 {
-	return nvmeiba_kapi.atom_users_to_string(&os->atom, buf, len);
+	return nvmeiba_atom_users_to_string(&os->atom, buf, len);
 }
 
 void block_api_os_clear_io_stats(struct nvmeibc_os_api *os, const int which)
@@ -2126,7 +2097,7 @@ void block_api_os_change_size(struct nvmeibc_block_device *dev, bool force_reval
 
 static void __copy_gendisk(struct gendisk *dst, const struct gendisk *src)
 {
-	dst->major = nvmeibc_use_block_external_major ? 0 : src->major;
+	dst->major = nvmeibc_use_block_extrenal_major ? 0 : src->major;
 	dst->flags = src->flags;
 	dst->fops =  src->fops;
 	dst->queue = src->queue;
@@ -2183,7 +2154,7 @@ static int nvmeibc_atom_part_add(struct nvmeiba_atom_os_api *atom, struct nvmeib
 	//car->sub.flags.is_sub_auto_resize |= f.is_sub_auto_resize;	// True if at least one of them is auto resizable. Todo add this line when upon removing nickname this flag is updated
 	atom->sub.parent = car;
 	list_add_tail(&atom->sub.part_list, &car->sub.part_list);
-	nvmeiba_kapi.atom_part_add(car);
+	nvmeiba_atom_part_add(car);
 _out:
 	return rv;
 }
@@ -2196,7 +2167,7 @@ static void nvmeibc_atom_part_del(struct nvmeiba_atom_os_api *atom)
 		if (car && (car != atom)) {
 			list_del(&atom->sub.part_list);     // Delete form carrier so take lock on carrier
 			__atom_set_self_parent(atom);
-			nvmeiba_kapi.atom_part_del(car);
+			nvmeiba_atom_part_del(car);
 		} else {}								// Cleanup of failed constructor: Rare case when creation of sub volume failed before it could connect to carrier
 	}
 }
@@ -2376,7 +2347,7 @@ void block_api_os_carrier_ref_add(struct nvmeibc_os_api *car, const struct nvmei
 	struct nvmeibc_os_api_self_ref *ref = &car->unsafe_self_ref;
 	__verify_on_main_wq_osapi(car);
 	_NT(t_q0_capios, "@DEV_NAME: mounting carrier @DEV_NAME", rider->atom.dev_name, car->atom.dev_name);
-	nvmeiba_kapi.atom_part_add(&car->atom);	// Same refcount mechanism as sub-vols/aliases/partitions. As if rider creates an alias for carrier, thus holding a reference
+	nvmeiba_atom_part_add(&car->atom);	// Same refcount mechanism as sub-vols/aliases/partitions. As if rider creates an alias for carrier, thus holding a reference
 	WARN(ref->bdev_during_detach != NULL, "nvmeibc flow error\n");		// Detach could not be started because carrier will be used
 }
 
@@ -2386,6 +2357,6 @@ void block_api_os_carrier_ref_del(struct nvmeibc_os_api *car, const struct nvmei
 	__verify_on_main_wq_osapi(car);
 	_NT(t_q1_capios, "@DEV_NAME: umounting carrier @DEV_NAME", rider->atom.dev_name, car->atom.dev_name);
 	WARN(ref->bdev_during_detach != NULL, "nvmeibc flow error\n");		// Detach could not be started because carrier is in use
-	nvmeiba_kapi.atom_part_del(&car->atom);
+	nvmeiba_atom_part_del(&car->atom);
 }
 

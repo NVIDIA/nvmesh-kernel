@@ -1,12 +1,8 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_ib_driver.h"
 #include "nvmeib_public.h"
 #include "mlx/nvmeib_mlx.h"
 #include "siw/nvmeib_siw.h"
+#include "bnxt_re/nvmeib_bnxt_re.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_public.h"
 #include "nvmeibm_trace.h"
@@ -95,6 +91,15 @@ int nvmeib_ibdr_dev_init(bool paging_enabled)
 		nvmeib_mlx4_cleanup();
 		return ret;
 	}
+
+#if BNXT_RE
+	ret = nvmeib_bnxt_re_init();
+	if (ret) {
+		nvmeib_siw_cleanup();
+		nvmeib_mlx5_cleanup();
+		nvmeib_mlx4_cleanup();
+	}
+#endif
 
 	return ret;
 }
@@ -269,6 +274,52 @@ static int nvmeib_ibdr_hwdev_pops_clear(struct nvmeib_hwdev *dev)
 	return 0;
 }
 
+static struct nvmeib_device_ops *nvmeib_ibdr_hwdev_ops_get(struct nvmeib_hwdev *dev, const char *call_fn)
+{
+	struct nvmeib_device_ops *ops = ERR_PTR(-EINVAL);
+
+	if (!dev || !dev->ops) {
+		_NE(error_nvmeib_ib_driver_nvmeib_ibdr_hwdev_ops_get, "Invalid device ptr @DEV", dev);
+		goto out;
+	}
+	
+	mutex_lock(&dev->ops_guard);
+	ops = dev->ops;
+
+	if (!try_module_get(ops->module)) {
+		_NE(error_1_nvmeib_ib_driver_nvmeib_ibdr_hwdev_ops_get, "try_module_get failed for module @MODULE_NAME", ops->module->name);
+		ops = ERR_PTR(-EBUSY);
+	}
+	else
+		_ND(trace_nvmeib_ib_driver_nvmeib_ibdr_hwdev_ops_get, "module @MODULE_NAME call_fn @CALL_FN ref-cnt +1", ops->module->name, call_fn);
+	mutex_unlock(&dev->ops_guard);
+
+out:
+	return ops;
+}
+
+static struct nvmeib_device_ops *nvmeib_ibdr_hwdev_ops_get_ib(struct ib_device *ib_dev, const char *call_fn)
+{
+	struct nvmeib_hwdev *dev = nvmeib_ibdr_hwdev_get(ib_dev);
+	return nvmeib_ibdr_hwdev_ops_get(dev, call_fn);
+}
+
+static int nvmeib_ibdr_hwdev_ops_put(struct nvmeib_device_ops *ops, const char *call_fn)
+{
+	int rv = 0;
+
+	if (IS_ERR_OR_NULL(ops)) {
+		rv = -EINVAL;
+		goto out;
+	}
+
+	module_put(ops->module);
+	_ND(trace_nvmeib_ib_driver_nvmeib_ibdr_hwdev_ops_put, "module @MODULE_NAME call_fn @CALL_FN ref-cnt -1", ops->module->name, call_fn);
+
+out:
+	return rv;
+}
+
 struct nvmeib_device_public_ops *nvmeib_ibdr_hwdev_pops_get(struct ib_device *ib_dev)
 {
 	struct nvmeib_hwdev *dev = nvmeib_ibdr_hwdev_get(ib_dev);
@@ -302,6 +353,38 @@ int nvmeib_ibdr_hwdev_pops_put(struct nvmeib_device_public_ops *pops)
 	return 0;
 }
 EXPORT_SYMBOL(nvmeib_ibdr_hwdev_pops_put);
+
+#define NVMEIB_DEV_OPS_CALL(_ibdev, cb, ...) \
+({ \
+	 struct nvmeib_device_ops *ops; \
+	 int rv; \
+	 \
+	 ops = nvmeib_ibdr_hwdev_ops_get_ib(_ibdev, #cb); \
+	 if (!IS_ERR_OR_NULL(ops)) {\
+		 if (ops->cb) \
+			rv = ops->cb(__VA_ARGS__); \
+		else\
+			rv = -ENOSYS;\
+		nvmeib_ibdr_hwdev_ops_put(ops, #cb); \
+	 } \
+	 else \
+		 rv = ops ? PTR_ERR(ops) : -ENOSYS;\
+	 rv; \
+ })
+
+#define NVMEIB_DEV_OPS_CALL_RET_PTR(_ibdev, cb, ...) \
+({ \
+	 struct nvmeib_device_ops *ops; \
+	 void *rv = NULL; \
+	 \
+	 ops = nvmeib_ibdr_hwdev_ops_get_ib(_ibdev, #cb); \
+	 if (!IS_ERR_OR_NULL(ops)) {\
+		 if (ops->cb) \
+			rv = ops->cb(__VA_ARGS__); \
+		nvmeib_ibdr_hwdev_ops_put(ops, #cb); \
+	 }\
+	 rv; \
+ })
 
 void nvmeib_ibdr_hwdev_pops_call_all(void (*cb)(struct nvmeib_device_public_ops *pops, void *param), void *param)
 {
@@ -370,3 +453,285 @@ int nvmeib_device_get_max_rd_atom_on_wire(enum nvmeib_dev_type t)
 }
 EXPORT_SYMBOL(nvmeib_device_get_max_rd_atom_on_wire);
 
+/* get qp send_q resources */
+int nvmeib_ibdr_get_qp_sqr(struct ib_device *ib_dev, struct ib_qp *ib_qp,
+	struct nvmeib_sq_rsc *sqr)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, get_qp_sqr, ib_dev, ib_qp, sqr);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_get_qp_sqr);
+
+/* get qp completion queue resources */
+int nvmeib_ibdr_get_qp_cqr(struct ib_device *ib_dev, struct ib_cq *ib_cq,
+	struct nvmeib_cq_rsc *cqr)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, get_qp_cqr, ib_dev, ib_cq, cqr);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_get_qp_cqr);
+
+int nvmeib_ibdr_init_qp(struct ib_device *ib_dev, struct ib_qp *ib_qp,
+	u64 wr_id, u32 *opcode, struct nvmeib_sq_rsc *sqr)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, init_qp, ib_dev, ib_qp, wr_id, opcode, sqr);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_init_qp);
+
+int nvmeib_ibdr_dump_sq(struct ib_device *ib_dev, struct ib_qp *ib_qp)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, dump_sq, ib_dev, ib_qp);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_dump_sq);
+
+ssize_t nvmeib_ibdr_get_qp_usage(struct ib_device *ib_dev, struct ib_qp *ib_qp,
+								 enum nvmeib_cnt_mem_type mem_type)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, get_qp_usage, ib_dev, ib_qp, mem_type);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_get_qp_usage);
+
+ssize_t nvmeib_ibdr_get_srq_usage(struct ib_device *ib_dev, struct ib_srq *ib_srq,
+								 enum nvmeib_cnt_mem_type mem_type)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, get_srq_usage, ib_dev, ib_srq, mem_type);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_get_srq_usage);
+
+ssize_t nvmeib_ibdr_get_cq_usage(struct ib_device *ib_dev, struct ib_cq *ib_cq,
+								 enum nvmeib_cnt_mem_type mem_type)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, get_cq_usage, ib_dev, ib_cq, mem_type);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_get_cq_usage);
+
+ssize_t nvmeib_ibdr_get_mr_usage(struct ib_device *ib_dev, struct ib_mr *ib_mr,
+								 enum nvmeib_cnt_mem_type mem_type)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, get_mr_usage, ib_dev, ib_mr, mem_type);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_get_mr_usage);
+
+int nvmeib_ibdr_check_rdda_fw(struct ib_device *ib_dev)
+{
+	return NVMEIB_DEV_OPS_CALL(ib_dev, check_rdda_fw, ib_dev);
+}
+EXPORT_SYMBOL(nvmeib_ibdr_check_rdda_fw);
+
+int nvmeib_ibdr_max_sq_sz(struct ib_device *ib_dev)
+{
+	struct nvmeib_hwdev *dev = nvmeib_ibdr_hwdev_get(ib_dev);
+	int rv = 0;
+
+	NFIN;
+	if (dev)
+		rv = dev->max_rdda_sq_sz;
+	else
+		_NW(warn_nvmeib_ib_driver_nvmeib_ibdr_max_sq_sz, "Querying max rdda send-queue size of unsupported device @IB_DEV_NAME", ib_dev->name);
+	NFOUT;
+	return rv;
+}
+EXPORT_SYMBOL(nvmeib_ibdr_max_sq_sz);
+
+struct nvmeib_shadow_qp {
+	void *priv;
+	struct nvmeib_device_ops *ops;
+	int (*init)(struct nvmeibc_remote_net *rnet, void **priv);
+	int (*clear)(struct nvmeibc_remote_net *rnet, void *priv);
+	int (*send)(struct nvmeibc_remote_net *rnet, void *priv, struct nvmeib_send_wr *wr);
+	int (*free)(struct nvmeibc_remote_net *rnet, void *priv);
+	int (*dump_sq)(struct nvmeibc_remote_net *rnet, void *priv);
+};
+
+int nvmeib_ibdr_init_remote_qp_shadow(enum nvmeib_dev_type type,
+	struct nvmeibc_remote_net *rnet)
+{
+	struct nvmeib_shadow_qp *sqp;
+	int rv = 0;
+
+	NFIN;
+	if ((sqp = kzalloc(sizeof(*sqp), GFP_KERNEL))) {
+		struct nvmeib_hwdev *dev = nvmeib_ibdr_hwdev_get_by_type(type);
+		sqp->ops = nvmeib_ibdr_hwdev_ops_get(dev, __func__);
+
+		if (!IS_ERR_OR_NULL(sqp->ops)) {
+			sqp->init = sqp->ops->init_remote_qp_shadow;
+			sqp->clear = sqp->ops->clear_remote_qp_shadow;
+			sqp->send = sqp->ops->send_remote_qp_shadow;
+			sqp->free = sqp->ops->free_remote_qp_shadow;
+			sqp->dump_sq = sqp->ops->dump_remote_sq_shadow;
+
+			if ((rv = sqp->init(rnet, &sqp->priv))) {
+				nvmeib_ibdr_hwdev_ops_put(sqp->ops, __func__);
+				sqp->ops = NULL;
+			}
+		} else 
+			rv = -ENOSYS;
+		if (!rv) {
+			rnet->priv = sqp;
+			rnet->type = type;
+		}
+		else
+			kfree(sqp);
+	}
+	else
+		rv = -ENOMEM;
+	NFOUT;
+	return rv;
+}
+EXPORT_SYMBOL(nvmeib_ibdr_init_remote_qp_shadow);
+
+int nvmeib_ibdr_clear_remote_qp_shadow(struct nvmeibc_remote_net *rnet)
+{
+	struct nvmeib_shadow_qp *qps = rnet->priv;
+	int rv = 0;
+
+	NFIN;
+	rv = qps->clear(rnet, qps->priv);
+	NFOUT;
+	return rv;
+}
+EXPORT_SYMBOL(nvmeib_ibdr_clear_remote_qp_shadow);
+
+int nvmeib_ibdr_free_remote_qp_shadow(struct nvmeibc_remote_net *rnet)
+{
+	struct nvmeib_shadow_qp *qps = rnet->priv;
+	int rv = 0;
+
+	NFIN;
+	if (!qps || IS_ERR_OR_NULL(qps->ops)) {
+		_NT(trace_nvmeib_ib_driver_nvmeib_ibdr_free_remote_qp_shadow, "Invalid ops. qps @QPS qps->ops @OPS_PTR", qps, qps->ops);
+		rv = -EINVAL;
+		goto out;
+	}
+
+	if (qps->free)
+		rv = qps->free(rnet, qps->priv);
+	nvmeib_ibdr_hwdev_ops_put(qps->ops, __func__);
+	qps->ops = NULL;
+	kfree(qps);
+
+out:
+	NFOUT;
+	return rv;
+}
+EXPORT_SYMBOL(nvmeib_ibdr_free_remote_qp_shadow);
+
+int nvmeib_ibdr_dump_remote_sq_shadow(struct nvmeibc_remote_net *rnet)
+{
+	struct nvmeib_shadow_qp *qps = rnet->priv;
+	int rv = 0;
+	
+	NFIN;
+	if (!qps)
+		rv = -EINVAL;
+	else if (!qps->dump_sq)
+		rv = -ENOSYS;
+	else
+		rv = qps->dump_sq(rnet, qps->priv);
+	NFOUT;
+	return rv;
+}
+EXPORT_SYMBOL(nvmeib_ibdr_dump_remote_sq_shadow);
+
+int nvmeib_ibdr_read_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
+	struct nvmeib_rdma_iu *ariu, struct nvmeib_iu *iu,
+	struct nvmeib_rdma_iu *pbiu, u32 immediate)
+{
+	struct nvmeib_shadow_qp *qps = rnet->priv;
+	struct nvmeib_send_wr *wr;
+	struct nvmeib_rdma_iu *riu;
+	int o1 = ariu ? 1 : 0;
+	int o2 = pbiu ? 1 : 0; /* read-lock piggyback iu */
+	int len = o1 + o2 + iu->n_rdma_iu + 1;
+	int i, rv;
+
+	NFIN;
+	if (!(wr = kzalloc(len * sizeof(*wr), GFP_ATOMIC))) {
+		NFOUT;
+		return -ENOMEM;
+	}
+
+	/* add a possible first riu - (probably disk completion queue */
+	if (o1) {
+		nvmeib_send_wr_common(wr[0]).opcode = IB_WR_RDMA_WRITE;
+		nvmeib_send_wr_rdma(wr[0]).remote_addr = ariu->raddr;
+		nvmeib_send_wr_rdma(wr[0]).rkey = ariu->rkey;
+		nvmeib_send_wr_common(wr[0]).num_sge = ariu->sge_cnt;
+		nvmeib_send_wr_common(wr[0]).sg_list = ariu->sge;
+		nvmeib_send_wr_set_next(wr[0], &wr[1]);
+	}
+	riu = iu->rius;
+	if (!o2) {
+		for (i = 0; i < iu->n_rdma_iu - 1; ++i, ++riu) {
+			nvmeib_send_wr_common(wr[o1 + i]).opcode = IB_WR_RDMA_WRITE;
+			nvmeib_send_wr_rdma(wr[o1 + i]).remote_addr = riu->raddr;
+			nvmeib_send_wr_rdma(wr[o1 + i]).rkey = riu->rkey;
+			nvmeib_send_wr_common(wr[o1 + i]).num_sge = riu->sge_cnt;
+			nvmeib_send_wr_common(wr[o1 + i]).sg_list = riu->sge;
+			nvmeib_send_wr_set_next(wr[o1 + i], &wr[o1 + i + 1]);
+		}
+		nvmeib_send_wr_common(wr[o1 + i]).opcode = IB_WR_RDMA_WRITE_WITH_IMM;
+		nvmeib_send_wr_ex(wr[o1 + i]).imm_data = immediate;
+		nvmeib_send_wr_rdma(wr[o1 + i]).remote_addr = riu->raddr;
+		nvmeib_send_wr_rdma(wr[o1 + i]).rkey = riu->rkey;
+		nvmeib_send_wr_common(wr[o1 + i]).num_sge = riu->sge_cnt;
+		nvmeib_send_wr_common(wr[o1 + i]).sg_list = riu->sge;
+		nvmeib_send_wr_clear_next(wr[o1 + i]);
+	}
+	else {
+		for (i = 0; i < iu->n_rdma_iu; ++i, ++riu) {
+			nvmeib_send_wr_common(wr[o1 + i]).opcode = IB_WR_RDMA_WRITE;
+			nvmeib_send_wr_rdma(wr[o1 + i]).remote_addr = riu->raddr;
+			nvmeib_send_wr_rdma(wr[o1 + i]).rkey = riu->rkey;
+			nvmeib_send_wr_common(wr[o1 + i]).num_sge = riu->sge_cnt;
+			nvmeib_send_wr_common(wr[o1 + i]).sg_list = riu->sge;
+			nvmeib_send_wr_set_next(wr[o1 + i], &wr[o1 + i + 1]);
+		}
+		nvmeib_send_wr_common(wr[o1 + i]).opcode = IB_WR_RDMA_WRITE_WITH_IMM;
+		nvmeib_send_wr_ex(wr[o1 + i]).imm_data = immediate;
+		nvmeib_send_wr_rdma(wr[o1 + i]).remote_addr = pbiu->raddr;
+		nvmeib_send_wr_rdma(wr[o1 + i]).rkey = pbiu->rkey;
+		nvmeib_send_wr_common(wr[o1 + i]).num_sge = pbiu->sge_cnt;
+		nvmeib_send_wr_common(wr[o1 + i]).sg_list = pbiu->sge;
+		nvmeib_send_wr_clear_next(wr[o1 + i]);
+	}
+
+	/* nvmeib_mlx5_send_remote_qp_shadow */
+	rv = qps->send(rnet, qps->priv, wr);
+	kfree(wr);
+	NFOUT;
+	return rv;
+}
+EXPORT_SYMBOL(nvmeib_ibdr_read_remote_qp_shadow);
+
+int nvmeib_ibdr_write_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
+	struct nvmeib_rdma_iu *ariu, u32 immediate)
+{
+	struct nvmeib_shadow_qp *qps = rnet->priv;
+	struct nvmeib_send_wr wr;
+	int rv;
+
+	NFIN;
+	memset(&wr, 0, sizeof(wr));
+	if (ariu) {
+#ifdef USE_RDMA_POLLING
+		nvmeib_send_wr_common(wr).opcode = IB_WR_RDMA_WRITE;
+#else
+		nvmeib_send_wr_common(wr).opcode= IB_WR_RDMA_WRITE_WITH_IMM;
+		nvmeib_send_wr_ex(wr).imm_data = immediate;
+#endif
+		nvmeib_send_wr_rdma(wr).remote_addr = ariu->raddr;
+		nvmeib_send_wr_rdma(wr).rkey = ariu->rkey;
+		nvmeib_send_wr_common(wr).num_sge = ariu->sge_cnt;
+		nvmeib_send_wr_common(wr).sg_list = ariu->sge;
+	}
+	else {
+		nvmeib_send_wr_common(wr).opcode = IB_WR_SEND_WITH_IMM;
+		nvmeib_send_wr_ex(wr).imm_data = immediate;
+	}
+
+	/* nvmeib_mlx5_send_remote_qp_shadow */
+	rv = qps->send(rnet, qps->priv, &wr);
+	NFOUT;
+	return rv;
+}
+EXPORT_SYMBOL(nvmeib_ibdr_write_remote_qp_shadow);

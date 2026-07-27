@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_raid_recov_itr.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_req_rel_locks.h"	// Stale special value
 #include "block/datapath_utils_generic/nvmeibc_block_dp_common.h"			// vfree()
@@ -14,7 +9,7 @@
 	ulong nvmeibc_iter_colldown = 500;			// 0.5[sec]
 #endif
 module_param_named(recovery_iterator_cooldown, nvmeibc_iter_colldown, ulong, 0644);
-MODULE_PARM_DESC(recovery_iterator_cooldown, "Recovery iterator timeout to wait after completing full recovery cycle in jiffies. Increasing this trades recovery load vs. recovery time.");
+MODULE_PARM_DESC(recovery_iterator_cooldown, "Recovery iterator delay for each innefective recovery cycle [msec]");
 
 NVMEIBC_MEMMGR_METRIC(dp_recovery_problems_report, "component=raid.io_ctrl.recovery.problems");
 

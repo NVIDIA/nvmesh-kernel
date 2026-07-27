@@ -2,10 +2,10 @@ Name:				nvmesh-core
 Version:			%{version}
 Release:			%{release}
 Group:				System Environment
-Summary:			"nvmesh-core" by NVIDIA
+Summary:			"nvmesh-core" by Excelero
 
-License:			GPL-2.0-only OR Apache-2.0 at your choice
-URL:				http://www.nvidia.com
+License:			Commercial Non OSI
+URL:				http://www.excelero.com
 Source0:			%{name}
 
 Requires:			%{requires_pkgs}
@@ -13,9 +13,9 @@ Autoreq:                        0
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+© Copyright 2015-2020 Excelero, Inc. All rights reserved. This document contains the confidential and proprietary information of Excelero, Inc. Do not reproduce or distribute without the prior written consent of Excelero.
 
-"Nvidia nvmesh-core" includes NVMesh client and target services and components for a kmod-nvmesh-core environment.
+"Excelero nvmesh-core" includes NVMesh client and target services and components for a kmod-nvmesh-core environment.
 	Branch: %{branch}
 	Block Size: %{block_size}
 	Commit: %{commit_id}
@@ -34,6 +34,7 @@ mkdir -pv %{buildroot}/opt/NVMesh/target-repo/installation-scripts-%{version}-%{
 mkdir -pv %{buildroot}/opt/NVMesh/client-repo/services
 mkdir -pv %{buildroot}/opt/NVMesh/target-repo/services
 mkdir -pv %{buildroot}/opt/NVMesh/common-repo
+mkdir -pv %{buildroot}/opt/NVMesh/public
 mkdir -pv %{buildroot}/lib/systemd/system
 mkdir -pv %{buildroot}/usr/bin
 mkdir -pv %{buildroot}/etc/modprobe.d
@@ -51,6 +52,7 @@ mkdir -pv %{buildroot}/var/opt/NVMesh/mcs/TOMA
 mkdir -pv %{buildroot}/var/log/NVMesh/trace_daemon
 mkdir -pv %{buildroot}/var/log/NVMesh
 
+cp -rf %{_builddir}/%{name}/public/ %{buildroot}/opt/NVMesh
 cp -rf %{_builddir}/%{name}/toma %{buildroot}/opt/NVMesh/target-repo
 cp -rf %{_builddir}/%{name}/uninstall-target %{buildroot}/opt/NVMesh/target-repo/installation-scripts-%{version}-%{release}
 cp -rf %{_builddir}/%{name}/install.py %{buildroot}/opt/NVMesh/target-repo/installation-scripts-%{version}-%{release}
@@ -67,6 +69,8 @@ cp -rf %{_builddir}/%{name}/scripts/target %{buildroot}/opt/NVMesh/target-repo/s
 cp -rf %{_builddir}/%{name}/scripts/client %{buildroot}/opt/NVMesh/client-repo/scripts
 cp -rf %{_builddir}/%{name}/scripts/common %{buildroot}/opt/NVMesh/common-repo/scripts
 cp -rf %{_builddir}/%{name}/upgrade_scripts/NVMesh-target %{buildroot}/opt/NVMesh/target-repo
+cp -rf %{_builddir}/%{name}/mlnx_fw/Excelero_mlxconfig.db %{buildroot}/etc/opt/NVMesh
+cp -rf %{_builddir}/%{name}/mlnx_fw/patch_mlxconfig.db.sql %{buildroot}/etc/opt/NVMesh
 mv %{buildroot}/opt/NVMesh/target-repo/NVMesh-target %{buildroot}/opt/NVMesh/target-repo/upgrade_scripts
 cp -rf %{_builddir}/%{name}/uninstall-client %{buildroot}/opt/NVMesh/client-repo/installation-scripts-%{version}-%{release}
 cp -rf %{_builddir}/%{name}/install.py %{buildroot}/opt/NVMesh/client-repo/installation-scripts-%{version}-%{release}
@@ -129,6 +133,8 @@ echo "/opt/NVMesh
 /etc/depmod.d/zz02-nvmesh.conf
 /etc/opt/NVMesh/nvmesh.conf
 /etc/opt/NVMesh/target_devices.conf
+/etc/opt/NVMesh/Excelero_mlxconfig.db
+/etc/opt/NVMesh/patch_mlxconfig.db.sql
 /etc/udev/rules.d/60-nvmesh.rules
 %ghost /var/opt/NVMesh/.target_devices
 %ghost /var/opt/NVMesh/client_upgrade_version
@@ -166,5 +172,5 @@ fi
 %config(noreplace) /etc/opt/NVMesh/target_devices.conf
 
 %changelog
-* Wed Oct 7 2015 nvmesh
-- Installing NVIDIA nvmesh-core for a kmod-nvmesh-core environment
+* Wed Oct 7 2015 Excelero
+- Installing Excelero nvmesh-core for a kmod-nvmesh-core environment

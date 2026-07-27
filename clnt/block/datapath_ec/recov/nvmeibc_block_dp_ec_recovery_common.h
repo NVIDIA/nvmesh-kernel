@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_DP_EC_RECOV_COMMON_H
 #define NVMEIBC_DP_EC_RECOV_COMMON_H
 /* Generic utils for various syncs of EC */
@@ -78,8 +73,6 @@ u32 nvmeibcbdpec_calc_max_txid_in_data_md(const struct recovery_sync_op *so);
 /* Merge all dbits of all slices from all sources (RAM, MD, UNK, Convicts) */
 union nvmeibc_dbits_entry
 	nvmeibcbdpec_calc_max_dbit_in_ram_md( const struct recovery_sync_op *so);
-union nvmeibc_dbits_entry
-	nvmeibcbdpec_calc_worst_case_dbits(const struct recovery_sync_op *so);
 
 bool __is_journal_committed(struct nvmeibc_raid1 *r1, struct jent_md_decompressed jent_mds[], sgmnts_bmp_t analyzed_segs);
 

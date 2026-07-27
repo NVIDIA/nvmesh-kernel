@@ -1,7 +1,13 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+##############################################################################
+#  Copyright (C) 2015-2018 Excelero, Inc. All Rights Reserved.               #
+#                                                                            #
+#  This file is part of Excelero NVMesh software.                            #
+#                                                                            #
+#  Unauthorized copying of this file, via any medium is strictly prohibited  #
+#  Proprietary and confidential                                              #
+##############################################################################
 
 cd /sys/class/infiniband
 mlx_devices=`ls`

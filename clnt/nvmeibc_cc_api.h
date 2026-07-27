@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_CC_API_H
 #define NVMEIBC_CC_API_H
 
@@ -79,7 +74,7 @@ struct nvmeibc_control_api {
 	struct c_api_proc mcs;				// Communication with management
 	struct c_api_proc cli;				// Command line interface
 	struct proc_dir_entry *proc_dir;	// Location where ccapi proc files/msg loops reside (typically /proc/nvmeibc/)
-	struct c_api_bdev_ioctls ioctls;	// NVMesh specific ioctls
+	struct c_api_bdev_ioctls ioctls;	// Excelero specific ioctls
 
 	long long clnt_2_mgmt_report_id;		// Initialized to DEFAULT_UPSTREAM_VALUE (-1). Set by mgmt with MCS_UPDATE_CLIENT_TOKEN_MSG. Increments whenever volume: is attached/detached/IO enabled for the first time
 	long long clnt_2_mgmt_fullconf_token;	// Initialized to DEFAULT_UPSTREAM_VALUE (-1). Set by mgmt with MCS_UPDATE_CLIENT_TOKEN_MSG. Token with which mgmt requests client to report its full configuration

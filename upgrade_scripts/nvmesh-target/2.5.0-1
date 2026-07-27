@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
-
 trace_config_file="/var/log/NVMesh/trace.config"
 new_rpc_config_file="/opt/NVMesh/common-repo/tools/toma_rpc.config"
 

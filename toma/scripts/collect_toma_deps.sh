@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # DanielHSH, 2025/Nov, Used if we need to copy Toma to other machine (kubernetes container) with all its .so, without installing NVMesh properly. Gil Vitsinger was the last one who used
 TOMA_BIN_PATH=${TOMA_BIN_PATH:-"toma/bin/release/nvmeibt_toma"}
 OUTPUT_LIBS=${OUTPUT_LIBS:-toma_libs}

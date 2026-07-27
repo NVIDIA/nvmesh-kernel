@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_DP_OPERATION_PER_CPU_INFRA_H
 #define NVMEIBC_DP_OPERATION_PER_CPU_INFRA_H
 
@@ -90,7 +85,7 @@ static void __mini_elevator_flush_if_needed(struct nvmeibc_block_device *nd, int
 /******************************* Plug *****************************************/
 static bool mini_elevator = false;
 module_param(mini_elevator, bool, 0644);
-MODULE_PARM_DESC(mini_elevator, "Enable mini-elevator which combines writes to erasure coded volumes to fill stripes. This functionality was experimental (and promising), but did not reach production quality.");
+MODULE_PARM_DESC(mini_elevator, "Enable mini-elevator which combines writes to erasure coded volumes to fill stripes");
 #define _NPLUGLOG _ND
 
 // YR: We should have a linked list of all operations put into the cache this way... If the plug works well, we may not need the cache.
@@ -161,7 +156,7 @@ static void __mini_elevator_start_plug(struct nvmeibc_block_device *nd)
 #if ELEVATOR_TIMERS_IMPLEMENTATION
 	static ulong mini_elevator_jiffies = 100;
 	module_param(mini_elevator_jiffies, ulong, 0644);
-	MODULE_PARM_DESC(mini_elevator_jiffies, "Defines the maximum number of jiffies an IO may reside in the mini-elevator.");
+	MODULE_PARM_DESC(mini_elevator_jiffies, "Max jiffies in mini-elevator");
 	#if USE_1_ELEV_HASH_TO_ALL_BDEVS
 		static struct nvmeibc_elevator_operation_hash hash_elev;							// Instead of each block device using its hash, use a single hash, because timer gets only a single uint (key), It cannot get as param both key and pointer to hash
 		static bool is_hash_elev_initiliaized = false;
@@ -193,7 +188,7 @@ static void __wq_execute_elevator(struct workqe_struct *work)
 static void __operation_schedule_execute_no_cache(struct operation *o)
 {
 	WQ_INIT_WORK(&o->work_elev, __wq_execute_elevator);
-	dp_block_schedule_work(o->cpu_id, &o->work_elev);
+	dp_block_schedule_operation_work(o, &o->work_elev);
 }
 
 #if ELEVATOR_TIMERS_IMPLEMENTATION

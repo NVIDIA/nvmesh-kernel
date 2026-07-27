@@ -1,5 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
 ---
 # <source_pattern> - path/pattern to a local file or url
 #     metric_prefix - metric name prefix
@@ -10,8 +8,6 @@
 #     pattern_labels_re - extract label from json KEYS re path (general scope)
 #     query_labels - mapping of label name to extract label from json VALUES path in jmespath syntax, in case json is a list - use a query per item in the list
 #         <label_name> - jmespath.to.value.of.metric
-#     query_labels_re - extract multiple labels from a single field value using named regex groups
-#         <field_name> - regex with named groups e.g. '(?P<label1>[^-]+)->(?P<label2>.+)'
 #
 #     metrics - list of specific metric lookups and definitions
 #         <metric_name> - metric name
@@ -468,16 +464,6 @@ nvmesh_rpc_operation@volume@VOLUME_STATUS:
       help: 'IO ops for disk by operation'
       type: 'counter'
 
-/proc/nvmeibs/disks/*/qp_stats.json:
-  metric_prefix: 'nvmesh_target_disks_qp_stats'
-  glob_labels_re: '/proc/nvmeibs/disks/(?P<disk_sn>\w+(\.\d+)?)/qp_stats.json'
-  transform: 'summary'
-  metrics:
-    value:
-      pattern_labels_re: 'nvmesh_target_disks_qp_stats_(?P<counter_name>.+)'
-      help: 'NVMe queue pair stats per disk (summary)'
-      type: 'gauge'
-
 /proc/nvmeibs/nic_stats/*/iostats.json:
   metric_prefix: 'nvmesh_target_nics_io'
   glob_labels_re: '/proc/nvmeibs/nic_stats/(?P<nic_guid>\w+)/iostats.json'
@@ -601,9 +587,6 @@ nvmesh_rpc_operation@volume@VOLUME_STATUS:
     raft_time_since_converted_to_leader:
       help: 'Time since converted to RAFT leader'
       type: 'counter'
-    num_clients:
-      help: 'Number of connected clients'
-      type: 'gauge'
   aggregates:
     raft_leader_name:
       help: 'Raft leader name as seen by current TOMA'
@@ -629,14 +612,6 @@ nvmesh_rpc_operation@volume@VOLUME_STATUS:
 
 /proc/nvmeibs/toma_status/nm.json:
   metric_prefix: 'nvmesh_toma_nw_status'
-  aggregates:
-    paths_by_state:
-      help: 'network paths count by connection state'
-      aggregate_by:
-        path_state:
-          query: 'nw_status.state.nics[].ports[].paths[].state'
-        last_error:
-          query: 'nw_status.state.nics[].ports[].paths[].last_error'
   collections:
     nw_status.state.remote_nodes:
       query_labels:
@@ -645,117 +620,6 @@ nvmesh_rpc_operation@volume@VOLUME_STATUS:
         connected:
           help: 'is node connected'
           type: 'counter'
-    nw_status.state.nics:
-      metric_prefix: 'nvmesh_toma_nw_nic'
-      query_labels:
-        nic_name: 'name'
-      metrics:
-        allowed:
-          help: 'is NIC allowed for NVMesh traffic'
-          type: 'gauge'
-        alive:
-          help: 'is NIC alive'
-          type: 'gauge'
-      collections:
-        ports:
-          metric_prefix: 'nvmesh_toma_nw_port'
-          query_labels:
-            port_num: 'port_num'
-            gid: 'gid'
-            port_state: 'state'
-            port_type: 'type'
-          metrics:
-            usable:
-              help: 'is port usable'
-              type: 'gauge'
-            alive:
-              help: 'is port alive'
-              type: 'gauge'
-          collections:
-            paths:
-              metric_prefix: 'nvmesh_toma_nw_path'
-              query_labels:
-                path_state: 'state'
-                last_error: 'last_error'
-              query_labels_re:
-                name: '(?P<local_addr>[^-]+)->(?P<remote_node>[^:]+):(?P<remote_addr>.+)'
-              metrics:
-                version:
-                  help: 'path connection version'
-                  type: 'gauge'
-                counters_path_restarts:
-                  help: 'total path restarts'
-                  type: 'counter'
-                counters_invalid_ping_response:
-                  help: 'invalid ping responses'
-                  type: 'counter'
-                counters_ping_retries:
-                  help: 'total ping retries on path'
-                  type: 'counter'
-                restart_reason:
-                  pattern_labels_re: 'nvmesh_toma_nw_path_counters_path_restarts_counters_(?P<restart_reason>.+)'
-                  help: 'path restarts by reason'
-                  type: 'counter'
-
-/proc/nvmeibs/serjio/*/stats.json:
-  metric_prefix: 'nvmesh_target_serjio'
-  glob_labels_re: '/proc/nvmeibs/serjio/(?P<disk_id>\w+(\.\d+)?)/stats.json'
-  collections:
-    work_stats:
-      metric_prefix: 'nvmesh_target_serjio_work'
-      query_labels:
-        work_type: 'work_type'
-      metrics:
-        n_works:
-          help: 'number of works executed'
-          type: 'counter'
-        n_errors:
-          help: 'number of work errors'
-          type: 'counter'
-        n_rescheds:
-          help: 'number of work reschedules'
-          type: 'counter'
-        queued:
-          pattern_labels_re: 'works_queued_(?P<stat>min|max|avg|overall_count|current_count)'
-          help: 'work queue time statistics'
-        exec_time:
-          pattern_labels_re: 'works_exec_time_(?P<stat>min|max|avg|overall_count|current_count)'
-          help: 'work execution time statistics'
-    states_stats:
-      metric_prefix: 'nvmesh_target_serjio_state'
-      query_labels:
-        state: 'state'
-      metrics:
-        min:
-          help: 'state minimum duration'
-        max:
-          help: 'state maximum duration'
-        avg:
-          help: 'state average duration'
-        overall_count:
-          help: 'state overall occurrence count'
-          type: 'counter'
-        current_count:
-          help: 'state current count'
-          type: 'gauge'
-  metrics:
-    io_total_works:
-      pattern_labels_re: 'io_stats_works_io_total_total_works'
-      help: 'total number of IO works'
-      type: 'counter'
-    io_bw:
-      pattern_labels_re: 'io_stats_works_io_total_(?P<op>read|write)_bw_(?P<stat>avg|max)'
-      help: 'IO bandwidth statistics'
-    io_iops:
-      pattern_labels_re: 'io_stats_works_io_total_(?P<op>read|write)_iops_(?P<stat>avg|max)'
-      help: 'IO operations per second statistics'
-    io_errors_count:
-      pattern_labels_re: 'io_stats_works_io_total_(?P<error_type>submit_read_errors|submit_write_errors|read_errors|write_errors)_count'
-      help: 'IO error count'
-      type: 'counter'
-    io_errors_max:
-      pattern_labels_re: 'io_stats_works_io_total_(?P<error_type>submit_read_errors|submit_write_errors|read_errors|write_errors)_max'
-      help: 'IO error maximum'
 
 /proc/nvmeib*/memmgr_info:
   glob_labels_re: '/proc/(?P<module>\w+)/memmgr_info'

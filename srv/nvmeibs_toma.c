@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 /* Toma server side interface - extension of nvmeibs client object */
 #define S_TOMA_C
 
@@ -972,7 +967,7 @@ static int process_disk_segment_lock_gid_get(
 	struct nvmeibs_toma_disk_segment_lock_gid_req *req)
 {
 	int num_gids = MAX_PORTS_FOR_LOCKS_GIDS;
-	union ib_gid gids[MAX_PORTS_FOR_LOCKS_GIDS];
+	union ib_gid gids[num_gids];
 	struct nvmeibs_toma_server_proc_buf proc_buf;
 	struct nvmeibs_toma_disk_segment_lock_gid_rsp *rsp;
 	int rv = -1;

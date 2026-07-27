@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib.h"
 
 #include "nvmeibs_types.h"
@@ -25,14 +20,10 @@
 #include "nvmeib_public.h"
 #include "nvmeib_io_stats.h"
 #include "nvmeib_common_os_block_api.h"
-#include "nvmeib_json.h"
 #include "common/proc_epilog.h"
 #include "nvmeib_completion_noise.h"
 /* Must be last to override module_{init/exit} */
 #include "kr_undef.h"
-
-struct workqueue_struct *nvmeibs_nvme_wq = NULL;
-EXPORT_SYMBOL(nvmeibs_nvme_wq);
 
 #ifndef PCI_MSIX_ENTRY_CTRL_MASKBIT
 #define   PCI_MSIX_ENTRY_CTRL_MASKBIT 1
@@ -44,110 +35,89 @@ EXPORT_SYMBOL(nvmeibs_nvme_wq);
 /*
 static bool no_rdda = false;
 module_param(no_rdda, bool, 0444);
-MODULE_PARM_DESC(no_rdda, "Used to disable Remote Direct Disk Access.");
+MODULE_PARM_DESC(no_rdda, "Disable Remote Direct Disk Access");
 */
 unsigned max_client_rsrc = NVMEIBS_MAX_DISK_RESOURCES_PER_CLIENT;
 module_param(max_client_rsrc, uint, 0644);
-MODULE_PARM_DESC(max_client_rsrc, "RDDA is deprecated. Maximum number of RDDA connections per client.");
+MODULE_PARM_DESC(max_client_rsrc, "Maximum resources(I/O queues) per client");
 
 static int max_completions = 64;
 module_param(max_completions, int, 0644);
-MODULE_PARM_DESC(max_completions, "Maximum number of networking completions to handle per interrupt.");
+MODULE_PARM_DESC(max_completions, "Maximum nvme completions to poll and process per interrupt or iteration of cq's offload-thread (0: poll until empty-cq)");
 
 static bool nvmeibs_defer_process_io_cq = false;
 module_param_named(defer_process_io_cq, nvmeibs_defer_process_io_cq, bool, 0644);
-MODULE_PARM_DESC(defer_process_io_cq, "Defer all IO completions to a per completion queue thread, so it is not done in the interrupt context.");
-
-static bool nvmeibs_use_nvme_kwq = false;
-module_param_named(use_nvme_kwq, nvmeibs_use_nvme_kwq, bool, 0444);
-MODULE_PARM_DESC(use_nvme_kwq, "Determines whether to use a kernel workqueue instead of a wakeup thread for processing completion queues.");
-
-static bool nvmeibs_nvme_wq_unbound = false;
-module_param_named(nvme_wq_unbound, nvmeibs_nvme_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nvme_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibs_nvme (true) or a bound one (false), relevant only if use_nvme_kwq = true.");
+MODULE_PARM_DESC(defer_process_io_cq, "Defer all io complentions to offload-thread per cq");
 
 /* we dont really need to expose this param as we dont fail anything if we alloc less qs.
    it is just used as an initial/default value for when drive has not too many (< 30) qs */
 static int nvmeibs_min_local_nvmeqs = 1;
 module_param_named(min_local_nvmeqs, nvmeibs_min_local_nvmeqs, int, 0644);
-MODULE_PARM_DESC(min_local_nvmeqs, "Minimum number of NVMe queues per drive to reserve for non-RDDA usage. As RDDA is deprecated, this is obsolete.");
+MODULE_PARM_DESC(min_local_nvmeqs, "Minimum NVMe queues for local operation");
 
 static int nvmeibs_max_local_nvmeqs = 0;
 module_param_named(max_local_nvmeqs, nvmeibs_max_local_nvmeqs, int, 0444);
-MODULE_PARM_DESC(max_local_nvmeqs, "Maximum NVMe queues for local operation. A value of 0 sets the actual maximum to the lower of the number of CPUs, drive queues, doorbells and MSI-X interrupts available. The value is replaced by the actual number calculated.");
+MODULE_PARM_DESC(max_local_nvmeqs, "Maximum nvme queues for local operation. "
+								   "0 - use max possible number of nvme-qs of drive considering max_client_rsrc (RDDA)");
 
 static bool nvmeibs_iommu_enabled = false;
 module_param_named(iommu_enabled, nvmeibs_iommu_enabled, bool, 0444);
-MODULE_PARM_DESC(iommu_enabled, "Informs the internal NVMesh NVMe driver that the IOMMU is enabled on the node.");
+MODULE_PARM_DESC(iommu_enabled, "Used to tell nvme driver that IOMMU is enabled");
 
 static char ignore_disks[1024];
 static char ignore_disks[1024];
 module_param_string(ignore_disks, ignore_disks, sizeof(ignore_disks), 0600);
-MODULE_PARM_DESC(ignore_disks, "Comma separated list of PCI IDs of NVMe drives to ignore. For example, \"0000:03:00.0,0000:12:01.0\".");
+MODULE_PARM_DESC(ignore_disks, "Comma separated list of NVMe drives to "
+				 "ignore - for example 0000:03:00.0,0000:12:01.0");
 
 static char ignore_disks_serials[1024];
 module_param_string(ignore_disks_serials, ignore_disks_serials, sizeof(ignore_disks_serials), 0600);
-MODULE_PARM_DESC(ignore_disks_serials, "Comma separated list of serial IDs of NVMe drives to ignore. For example, \"S23YNAAH201234,S23YNAAH202345\".");
+MODULE_PARM_DESC(ignore_disks_serials, "Comma separated list of NVMe drives to "
+				 "ignore - for example S23YNAAH201234,S23YNAAH202345");
 
 char *dummy_id = NULL;
 module_param(dummy_id, charp, 0444);
-MODULE_PARM_DESC(dummy_id, "Serial ID to be used for drives on drive-less targets. Dummy drives are rarely needed, only for an arbiter on a 2-node system.");
+MODULE_PARM_DESC(dummy_id,
+	"ID for dummy partition, /var/opt/nvmesh/metadata_disk_image/<dummy_id>");
 #define DUMMY_DISK_PATH "/var/opt/nvmesh/metadata_disk_image/"
 static bool dummy_disk_added;
 
 static int nvme_number_offset = 1000;
 module_param(nvme_number_offset, int, 0444);
-MODULE_PARM_DESC(nvme_number_offset, "Offset for /dev/nvme%d device names.");
+MODULE_PARM_DESC(nvme_number_offset, "Offset for /dev/nvme%d device names");
 
 #define NVMEIBS_CAP_MAX_TRANSFER_SIZE (32 * 4096) /* cap max-transfer to 128KB */
 static bool nvmeibs_cap_transfer_size = 1;
 module_param_named(cap_transfer_size, nvmeibs_cap_transfer_size, bool, 0444);
-MODULE_PARM_DESC(cap_transfer_size, "Cap all disks' max-transfer-size to 128 KB, even if the drive supports larger transfers.");
+MODULE_PARM_DESC(cap_transfer_size, "Cap all disks' max-transfer-size to 128KB (set on insmod)");
 
 static char *fake_serial = NULL;
 module_param(fake_serial, charp, 0444);
-MODULE_PARM_DESC(fake_serial, "Do not use for production systems. Fake serial number for a fake NVMe drive, which should be machine specific.");
+MODULE_PARM_DESC(fake_serial, "Fake serial number for NVME drive (should be machine specific)");
 
 #define NVMEIBS_FORMAT_TIMEOUT_SECONDS_FIRST_TRY 300
 static int nvmeibs_format_timeout_seconds_second_try = 3600;
 module_param_named(format_timeout_seconds_seconds_try,
 					nvmeibs_format_timeout_seconds_second_try, int, 0644);
-MODULE_PARM_DESC(format_timeout_seconds_second_try, "Seconds to wait for an NVMe format to complete on a second attempt after a failed first attempt.");
+MODULE_PARM_DESC(format_timeout_seconds_second_try, "Amount of time waiting for a nvme format - second try");
 
 static bool nvmeibs_gcp_mode = false;
 module_param_named(gcp_mode, nvmeibs_gcp_mode, bool, 0644);
-MODULE_PARM_DESC(gcp_mode, "Use only drives that are specified in gcp_drives_to_uuid_list.");
+MODULE_PARM_DESC(gcp_mode, "GCP mode - use only drives that are specified in gcp_drives_to_uuid_list");
 
 #define GCP_MAX_DRIVES 32
 char *gcp_drives_to_uuid_list[GCP_MAX_DRIVES];
 int gcp_num_drives;
 module_param_array(gcp_drives_to_uuid_list, charp, &gcp_num_drives, 0444);
-MODULE_PARM_DESC(gcp_drives_to_uuid_list, "Related to GCP mode, i.e., specifically for GCP virtual NVMe drives. This provides a list of UUIDs of drives to be used. This should be provided on module invocation, i.e., during Target service startup.");
+MODULE_PARM_DESC(gcp_drives_to_uuid_list, "List prepared before nvmeibs was up to specify the drives to be used and their str_id");
 
 static bool nvmeibs_fake_large_disks = false;
 module_param_named(fake_large_disks, nvmeibs_fake_large_disks, bool, 0444);
-MODULE_PARM_DESC(fake_large_disks, "Do not use for production systems. Fake the system having larger disks by overriding their size. This is used for developing support for larger drives.");
+MODULE_PARM_DESC(fake_large_disks, "Fake large disks by overriding the size.");
 
 static uint64_t nvmeibs_fake_large_disk_size_lba = ((uint64_t)1 << (NVMEIB_EC_JMDC_BITS_J2D + NVMEIB_EC_JMDC_BITS_LINK));
 module_param_named(fake_large_disk_size_lba, nvmeibs_fake_large_disk_size_lba, ullong, 0444);
-MODULE_PARM_DESC(fake_large_disk_size_lba, "Do not use for production systems. The size of fake large disks, in 4k units.");
-
-static bool nvmeibs_use_intr_shaper = true;
-module_param_named(use_intr_shaper, nvmeibs_use_intr_shaper, bool, 0644);
-MODULE_PARM_DESC(use_intr_shaper, "Determines whether to use an interrupt shaper for NVMe completions.");
-
-static bool nvmeibs_use_intr_shaper_tcp = false;
-module_param_named(use_intr_shaper_tcp, nvmeibs_use_intr_shaper_tcp, bool, 0644);
-MODULE_PARM_DESC(use_intr_shaper_tcp, "Same as use_intr_shaper, but applied when running in TCP-only mode.");
-
-static bool nvmeibs_nvme_doorbell_batch = true;
-module_param_named(nvme_doorbell_batch, nvmeibs_nvme_doorbell_batch, bool, 0644);
-MODULE_PARM_DESC(nvme_doorbell_batch, "Determines whether to batch NVMe doorbell requests.");
-
-static bool nvmeibs_simulate_timeout = false;
-module_param_named(simulate_timeout, nvmeibs_simulate_timeout, bool, 0644);
-MODULE_PARM_DESC(simulate_timeout, "Set to 1 to simulate a timeout on the next outstanding command (auto-clears)");
-
+MODULE_PARM_DESC(fake_large_disk_size_lba, "Fake large disks size (in 4kB LBA)");
 
 static void nvmeibs_free_drives(struct kref *kref);
 
@@ -261,7 +231,10 @@ static inline u64 NVMEIB_CAP_TIMEOUT(u64 x)
 static ulong nvmeibs_timeout = (15*HZ);
 static ulong submit_wait_timeout = (15*HZ);
 module_param(submit_wait_timeout, ulong, 0644);
-MODULE_PARM_DESC(submit_wait_timeout, "Timeout for NVMe admin operations such as drive formatting. Does not affect a second format attempt after a failure, as some drives take a long time to format, especially larger ones. Value in milliseconds.");
+MODULE_PARM_DESC(submit_wait_timeout,
+	"Timeout for NVMe admin operations such as format. May be "
+	"increased for formatting of large drives (measured in system HZ, "
+	"usually milliseconds)");
 
 static atomic64_t global_uid = ATOMIC64_INIT(0);
 static inline u64 get_guid(void)
@@ -325,7 +298,6 @@ enum local_q_irq_state {
 	LOCAL_Q_IRQ_NONE			= 0,
 	LOCAL_Q_IRQ_DISABLE_NOSYNC	= 1,
 	LOCAL_Q_IRQ_ENABLE  		= 2,
-	LOCAL_Q_IRQ_DISABLE_SYNC	= 3, /* WARN: Must be called without holding q_lock! */
 };
 
 struct nvme_qp {
@@ -335,7 +307,6 @@ struct nvme_qp {
 	dma_addr_t cq_phys;
 	int cq_len;
 	int cq_head;
-	int old_cq_head;
 	int cq_phase;
 	u32 __iomem *cq_doorbell;
 	struct nvme_command *sq;
@@ -365,36 +336,7 @@ struct nvme_qp {
 	bool dying;
 	struct nvmeib_qp_stats_pcpu __percpu * qp_stats;
 	struct nvme_qp_cmds_stats nvme_qp_stats;
-	struct work_struct process_cq_work;
 };
-
-/* q_lock wrappers: set/clear q->locking_cpu so q_already_locked(q) is reliable. */
-#define q_lock_irqsave(q, flags) \
-	do { \
-		spin_lock_irqsave(&(q)->q_lock, flags); \
-		(q)->locking_cpu = smp_processor_id(); \
-	} while (0)
-
-#define q_unlock_irqrestore(q, flags) \
-	do { \
-		(q)->locking_cpu = -1; \
-		spin_unlock_irqrestore(&(q)->q_lock, flags); \
-	} while (0)
-
-#define q_lock(q) \
-	do { \
-		spin_lock(&(q)->q_lock); \
-		(q)->locking_cpu = smp_processor_id(); \
-	} while (0)
-
-#define q_unlock(q) \
-	do { \
-		(q)->locking_cpu = -1; \
-		spin_unlock(&(q)->q_lock); \
-	} while (0)
-
-#define q_already_locked(q) \
-	(irqs_disabled() && (q)->locking_cpu == smp_processor_id())
 
 /* -------------------------------------------------------------------------- *
  *                      IOQM - IO Queues Manager                              *
@@ -540,8 +482,6 @@ struct device_data {
 
 	int max_completions;
 	bool defer_process_io_cq;
-
-	bool use_intr_shaper;
 	//struct task_struct *thread[MAX_LOCAL_IOQS];
 	//struct task_struct **thread;
 
@@ -638,21 +578,6 @@ void nvmeibs_nvme_disk_qp_stats_reset(struct nvmeibs_disk_info *di) {
 	}
 }
 
-void nvmeibs_nvme_qp_stats_reset(struct nvmeibs_disk_info *di)
-{
-	struct device_data *d = di ? di->dev : NULL;
-	struct nvme_qp *q;
-	int qid;
-
-	if (!d)
-		return;
-
-	for (qid = 0; qid < d->max_ioqs; ++qid) {
-		if ((q = d->local_ioq[qid]))
-			memset(&q->nvme_qp_stats, 0, sizeof(q->nvme_qp_stats));
-	}
-}
-
 #define dump_dev_state(_name_, __d__)                                     \
 do {                                                              \
 	_ND(_name_, "dev @SERIAL (@DEVICE_PTR) state: nr @NEED_RESET, rm @REMOVED, rp @RESET_PENDING)",                \
@@ -729,15 +654,13 @@ static void free_qp(struct nvme_qp *q)
 	unsigned long flags;
 	_ND(trace_nvme_free_qp, "Try free_qp(id=@ID_INT) used_ids=@USED_IDS, state @STATE", q->id, q->used_ids,
 	   q->state);
-	q_lock_irqsave(q, flags);
+	spin_lock_irqsave(&q->q_lock, flags);
 
 	//OM: add cond that remote_ioqs and bio_list are empty
 	wait_event_interruptible_lock_irq_timeout(q->waiting,
 			q->used_ids <= (q->id == 0 ? N_ASYNC_EVENTS : 0),
 			q->q_lock, 2*nvmeibs_timeout);
-	/* Wait macro uses raw spin_lock_irqsave/unlock; re-establish q_already_locked invariant */
-	q->locking_cpu = smp_processor_id();
-	q_unlock_irqrestore(q, flags);
+	spin_unlock_irqrestore(&q->q_lock, flags);
 
 	_ND(trace_1_nvme_free_qp, "Cont free_qp(id=@ID_INT) used_ids=@USED_IDS", q->id, q->used_ids);
 
@@ -885,7 +808,7 @@ static void ioqm_free(struct device_data *d)
 
 static bool nvmeibs_qid_hint = false;
 module_param_named(qid_hint, nvmeibs_qid_hint, bool, 0644);
-MODULE_PARM_DESC(qid_hint, "Send data on a channel per the CPU id, mainly relevant for SIW.");
+MODULE_PARM_DESC(qid_hint, "Use qid from nvme-req");
 
 static inline int ioqm_get_submit_qid(struct device_data *d, unsigned qid_hint_plus1)
 {
@@ -905,9 +828,9 @@ static inline int ioqm_get_q_spin_lock(struct device_data *d, unsigned long *pfl
 	do {
 		qid = ioqm_get_submit_qid(d, 0); /* 0 based */
 		q = d->local_ioq[qid];
-		q_lock_irqsave(q, *pflags);
+		spin_lock_irqsave(&q->q_lock, *pflags);
 		if ((q_state = q->state) != LOCAL_Q_ON) {
-			q_unlock_irqrestore(q, *pflags);
+			spin_unlock_irqrestore(&q->q_lock, *pflags);
 			if (q_state >= LOCAL_Q_DYING) {
 				return -1;
 			}
@@ -937,11 +860,13 @@ static inline int ioqm_get_q_spin_lock_irqsave_recursive(struct device_data *d,
 		q = d->local_ioq[qid];
 		should_lock = !irqs_disabled() || q->locking_cpu != smp_processor_id();
 		if (should_lock) {
-			q_lock_irqsave(q, *pflags);
+			spin_lock_irqsave(&q->q_lock, *pflags);
+			q->locking_cpu = smp_processor_id();
 		}
 		if (q->state != LOCAL_Q_ON) {
 			if (should_lock) {
-				q_unlock_irqrestore(q, *pflags);
+				q->locking_cpu = -1;
+				spin_unlock_irqrestore(&q->q_lock, *pflags);
 			}
 			if (q->state >= LOCAL_Q_DYING) {
 				if (should_unlock)
@@ -1093,9 +1018,6 @@ static inline int local_q_kthread_start_(struct nvme_qp *q)
 	return rv;
 }
 
-static inline void local_q_modify_irq(struct nvme_qp *q,
-									  enum local_q_irq_state new_state);
-
 /**
  * @qid - the q id relative to local ioqs range (i.e. q->id - 1)
  * no done under q lock are
@@ -1107,22 +1029,10 @@ static inline void local_q_kthread_stop(struct nvme_qp *q)
 	ulong flags;
 	NFIN;
 
-	q_lock_irqsave(q, flags);
-
-	/* [NVMESH-7772]: Mask the IRQ under lock (no wait), clear q->thread, then unlock.
-	 * After unlock, synchronously wait for any in-flight handler so we never hold
-	 * q_lock while waiting for the handler. Caller will free_irq() so we do not re-enable.
-	 * Set q->dying so the kthread skips local_q_modify_irq(LOCAL_Q_IRQ_ENABLE) if it runs
-	 * after we clear q->thread and before kthread_stop(t). */
-	q->dying = true;
-	local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
-
+	spin_lock_irqsave(&q->q_lock, flags);
 	t = q->thread;
 	q->thread = NULL;
-	q_unlock_irqrestore(q, flags);
-
-	/* Wait for any in-flight interrupt handler to complete; must not hold q_lock. */
-	local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_SYNC);
+	spin_unlock_irqrestore(&q->q_lock, flags);
 
 	if (t) {
 		_NT(trace_nvme_local_q_kthread_stop, "qid @QID: stopping kthread...", qid);
@@ -1177,55 +1087,28 @@ static inline void local_q_modify_irq(struct nvme_qp *q,
 									  enum local_q_irq_state new_state)
 {
 	struct device_data *d = q->dev;
-	bool already_locked = q_already_locked(q);
-	enum local_q_irq_state old_state = READ_ONCE(q->irq_state), curr_state;
-	unsigned long flags;
 	NFIN;
 
-	if (old_state == LOCAL_Q_IRQ_NONE) {
+	if (q->irq_state == LOCAL_Q_IRQ_NONE) {
 		_NT(trace_nvme_local_q_modify_irq, "Cannot modify irq state (to @NEW_STATE), "
 		   "request-irq() was not called", new_state);
 		goto out;
 	}
-	if (new_state != old_state) {
-		//_NT(trace_1_nvme_local_q_modify_irq, "@OP_STR IRQ: Disk @SERIAL qid=@QID irq=@IRQ",
-		//	new_state == LOCAL_Q_IRQ_ENABLE ? "Enable" : "Disable",
-		//	d->serial, q->id, d->msix_entries[q->id].vector);
+	if (new_state != q->irq_state) {
+		_ND(trace_1_nvme_local_q_modify_irq, "@OP_STR IRQ: Disk @SERIAL qid=@QID irq=@IRQ",
+			new_state == LOCAL_Q_IRQ_ENABLE ? "Enable" : "Disable",
+			d->serial, q->id, d->msix_entries[q->id].vector);
 		if (new_state == LOCAL_Q_IRQ_ENABLE)
 			enable_irq(d->msix_entries[q->id].vector);
 		else if (new_state == LOCAL_Q_IRQ_DISABLE_NOSYNC)
 			disable_irq_nosync(d->msix_entries[q->id].vector);
-		else if (new_state == LOCAL_Q_IRQ_DISABLE_SYNC) {
-			/* Check we are not already-locked otherwise we will deadlock */
-			if (already_locked) {
-				_NE_dmesg(error_2_nvme_local_q_modify_irq, 
-					"nvme_q: @PTR - Attempt to call disable_irq() while holding q_lock", q);
-				BUG_NON_PRODUCTION(7772);
-				goto out;
-			}
-
-			/* Disable IRQ - synchronised */
-			disable_irq(d->msix_entries[q->id].vector);
-		} else {
+		else {
 			_NE(error_nvme_local_q_modify_irq, "unknown irq state @NEW_STATE", new_state);
 			BUG();
 		}
-
-		if (!already_locked)
-			q_lock_irqsave(q, flags);
-
-		if ((curr_state = READ_ONCE(q->irq_state)) != old_state) {
-			_NE(error_3_nvme_local_q_modify_irq, 
-				"nvme_q: @PTR - irq state changed under-our-feet from @STATE to @NEW_STATE", 
-				q, old_state, curr_state);
-			BUG_NON_PRODUCTION(7772);
-		}
-
-		WRITE_ONCE(q->irq_state, new_state);
-
-		if (!already_locked)
-			q_unlock_irqrestore(q, flags);
+		q->irq_state = new_state;
 	}
+
 out:
 	NFOUT;
 }
@@ -1241,7 +1124,7 @@ static inline int end_use_local_q(struct nvme_qp *q, bool shutdown)
 	_NT(trace_nvme_end_use_local_q, "Disk @SERIAL, qid=@QID (state @IOQ_STATE_STR)",
 		d->serial, q->id, ioq_state_str(q->state));
 
-	q_lock_irqsave(q, flags);
+	spin_lock_irqsave(&q->q_lock, flags);
 	if (!shutdown) {
 		/* in this state intr-handler wont wakeup q's kthread
 		and the q's kthread wont re-enabled q's irq. */
@@ -1249,14 +1132,10 @@ static inline int end_use_local_q(struct nvme_qp *q, bool shutdown)
 	} else {
 		q->state = LOCAL_Q_DYING;
 	}
-	q_unlock_irqrestore(q, flags);
+	spin_unlock_irqrestore(&q->q_lock, flags);
 
-	if (nvmeibs_use_nvme_kwq) {
-		cancel_work_sync(&q->process_cq_work);
-	} else {
-		local_q_kthread_stop(q);
-	}
-
+	/* first stop polling kthread then free-irq */
+	local_q_kthread_stop(q);
 	local_q_free_irq(q);
 
 	/* destroy sq and cq */
@@ -1264,9 +1143,9 @@ static inline int end_use_local_q(struct nvme_qp *q, bool shutdown)
 		_NT(trace_1_nvme_end_use_local_q, "Fail to destroy nvme qpair @ID_INT", q->id);
 		goto out;
 	}
-	q_lock_irqsave(q, flags);
+	spin_lock_irqsave(&q->q_lock, flags);
 	q->state = shutdown ? LOCAL_Q_DESTROYED : LOCAL_Q_OFF;
-	q_unlock_irqrestore(q, flags);
+	spin_unlock_irqrestore(&q->q_lock, flags);
 	rv = 0;
 
 out:
@@ -1332,7 +1211,7 @@ static void ioqm_q_alloc_work(struct workqe_struct *work)
 			/*
 			 * start local-q shutdown sequence
 			 */
-			q_lock_irqsave(q, flags);
+			spin_lock_irqsave(&q->q_lock, flags);
 			BUG_ON(q->state != LOCAL_Q_ON);
 			q->state = LOCAL_Q_STOP_NEW_IO;
 			if (local_q_no_io_(q)) {
@@ -1349,7 +1228,7 @@ static void ioqm_q_alloc_work(struct workqe_struct *work)
 				free_w = false;
 				/* from here on, do not change @w */
 			}
-			q_unlock_irqrestore(q, flags);
+			spin_unlock_irqrestore(&q->q_lock, flags);
 		}
 		else {
 			d->ioqm.n_pending_reqs++;
@@ -1656,12 +1535,6 @@ static inline void nvme_remove_disk(struct drive_params *drv)
 	NFOUT;
 }
 
-static inline bool is_cq_empty(struct nvme_qp *q)
-{
-	struct nvme_completion *cqp = &q->cq[q->cq_head];
-
-	return (le16_to_cpu(cqp->status) & 1) == q->cq_phase;
-}
 
 static int nvmeibs_process_cq(struct nvme_qp *q)
 {
@@ -1685,25 +1558,25 @@ static int nvmeibs_process_cq(struct nvme_qp *q)
 
 	nvmeib_qp_stats_on_poll_cq(q->qp_stats, 0, recv);
 
-	for (num_handled = 0; num_handled < d_max_completions || d_max_completions == 0; num_handled++) {
+	q->locking_cpu = smp_processor_id();
+	for (num_handled = 0; num_handled < d_max_completions || d_max_completions == 0;
+			num_handled++) {
 		if (!in_interrupt) {
 			nvmeib_completion_noise_start(NVMEIB_NOISE_COMPLETION);
 		}
 		cqp = &q->cq[q->cq_head];
-		if (is_cq_empty(q)) {
+		if ((le16_to_cpu(cqp->status) & 1) == q->cq_phase) {
 			nvmeib_qp_stats_on_poll_cq_empty(q->qp_stats);
 			break;
 		}
 		if (le16_to_cpu(cqp->sq_id) != q->id) {
 			_NE(error_nvme_nvmeibs_process_cq, "completion sq (@LE16_TO_CPU) != @ID_INT", le16_to_cpu(cqp->sq_id), q->id);
-			q->nvme_qp_stats.n_cq_errors++;
 			goto cont;
 		}
 		q->sq_head = le16_to_cpu(cqp->sq_head); /* reclaim sq entries */
 		cmdid = le16_to_cpu(cqp->command_id);
 		if (cmdid >= q->total_ids) {
 			_NE(error_1_nvme_nvmeibs_process_cq, "Illegal id @CMDID", cmdid);
-			q->nvme_qp_stats.n_cq_errors++;
 			goto cont;
 		}
 		/* clear id, marke as not in use.
@@ -1715,8 +1588,6 @@ static int nvmeibs_process_cq(struct nvme_qp *q)
 			callback = rqp->callback;
 			arg = rqp->arg;
 			status = le16_to_cpu(cqp->status) >> 1;
-			if (status)
-				q->nvme_qp_stats.n_errors++;
 			result = le32_to_cpu(cqp->result.u32);
 			rqp->callback = NULL;
 			--q->used_ids;
@@ -1742,27 +1613,24 @@ static int nvmeibs_process_cq(struct nvme_qp *q)
 			q->cq_head = 0;
 			q->cq_phase ^= 1;
 		}
-		if (!nvmeibs_nvme_doorbell_batch) {
-			writel(q->cq_head, q->cq_doorbell);
-		}
+		writel(q->cq_head, q->cq_doorbell);
 		if (callback) {
-			q_unlock(q); /* irqs stay disabled */
+			q->locking_cpu = -1;
+			spin_unlock(&q->q_lock); /* irqs stay disabled */
 			(*callback)(arg, status, result);
-			q_lock(q);
+			spin_lock(&q->q_lock);
+			q->locking_cpu = smp_processor_id();
 			callback = 0;
 		}
 	}
 
 	if (num_handled != 0) {
 		wake_up(&q->waiting);
-		if (nvmeibs_nvme_doorbell_batch && q->old_cq_head != q->cq_head) {
-			/* as we unlock the q_lock when running the callback other thread/intterupts can update the cq_head before us */
-			writel(q->cq_head, q->cq_doorbell);
-			q->old_cq_head = q->cq_head;
-		}
 		if (q->complete_fn != NULL)
 			(*q->complete_fn)(q);
 	}
+
+	q->locking_cpu = -1;
 
 	nvmeib_qp_stats_on_update_cqes(q->qp_stats, 0, n);
 
@@ -1770,99 +1638,39 @@ out:
 	return num_handled;
 }
 
-extern struct nvmeib_intr_shaper *s_intr_shaper;
-
-static inline void nvmeibs_nvme_update_qp_stats_intr_comps(struct nvme_qp *q, int num_handled)
-{
-	q->nvme_qp_stats.intr_comps_tot += num_handled;
-	q->nvme_qp_stats.intr_comps_cnt++;
-	if (num_handled > q->nvme_qp_stats.intr_comps_max)
-		q->nvme_qp_stats.intr_comps_max = num_handled;
-}
-
 static irqreturn_t nvmeibs_intr(int irq, void *arg)
 {
 	struct nvme_qp *q = (struct nvme_qp *)arg;
 	struct device_data *d = q->dev;
 	int d_max_completions = d->max_completions;
-	bool d_use_intr_shaper = d->use_intr_shaper;
-	int d_defer_process_io_cq = d->adminq != q ? (d->defer_process_io_cq) : 0;
+	int d_defer_process_io_cq = (d->defer_process_io_cq && d->adminq != q);
 	int num_handled = 0;
 	static long last_time = 0;
-	bool offload_enabled = false;
-	bool max_completions_reached = false;
 
-	nvmeib_intr_shaper_intr_enter(s_intr_shaper, INTR_SHAPER_INTR_TYPE_SERVER_NVME);
 	nvmeib_completion_noise_start(NVMEIB_NOISE_INTERRUPT);
-
-	q_lock(q);
-
-	offload_enabled = (q->thread || nvmeibs_use_nvme_kwq) && d->adminq != q;
-
-	/* interrupt shaper is on and not admin cq and offload is enabled */
-	if (!d_defer_process_io_cq && d_use_intr_shaper && offload_enabled) {
-		d_defer_process_io_cq = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
-	}
-
 	if (q->irq_debug == 2) {
 		q->irq_debug = 0;
 		_ND(trace_nvme_nvmeibs_intr, "Got local IRQ again");
 	}
+	spin_lock(&q->q_lock);
 	nvmeib_qp_stats_on_interrupt(q->qp_stats);
-	if (q->polling)
-		q->nvme_qp_stats.n_spurious_intrs++;
-	if (!d_defer_process_io_cq) {
+	if (!d_defer_process_io_cq)
 		num_handled = nvmeibs_process_cq(q);
-		nvmeibs_nvme_update_qp_stats_intr_comps(q, num_handled);
-	
-		/* nvmeibs_process_cq releases spinlock, so q->thread may have changed */
-		offload_enabled &= (q->thread || nvmeibs_use_nvme_kwq);
-		if (d_use_intr_shaper && offload_enabled && !is_cq_empty(q)) {
-			nvmeib_intr_shaper_intr_polled(s_intr_shaper, num_handled);
-			d_defer_process_io_cq = nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper);
-		}
-		max_completions_reached = num_handled == d_max_completions && d_max_completions;
-	}
-
-	/* cq is still not empty or defer process io cq is enabled */
-	if (offload_enabled && (max_completions_reached || d_defer_process_io_cq)) {
-		//_ND(trace_nvme_nvmeibs_intr_offload_sched, "Offload sched serial=@SERIAL qid=@QID is_admin=@BOOL", d->serial, q->id, d->adminq == q);
+	if (((num_handled == d_max_completions && d_max_completions) || d_defer_process_io_cq) && q->thread) {
 		nvmeib_qp_stats_on_offload_sched(q->qp_stats);
-		if (nvmeibs_use_nvme_kwq) {
-			queue_work(nvmeibs_nvme_wq, &q->process_cq_work);
-		} else {
-			local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
-			/* Set polling=true before wake_up_process to ensure the woken thread sees it.
-			 * The smp_mb__before_atomic in wake_up_process provides the necessary barrier. */
-			WRITE_ONCE(q->polling, true);
-			/* Ensure the polling mode is visible before waking up the thread */
-			smp_mb();
-
-			/* [NVMESH-7772]: Re-check q->thread; the lock was dropped inside nvmeibs_process_cq
-			 * when running a completion callback, so local_q_kthread_stop may have cleared it. */
-			if (q->thread) {
-				q->nvme_qp_stats.n_thread_wakeups++;
+		local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
+		q->polling = true;
 		wake_up_process(q->thread);
-			} else {
-				_NE(err_2_nvme_nvmeibs_intr, "nvme@SEQ (@SERIAL): nvme_q: @PTR Thread unexpectedly NULL", d->seq, d->serial, q);
-				BUG_NON_PRODUCTION(7772);
-			}
-		}
 		if (q->irq_debug < 1 || jiffies > last_time + 5 * HZ) {
 			last_time = jiffies;
 			q->irq_debug = 1;
 			_ND(trace_1_nvme_nvmeibs_intr, "nvme@SEQ (@SERIAL): Switch local IRQ to thread", d->seq, d->serial);
 		}
 	}
-	q_unlock(q);
+	spin_unlock(&q->q_lock);
 	nvmeib_completion_noise_end(NVMEIB_NOISE_INTERRUPT, NULL, 0, NVMEIB_NOISE_CTRS_NVMEIBS_INTR);
 
-	nvmeib_intr_shaper_intr_exit(s_intr_shaper);
-	/* Always return IRQ_HANDLED to avoid "nobody cared" errors.
-	 * We may get spurious interrupts due to race conditions when switching
-	 * between interrupt and polling modes (disable_irq_nosync doesn't wait
-	 * for in-flight interrupts to be masked by hardware). */
-	return IRQ_HANDLED;
+	return ((num_handled > 0) || d_defer_process_io_cq) ? IRQ_HANDLED : IRQ_NONE;
 }
 
 struct cmd_result {
@@ -1940,7 +1748,7 @@ static void nvmeibs_submit_wait(struct nvme_qp *qp, struct nvme_command *cmd,
 			rqp->callback = NULL;
 			qp->sq_tail = (qp->sq_tail ? : qp->sq_len) - 1;
 		}
-		q_unlock_irqrestore(qp, *pflags);
+		spin_unlock_irqrestore(&qp->q_lock, *pflags);
 		return;
 	}
 
@@ -1959,7 +1767,7 @@ static void nvmeibs_submit_wait(struct nvme_qp *qp, struct nvme_command *cmd,
 		qp->dev->serial, cmd->common.opcode, timeout, HZ);
 
 	submit_cmd(qp);
-	q_unlock_irqrestore(qp, *pflags);
+	spin_unlock_irqrestore(&qp->q_lock, *pflags);
 
 	wait_rv = wait_with_pauses(dev, &result->completion, timeout, pause);
 	if (cmd->common.opcode == nvme_admin_format_nvm) {
@@ -1977,7 +1785,7 @@ static void nvmeibs_submit_wait(struct nvme_qp *qp, struct nvme_command *cmd,
 	}
 	if (wait_rv == 0) {
 	/* Simulate an interrupt if timed-out */
-		q_lock_irqsave(qp, *pflags);
+		spin_lock_irqsave(&qp->q_lock, *pflags);
 		nvmeib_qp_stats_on_offth_iter(qp->qp_stats);
 		(void) nvmeibs_process_cq(qp);
 		if (result->status == -ETIMEDOUT) {
@@ -1988,7 +1796,7 @@ static void nvmeibs_submit_wait(struct nvme_qp *qp, struct nvme_command *cmd,
 			initaite_dev_rst(trace_dev_rst_nvme_nvmeibs_submit_wait, qp->dev);
 			qp->dev->admin_timeout += submit_wait_timeout;
 		}
-		q_unlock_irqrestore(qp, *pflags);
+		spin_unlock_irqrestore(&qp->q_lock, *pflags);
 		pci_read_config_word(qp->dev->pci_dev, PCI_CONFIG_STS, &sts);
 		if (qp->dev->need_reset) {
 			pr_warn("nvmeibs: timedout csts=0x%x pci_sts=0x%x nvme%d:"
@@ -2009,13 +1817,11 @@ static struct nvme_command *get_cmd(struct nvme_qp *q,
 	struct nvme_command *cmd;
 	int err;
 
-	q_lock_irqsave(q, *pflags);
+	spin_lock_irqsave(&q->q_lock, *pflags);
 	err = wait_event_interruptible_lock_irq_timeout(q->waiting,
 			(q->sq_tail + 1 != (q->sq_head ? : q->sq_len)) &&
 			(q->used_ids < q->total_ids),
 		q->q_lock, nvmeibs_timeout);
-	/* Wait macro uses raw spin_lock_irqsave/unlock; re-establish q_already_locked invariant */
-	q->locking_cpu = smp_processor_id();
 
 	if (err <= 0) {
 		_NT(trace_nvme_get_cmd, "Disk @SERIAL: sq_tail=@SQ_TAIL, sq_head=@SQ_HEAD, sq_len=@SQ_LEN, used_ids=@USED_IDS, total_ids=@TOTAL_IDS, id=@ID_INT",
@@ -2040,7 +1846,7 @@ static struct nvme_command *get_cmd(struct nvme_qp *q,
 	cmd->common.command_id = id;
 	return cmd;
 out:
-	q_unlock_irqrestore(q, *pflags);
+	spin_unlock_irqrestore(&q->q_lock, *pflags);
 	return NULL;
 }
 
@@ -2513,7 +2319,7 @@ static void q_async_event(struct device_data *d)
 	cmd = get_cmd(d->adminq, async_event_happened, d, &flags);
 	cmd->common.opcode = nvme_admin_async_event;
 	submit_cmd(d->adminq);
-	q_unlock_irqrestore(d->adminq, flags);
+	spin_unlock_irqrestore(&d->adminq->q_lock, flags);
 }
 
 static int setup_adminq(struct device_data *d)
@@ -3772,7 +3578,6 @@ static void local_submit_bios(struct nvme_qp *q)
 					  DMA_BIDIRECTIONAL);
 		if (dma_mapping_error(dev, ctxt->prp1)) {
 			_NE(error_1_nvme_local_submit_bios, "Error mapping bv page to nvme device");
-			q->nvme_qp_stats.n_dma_errors++;
 			bio_endio(bio, -ENOMEM);
 			goto cont;
 		}
@@ -3891,7 +3696,7 @@ static REQ_RET
 		bio_list_add(&drv->bio_list[qp->id - 1], bio);
 		local_submit_bios(qp);
 	}
-	q_unlock_irqrestore(qp, flags);
+	spin_unlock_irqrestore(&qp->q_lock, flags);
 out:;
 	return REQ_RET_ZERO;
 }
@@ -4047,7 +3852,6 @@ static void process_remote_iops(struct device_data *d, int qid)
 				}
 				if (req->table.nents == 0) {
 					_NE(error_2_nvme_process_remote_iops, "Error DMA mapping to nvme device");
-					q->nvme_qp_stats.n_dma_errors++;
 					req->table.nents = req->table.orig_nents;
 					--q->used_ids;
 					clear_bit(id, q->id_bitmap);
@@ -4068,7 +3872,6 @@ static void process_remote_iops(struct device_data *d, int qid)
 										req->metadata, req->mtdt_size, dir);
 						if (dma_mapping_error(&d->pci_dev->dev, req->mtdt_dma)) {
 							_NE(error_1_process_remote_iops, "Failed dma_map for metdata size=@M_SIZE", req->mtdt_size);
-							q->nvme_qp_stats.n_dma_errors++;
 							(*req->cb)(req->arg, -ENOMEM, 0);
 							dma_unmap_sg(&d->pci_dev->dev, req->table.sgl, req->table.orig_nents, dir);
 							list_del_init(&req->link);
@@ -4172,7 +3975,6 @@ static void process_remote_iops(struct device_data *d, int qid)
 			if (prp_i > 2) {
 				prpl_dma = dma_map_single(&d->pci_dev->dev, prpl, PAGE_SIZE, DMA_TO_DEVICE);
 				if (dma_mapping_error(&d->pci_dev->dev, prpl_dma)) {
-					q->nvme_qp_stats.n_dma_errors++;
 					kfree(prpl);
 					if (req->resid_len != 0)
 						list_del_init(&req->link);
@@ -4329,7 +4131,7 @@ static void submit_external_iop(struct work_struct *work)
 #endif
 		if (bio == NULL)
 			goto err;
-		bio_set_dev(bio, ed2bd(d));
+		nvmeib_bio_set_dev(bio, ed2bd(d));
 		if (req->use_sg) {
 			struct scatterlist *s;
 			int n = 0;
@@ -4404,7 +4206,7 @@ int submit_local_cmd(struct nvmeibs_disk_info *d_info,
 	bool op_uses_md = req->nvme_op == nvme_cmd_read ||
 		req->nvme_op == nvme_cmd_write || req->nvme_op == nvme_cmd_compare;
 
-	req->stats.start_time = ktime_get();
+	req->stats.start_time = nvmeib_public_ktime_get();
 
 	NFIN;
 	_ND(trace_nvme_submit_local_cmd, "submit_local_cmd d=@DEVICE_PTR req=@REQ", d, req);
@@ -4478,7 +4280,8 @@ int submit_local_cmd(struct nvmeibs_disk_info *d_info,
 		list_add_tail(&req->link, &d->remote_iops_q[qid]);
 	process_remote_iops(d, qid);
 	if (should_unlock) {
-		q_unlock_irqrestore(q, flags);
+		q->locking_cpu = -1;
+		spin_unlock_irqrestore(&q->q_lock, flags);
 	}
 out:
 	NFOUT;
@@ -4853,23 +4656,6 @@ static void nvmeibs_shutdown(struct pci_dev *pdev)
 	mutex_unlock(&d->dev_lock);
 }
 
-static void kthread_process_drive_cq_work_func(struct work_struct *work)
-{
-	struct nvme_qp *q = container_of(work, struct nvme_qp, process_cq_work);
-	unsigned long flags;
-	int i = 0;
-
-	q_lock_irqsave(q, flags);
-	if (q->state == LOCAL_Q_ON || q->state == LOCAL_Q_STOP_NEW_IO) {
-		i = nvmeibs_process_cq(q);
-		//_ND(trace_nvme_kthread_process_drive_cq_work_func_processed, "Work function processed @INT completions for drive @SERIAL qid=@QID", i, q->dev->serial, q->id);
-		if (!is_cq_empty(q)) {
-			/* resched itself */
-			queue_work(nvmeibs_nvme_wq, &q->process_cq_work);
-		}
-	}
-	q_unlock_irqrestore(q, flags);
-}
 
 /*
  * This function can be called either
@@ -4902,11 +4688,9 @@ static inline int reuse_local_q_(struct nvme_qp *q)
 	WARN_ON_ONCE(q->irq_state != LOCAL_Q_IRQ_ENABLE);
 
 	/* start polling kthread */
-	if (!nvmeibs_use_nvme_kwq) {
-		WRITE_ONCE(q->polling, false);
-		if (local_q_kthread_start_(q) < 0)
-			goto free_irq;
-	}
+	q->polling = false;
+	if (local_q_kthread_start_(q) < 0)
+		goto free_irq;
 
 	q->state = LOCAL_Q_ON;
 	rv = 0;
@@ -4970,9 +4754,8 @@ static int reinit_q(struct nvme_qp *q, bool full_init)
 	}
 
 	//OM: why do we need the lock?
-	q_lock_irqsave(q, flags);
+	spin_lock_irqsave(&q->q_lock, flags);
 	q->cq_head = 0;
-	q->old_cq_head = 0;
 	q->cq_phase = 0;
 	q->sq_head = 0;
 	q->sq_tail = 0;
@@ -4981,7 +4764,7 @@ static int reinit_q(struct nvme_qp *q, bool full_init)
 	memset(q->id_bitmap, 0, sizeof q->id_bitmap);
 	memset(q->ids, 0, q->total_ids * sizeof(struct req_id));
 
-	q_unlock_irqrestore(q, flags);
+	spin_unlock_irqrestore(&q->q_lock, flags);
 	rv = full_init ? reuse_local_q_(q) : 0;
 	q->dying = false;
 
@@ -5034,7 +4817,7 @@ static void thread_process_q(struct nvme_qp *q, struct list_head *abort_list)
 
 	if (q == NULL)
 		return;
-	q_lock_irqsave(q, flags);
+	spin_lock_irqsave(&q->q_lock, flags);
 	if (q->state == LOCAL_Q_ON || q->state == LOCAL_Q_STOP_NEW_IO) {
 		nvmeib_qp_stats_on_offth_iter(q->qp_stats);
 		(void)nvmeibs_process_cq(q);
@@ -5042,14 +4825,8 @@ static void thread_process_q(struct nvme_qp *q, struct list_head *abort_list)
 			i = find_first_bit(q->id_bitmap, q->total_ids);
 			while (i < q->total_ids && n_aborts < q->dev->max_abort) {
 				if (q->ids[i].callback != NULL) {
-					if (nvmeibs_simulate_timeout ||
-					    time_after(current_time,
+					if (time_after(current_time,
 								q->ids[i].issue_time + nvmeibs_timeout)) {
-						q->nvme_qp_stats.q_timeouts++;
-						if (nvmeibs_simulate_timeout) {
-							nvmeibs_simulate_timeout = false;
-							_NW(warn_nvme_thread_process_q_sim, "Simulating timeout on q=@ID_INT id=@IDX", q->id, i);
-						}
 						_NE(error_nvme_thread_process_q, "timeout ABORT!!! q=@ID_INT id=@IDX", q->id, i);
 						_NE(error_1_nvme_thread_process_q, "current=@CURRENT_LONG issue=@ISSUE", current_time, q->ids[i].issue_time);
 						if (abort_list != NULL && !q->ids[i].aborted) {
@@ -5065,7 +4842,6 @@ static void thread_process_q(struct nvme_qp *q, struct list_head *abort_list)
 							}
 						}
 						else if(!q->dev->need_reset) {
-							q->nvme_qp_stats.n_abort_cmd_failed++;
 							_NW(warn_nvme_thread_process_q, "Resetting nvme@SEQ due to double timeout", q->dev->seq);
 							initaite_dev_rst(trace_dev_rst_nvme_thread_process_q, q->dev);
 						}
@@ -5075,8 +4851,7 @@ static void thread_process_q(struct nvme_qp *q, struct list_head *abort_list)
 			}
 		}
 	}
-	q->nvme_qp_stats.n_timeout_abort_cmds += n_aborts;
-	q_unlock_irqrestore(q, flags);
+	spin_unlock_irqrestore(&q->q_lock, flags);
 }
 
 // Status of 8 is: Command Aborted due to SQ Deletion.
@@ -5086,9 +4861,10 @@ static void abort_q_cmds(struct nvme_qp *q)
 	int i;
 
 	/* Block comp-intr while aborting */
-	q_lock_irqsave(q, flags);
+	spin_lock_irqsave(&q->q_lock, flags);
 	/* Allow recursive locking the q as rqp->callback may try to submit new cmd;
 	   The new cmd wont be queued as device's reset or remove flags are set */
+	q->locking_cpu = smp_processor_id();
 	i = find_first_bit(q->id_bitmap, q->total_ids);
 	while (i < q->total_ids) {
 		if(test_and_clear_bit(i, q->id_bitmap)) {
@@ -5096,19 +4872,21 @@ static void abort_q_cmds(struct nvme_qp *q)
 			nvme_callback_t *cb = rqp->callback;
 			void *arg = rqp->arg;
 			--q->used_ids;
-			q->nvme_qp_stats.n_queue_abort_cmds++;
 			rqp->callback = NULL;
 			if (cb != NULL) {
-				q_unlock_irqrestore(q, flags);
+				q->locking_cpu = -1;
+				spin_unlock_irqrestore(&q->q_lock, flags);
 				(*cb)(arg, 0x8, 0);
-				q_lock_irqsave(q, flags);
+				spin_lock_irqsave(&q->q_lock, flags);
+				q->locking_cpu = smp_processor_id();
 			}
 			else
 				_NE(error_1_abort_q_cmds, "aborting command without callback");
 		}
 		i = find_next_bit(q->id_bitmap, q->total_ids, i+1);
 	}
-	q_unlock_irqrestore(q, flags);
+	q->locking_cpu = -1;
+	spin_unlock_irqrestore(&q->q_lock, flags);
 }
 
 static void abandon_outstanding(struct device_data *d)
@@ -5141,15 +4919,15 @@ static void abandon_outstanding(struct device_data *d)
 	for (qid = 0; qid < d->max_ioqs; ++qid) {
 		if ((q = d->local_ioq[qid])) {
 			abort_q_cmds(q);
-			q_lock_irqsave(q, flags);
+			spin_lock_irqsave(&q->q_lock, flags);
 			q->dying = true;
 			while ((req = list_first_entry_or_null(&d->remote_iops_q[qid],
 					struct nvmeibs_nvme_req, link)) != NULL) {
 				list_del_init(&req->link);
 				if (req->cb != NULL) {
-					q_unlock_irqrestore(q, flags);
+					spin_unlock_irqrestore(&q->q_lock, flags);
 					(*req->cb)(req->arg, 0x8, 0);
-					q_lock_irqsave(q, flags);
+					spin_lock_irqsave(&q->q_lock, flags);
 				}
 			}
 		}
@@ -5159,10 +4937,8 @@ static void abandon_outstanding(struct device_data *d)
 				bio_endio(bio, -ENXIO);
 
 		if ((q = d->local_ioq[qid])) {
-			q_unlock_irqrestore(q, flags);
-			if (!nvmeibs_use_nvme_kwq) {
-				local_q_kthread_stop(q);
-			}
+			spin_unlock_irqrestore(&q->q_lock, flags);
+			local_q_kthread_stop(q);
 		}
 	}
 	if (d->adminq)
@@ -5295,9 +5071,6 @@ unlock_dev:
 			list_del(&a->link);
 			_NE(error_nvme_nvmeibs_nvme_thread_func, "Abort nvme@SEQ q=@QID cmdid=@CMDID", a->d->seq, a->qid, a->cmdid);
 			if (!a->d->need_reset && abort_cmd(a->d, a->qid, a->cmdid) != 0) {
-				struct nvme_qp *aq = a->d->local_ioq[a->qid - 1];
-				if (aq)
-					aq->nvme_qp_stats.n_abort_cmd_failed++;
 				_NW(warn_1_nvme_nvmeibs_nvme_thread_func, "Abort Failed on nvme@SEQ Resetting", a->d->seq);
 				initaite_dev_rst(trace_dev_rst_2_nvme_nvmeibs_nvme_thread_func, a->d);
 			}
@@ -5312,20 +5085,6 @@ unlock_dev:
 	return 0;
 }
 
-static bool can_enable_irq(struct nvme_qp *q)
-{
-	return !q->dying && (q->state == LOCAL_Q_ON || q->state == LOCAL_Q_STOP_NEW_IO);
-}
-
-static inline void nvmeibs_nvme_update_qp_stats_thread_comps(struct nvme_qp *q, int num_completions, int num_poll_loops)
-{
-	q->nvme_qp_stats.thread_comps_tot += num_completions;
-	q->nvme_qp_stats.thread_comps_cnt++;
-	q->nvme_qp_stats.n_poll_loops += num_poll_loops;
-	if (num_completions > q->nvme_qp_stats.thread_comps_max)
-		q->nvme_qp_stats.thread_comps_max = num_completions;
-}
-
 static int kthread_process_drive_cq(void *arg)
 {
 	struct nvme_qp *q = arg;
@@ -5333,10 +5092,9 @@ static int kthread_process_drive_cq(void *arg)
 	int qid = q->id - 1;
 	bool cont = false;
 	int total = 0, i;
-	int session_comps = 0, session_poll_loops = 0;
+	unsigned long max_time;
 	bool enb_irq = false;
-	u64 start_ns, busy_ns __attribute__((unused));
-	unsigned long flags;
+	int d_max_completions = d->max_completions;
 
 	set_current_state(TASK_INTERRUPTIBLE);
 	complete(&q->th_ready);
@@ -5344,111 +5102,53 @@ static int kthread_process_drive_cq(void *arg)
 	_NT(trace_nvme_kthread_process_drive_cq, "Thread started for drive @SERIAL qid=@QID", d->serial, qid);
 	while (!kthread_should_stop()) {
 		q = d->local_ioq[qid];
-		if (q && READ_ONCE(q->polling)) {
-			session_comps = 0;
-			session_poll_loops = 0;
+		if (q && q->polling) {
+			max_time = jiffies + HZ;
 
 			do {
+				unsigned long flags;
+
 				cont = false;
 				enb_irq = false;
 				q = d->local_ioq[qid];
-				if (!q || !READ_ONCE(q->polling) || d->removed || d->reset_pending
+				if (!q || !q->polling || d->removed || d->reset_pending
 					|| d->need_reset)
 					break;
-				q_lock_irqsave(q, flags);
+				spin_lock_irqsave(&q->q_lock, flags);
 				nvmeib_qp_stats_on_offth_iter(q->qp_stats);
-				start_ns = local_clock();
 				i = nvmeibs_process_cq(q);
-				busy_ns = local_clock() - start_ns;
-				enb_irq = can_enable_irq(q);
-				q_unlock_irqrestore(q, flags);
-				session_poll_loops++;
-				cont = i > 0;
+				enb_irq = (q->state == LOCAL_Q_ON ||
+						   q->state == LOCAL_Q_STOP_NEW_IO);
+				spin_unlock_irqrestore(&q->q_lock, flags);
+				cont = (i == d_max_completions);
 				total += i;
-				session_comps += i;
-				cond_resched(); /* let other threads run */
-			} while (cont);
+			} while (cont && time_before(jiffies, max_time));
 
-			if (q) {
-				nvmeibs_nvme_update_qp_stats_thread_comps(q, session_comps, session_poll_loops);
-			}
-
-			if (!cont && !d->removed && READ_ONCE(q->polling)) {
-				/* The correct sequence to prevent lost-wakeups is: 
-				* 1. Set state for interrupt to see
-				* 2. Set_current_state(TASK_INTERRUPTIBLE);
-				* 3. Write Barrier
-				* 4. Enable interrupts
-				* 5. Read Barrier
-				* 6. Check state if interrupt has changed it to polling mode
-				* 7. Schedule if state has not changed, otherwise continue polling
-				*/
-
-				/* Step 1: update poll-mode */
-				WRITE_ONCE(q->polling, false);
-
-				/* Step 2: set task state to INTERRUPTIBLE */
-				set_current_state(TASK_INTERRUPTIBLE);
-
-				/* Step 3: write barrier */
-				smp_mb();
-				
-				/* Step 4: enable interrupts (re-check state/dying under lock so we do not
-				 * re-enable after local_q_kthread_stop has cleared q->thread). */
+			if (!cont && !d->removed && q->polling) {
+				q->polling = false;
+				//OM: review (shall we check if reset-needed/pedning
 				if (enb_irq) {
-					q_lock_irqsave(q, flags);
-					// [NVMESH-7772]: Check we can still enable interrupts
-					if (can_enable_irq(q)) {
-						local_q_modify_irq(q, LOCAL_Q_IRQ_ENABLE);
-						_ND(trace_1_nvme_kthread_process_drive_cq, "Switch local IRQ back after @TOTAL completions", total);
-						q->irq_debug = 2;
-						total = 0;
-					} else {
-						_NT(trace_3_nvme_kthread_process_drive_cq, "IRQ already disabled by local_q_kthread_stop");
-					}
-					q_unlock_irqrestore(q, flags);
+					local_q_modify_irq(q, LOCAL_Q_IRQ_ENABLE);
+					_ND(trace_1_nvme_kthread_process_drive_cq, "Switch local IRQ back after @TOTAL completions", total);
+					q->irq_debug = 2;
+					total = 0;
 				}
 
-				/* Step 5: read barrier */
-				smp_mb();
-
-				/* we may miss an interrupt in the time until we rearm the interrupts, so we need to check if the CQ is not empty */
-
-				/* [NVMESH-7791]: q_lock must be taken before checking is_cq_empty() */
-				q_lock_irqsave(q, flags);
-				if (!is_cq_empty(q)) {
-					//_ND(cq_not_empty_nvme_kthread_process_drive_cq, "CQ is not empty, disable interrupts and mark as polling again serial=@SERIAL qid=@QID", d->serial, qid);
-					set_current_state(TASK_RUNNING);
-					/* disable interrupts */
-					local_q_modify_irq(q, LOCAL_Q_IRQ_DISABLE_NOSYNC);
-					q_unlock_irqrestore(q, flags);
-					/* mark as polling again */
-					WRITE_ONCE(q->polling, true);
-					smp_mb();
-					/* sleep if needed */
-					cond_resched();
-					continue;
-				}
-				q_unlock_irqrestore(q, flags);
-				smp_mb();
-
-				/* Step 6: Check polling again in case interrupt set it to true. This is not a must as
-				the interrupt would have changed the state to READY so the schedule() will not really sleep,
-				but it's a good practice to check again.
-				* Also check kthread_should_stop() to prevent lost wakeup from kthread-stop */
-				if (!READ_ONCE(q->polling) && !kthread_should_stop()) {
-					q->nvme_qp_stats.n_thread_sleeps++;
-					/* Step 7: call schedule(), main kthread handles lost interrupts
+				/* prevent lost wakeup from kthread-stop */
+				set_current_state(TASK_INTERRUPTIBLE);
+				/* check polling again in case the just enabled interrupt sets it to true */
+				barrier();
+				if (!q->polling && !kthread_should_stop()) {
+					/* main kthread handles lost interrupts
 						(changed from schedule_timeout()) */
 					schedule();
 				}
-				/* This is redundant as the task state is already set to RUNNING after schedule() */
 				__set_current_state(TASK_RUNNING);
 			}
 		}
 		cond_resched();
 	}
-	_NT(trace_2_nvme_kthread_process_drive_cq, "Thread stopped for drive @SERIAL qid=@QID", d->serial, qid);
+	_NT(trace_2_nvme_kthread_process_drive_cq, "Thread stopped for drive @SERIAL", d->serial);
 	return 0;
 }
 
@@ -5543,11 +5243,8 @@ static int setup_ioqs(struct device_data *d)
 				goto out;
 			if ((err = create_sq(d, qid, q->sq_phys, q->sq_len, qid)) < 0)
 				goto out;
-			if (!nvmeibs_use_nvme_kwq) {
-				if ((err = local_q_kthread_start_(q)) < 0)
-					goto out;
-			}
-			INIT_WORK(&q->process_cq_work, kthread_process_drive_cq_work_func);
+			if ((err = local_q_kthread_start_(q)) < 0)
+				goto out;
 			q->state = LOCAL_Q_ON;
 		}
 		d->local_ioq[qid - 1] = q;
@@ -5557,17 +5254,13 @@ static int setup_ioqs(struct device_data *d)
 out:
 	_NW(warn_nvme_setup_ioqs, "setup_ioqs failed err=@ERR", err);
 	if (q != NULL) {
-		if (!nvmeibs_use_nvme_kwq) {
-			local_q_kthread_stop(q);
-		}
+		local_q_kthread_stop(q);
 		local_q_free_irq(q);
 		free_qp(q);
 	}
 	while (--ii >= 0) {
 		if ((q = d->local_ioq[ii])) {
-			if (!nvmeibs_use_nvme_kwq) {
-				local_q_kthread_stop(q);
-			}
+			local_q_kthread_stop(q);
 			local_q_free_irq(q);
 			free_qp(q);
 		}
@@ -5802,7 +5495,7 @@ static struct nvme_iod *nvmeibs_map_user_pages(struct device_data *dev, int writ
 	if (!pages)
 		return ERR_PTR(-ENOMEM);
 
-	err = get_user_pages_fast(addr, count, 1, pages);
+	err = nvmeib_get_user_pages_fast(addr, count, 1, pages);
 	if (err < count) {
 		count = err;
 		err = -EFAULT;
@@ -6100,7 +5793,7 @@ static int submit_user_cmd_io(struct device_data *d, struct nvme_qp *q,
 			rv = -EINVAL;
 			goto out;
 		}
-		rv = get_user_pages_fast(acmd.metadata, 1, 1, &md_pg);
+		rv = nvmeib_get_user_pages_fast(acmd.metadata, 1, 1, &md_pg);
 		if (rv != 1) {
 			if (rv >= 0)
 				rv = -EFAULT;
@@ -6202,7 +5895,7 @@ static int submit_user_io(struct drive_params *drv, struct nvme_user_io __user *
 			_NT(trace_nvme_submit_user_io, "io.metadata=@METADATA_LLONG meta_len=@META_LEN", io.metadata, meta_len);
 			return -EINVAL; /* Only support 1 page of metadata */
 		}
-		rv = get_user_pages_fast(io.metadata, 1, 1, &page);
+		rv = nvmeib_get_user_pages_fast(io.metadata, 1, 1, &page);
 		if (rv < 0)
 			return rv;
 		else if (rv != 1)
@@ -6459,9 +6152,7 @@ static bool nvmeibs_remove1(struct pci_dev *pdev, bool do_shutdown)
 
 	for (qid = 0; qid < d->max_ioqs; ++qid) {
 		if ((q = d->local_ioq[qid])) {
-			if (!nvmeibs_use_nvme_kwq) {
-				local_q_kthread_stop(q);
-			}
+			local_q_kthread_stop(q);
 
 			if (!d->need_reset && !d->removed) {
 				destroy_sq(d, q->id);
@@ -6640,7 +6331,7 @@ static void remove_all_devices(void)
 	/* [NVMESH-4373]: Use private work-queue for remove-work
 	 * so we don't get complaints about hogging the system-wq
 	 */
-	if (!(rm_wq = alloc_workqueue("nvmeibs_nvme_rm_wq",
+	if (!(rm_wq = nvmeib_public_alloc_workqueue("nvmeibs_nvme_rm_wq",
 		WQ_UNBOUND, WQ_UNBOUND_MAX_ACTIVE)))
 	{
 		_NW_dmesg(warn_remove_all_devices_rm_wq_fail,
@@ -6676,8 +6367,8 @@ static void remove_all_devices(void)
 	complete_all(&rm_all_comp);
 
 	if (rm_wq != system_wq) {
-		flush_workqueue(rm_wq);
-		destroy_workqueue(rm_wq);
+		nvmeib_public_flush_workqueue(rm_wq);
+		nvmeib_public_destroy_workqueue(rm_wq);
 	}
 }
 
@@ -6802,7 +6493,7 @@ static void test_sector_done(void *arg, int status, u32 result)
 			if (status == 0) {
 				d->read_test_done = false;
 				INIT_DELAYED_WORK(&d->dwork, test_done_work);
-				schedule_delayed_work(&d->dwork, 0);
+				SCHEDULE_DELAYED_WORK(&d->dwork, 0);
 			}
 			else {
 				if (d->read_test_done)
@@ -6874,7 +6565,7 @@ static void read_write_test_sector(struct drive_params *drv)
 			cmd->rw.metadata = cpu_to_le64(d->test_meta_dma);
 	}
 	submit_cmd(q);
-	q_unlock_irqrestore(q, flags);
+	spin_unlock_irqrestore(&q->q_lock, flags);
 	return;
 fail:
 	if (d->test_dma) {
@@ -6903,7 +6594,6 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct device_data *d;
 	int bars;
 	int err;
-	extern unsigned int nvmeibs_tcp_mode;
 
 	_NT(trace_nvme_nvmeibs_probe, "--> nvmeibspci_driver probe: pci_dev=@PCI_DEV   @DEV_NAME", pdev, dev_name(&pdev->dev));
 
@@ -6934,7 +6624,6 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	d->max_msix = max_msix;
 	d->max_completions = max_completions;
 	d->defer_process_io_cq = nvmeibs_defer_process_io_cq;
-	d->use_intr_shaper = nvmeibs_tcp_mode ? nvmeibs_use_intr_shaper_tcp : nvmeibs_use_intr_shaper;
 	INIT_DELAYED_WORK(&d->dwork, nvmeibs_probe1);
 	INIT_WORK(&d->async_work, async_event_work);
 	INIT_WORK(&d->remove_work, nvmeibs_remove_work);
@@ -6965,7 +6654,7 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = dma_set_mask(&pdev->dev, DMA_BIT_MASK(64));
 	if (!err) {
 #	if KS_HAS_GPL_SME_ACTIVE
-		err = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
+		err = nvmeib_public_dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
 #	else
 		err = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
 #	endif
@@ -7029,7 +6718,7 @@ static int nvmeibs_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	d->wait_until = d->wait_started + NVMEIB_CAP_TIMEOUT(d->cap)*HZ/2;
 
 	atomic_inc(&total_pending);
-	schedule_delayed_work(&d->dwork, HZ / 10); /* nvmeibs_probe1 */
+	SCHEDULE_DELAYED_WORK(&d->dwork, HZ / 10); /* nvmeibs_probe1 */
 
 	_NT(trace_8_nvme_nvmeibs_probe, "<-- nvmeibspci_driver probe: pci_dev=@PCI_DEV", pdev);
 	return 0;
@@ -7075,7 +6764,7 @@ static void nvmeibs_probe1(struct work_struct *arg)
 			err = -ENXIO;
 			goto errout;
 		}
-		schedule_delayed_work(&d->dwork, 1+HZ/10);
+		SCHEDULE_DELAYED_WORK(&d->dwork, 1+HZ/10);
 		goto immediateout;
 	}
 	_NT(trace_nvme_nvmeibs_probe1, "Device ready after @WAIT_TIME msec pci_dev=@PCI_DEV", 1000*(jiffies - d->wait_started)/HZ, pci_dev);
@@ -7204,11 +6893,6 @@ static ssize_t nvmeof_chng(void *arg, char *buf, size_t len)
 #endif
 	u16 vendor = 0;
 	int err;
-
-	/* [NVMESH-7276]: Disable broken external-drive support */
-	_NE(err_nvmeof_chng, "External-Drive support is broken in this release");
-	WARN_KNOWN_ONCE(1, 7276);
-	return -EOPNOTSUPP;
 
 	devname = strsep(&buf, ",\n");
 	if (devname == NULL)
@@ -7800,141 +7484,6 @@ ssize_t nvmeibs_nvme_fill_stats_nvme_qps(struct nvmeibs_disk_info *di, char *buf
 }
 EXPORT_SYMBOL(nvmeibs_nvme_fill_stats_nvme_qps);
 
-ssize_t nvmeibs_nvme_fill_qp_stats_json(struct nvmeibs_disk_info *di, char *buf, size_t len)
-{
-	struct device_data *d = di ? di->dev : NULL;
-	int qid;
-	struct nvme_qp *q;
-	struct nvme_qp_cmds_stats s;
-	u64 sum_rd = 0, sum_wr = 0;
-	u64 sum_intr_comps_cnt = 0, sum_thread_comps_cnt = 0;
-	struct {
-		char *buf;
-		size_t len;
-		ssize_t count;
-		size_t ntabs;
-		const struct nvmeib_json_ops *jops;
-	} jdata = {
-		.buf = buf, .len = len, .count = 0, .ntabs = 0, .jops = &nvmeib_json_ops
-	};
-
-	if (!d)
-		return 0;
-
-	memset(&s, 0, sizeof(s));
-
-	CALL_JSON_START_OBJ(&jdata, NULL);
-	CALL_JSON_START_ARRAY(&jdata, "queues");
-
-	for (qid = 0; qid < d->max_ioqs; ++qid) {
-		int is_last = (qid == d->max_ioqs - 1);
-
-		q = d->local_ioq[qid];
-		CALL_JSON_START_OBJ(&jdata, NULL);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "qid", qid);
-
-		if (!q) {
-			CALL_JSON_DATA_STR(&jdata, JSON_LAST_ELEM, "status", "not_init");
-			CALL_JSON_END_OBJ(&jdata, is_last);
-			continue;
-		}
-
-		sum_rd += q->nvme_qp_stats.rd_count;
-		sum_wr += q->nvme_qp_stats.wr_count;
-		s.n_timeout_abort_cmds += q->nvme_qp_stats.n_timeout_abort_cmds;
-		s.q_timeouts += q->nvme_qp_stats.q_timeouts;
-		s.n_errors += q->nvme_qp_stats.n_errors;
-		if (q->nvme_qp_stats.intr_comps_max > s.intr_comps_max)
-			s.intr_comps_max = q->nvme_qp_stats.intr_comps_max;
-		s.intr_comps_tot += q->nvme_qp_stats.intr_comps_tot;
-		sum_intr_comps_cnt += q->nvme_qp_stats.intr_comps_cnt;
-		if (q->nvme_qp_stats.thread_comps_max > s.thread_comps_max)
-			s.thread_comps_max = q->nvme_qp_stats.thread_comps_max;
-		s.thread_comps_tot += q->nvme_qp_stats.thread_comps_tot;
-		sum_thread_comps_cnt += q->nvme_qp_stats.thread_comps_cnt;
-		s.n_poll_loops += q->nvme_qp_stats.n_poll_loops;
-		s.n_thread_wakeups += q->nvme_qp_stats.n_thread_wakeups;
-		s.n_thread_sleeps += q->nvme_qp_stats.n_thread_sleeps;
-		s.n_spurious_intrs += q->nvme_qp_stats.n_spurious_intrs;
-		s.n_cq_errors += q->nvme_qp_stats.n_cq_errors;
-		s.n_dma_errors += q->nvme_qp_stats.n_dma_errors;
-		s.n_abort_cmd_failed += q->nvme_qp_stats.n_abort_cmd_failed;
-		s.n_queue_abort_cmds += q->nvme_qp_stats.n_queue_abort_cmds;
-
-		CALL_JSON_DATA_SVAL(&jdata, !JSON_LAST_ELEM, "rd_count", q->nvme_qp_stats.rd_count);
-		CALL_JSON_DATA_SVAL(&jdata, !JSON_LAST_ELEM, "wr_count", q->nvme_qp_stats.wr_count);
-		CALL_JSON_DATA_SVAL(&jdata, !JSON_LAST_ELEM, "n_timeout_abort_cmds", q->nvme_qp_stats.n_timeout_abort_cmds);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "q_timeouts", q->nvme_qp_stats.q_timeouts);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_errors", q->nvme_qp_stats.n_errors);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_cq_errors", q->nvme_qp_stats.n_cq_errors);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_dma_errors", q->nvme_qp_stats.n_dma_errors);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_abort_cmd_failed", q->nvme_qp_stats.n_abort_cmd_failed);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_queue_abort_cmds", q->nvme_qp_stats.n_queue_abort_cmds);
-
-		CALL_JSON_START_OBJ(&jdata, "intr_completions");
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "max", q->nvme_qp_stats.intr_comps_max);
-		CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg", q->nvme_qp_stats.intr_comps_tot,
-				q->nvme_qp_stats.intr_comps_cnt ? q->nvme_qp_stats.intr_comps_cnt : 1, 2);
-		CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "tot", q->nvme_qp_stats.intr_comps_tot);
-		CALL_JSON_END_OBJ(&jdata, !JSON_LAST_ELEM);
-
-		CALL_JSON_START_OBJ(&jdata, "thread_completions");
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "max", q->nvme_qp_stats.thread_comps_max);
-		CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg", q->nvme_qp_stats.thread_comps_tot,
-				q->nvme_qp_stats.thread_comps_cnt ? q->nvme_qp_stats.thread_comps_cnt : 1, 2);
-		CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg_per_poll", q->nvme_qp_stats.thread_comps_tot,
-				q->nvme_qp_stats.n_poll_loops ? q->nvme_qp_stats.n_poll_loops : 1, 2);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "tot", q->nvme_qp_stats.thread_comps_tot);
-		CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "n_poll_loops", q->nvme_qp_stats.n_poll_loops);
-		CALL_JSON_END_OBJ(&jdata, !JSON_LAST_ELEM);
-
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_thread_wakeups", q->nvme_qp_stats.n_thread_wakeups);
-		CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_thread_sleeps", q->nvme_qp_stats.n_thread_sleeps);
-		CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "n_spurious_intrs", q->nvme_qp_stats.n_spurious_intrs);
-
-		CALL_JSON_END_OBJ(&jdata, is_last);
-	}
-
-	CALL_JSON_END_ARRAY(&jdata, !JSON_LAST_ELEM);
-
-	CALL_JSON_START_OBJ(&jdata, "summary");
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "rd_count", sum_rd);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "wr_count", sum_wr);
-	CALL_JSON_DATA_SVAL(&jdata, !JSON_LAST_ELEM, "n_timeout_abort_cmds", s.n_timeout_abort_cmds);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "q_timeouts", s.q_timeouts);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_errors", s.n_errors);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_cq_errors", s.n_cq_errors);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_dma_errors", s.n_dma_errors);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_abort_cmd_failed", s.n_abort_cmd_failed);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_queue_abort_cmds", s.n_queue_abort_cmds);
-
-	CALL_JSON_START_OBJ(&jdata, "intr_completions");
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "max", s.intr_comps_max);
-	CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg", s.intr_comps_tot,
-			sum_intr_comps_cnt ? sum_intr_comps_cnt : 1, 2);
-	CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "tot", s.intr_comps_tot);
-	CALL_JSON_END_OBJ(&jdata, !JSON_LAST_ELEM);
-
-	CALL_JSON_START_OBJ(&jdata, "thread_completions");
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "max", s.thread_comps_max);
-	CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg", s.thread_comps_tot,
-			sum_thread_comps_cnt ? sum_thread_comps_cnt : 1, 2);
-	CALL_JSON_DATA_UVAL_FLOAT(&jdata, !JSON_LAST_ELEM, "avg_per_poll", s.thread_comps_tot,
-			s.n_poll_loops ? s.n_poll_loops : 1, 2);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "tot", s.thread_comps_tot);
-	CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "n_poll_loops", s.n_poll_loops);
-	CALL_JSON_END_OBJ(&jdata, !JSON_LAST_ELEM);
-
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_thread_wakeups", s.n_thread_wakeups);
-	CALL_JSON_DATA_UVAL(&jdata, !JSON_LAST_ELEM, "n_thread_sleeps", s.n_thread_sleeps);
-	CALL_JSON_DATA_UVAL(&jdata, JSON_LAST_ELEM, "n_spurious_intrs", s.n_spurious_intrs);
-	CALL_JSON_END_OBJ(&jdata, JSON_LAST_ELEM);
-
-	CALL_JSON_END_OBJ(&jdata, JSON_LAST_ELEM);
-
-	return jdata.count;
-}
-EXPORT_SYMBOL(nvmeibs_nvme_fill_qp_stats_json);
 
 #ifndef PCI_CLASS_STORAGE_EXPRESS
 #define PCI_CLASS_STORAGE_EXPRESS	0x010802
@@ -7998,7 +7547,9 @@ static int __init nvmeibspci_init(void)
 	nvmeib_ref_init(&rm_all);
 #ifdef CALL_IB
 	if ((err = nvmeibs_init()) != 0) {
-		goto err;
+		remove_proc_entry("disks", nvmeibs_proc_dir);
+		remove_proc_entry("nvmeibs", NULL);
+		return err;
 	}
 #endif
 
@@ -8010,19 +7561,6 @@ static int __init nvmeibspci_init(void)
 		_NE(error_1_nvme_nvmeibspci_init, "Failed to allocate ioq manager work queue");
 		err = -ENOMEM;
 		goto err;
-	}
-
-	if (nvmeibs_use_nvme_kwq) {
-		unsigned int flags = WQ_MEM_RECLAIM | WQ_SYSFS;
-		if (nvmeibs_nvme_wq_unbound)
-			flags |= WQ_UNBOUND;
-		nvmeibs_nvme_wq = alloc_workqueue("nvmeibs_nvme", flags, 0);
-		if (!nvmeibs_nvme_wq) {
-			_NE(error_2_nvme_nvmeibspci_init_d, "Failed to allocate nvmeibs_nvme work queue");
-			err = -ENOMEM;
-			goto err;
-		}
-		_NT(trace_nvme_nvmeibspci_init_d, "Created nvmeibs_nvme work queue");
 	}
 
 	nvmeibs_kthread = kthread_run(nvmeibs_nvme_thread_func, NULL, "nvmeibs");
@@ -8069,8 +7607,6 @@ err:
 		remove_proc_entry("disks", nvmeibs_proc_dir);
 	if (nvmeibs_proc_dir)
 		remove_proc_entry("nvmeibs", NULL);
-	if (nvmeibs_use_nvme_kwq && nvmeibs_nvme_wq)
-		destroy_workqueue(nvmeibs_nvme_wq);
 
 	_NE(error_3_nvme_nvmeibspci_init, "nvmeibspci_init(): err=@INT", err);
 	return err;
@@ -8111,8 +7647,6 @@ static void __exit nvmeibspci_exit(void)
 	   even after removing devices */
 	wq_drain(ioqm_wq);
 	wq_destroy(ioqm_wq);
-	if (nvmeibs_use_nvme_kwq && nvmeibs_nvme_wq)
-		destroy_workqueue(nvmeibs_nvme_wq);
 
 	nvmeib_public_proc_remove(nvmeof_proc);
 	remove_proc_entry("disks", nvmeibs_proc_dir);
@@ -8120,8 +7654,8 @@ static void __exit nvmeibspci_exit(void)
 	_NT(trace_5_nvme_nvmeibspci_exit, "nvmeibspci_exit(): done");
 }
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_AUTHOR("Excelero Storage Ltd.");
+// MODULE_LICENSE("Proprietery");
 MODULE_VERSION("0.1");
 module_init(nvmeibspci_init);
 module_exit(nvmeibspci_exit);

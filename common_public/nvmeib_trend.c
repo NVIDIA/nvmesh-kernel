@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_trend.h"
 
 int nvmeib_trend_foreach(struct nvmeib_trend *arr, nvmeib_trend_call_fn fn, void *arg)  {

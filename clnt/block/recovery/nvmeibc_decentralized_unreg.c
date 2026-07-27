@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_decentralized_unreg.h"
 #include "block/nvmeibc_block_common.h"
 #define N_MAX_LOCKS_IN_CACHE (64)	// Daniel: Todo, make larger / param ??

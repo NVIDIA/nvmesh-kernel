@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_DP_DBGDI_H
 #define NVMEIBC_DP_DBGDI_H
 /* Full spec and design document: https://docs.google.com/document/d/1xOKzfihjCJTfp7bEa-QuDWi3S7ofxOCNXnxULM0R_JI/edit

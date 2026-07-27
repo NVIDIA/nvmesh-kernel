@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_H
 #define NVMEIB_H
 
@@ -31,13 +26,6 @@
 #endif
 
 #ifdef __KERNEL__
-#if !KS_HAS_DEL_TIMER_SYNC
-#define del_timer_sync		timer_delete_sync
-#endif
-#if !KS_HAS_HRTIMER_INIT
-#define hrtimer_init(timer, clock_id, mode) \
-	hrtimer_setup((timer), NULL, (clock_id), (mode))
-#endif
 /* IOMMU Future-proof: Fail with error if someone tries to use virt_to_phys or page_to_phys
  * If you are sure you know what are you doing, then re-enable them with #pragma pop_macro before use
  */
@@ -79,12 +67,12 @@
 
 
 enum {
-	NVMEIB_SERVICE_ID_MASK = (~RDMA_IB_IP_PS_MASK)
+	NVMEIB_EXCELERO_SERVICE_ID_MASK = (~RDMA_IB_IP_PS_MASK)
 };
 enum {
-	NVMEIB_PKEY = 0xffff,
+	NVMEIB_EXCELERO_PKEY = 0xffff,
 	GUID_SIZE = sizeof("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"),
-	NVMEIB_IWARP_PORT_ID = 7915,
+	NVMEIB_EXCELERO_IWARP_PORT_ID = 7915,
 
 	NVMEIB_FMR_SIZE       = 512,
 	NVMEIB_FMR_MIN_SIZE	  = 127,
@@ -214,8 +202,6 @@ enum {
 	(!NVMEIB_LOCAL_LOCK_ALWAYS_USE_RDMA && (dev_type) == DT_siw)
 
 static const u64 nvmeib_ka_value = 0x4e564d4549424b41; /*NVMEIBKA*/
-
-extern unsigned int nvmeib_tcp_mode;
 
 /* Daniel: utsname() is an unsafe function to call from interrupt context */
 const char *nvmeib_get_utsname_nodename(void);
@@ -518,10 +504,7 @@ struct nvmeib_iu {
 	void (*work_handler)(struct nvmeib_iu *ioctx);
 	void *work_payload;
 	struct completion *io_done;
-	union {
-		struct workqe_struct work;   /* custom nvmeib_q work item */
-		struct work_struct kwork;    /* kernel workqueue work item */
-	};
+	struct workqe_struct work;
 	u64 dma;
 	void *buf;
 	size_t size; /* NVMEIBS_MAX_ADMIN_MSG_SIZE or NVMEIBC_DEFAULT_CLIENT_MSG_SIZE */
@@ -779,80 +762,24 @@ struct nvmeib_alloc_n_map_info {
 /*
  * interrupt shaper percpu
  */
-
-enum intr_shaper_intr_type {
-	INTR_SHAPER_INTR_TYPE_NONE = 0,
-	INTR_SHAPER_INTR_TYPE_CLIENT_SCQ = 1,
-	INTR_SHAPER_INTR_TYPE_CLIENT_RCQ = 2,
-	INTR_SHAPER_INTR_TYPE_SERVER_SCQ = 3,
-	INTR_SHAPER_INTR_TYPE_SERVER_RCQ = 4,
-	INTR_SHAPER_INTR_TYPE_SERVER_NVME = 5,
-	INTR_SHAPER_INTR_TYPE_DEV_CQ = 6,
-	MAX_INTR_SHAPER_INTR_TYPE = 7,
-};
-
-inline static const char *intr_shaper_intr_type_to_str(enum intr_shaper_intr_type type, bool lower_case)
-{
-	switch (type) {
-	case INTR_SHAPER_INTR_TYPE_NONE: return lower_case ? "none" : "NONE";
-	case INTR_SHAPER_INTR_TYPE_CLIENT_SCQ: return lower_case ? "client_scq" : "CLIENT_SCQ";
-	case INTR_SHAPER_INTR_TYPE_CLIENT_RCQ: return lower_case ? "client_rcq" : "CLIENT_RCQ";
-	case INTR_SHAPER_INTR_TYPE_SERVER_SCQ: return lower_case ? "server_scq" : "SERVER_SCQ";
-	case INTR_SHAPER_INTR_TYPE_SERVER_RCQ: return lower_case ? "server_rcq" : "SERVER_RCQ";
-	case INTR_SHAPER_INTR_TYPE_SERVER_NVME: return lower_case ? "server_nvme" : "SERVER_NVME";
-	case INTR_SHAPER_INTR_TYPE_DEV_CQ: return lower_case ? "dev_cq" : "DEV_CQ";
-	default: return lower_case ? "unknown" : "UNKNOWN";
-	}
-}
-
-struct intr_shaper_percpu_stats {
-	u64 n_intrs;
-	u64 total_intr_time_ns;
-	u64 max_intr_time_ns;
-	u64 min_intr_time_ns;
-	u64 total_burst_size;
-	u32 max_burst_size;
-	u32 min_burst_size;
-	u64 n_wakeups_burst;
-	u64 n_wakeups_cycles;
-	u64 n_wakeups_irq_time;
-};
-
 struct intr_shaper_percpu {
-	/* for EWMA calculation */
-	u32 last_burst_size;
-	u64 last_update_ns;       /* when we last updated the ewma */
-	u64 busy_since_last_ns;   /* accumulated busy time since last update */
-	u32 ewma_load_pct_x1000;      /* EWMA of load (% * 1000) */
-	int last_result;
-
-	/* Status of current interrupt*/
-	enum intr_shaper_intr_type hw_intr_type;
-	u64 hw_intr_start_ns;
-	int hw_intr_n_polled;
-
-	enum intr_shaper_intr_type sw_intr_type;
-	u64 sw_intr_start_ns;
-	int sw_intr_n_polled;
-
-	/* Local copy of the shaper parameters */
-	unsigned int max_burst_size_local;
-	unsigned int max_percent_cpu_local;
-	unsigned int max_irq_time_usecs_local;
-
-	/* Statistics*/
-	struct intr_shaper_percpu_stats stats_per_intr_type[MAX_INTR_SHAPER_INTR_TYPE];
-	u64 total_ewma_percent_cpu_x1000;
-	u64 n_calc_ewma_percent_cpu;
-	u32 max_ewma_percent_cpu_x1000;
-	u32 min_ewma_percent_cpu_x1000;
+	/* volatile is used for generic solution, it is not needed if the member:
+	 * 1) is not read by other cpus than their associated one
+	 * 2) is always read from the same function
+	 * 3) doesn't need to be so accurate (from other cpu pov) but statistic
+	 */
+	volatile u64 last_frame;
+	volatile u64 burst_size;
+	volatile cycles_t frame_cycles; /* Number of TSC ticks, that have been spent in interrupt */
 };
 
 struct nvmeib_intr_shaper {
 	size_t percpu_size;
 	void *percpu; /* struct intr_shaper_percpu + cachline align */
 	/* use shorter frame for 'finer' burst detction */
-	u64 frame_size_nsecs;
+	u64 frame_in_tscs;
+	u64 max_burst_size;
+	cycles_t max_frame_cycles;
 };
 
 #define NVMEIB_STATE_GUARD_STACK_TRACE_DEPTH 5
@@ -1186,17 +1113,7 @@ void nvmeib_release(struct nvmeib_alloc_info *ai,
 	void *vaddr, struct nvmesh_memmgr_metrics *mem_audit);
 void nvmeib_dump_page(void *page);
 void nvmeib_dump_buf(const void *buf, int len);
-
-enum nvmeib_cq_vector_get_type {
-	NVMEIB_CQ_VECTOR_GET_TYPE_ADMIN = 0,
-	NVMEIB_CQ_VECTOR_GET_TYPE_LOCK,
-	NVMEIB_CQ_VECTOR_GET_TYPE_IO,
-	NVMEIB_CQ_VECTOR_GET_TYPE_NORDDA,
-	NVMEIB_CQ_VECTOR_GET_TYPE_DEVCQ,
-	MAX_NVMEIB_CQ_VECTOR_GET_TYPE,
-};
-
-void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, enum nvmeib_cq_vector_get_type type,unsigned index, int *scq_vector, int *rcq_vector);
+void nvmeib_cq_vector_get(struct nvmeib_dev *dev, const char *ch_name, unsigned index, int *scq_vector, int *rcq_vector);
 void *nvmeib_alloc_n_map(struct nvmeib_alloc_n_map_info *info);
 void nvmeib_free_n_unmap(void *vaddr, struct nvmeib_alloc_n_map_info *info);
 /* RQ Routines */
@@ -1215,39 +1132,20 @@ void nvmeib_free_recvq(struct nvmeib_recvq *rq);
 int nvmeib_post_sq_drain(struct ib_qp *qp);
 int nvmeib_post_rq_drain(struct ib_qp *qp);
 
-struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs);
+struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs,
+						     u64 max_burst_size,
+						     int max_percent_cpu);
 void nvmeib_intr_shaper_destroy(struct nvmeib_intr_shaper *shaper);
-unsigned int nvmeib_intr_shaper_get_max_burst(struct nvmeib_intr_shaper *shaper);
 
 enum nvmeib_intr_shaper_calc_ret {
 	NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP = 0,
 	NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST = 1,
 	NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES = 2,
-	NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME = 3,
 };
 
-inline static const char *nvmeib_intr_shaper_calc_ret_to_str(int ret)
-{
-	switch (ret) {
-	case NVMEIB_INTR_SHAPER_RET_DONT_WAKE_UP: return "DONT_WAKE_UP";
-	case NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST: return "WAKE_UP_BURST";
-	case NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES: return "WAKE_UP_CYCLES";
-	case NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME: return "WAKE_UP_IRQ_TIME";
-	default: return "UNKNOWN";
-	}
-}
-
-#define NVMEIB_INTR_SHAPER_OVERLOAD_PCT_MARGIN 3
-
-struct nvmeib_intr_shaper *nvmeib_get_intr_shaper(void);
-void nvmeib_intr_shaper_intr_enter(struct nvmeib_intr_shaper *shaper, enum intr_shaper_intr_type intr_type);
-void nvmeib_intr_shaper_intr_exit(struct nvmeib_intr_shaper *shaper);
-void nvmeib_intr_shaper_intr_polled(struct nvmeib_intr_shaper *shaper, int n_polled);
-bool nvmeib_intr_shaper_intr_should_wake_up_reason(struct nvmeib_intr_shaper *shaper, enum nvmeib_intr_shaper_calc_ret *wake_up_reason);
-#define nvmeib_intr_shaper_intr_should_wake_up(shaper) nvmeib_intr_shaper_intr_should_wake_up_reason(shaper, NULL)
-
-bool nvmeib_intr_shaper_should_continue_polling(struct nvmeib_intr_shaper *shaper, int n_polled, u64 busy_ns);
-
+int nvmeib_intr_shaper_calc_percpu(struct nvmeib_intr_shaper *shaper,
+				    int n_polled,
+				    cycles_t n_cycles);
 
 /* cpu version of volume_client_config_jrange_cache */
 struct nvmeib_jrange_cache
@@ -1548,18 +1446,7 @@ void * nvmeib_s_tree_lookup(unsigned long key);
 
 #if !defined(UM_APP)
 	#if KS_NEW_TIMER_API
-		#if KS_HAS___INIT_TIMER
-			#define INIT_TIMER(x) __init_timer((x), 0, 0)
-			#define SETUP_TIMER(_timer, _fn, _data, _flags)                 \
-						do {                                                    \
-								__init_timer((_timer), (_fn), (_flags));        \
-								(_timer)->function = (_fn);                     \
-						} while (0)
-		#else
-			#define INIT_TIMER(x) timer_setup((x), NULL, 0)
-			#define SETUP_TIMER(_timer, _fn, _data, _flags) \
-						timer_setup((_timer), (_fn), (_flags))
-		#endif
+		#define INIT_TIMER(x) __init_timer((x), 0, 0)
 
 		#define TIMER_CALLBACK_DECL(func_name) \
 			void func_name(struct timer_list* _tl);
@@ -1580,6 +1467,12 @@ void * nvmeib_s_tree_lookup(unsigned long key);
 			do { 								\
 				container->container_field ## _data = data;		\
 			} while (0)
+
+		#define SETUP_TIMER(_timer, _fn, _data, _flags)                 \
+					do {                                                    \
+							__init_timer((_timer), (_fn), (_flags));        \
+							(_timer)->function = (_fn);                     \
+					} while (0)
 
 	#else //KS_NEW_TIMER_API
 
@@ -1855,6 +1748,47 @@ ssize_t nvmeib_cnt_print(enum nvmeib_cnt_mem_type mem_type, char *buffer, size_t
 
 /* ib functions */
 
+/* QPs */
+struct ib_qp *nvmeib_create_qp_cnt_usage(struct ib_pd *pd, struct ib_qp_init_attr *qp_init_attr,
+									  const char *file, int line, const char *fn,
+									  const void *bt0, const void *bt1, const void *bt2, u64 loc_id);
+#define ib_create_qp(pd, attr) nvmeib_create_qp_cnt_usage(pd, attr, NVMEIB_CNT_ALLOC_LOC_PARAMS)
+
+int nvmeib_destroy_qp_cnt_usage(struct ib_qp *ib_qp, const char *file, int line, const char *fn);
+#define ib_destroy_qp(qp) nvmeib_destroy_qp_cnt_usage(qp, NVMEIB_CNT_FREE_LOC_PARAMS)
+
+/* CQs */
+struct ib_cq *nvmeib_create_cq_cnt_usage(struct ib_device *ib_dev, ib_comp_handler comp_h,
+										 void (*evt_h)(struct ib_event *, void *),
+										 void *ctx, int cqe, int comp_v,
+										const char *file, int line, const char *fn,
+										const void *bt0, const void *bt1, const void *bt2, u64 loc_id);
+#pragma push_macro("nvmeib_create_cq")
+#undef nvmeib_create_cq
+#define nvmeib_create_cq(dev, comp_h, evt_h, ctx, cqe, comp_v)	\
+	nvmeib_create_cq_cnt_usage(dev, comp_h, evt_h, ctx, cqe, comp_v, NVMEIB_CNT_ALLOC_LOC_PARAMS)
+
+int nvmeib_destroy_cq_cnt_usage(struct ib_cq *cq, const char *file, int line, const char *fn);
+#define ib_destroy_cq(cq) nvmeib_destroy_cq_cnt_usage(cq, NVMEIB_CNT_FREE_LOC_PARAMS)
+
+/* SRQs */
+struct ib_srq *nvmeib_create_srq_cnt_usage(struct ib_pd *pd, struct ib_srq_init_attr *srq_init_attr,
+									  const char *file, int line, const char *fn,
+									  const void *bt0, const void *bt1, const void *bt2, u64 loc_id);
+#define ib_create_srq(pd, attr) nvmeib_create_srq_cnt_usage(pd, attr, NVMEIB_CNT_ALLOC_LOC_PARAMS)
+
+int nvmeib_destroy_srq_cnt_usage(struct ib_srq *ib_srq, const char *file, int line, const char *fn);
+#define ib_destroy_srq(srq) nvmeib_destroy_srq_cnt_usage(srq, NVMEIB_CNT_FREE_LOC_PARAMS)
+
+/* MRs */
+struct ib_mr *nvmeib_alloc_mr_cnt_usage(struct ib_pd *pd, enum ib_mr_type mr_type, u32 max_num_sg,
+										const char *file, int line, const char *fn,
+										const void *bt0, const void *bt1, const void *bt2, u64 loc_id);
+#define ib_alloc_mr(pd, mr_type, max_num_sg) nvmeib_alloc_mr_cnt_usage(pd, mr_type, max_num_sg, NVMEIB_CNT_ALLOC_LOC_PARAMS)
+
+int nvmeib_dereg_mr_cnt_usage(struct ib_mr *mr, const char *file, int line, const char *fn);
+#define ib_dereg_mr(mr) nvmeib_dereg_mr_cnt_usage(mr, NVMEIB_CNT_FREE_LOC_PARAMS)
+
 #endif /* !defined(__NVMEIB_C__) && !defined(NVMEIB_NO_MEM_CNT) */
 
 #endif /* defined(NVMEIB_COUNT_MEM_USAGE) */
@@ -2022,7 +1956,7 @@ ssize_t nvmeib_qp_stats_fill(struct nvmeib_qp_stats_pcpu *s, char *buf, size_t l
 #endif /* NVMEIB_QP_STATS */
 
 unsigned int nvmeib_get_tcp_base_port_id(void);
-unsigned int nvmeib_get_tcp_num_ports(struct nvmeib_dev *dev);
+unsigned int nvmeib_get_tcp_num_ports(void);
 bool nvmeib_is_dev_in_blacklist(struct ib_device *ib_dev);
 bool nvmeib_dev_use_keeper(struct nvmeib_dev *dev);
 

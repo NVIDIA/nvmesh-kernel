@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -85,7 +80,7 @@ int test_segment(char *volume_name, uint64_t praid_vlba, uint64_t data_disks, ui
 		};
 
 		int ioctl_out;
-		if ((ioctl_out = ioctl(fd, NVME_IOCTL_SUBMIT_IO, &io)) < 0) {
+		if ((ioctl_out = ioctl(fd, NVME_IOCTL_SUBMIT_IO, &io) < 0)) {
 			perror("NVMe ioctl failed");
 			fprintf(stderr, "d1=%ld, d2=%ld\n", d1, d2);
 			break;

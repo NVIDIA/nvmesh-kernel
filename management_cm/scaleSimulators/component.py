@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import abc
 import time
 import os
@@ -158,12 +155,6 @@ class Component(object):
 	def doBeforeExit(self):
 		pass
 
-	def getManagementTopicName(self):
-		return 'default.management.priority.1.0.0'
-
-	def getManagementKeepAliveTopicName(self):
-		return 'default.management.keepalive.1.0.0'
-
 	def initKafka(self):
 		self.initConsumer()
 		self.initProducer()
@@ -229,12 +220,9 @@ class Component(object):
 			self.consumer.close()
 			self.exitGracefully()
 
-	def produceMessageToTopic(self, message, topic, key=None):
+	def produceMessageToTopic(self, message, topic):
 		try:
-			if topic == self.getManagementKeepAliveTopicName() and not key:
-				key = f"{self.hostname}.{self.getType()}.{message.get('messageType')}"
-
-			self.producer.produce(topic, key=key, value=json.dumps(message))
+			self.producer.produce(topic, value=json.dumps(message))
 			self.producer.flush()  # flush is not raising an exception if the topic does not exist
 
 		except Exception as e:

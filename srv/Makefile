@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 # nvmeibs.ko Makefile
 
 # Include common.mk
@@ -15,7 +12,7 @@ nvmeibs-y := nvmeibs_main.o nvmeibs_ib_port.o nvmeibs_client.o nvmeibs_disk.o \
 		nvmeibs_um_comm.o nvmeibs_serjio_gen_cmd_handlers.o nvmeibs_client_db.o \
 		nvmeibs_capabilities.o \
 		nvmeibs_main_gen_cmds.o vex/nvmeibs_vex.o nvmeibs_async_cookies.o traces_ids.o \
-		nvmeibs_memmgr_metrics.o
+		nvmeibs_memmgr_metrics.o ../common/nvmeib_jdr.o
 
 ccflags-y += -DTRACE_INCLUDE_FILE=\"nvmeibs_trace.h\"
 ldflags-y += -T $(M)/srv/nvmeibs.lds

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
@@ -23,10 +18,7 @@ int main(int argc, char *argv[])
 {
 	struct sockaddr_un sun;
 	int fd;
-	int i, len, rc;
-#ifdef TOMA_RPC_POLLING
-	int arg;
-#endif
+	int i, len, rc, arg;
 	char inbuf[MSG_SIZE+1];
 
 	if (getuid()) {
@@ -76,11 +68,8 @@ int main(int argc, char *argv[])
 	}
 
 	send(fd, inbuf, strlen(inbuf), 0);
-
-#ifdef TOMA_RPC_POLLING
 	arg=1;
 	ioctl(fd, FIONBIO, &arg);
-#endif
 
 	while (1) {
 		rc = recv(fd, inbuf, sizeof(inbuf)-1, 0);

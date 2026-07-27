@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef B_UNITEST_H
 #define B_UNITEST_H
 /* Architecture which stores the entire nvmesh, utilities for testing and can
@@ -29,7 +24,7 @@ extern uint nvmeibc_jentry_num_blocks;					// Clients module param of binje
 extern unsigned self_recovery_detach_initial_time_sec;
 extern ulong nvmeibc_jam_pending_req_timeout_jif;
 extern bool cli_attach_check_if_already_attached;
-extern bool nvmeibc_warn_on_edic_verification_failure;
+extern bool nvmeibc_warn_on_edic_werification_failure;
 extern bool nvmeibc_warn_on_mgmt_wrong_msg_logic;
 extern bool nvmeibc_warn_on_parities_sync_missmatch;
 extern bool nvmeibc_notify_toma_on_slice_by_slice_destruction_in_sync;

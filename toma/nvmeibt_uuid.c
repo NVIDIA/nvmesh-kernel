@@ -1,9 +1,4 @@
 /*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
-/*
  * nvmeibt_uuid.c
  *
  *  Created on: Aug 26, 2020

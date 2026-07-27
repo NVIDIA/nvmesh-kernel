@@ -1,11 +1,8 @@
 #!/usr/bin/python2
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import sys, subprocess, getopt, json, os.path, os, fcntl, time
 
-NVMESH_PREFIX = 'NVMesh-'
+EXCELERO_PREFIX = 'NVMesh-'
 SERVER_DIR_NAME = 'NVMesh-target'
 CLIENT_DIR_NAME = 'NVMesh-client'
 
@@ -64,7 +61,7 @@ def copy_git_repo():
 
 	print 'Cloning git repo...'
 
-	clone_cmd = 'cd /tmp; git clone -b "{}" git@gitlab.nvidia.com:{}/nvmesh.git; cd nvmesh'.format(
+	clone_cmd = 'cd /tmp; git clone -b "{}" git@gitlab.excelero.com:{}/nvmesh.git; cd nvmesh'.format(
 			BRANCH, PRIVATE_REPOSITORY)
 	gitclone_proc = subprocess.Popen(clone_cmd, shell=True)
 	proc_res = gitclone_proc.wait()
@@ -367,7 +364,7 @@ def main(argv):
 	global FORCE
 	FORCE = False
 	global PRIVATE_REPOSITORY
-	PRIVATE_REPOSITORY = 'nvidia'
+	PRIVATE_REPOSITORY = 'excelero'
 	global SECTOR_SHIFT
 	SECTOR_SHIFT = False
         global SIGN_RPM

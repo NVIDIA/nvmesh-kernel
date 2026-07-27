@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 By Priority
 ------------
 - disk_segment_dirty_bits_table_restore()
@@ -88,7 +85,7 @@ TOMA
 - use nvmeivt_read_config_line() in raft read persistency
 
 - There are permissions issues
-  - /etc/cache/nvmesh
+  - /etc/cache/excelero
   - /etc/udev/rules.d/90-ib.rules
 
 - Clean shutdown:

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_TYPES_H
 #define NVMEIBC_TYPES_H
 
@@ -163,6 +158,7 @@ struct nvmeibc_io_path {
  * interact with disks on controller machines
  */
 struct nvmeibc_io_rnic;
+struct nvmeibc_ib_io_channel;
 struct nvmeibc_io_lnic {
 	union {
 		struct nvmeibc_ib_port *port;
@@ -184,6 +180,10 @@ struct nvmeibc_io_lnic {
 	atomic_t dying;
 	/* the peer remote nic */
 	struct nvmeibc_io_rnic *rionic;
+	/* number of qp we maintain */
+	int n_qps;
+	/* the access channels (channel ~ net ~ qp) that use the nic */
+	struct nvmeibc_ib_io_channel *io_channels;
 	/* number of qp we maintain for nordda */
 	int n_nr_qps;
 	/* the access channels (channel ~ net ~ qp) that use the nic for nordda */
@@ -222,8 +222,6 @@ struct nvmeibc_io_lnic {
  */
 struct nvmeibc_channel;
 struct nvmeibc_io_rnic {
-	/* the remote io nic index in disk->nr_rionics list */
-	uint nr_idx;
 	/* the remote io nic id */
 	union ib_gid hw_gid;
 	/* the srv allow access to this rnic */

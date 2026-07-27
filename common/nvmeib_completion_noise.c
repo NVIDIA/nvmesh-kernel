@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_completion_noise.h"
 #include "nvmeib.h"
 #include "compat/kr_incs_time_rdtsc.h"
@@ -158,7 +153,7 @@ static enum hrtimer_restart percpu_noise_measurement_hrtimer_callback(struct hrt
 
 	local_irq_save(flags);
 
-	current_cycles = get_cycles();
+	current_cycles = nvmeib_public_get_cycles();
 	cycles_per_interval = current_cycles - stats->cycles_start_interval;
 	       
 	process_threshold_levels(stats->accumulated_noisy_cycles, cycles_per_interval, current_cycles, stats->threshold_levels);
@@ -167,13 +162,13 @@ static enum hrtimer_restart percpu_noise_measurement_hrtimer_callback(struct hrt
 	/* Reset accumulated cycles for next interval */
 	stats->accumulated_noisy_cycles = 0;
 	stats->accumulated_local_noisy_cycles = 0;
-	stats->cycles_start_interval = get_cycles();
+	stats->cycles_start_interval = nvmeib_public_get_cycles();
 
 	local_irq_restore(flags);
 
 	/* Reschedule this CPU's hrtimer */
 	interval = ms_to_ktime(nvmeib_completion_noise_measurement_interval_ms);
-	hrtimer_forward(timer, hrtimer_cb_get_time(timer), interval);
+	nvmeib_public_hrtimer_forward(timer, hrtimer_cb_get_time(timer), interval);
 	return HRTIMER_RESTART;
 }
 
@@ -181,7 +176,7 @@ static void nvmeib_completion_noise_reset_cpu_stats(struct nvmeib_completion_noi
 {
 	int i;
 	struct nvmeib_completion_noise_stats *stats = &noise->stats;
-	u64 current_cycles = get_cycles();
+	u64 current_cycles = nvmeib_public_get_cycles();
 	
 	/* Reset stats without touching the timer - just memset the stats struct */
 	memset(stats, 0, sizeof(*stats));
@@ -202,7 +197,7 @@ static void nvmeib_completion_noise_reset_cpu_stats(struct nvmeib_completion_noi
 static void nvmeib_completion_noise_init_cpu_timer(struct nvmeib_completion_noise_pcpu *noise)
 {
 	/* Initialize per-CPU high-resolution timer pinned to this CPU */
-	hrtimer_init(&noise->measurement_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+	nvmeib_public_hrtimer_init(&noise->measurement_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
 	noise->measurement_hrtimer.function = percpu_noise_measurement_hrtimer_callback;
 }
 
@@ -214,7 +209,7 @@ static void nvmeib_completion_noise_init_cpu(struct nvmeib_completion_noise_pcpu
 
 static void __start_timer(struct nvmeib_completion_noise_pcpu *noise)
 {
-	hrtimer_start(&noise->measurement_hrtimer, 
+	nvmeib_public_hrtimer_start(&noise->measurement_hrtimer, 
 		      ms_to_ktime(nvmeib_completion_noise_measurement_interval_ms), 
 		      HRTIMER_MODE_REL_PINNED);
 }
@@ -242,7 +237,7 @@ static void stop_cpu_timer(void *unused)
 
 	BUG_ON(!completion_noise_stats);
 	noise = this_cpu_ptr(completion_noise_stats);
-	hrtimer_cancel(&noise->measurement_hrtimer);
+	nvmeib_public_hrtimer_cancel(&noise->measurement_hrtimer);
 }
 
 int nvmeib_completion_noise_init(void)
@@ -320,7 +315,7 @@ void nvmeib_completion_noise_start(enum nvmeib_noise_type type)
 	local_irq_save(flags);
 	noise = this_cpu_ptr(completion_noise_stats);
 	stats = &noise->stats;
-	current_cycles = get_cycles();
+	current_cycles = nvmeib_public_get_cycles();
 
 	switch (type) {
 	case NVMEIB_NOISE_COMPLETION:
@@ -369,7 +364,7 @@ void nvmeib_completion_noise_end(enum nvmeib_noise_type type, const unsigned lon
 
 	noise = this_cpu_ptr(completion_noise_stats);
 	stats = &noise->stats;
-	end_cycles = get_cycles();
+	end_cycles = nvmeib_public_get_cycles();
 
 	switch (type) {
 	case NVMEIB_NOISE_COMPLETION:
@@ -498,8 +493,8 @@ static ssize_t nvmeib_completion_noise_fill_stats_impl(void *priv, char *buf, si
 	struct jdr jdr_inst = jdr_make((struct charvec){.base = buf, .len = len});
 	int cpu;
 	struct cpu_noise_data noise_data;
-	int online_cpu_count __attribute__((unused)) = 0;
-	int current_cpu_index __attribute__((unused)) = 0;
+	int online_cpu_count = 0;
+	int current_cpu_index = 0;
 	int max_thresh_idx = min(nvmeib_completion_noise_threshold_percentages_size, MAX_NOISE_THRESHOLD_LEVELS);
 	int max_ctr_idx = use_local ? NVMEIBS_NOISE_CTRS_LOCAL_ONLY_MAX : NVMEIBS_NOISE_CTRS_LOCAL_ONLY_START;
 
@@ -596,7 +591,7 @@ static void reset_cpu_noise_data(void *unused)
 	
 	local_irq_disable();
 	noise = this_cpu_ptr(completion_noise_stats);
-	hrtimer_cancel(&noise->measurement_hrtimer);
+	nvmeib_public_hrtimer_cancel(&noise->measurement_hrtimer);
 	nvmeib_completion_noise_reset_cpu_stats(noise);
 	__start_timer(noise);
 	local_irq_enable();
@@ -618,4 +613,4 @@ ssize_t nvmeib_completion_noise_reset_stats(void *priv, char *buf, size_t len)
 	
 	return len;
 }
-EXPORT_SYMBOL(nvmeib_completion_noise_reset_stats);
+EXPORT_SYMBOL(nvmeib_completion_noise_reset_stats); 

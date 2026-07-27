@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # Check if two branches are provided
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <old_branch> <new_branch>"

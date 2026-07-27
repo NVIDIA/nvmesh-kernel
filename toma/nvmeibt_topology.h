@@ -1,11 +1,6 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 /**
  * @file   nvmeibt_topology.h
- * @Author Ronen
+ * @Author Ronen (ronen@excelero.com)
  * @date   Mar, 2015
  * @brief  The topology data glue
  *

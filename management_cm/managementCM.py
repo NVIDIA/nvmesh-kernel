@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import json
 import queue
 import subprocess
@@ -18,7 +14,6 @@ import uuid
 from timeit import default_timer as timer
 import re
 import time
-import shutil
 
 from CMSocket import CMSocket, FileSocket, NvmeshUMSocket, process_scheme
 from CMSocket import JsonSocket
@@ -35,19 +30,12 @@ CLIENT_INSTANCES_CHECK_INTERVAL = 5
 MCS_MANAGEMENT_TIMEOUT = 300
 EMPTY_GUID = '00000000-0000-0000-0000-000000000000'
 
-# Fixed filenames for TLS certificates
-# on startup and SIGHUP the TLS files from user configured path are copied to this directory
-TLS_CERTS_DIR = '/var/run/nvmesh/tls/nvmeshcm'
-TLS_CERTS_KEY_FILEPATH = os.path.join(TLS_CERTS_DIR, 'key.key')
-TLS_CERTS_CERT_FILEPATH = os.path.join(TLS_CERTS_DIR, 'cert.crt')
-TLS_CERTS_CA_FILEPATH = os.path.join(TLS_CERTS_DIR, 'ca.crt')
-
 schemePath = '/opt/nvmesh/client-repo/management_cm/clnt/'
+
 
 POLL_PERIOD_BEFORE_FIRST_CONNECTION_SEC = 0.01
 SELECT_TIMEOUT_SEC = 2.0
 WAIT_FOR_MCS_PROC_TIMEOUT_SECS = 10
-
 
 class ManagementCM(Daemon):
 	def __init__(self, pidfile, lockfile, logger):
@@ -65,11 +53,9 @@ class ManagementCM(Daemon):
 		self.shouldClose = False
 		self.concurrentConnections = {}
 		self.managementTopic = 'default.management.priority.1.0.0'
-		self.managementKeepaliveTopic = 'default.management.keepalive.1.0.0'
 		self.hostname = socket.gethostname()
 		self.clientTopic = 'client.main'
-		self.topicsToSubscribeOn = {'{0}.managementAgent.main.1.0.0'.format(self.hostname): False,
-									'{0}.{1}.1.0.0'.format(self.hostname, self.clientTopic): False}
+		self.topicsToSubscribeOn = { '{0}.managementAgent.main.1.0.0'.format(self.hostname): False, '{0}.{1}.1.0.0'.format(self.hostname, self.clientTopic) : False }
 		self.consumableTopicsInitiated = False
 		self.cacheFolder = '/var/opt/nvmesh/mcs/'
 		self.kafkaAdminClient = None
@@ -85,20 +71,10 @@ class ManagementCM(Daemon):
 			print(("Unknown exception at Deamon init Exception:{0}".format(e)))
 			raise
 
-	def isKeepaliveMessage(self, message):
-		return message.get('messageType') in ['keepalive', 'leaderKeepalive']
-
 	def stopSignalHandler(self, signum, frame):
 		self.logger.debug("Received close signal, exiting. PID {}".format(os.getpid()))
 		self.closing = True
-		os.close(self.select_wakeup_p_write)  # wakeup select
-
-	def handleSIGHUP(self, signum, frame):
-		self.logger.debug(f'Received SIGHUP signal - reloading certificates and Kafka connections')
-		if not self.isReloadingKafkaConnections:
-			self.needsReload = True
-		else:
-			self.logger.warning("Reload already in progress, ignoring SIGHUP")
+		os.close(self.select_wakeup_p_write) # wakeup select
 
 	def reloadConfig(self, signum, frame):
 		self.logger.debug("Received reload config signal.")
@@ -247,64 +223,11 @@ class ManagementCM(Daemon):
 					self.topicsToSubscribeOn[topic] = True
 
 		if shouldSubscribe:
-			self.logger.debug(f"Subscribing on topics: {topicsToSubscribeOn}")
 			self.consumer.subscribe(topicsToSubscribeOn)
 			if allTopicsInitiated:
 				self.consumableTopicsInitiated = True
 
 		return topicsToSubscribeOn
-
-	def copyCertificates(self):
-		"""
-		Copy TLS certificates to runtime directory.
-		"""
-		certConfigKeys = ['cert', 'key', 'CA']
-
-		# Verify that the certificate files exist
-		for certConfigKey in certConfigKeys:
-			certFile = getattr(CMConfig, certConfigKey)
-			if not certFile:
-				self.logger.error(f'Config key {certConfigKey} is missing')
-				sys.exit(1)
-
-			if not os.path.exists(certFile):
-				self.logger.error(f'Certificate file {certFile} does not exist')
-				sys.exit(1)
-
-		# Copy certificates to runtime directory
-		try:
-			if not os.path.exists(TLS_CERTS_DIR):
-				self.logger.debug(f'Creating TLS certificates directory: {TLS_CERTS_DIR}')
-				os.makedirs(TLS_CERTS_DIR, mode=0o700, exist_ok=True)
-
-			srcCertFiles = [
-				# (source file, destination file)
-				(CMConfig.cert, TLS_CERTS_CERT_FILEPATH),
-				(CMConfig.key, TLS_CERTS_KEY_FILEPATH),
-				(CMConfig.CA, TLS_CERTS_CA_FILEPATH)]
-
-			for srcCertFile, destCertFile in srcCertFiles:
-				shutil.copy2(srcCertFile, destCertFile)
-
-			self.logger.debug(f'Successfully copied TLS certificates to TLS certificates directory {TLS_CERTS_DIR}')
-
-		except Exception as e:
-			self.logger.error(f'Failed to copy certificates: {e}')
-			raise
-
-	def getKafkaSSLConfig(self):
-		conf = {
-			'security.protocol': 'SSL',
-			'enable.ssl.certificate.verification': 'true',
-			'ssl.certificate.location': TLS_CERTS_CERT_FILEPATH,
-			'ssl.key.location': TLS_CERTS_KEY_FILEPATH,
-			'ssl.ca.location': TLS_CERTS_CA_FILEPATH,
-		}
-
-		if CMConfig.keyPass:
-			conf['ssl.key.password'] = CMConfig.keyPass
-
-		return conf
 
 	def getKafkaConfig(self):
 		mandatoryConfigsForTLS = [CMConfig.CA, CMConfig.cert, CMConfig.key]
@@ -318,8 +241,14 @@ class ManagementCM(Daemon):
 		}
 
 		if CMConfig.TLSEnabled:
-			sslConf = self.getKafkaSSLConfig()
-			conf.update(sslConf)
+			conf['security.protocol'] = 'SSL'
+			conf['enable.ssl.certificate.verification'] = 'true'
+			conf['ssl.certificate.location'] = CMConfig.cert
+			conf['ssl.ca.location'] = CMConfig.CA
+			conf['ssl.key.location'] = CMConfig.key
+
+			if CMConfig.keyPass:
+				conf['ssl.key.password'] = CMConfig.keyPass
 
 		return conf
 
@@ -394,17 +323,8 @@ class ManagementCM(Daemon):
 
 			while self.kafkaOutbox.qsize() > 0:
 				messageToSend = self.kafkaOutbox.get()
-				messagePayload = json.loads(messageToSend.payload.decode('utf-8'))
-				self.logger.debug('Sending the following message to Kafka: {}'.format(messagePayload))
-
-				topic = self.managementTopic
-				key = None
-
-				if self.isKeepaliveMessage(messagePayload):
-					topic = self.managementKeepaliveTopic
-					key = f"{self.hostname}.{messagePayload.get('originType')}.{messagePayload.get('messageType')}"
-
-				self.producer.produce(topic, key=key, value=json.dumps(messagePayload), on_delivery=deliveryDone)
+				self.logger.debug('Sending the following message to Kafka: {}'.format(messageToSend.payload))
+				self.producer.produce(self.managementTopic, value=messageToSend.payload.decode('utf-8'), on_delivery=deliveryDone)
 
 			self.logger.debug('There are {} messages in producer, waiting to be send - Flushing the producer'.format(len(self.producer)))
 			self.producer.flush(5)
@@ -463,10 +383,10 @@ class ManagementCM(Daemon):
 		if not offsetToCommit:
 			return self.logger.debug('I\'ve being called to commit offsets to topic:partition {}:{} but nothing could be committed'.format(topic, partition))
 
-		topicPartition = TopicPartition(topic, partition, offsetToCommit + 1)
+		topicPartition = TopicPartition(topic, partition, offsetToCommit+1)
 
 		try:
-			self.logger.debug('Committing offsets to topic:partition {}:{} with offset: {}'.format(topic, partition, offsetToCommit + 1))
+			self.logger.debug('Committing offsets to topic:partition {}:{} with offset: {}'.format(topic, partition, offsetToCommit+1))
 			self.consumer.commit(offsets=[topicPartition], asynchronous=False)
 		except Exception as e:
 			self.logger.error('Failed to commit offsets for topic:partition {}:{} with offset: {}. {}'.format(topic, partition, offsetToCommit, e))
@@ -519,24 +439,12 @@ class ManagementCM(Daemon):
 
 		if self.consumer:
 			self.consumer.close()
-			self.consumableTopicsInitiated = False
-			for topic in self.topicsToSubscribeOn:
-				self.topicsToSubscribeOn[topic] = False
 
 	def reloadKafkaConnections(self):
-		self.logger.debug(f"Reloading TLS Certificates & Kafka connections...")
+		self.logger.debug(f"Reloading kafka connections...")
 		self.isReloadingKafkaConnections = True
 
-		self.logger.debug("Closing Kafka connections...")
 		self.closeKafkaConnection()
-
-		# Copy certificates on reload if TLS is enabled
-		if CMConfig.TLSEnabled:
-			self.logger.debug("Reloading TLS certificates...")
-			self.copyCertificates()
-
-		# Reload Kafka connections
-		self.logger.debug("Starting Kafka connections...")
 
 		conf = self.getKafkaConfig()
 		self.kafkaAdminClient = AdminClient(conf)
@@ -616,12 +524,7 @@ class ManagementCM(Daemon):
 		signal.signal(signal.SIGTERM, self.stopSignalHandler)
 		signal.signal(signal.SIGABRT, self.stopSignalHandler)
 		signal.signal(signal.SIGUSR1, self.reloadConfig)
-		signal.signal(signal.SIGHUP, self.handleSIGHUP)
 		logger.info("Registered to signals")
-
-		# Copy TLS certificates to runtime directory if TLS is enabled
-		if CMConfig.TLSEnabled:
-			self.copyCertificates()
 
 		# singaling the main process so it can exit and let systemd know that the service has fully started
 		if self.notifyMainProcessOnStartup:
@@ -681,9 +584,9 @@ class ManagementCM(Daemon):
 					self.shouldClose = True
 					continue
 
-				self.checkAndPerformReload()
 				self.flushOutbox()
 				self.consumeTopics()
+				self.checkAndPerformReload()
 
 				readable, writable, errored = select.select(self.readList, self.writeList, errList, Timeout)
 
@@ -726,7 +629,7 @@ class ManagementCM(Daemon):
 					kernelClientConnected = self.tryConnectKernelClient(clientFD)
 
 			except select.error as e:
-				if e.errno == errno.EINTR:
+				if e[0] == errno.EINTR:
 					self.logger.debug("Received EINTR, retrying...")
 				else:
 					self.logger.exception("Received Exception %s, retrying...", e.__class__.__name__)
@@ -736,7 +639,7 @@ class ManagementCM(Daemon):
 
 	def getSchemeVersion(self) -> str:
 		packer = process_scheme.Packer(os.path.join(schemePath, "clnt_scheme.json"), logger=None)
-		print(hex(packer.scheme_version))
+		print (hex(packer.scheme_version))
 
 
 class OurHandler(logging.handlers.SysLogHandler):
@@ -745,6 +648,7 @@ class OurHandler(logging.handlers.SysLogHandler):
 		logging.handlers.SysLogHandler.__init__(self, address=address)
 		self.CONTINUATION_STR = "..."
 		self.MAX_MSG = 4096 - len(self.CONTINUATION_STR)
+
 
 	def emit(self, record):
 		"""
@@ -760,7 +664,7 @@ class OurHandler(logging.handlers.SysLogHandler):
 		prio = '<%d>' % self.encodePriority(self.facility,
 											self.mapPriority(record.levelname))
 		# Message is a string. Convert to bytes as required by RFC 5424
-		# if type(msg) is str:
+		#if type(msg) is str:
 		#	msg = msg.encode('utf-8')
 
 		msg_ = msg
@@ -802,12 +706,12 @@ def addLoggingLevelVerbose():
 			return
 
 		isMessage = False
-		# sequences = None
+		#sequences = None
 		verboseType = kws.pop('verboseType', '')
 		typeWithOpcode = None
 
 		if verboseType == 'message':
-			# sequences = (kws.pop('sequences'))
+			#sequences = (kws.pop('sequences'))
 			isMessage = True
 			verboseType = kws.pop('fromTo', None)
 			opcode = kws.pop('opcode', '-')
@@ -826,8 +730,8 @@ def addLoggingLevelVerbose():
 					pass
 
 				verbose_message = 'msg: %s: %s.' % (typeWithOpcode, json_body or message)
-			# if sequences:
-			# verbose_message += ' connectionSequence: {}, messageSequence: {}'.format(sequences[0], sequences[1])
+				#if sequences:
+					#verbose_message += ' connectionSequence: {}, messageSequence: {}'.format(sequences[0], sequences[1])
 			else:
 				verbose_message = '%s: %s.' % (verboseType, message)
 
@@ -862,7 +766,6 @@ def readBashFile(filename):
 
 	return l
 
-
 def is_service_enabled(service_name):
 	logger = logging.getLogger('managementCM')
 	try:
@@ -878,7 +781,6 @@ def is_service_enabled(service_name):
 	except Exception as e:
 		logger.debug("Unexpected error: {}".format(str(e)))
 		return False
-
 
 def readConfigFile():
 	subprocess.call('/opt/nvmesh/bin/process_config_files')
@@ -930,7 +832,6 @@ def readConfigFile():
 
 	if is_service_enabled('nvmeshum.service'):
 		CMConfig.nvmeshUMClient = True
-
 
 # CMConfig.MULTI_INSTANCE_ENABLED = 'MULTI_INSTANCE_ENABLED' in configFile and configFile['MULTI_INSTANCE_ENABLED'] == 'Yes'
 
@@ -991,13 +892,6 @@ class CMConfig(object):
 	MULTI_INSTANCE_ENABLED = False
 	remoteDebug = False
 
-	# TLS configs for Kafka
-	TLSEnabled = False
-	CA = None
-	cert = None
-	key = None
-	keyPass = None
-
 
 if __name__ == "__main__":
 	SYSLOG_PATH = '/dev/log'
@@ -1009,7 +903,7 @@ if __name__ == "__main__":
 	procPathServer = '/proc/nvmeibs/mcs'
 	# procPathMC = '/proc/{clientInstName}/mcs/mcs'
 
-	if not (len(sys.argv) == 2 and sys.argv[1] in ['--version', '-v']):  # readConfigFile not needed in this case, we only want print the version
+	if not (len(sys.argv) == 2 and sys.argv[1] in ['--version', '-v']): #readConfigFile not needed in this case, we only want print the version
 		readConfigFile()
 
 	logger = getLogger()
@@ -1027,6 +921,7 @@ if __name__ == "__main__":
 		schemePath = '/opt/nvmesh/client-repo/management_cm/clnt/'
 
 	managementCM = ManagementCM(PID_FILE, LOCK_FILE, logger)
+
 
 	if len(sys.argv) >= 2:
 		pid = 1

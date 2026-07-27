@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import socket
 import datetime
 import subprocess
@@ -52,6 +49,9 @@ class UpgradeAgent(Component):
 
     def getInterestEvents(self):
         return []
+
+    def getManagementTopicName(self):
+        return 'default.management.priority.1.0.0'
 
     def getInterestConsumersConfig(self):
         topicsConfig = [{'name': '{}.upgradeAgent.commands.1.0.0'.format(self.hostname), 'partition': 0}]
@@ -137,8 +137,8 @@ class UpgradeAgent(Component):
             self.logger.error(f'Error executing command {cmd}: {e}')
             return {"isException": True, "exception": str(e)}
 
-    def produceMessageToTopic(self, message, topic, key=None):
-        Component.produceMessageToTopic(self, message, topic, key)
+    def produceMessageToTopic(self, message, topic):
+        Component.produceMessageToTopic(self, message, topic)
         self.messageSequence += 1
 
     def updateToken(self, token):
@@ -169,7 +169,7 @@ class UpgradeAgent(Component):
         message = self.buildGenericMessage(messageType=MessageTypes.UPGRADE_AGENT_KEEPALIVE, payload=payload)
 
         self.logger.debug('Going to send keepalive message, token: {}, messageSequence: {}'.format(message['upgradeAgentToken'], message['messageSequence']))
-        self.produceMessageToTopic(message, self.getManagementKeepAliveTopicName())
+        self.produceMessageToTopic(message, self.getManagementTopicName())
 
         self.lastKeepAliveTime = datetime.datetime.now()
 

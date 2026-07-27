@@ -1,9 +1,12 @@
 #!/bin/bash
 
 ##############################################################################
-#  Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All Rights Reserved.  #
+#  Copyright (C) 2015-2021 Excelero, Inc. All Rights Reserved.               #
 #                                                                            #
-#  This file is part of NVMesh software.                                     #
+#  This file is part of Excelero NVMesh software.                            #
+#                                                                            #
+#  Unauthorized copying of this file, via any medium is strictly prohibited  #
+#  Proprietary and confidential                                              #
 ##############################################################################
 
 # Description:
@@ -44,21 +47,9 @@ if [ -z "$NVME_IRQ_AFFINITY_DOMAIN" ]; then
     NVME_IRQ_AFFINITY_DOMAIN="pernuma"
 fi
 
-# Supported: pernuma, persocket, fullspread, pernuma_thread0, persocket_thread0, or comma-separated cpu list (e.g. "0,1,2,3")
-VALID_DOMAIN=false
-for d in pernuma persocket fullspread pernuma_thread0 persocket_thread0; do
-    if [ "$NVME_IRQ_AFFINITY_DOMAIN" = "$d" ]; then
-	VALID_DOMAIN=true
-	break
-    fi
-done
-if ! $VALID_DOMAIN; then
-    # Allow cpu-list (comma-separated numbers); validated when populating cpus_group_table
-    if [[ "$NVME_IRQ_AFFINITY_DOMAIN" =~ ^[0-9]+([,[:space:]]+[0-9]+)*$ ]]; then
-	VALID_DOMAIN=true
-    fi
-fi
-if ! $VALID_DOMAIN; then
+if  [[ "$NVME_IRQ_AFFINITY_DOMAIN" != "pernuma" &&
+       "$NVME_IRQ_AFFINITY_DOMAIN" != "persocket" &&
+       "$NVME_IRQ_AFFINITY_DOMAIN" != "fullspread" ]]; then
     echo "nvmesh_set_irq_affinity: Unsupported mode '$NVME_IRQ_AFFINITY_DOMAIN'"
     echo "nvmesh_set_irq_affinity: Unsupported mode '$NVME_IRQ_AFFINITY_DOMAIN'" > /dev/kmsg
     exit
@@ -113,22 +104,6 @@ elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "persocket" ]; then
 	    cpus_group_table[$i,$j]=${TBL_CPUS_PER_SOCK[$i,$j]}
 	done
     done
-elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "pernuma_thread0" ]; then
-    n_cpus_groups=$N_NUMAS
-    for ((i=0;i<n_cpus_groups;i++)) do
-	cpus_group_size[$i]=${NUM_CPUS_PER_NUMA_THREAD0[$i]}
-	for ((j=0; j<cpus_group_size[$i]; j++)) do
-	    cpus_group_table[$i,$j]=${TBL_CPUS_PER_NUMA_THREAD0[$i,$j]}
-	done
-    done
-elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "persocket_thread0" ]; then
-    n_cpus_groups=$N_SOCKS
-    for ((i=0;i<n_cpus_groups;i++)) do
-	cpus_group_size[$i]=${NUM_CPUS_PER_SOCK_THREAD0[$i]}
-	for ((j=0; j<cpus_group_size[$i]; j++)) do
-	    cpus_group_table[$i,$j]=${TBL_CPUS_PER_SOCK_THREAD0[$i,$j]}
-	done
-    done
 elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "fullspread" ]; then
     n_cpus_groups=$N_HOSTS
     for ((i=0;i<n_cpus_groups;i++)) do
@@ -138,18 +113,8 @@ elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "fullspread" ]; then
 	done
     done
 else
-    # cpu-list: comma-separated list of CPUs (e.g. "0,1,2,3" or "16,17,18,19")
-    IFS=', ' read -ra CPU_LIST_ARR <<< "$NVME_IRQ_AFFINITY_DOMAIN"
-    n_cpus_groups=1
-    cpus_group_size[0]=${#CPU_LIST_ARR[@]}
-    if [ ${cpus_group_size[0]} -eq 0 ]; then
-	echo "nvmesh_set_irq_affinity: Invalid cpu-list (empty): '$NVME_IRQ_AFFINITY_DOMAIN'"
-	exit 1
-    fi
-    for ((j=0; j<cpus_group_size[0]; j++)) do
-	cpus_group_table[0,$j]=${CPU_LIST_ARR[$j]}
-    done
-    echo "nvmesh_set_irq_affinity: Using cpu-list: ${CPU_LIST_ARR[*]}"
+    echo "Unsupported mode $NVME_IRQ_AFFINITY_DOMAIN"
+    exit
 fi
 
 print_table "cpus_group_table" $n_cpus_groups cpus_group_size[@] 
@@ -167,15 +132,15 @@ for x in `ls /proc/nvmeibs/smart* | cut -c 20- | sort -g`; do
 	numa=0
     fi
     sock=${NUMA_2_SOCK[$numa]}
-    if [ "$NVME_IRQ_AFFINITY_DOMAIN" == "pernuma" ] || [ "$NVME_IRQ_AFFINITY_DOMAIN" == "pernuma_thread0" ]; then
+    if [ "$NVME_IRQ_AFFINITY_DOMAIN" == "pernuma" ]; then
 	disk_to_group[$x]=$numa
-    elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "persocket" ] || [ "$NVME_IRQ_AFFINITY_DOMAIN" == "persocket_thread0" ]; then
+    elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "persocket" ]; then
 	disk_to_group[$x]=$sock
     elif [ "$NVME_IRQ_AFFINITY_DOMAIN" == "fullspread" ]; then
 	disk_to_group[$x]=0
     else
-	# cpu-list: single group 0 for all disks
-	disk_to_group[$x]=0
+	echo "Unsupported mode $NVME_IRQ_AFFINITY_DOMAIN"
+	exit
     fi
     printf "%2d. disk %2d (numa=%2d, sock=%2d) -> cpus-group=%2d\n"\
     $n_disks $x $numa $sock ${disk_to_group[$x]}

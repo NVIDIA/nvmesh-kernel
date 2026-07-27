@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_IIR
 #define NVMEIB_IIR
 
@@ -67,11 +62,10 @@ static inline double nvmeib_iir_get_standard_deviation(struct nvmeib_iir iir)
 
 static inline void nvmeib_iir_reset(struct nvmeib_iir *iir, double new_sample_weight, char *desc1, char *desc2)
 {
-	size_t		len1;
+	size_t		len1 = strlen(desc1);
 
 	*iir = (struct nvmeib_iir){"", 0.0, 0.0, 0.0, new_sample_weight};
 	nvmeib_strlcpy(iir->desc, desc1, sizeof(iir->desc));
-	len1 = strnlen(iir->desc, sizeof(iir->desc));
 	nvmeib_strlcpy(iir->desc + len1, desc2, sizeof(iir->desc) - len1);
 }
 

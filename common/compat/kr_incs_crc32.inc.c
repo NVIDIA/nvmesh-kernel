@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef KR_INCS_CRC32_IMPL_H
 #define KR_INCS_CRC32_IMPL_H
 
@@ -11,24 +6,28 @@
 __attribute__((optimize(4)))
 #endif
 static inline u32 __calculate_crc32c_avx(u32 crc_init, const u8* buffer, u32 num) {
-	u64 crc, data;
-	unsigned int i;
-	#if defined(BUG_ON)
-		BUG_ON(num % sizeof(u64));
-	#endif
-	num /= sizeof(u64);
-	crc = crc_init;                  // For RFC 3720, 0xffffffff
-	for (i = 0; i < num; i++) {
-		data = ((u64 *)buffer)[i];
-		#ifdef __x86_64__
-			asm volatile ("crc32 %1, %0"          : "+r" (crc) : "r" (data));
-		#elif defined(__aarch64__)
-			asm volatile ("crc32cx %w0, %w0, %x1" : "+r" (crc) : "r" (data));
-		#else
-			#error "Unsupported architechture"
+	#if defined (PARALLELS_COMPILATION_ONLY) && PARALLELS_COMPILATION_ONLY
+		oops;	return 0; // Functions __crc32c..() Not available on MacOS UM VM that runs on the virtual ARM CPU
+	#else
+		u64 crc, data;
+		unsigned int i;
+		#if defined(BUG_ON)
+			BUG_ON(num % sizeof(u64));
 		#endif
-	}
-	return (u32)crc;                      // For RFC 3720, XOR with 0xffffffff
+		num /= sizeof(u64);
+		crc = crc_init;                  // For RFC 3720, 0xffffffff
+		for (i = 0; i < num; i++) {
+			data = ((u64 *)buffer)[i];
+			#ifdef __x86_64__
+				asm volatile ("crc32 %1, %0"          : "+r" (crc) : "r" (data));
+			#elif defined(__aarch64__)
+				asm volatile ("crc32cx %w0, %w0, %x1" : "+r" (crc) : "r" (data));
+			#else
+				#error "Unsupported architechture"
+			#endif
+		}
+		return (u32)crc;                      // For RFC 3720, XOR with 0xffffffff
+	#endif
 }
 
 #ifndef __KERNEL__		// Kernel already has those functions. Define as compatibility for user-space
@@ -216,11 +215,7 @@ static u32 __attribute__((unused)) __crc32c_unopt_mask(u32 crc, const void *buf,
 
 #if !KS_HAS_CRC32C			// Centos 6.0+ kernels dont have u32 crc32c(
 	// include/linux/crc32x.h
-#if KS_CRC32C_USES_SIZE_T
-	u32 crc32c(u32 crc, const void *buf, size_t length) {	// All implementations return identical results
-#else
 	u32 crc32c(u32 crc, const void *buf, unsigned int length) {	// All implementations return identical results
-#endif
 		#if 0
 			return __crc32c_unopt_table(crc, buf, length);
 		#elif 0

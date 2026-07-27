@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -62,9 +57,9 @@
 #define IFIN _I("-->\n")
 #define IFOUT _I("<--\n")
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("Tests if RDMA Atomic operations use PCIE Atomics");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_LICENSE("Dual BSD/GPL");
 
 #define NUM_OPS 16
 

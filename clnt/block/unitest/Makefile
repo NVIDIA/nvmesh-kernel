@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 # ********** Extract git information *********
 ifeq ($(COMPILATION_DATE),)
 	COMPILATION_DATE := NVMEIB_DATE\($(shell date +%-d,%-m,%Y)\)
@@ -120,7 +117,6 @@ INCLUDES :=
 INCLUDES += -I$(SSDA)/clnt/block/unitest -I$(SSDA)/clnt/ -I$(SSDA)/srv/ -I$(SSDA)/common/ -I$(SSDA)/common_public/ -I$(SSDA)/toma/ -I$(SSDA)/
 INCLUDES += -I/usr/include
 INCLUDES += -I$(SSDA)/autogen/toma/ -I$(SSDA)/autogen/common/ -I$(SSDA)/autogen/clnt/
-INCLUDES += -I$(SSDA)/utils/nvmeib_jdr/
 
 # ********** Define linker and compilation flags *********
 
@@ -140,7 +136,6 @@ SOURCES  = tests_conf.c
 SOURCES += bunitest.c kr_incs.c nvmeibc_simu_disk.c ib_incs.c kr_sim_svc.c nvmeib_common_all.c nvmesh_sim.c di_tracker.c
 SOURCES += memmgr_metrics_tests.c
 SOURCES += error_tags_tests.c
-SOURCES += kr_incs_bit_ops_test.c
 SOURCES += ./clnt/nvmeibc_cli_scripts_simu.c ./clnt/nvmeibc_user_space_simu.c
 SOURCES += ./mgmt/nvmeibm_conf_db.c ./mgmt/nvmeibm_mgmt_simu.c ./mgmt/nvmeibm_mcs_simu.c
 SOURCES += ./toma/nvmeibt_topology_simu.c ./toma/nvmeibt_toma_simu.c ./toma/nvmeibr_disk_metadata_sim.c
@@ -161,16 +156,12 @@ SOURCES += ./uni_scenarios/uni_scenario_ec_jam.c
 SOURCES += ./uni_scenarios/uni_scenario_ec_serjio.c
 SOURCES += ./uni_scenarios/uni_scenario_common.c
 SOURCES += ./nvmeibc_tracer_unitest.c
-SOURCES += ./nvmeibc_nvmeiba_kapi_sim.c
-
-# Production code: /utils/
-UTILS_DIR := $(SSDA)/utils
-SOURCES += $(UTILS_DIR)/nvmeib_jdr/nvmeib_jdr.c
 
 # Production code: /common/
 CMDIR = $(SSDA)/common
 SOURCES += $(CMDIR)/nvmeib_io_stats.c $(CMDIR)/nvmeib_mcs_msg_cache.c $(CMDIR)/nvmeib_mcs.c $(CMDIR)/nvmeib_kth_events.c
 SOURCES += $(CMDIR)/nvmeib_json.c
+SOURCES += $(CMDIR)/nvmeib_jdr.c
 SOURCES += $(CMDIR)/nvmeib_metrics_jdr.c
 SOURCES += $(CMDIR)/nvmeib_memmgr_metrics.c
 SOURCES += $(CMDIR)/nvmeib_error_tags.c
@@ -274,9 +265,7 @@ ifeq ($(USE_ARM), 1)
 	#ASM_SRC	= $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_asm_arm.S_shipped
 	ARM_SRC :=
 else
-	SOURCES += $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.c
-	CFLAGS_nvmeibc_block_dp_ec_gf_avx2.c += -mavx2 -msse4.2
-	ASM_SRC :=
+	ASM_SRC = $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_asm.S_shipped
 endif
 ASM_OBJ = $(ASM_SRC:.S_shipped=.o)
 
@@ -293,7 +282,7 @@ BACKUPS =$(SOURCES:.c=.~) $(ASM_OBJ:.o=.~)
 EXE_NAME = blk_unitest
 
 PRECOMPILED_HEADERS := $(OBJ_DIR)/pch.h.gch
-IGNORE_PRECOMPILED_HEADERS := kr_incs.c tests_conf.c $(SSDA)/tools/nvmeib_trace_userspace.c $(SSDA)/tools/nvmeib_trace_userspace_poller.c nvmeibc_block_dp_ec_gf_avx2.c
+IGNORE_PRECOMPILED_HEADERS := kr_incs.c tests_conf.c $(SSDA)/tools/nvmeib_trace_userspace.c $(SSDA)/tools/nvmeib_trace_userspace_poller.c
 FILES_DEPEND =$(OBJECTS:.o=.d) $(PRECOMPILED_HEADERS:.h.gch=.h.d)
 
 # Autogen
@@ -423,11 +412,8 @@ ECHO_COMPILING:
 $(ASMOBJ) : $(ASMSRC)
 	@$(MAKE) -C $(CDIR)/datapath_ec $@
 
-PERF_SRC = $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf.c $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.c ./uni_scenarios/uni_scenario_gf.c ./kr_incs.c ./kr_sim_svc.c
-PERF_OBJ = $(PERF_SRC:.c=.o)
-ifneq ($(strip $(ASM_OBJ)),)
-PERF_OBJ += $(OBJ_DIR)/$(ASM_OBJ)
-endif
+PERF_SRC = $(CDIR)/datapath_ec/nvmeibc_block_dp_ec_gf.c ./uni_scenarios/uni_scenario_gf.c ./kr_incs.c ./kr_sim_svc.c
+PERF_OBJ = $(PERF_SRC:.c=.o) $(OBJ_DIR)/$(ASM_OBJ)
 PERF_NAME= gf_perf
 
 gf_perf:

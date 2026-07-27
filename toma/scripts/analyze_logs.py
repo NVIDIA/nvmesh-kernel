@@ -1,8 +1,4 @@
 #!/usr/bin/python2
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # DanielHsH, 2025/Nov, this script is deprecated. Originally tried to find important stuff in Toma logs. Basically an elaborate grep. Not used in production
 
 import sys, os, subprocess, errno, getopt, re

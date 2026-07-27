@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 /*clang-format off*/
 #include "common/kr_incs.h" /*Must be first*/
 /*clang-format on*/
@@ -11,7 +6,6 @@
 #include "nvmeibc_trend_types.h"
 #include "nvmeibs_trend_types.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
-#include "nvmeib_io_stats.h"
 
 #include <arpa/inet.h>
 
@@ -82,23 +76,6 @@ int fmt_yesno(char *buf, int len, long arg, int datalen) {
 	else return scnprintf(buf, len, "No");
 }
 
-int fmt_ndu(char *buf, int len, long arg, int datalen) {
-	(void)arg;
-	(void)datalen;
-	return scnprintf(buf, len, "NDU(%d)", (int)arg);
-}
-
-int fmt_kafka_offset(char *buf, int len, long arg, int datalen) {
-	const long topic_offset = (arg & ((1L << 48)-1));	// Split bit field
-	const int topic_change_no = (int)(arg >> 56);
-	(void)datalen;
-	if (arg < 0)
-		return scnprintf(buf, len, "k_offset[%ld]", arg);
-	if (topic_change_no <= 1)			// No topic change so not interesting to print
-		return scnprintf(buf, len, "k_offset[%lu]", topic_offset);
-	return     scnprintf(buf, len, "k_offset[%lu|%u]", topic_offset, topic_change_no);
-}
-
 int fmt_disk_disconnection_status_from_buf(char *buf, int len, long arg, int datalen) {
 	return scnprintf(buf, len, "%s(%d)", nvmeibc_disk_release_reason_str[(int)arg],
 	(int)arg);
@@ -134,20 +111,6 @@ int fmt_serjio_jentry_state(char *buf, int len, long arg, int datalen) {
 	return scnprintf(buf, len, "%s(%d)", nvmeib_shared_serjio_jentry_state_to_str((int)arg), (int)arg);
 }
 
-int fmt_serjio_jentry_state_mask(char *buf, int len, long arg, int datalen) {
-	int i, count = 0;
-	unsigned int mask = (unsigned int)arg;
-	(void)datalen;
-	for (i = 0; i < MAX_JENTRY_STATE; i++) {
-		if ((1 << i) & mask) {
-			count += scnprintf(buf + count, len - count, "%s|", nvmeib_shared_serjio_jentry_state_to_str(i));
-		}
-	}
-	/* Remove the last '|' */
-	buf[count - 1] = '\0';
-	return count - 1;
-}
-
 int fmt_serjio_jentry_state_chng_reason(char *buf, int len, long arg, int datalen) {
 	(void)datalen;
 	return scnprintf(buf, len, "%s(%d)", nvmeib_shared_serjio_jentry_state_chng_reason_to_str((int)arg), (int)arg);
@@ -166,11 +129,6 @@ int fmt_expect_last_wqe(char *buf, int len, long arg, int datalen) {
 int fmt_find_sock_cep_state(char *buf, int len, long arg, int datalen) {
 	(void)datalen;
 	return scnprintf(buf, len, "%s(%d)", find_path_cep_state_to_str((int)arg), (int)arg);
-}
-
-int fmt_iostats_verb(char *buf, int len, long arg, int datalen) {
-	(void)datalen;
-	return scnprintf(buf, len, "%s(%d)", verb_to_string((int)arg, false), (int)arg);
 }
 
 /*******************************************************************************

@@ -1,9 +1,4 @@
 /*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
-/*
  * nvmeibt_mm_json.c
  *
  * Read management config in JSON, and convert to usable structure.
@@ -2241,14 +2236,12 @@ static int apply_parsed_JSON_tree_to_toma_objects(struct mm_json_elem *root)
 	rv |= parse_generic_tlv_JSON(&(tlv_kafka_mgmt_config_json_tree_root->dict), &JSON_tlv_kafka_mgmt_config);
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(ysn82la, KAFKA_MGMT_CONFIG, follower_committed, nvmeibt_tlv_get_idx(&JSON_tlv_kafka_mgmt_config));
 	kafka_conf = (struct mm_mgmt_conf *)NNVMEIBT_BM_CALLOC(16wkixt,  sizeof(*kafka_conf));
-	if (kafka_mgmt_config_json_tree_root)														// NULL if there are no volumes.
-		JSON_persistence_tree_to_mgmt_conf(kafka_conf, kafka_mgmt_config_json_tree_root, -1);
+	JSON_persistence_tree_to_mgmt_conf(kafka_conf, kafka_mgmt_config_json_tree_root, -1);
 	//
 	rv |= parse_generic_tlv_JSON(&(tlv_full_topo_config_volumes_json_tree_root->dict), &JSON_tlv_full_topo_config_volumes);
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(zoqhy4d, TOPO_CONFIG, follower_committed, nvmeibt_tlv_get_idx(&JSON_tlv_full_topo_config_volumes));
 	topo_conf = (struct mm_mgmt_conf *)NNVMEIBT_BM_CALLOC(osmirb3,  sizeof(*topo_conf));
-	if (full_topo_config_volumes_json_tree_root)												// NULL if there are no volumes.
-		JSON_persistence_tree_to_mgmt_conf(topo_conf, full_topo_config_volumes_json_tree_root, -1);
+	JSON_persistence_tree_to_mgmt_conf(topo_conf, full_topo_config_volumes_json_tree_root, -1);
 	//
 	rv |= parse_generic_tlv_JSON(&(tlv_full_topo_json_tree_root->dict), &JSON_tlv_topo_full);
 	SET_RAFT_COMMIT_LIFECYCLE_VAL(2miyahw, TOPO, follower_committed, nvmeibt_tlv_get_idx(&JSON_tlv_topo_full));
@@ -2258,8 +2251,7 @@ static int apply_parsed_JSON_tree_to_toma_objects(struct mm_json_elem *root)
 	// Apply the conf only after applying raft & raft_members, when we can pretend to be the leader
 	nvmeibt_read_config_apply_vol_mgmt_conf(kafka_conf, CONFIG_TAG_OUTDATED + 2, 1, KAFKA_EVENT_TYPE_VOL_ADD, 0);
 	nvmeibt_read_config_apply_vol_committed_topo_conf(topo_conf, CONFIG_TAG_OUTDATED + 2);
-	if (full_topo_json_tree_root)
-		apply_topo_json_tree_root(&(full_topo_json_tree_root->dict));
+	apply_topo_json_tree_root(&(full_topo_json_tree_root->dict));
 	//	Serialize everything before generating the full persist_and_wire
 	nvmeibt_topology_reset_due_to_convert_to_leader();	// committed-->baseline before serialization
 	//
@@ -2345,7 +2337,6 @@ int nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(char *JSON_file_name
 	}
 out:
 	nvmeibt_mm_json_free_kv_tree(json_tree_root);
-	NNVMEIBT_STR_FREE(__AUTOID__, JSON_buf);
 	NFOUT;
 	return rv;
 }

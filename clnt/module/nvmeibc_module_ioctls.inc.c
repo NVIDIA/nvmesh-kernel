@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "main/nvmeibc_main_ioctls.h"
 #include "module/instance/nvmeibc_cinst_params.h"
 //#include "main/nvmeibc_main_common.h"

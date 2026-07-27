@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #if TOMA_IB_ROCE
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"

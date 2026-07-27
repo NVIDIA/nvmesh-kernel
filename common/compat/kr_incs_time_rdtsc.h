@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef KR_INCS_TIME_RDTSC_H
 #define KR_INCS_TIME_RDTSC_H
 
@@ -22,7 +17,7 @@
 	}
 #elif defined(__KERNEL__)
 	static inline u64 nvmeib_public_rdtsc(void) {		// Emulation as if processor speed is exactly 1[GHz]
-		return ktime_to_ns(ktime_get_raw());	// Wrapper of GPL: ktime_get_raw()
+		return ktime_to_ns(nvmeib_public_ktime_get_raw());	// Wrapper of GPL: ktime_get_raw()
 	}
 	static inline unsigned int nvmeib_public_tsc_khz(void) {
 		return 1000000;	/* We used ktime_get_raw (in ns) */

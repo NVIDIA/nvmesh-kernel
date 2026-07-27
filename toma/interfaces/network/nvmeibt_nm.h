@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #ifndef NVMEIBT_NM_H
 #define NVMEIBT_NM_H
 #include <stdio.h>
@@ -325,7 +320,6 @@ static inline const char *nvmeibt_nm_ple_str(int v)
 	case nvmeibt_nm_ple_failed_send_comp: return "Send completion with error";
 	case nvmeibt_nm_ple_failed_recv_comp: return "Receive completion with error";
 	case nvmeibt_nm_ple_unknown_wr_opcode: return "Unknown WR opcode";
-	case nvmeibt_nm_ple_different_srm_id: return "Different SRM ID";
 	case nvmeibt_nm_ple_other:
 	default : return "Internal error";
 	}
@@ -382,7 +376,6 @@ struct nvmeibt_nm_path {
 	int is_rtr;
 	int is_rts;
 	uint8_t ping_id;
-	uint8_t last_received_ping_request_id;
 	struct nvmeibt_nm_linkable poll_link;
 	int poll_linked;
 	int is_sender;

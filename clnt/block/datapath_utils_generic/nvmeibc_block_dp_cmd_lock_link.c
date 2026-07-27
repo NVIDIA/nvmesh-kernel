@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 // For documentation, see Header in H file
 /*****************************************************************************/
 #include "nvmeibc_block_dp_cmd_lock_link.h"
@@ -34,10 +29,8 @@ int nvmeibc_clmat_allocate(struct operation *o, bool use_kv_alloc, int n_locks, 
 			o->locks = my_kzalloc( alloc_size, GFP_NOFS);
 
 		if (!o->flags.is_clmat_embedded) {
-			nvmesh_memmgr_metric_on_alloc_update(dp_commands_locks_matrix, alloc_size, o->locks);
-			if (!o->locks)
-				return -ENOMEM;
 			o->locks->mem_allocated_size = alloc_size;
+			nvmesh_memmgr_metric_on_alloc_update(dp_commands_locks_matrix, alloc_size, o->locks);
 		}
 
 		if (o->locks) {
@@ -107,7 +100,7 @@ void nvmeibc_clmat_to_string(const struct nvmeibc_block_command *cmds)
 	static const char row_bible[] = "Commands";
 	int i, j, nlocks, bible_index;
 	if (cmds && cmds->o && cmds->o->CLmat && cmds->locksets) {
-		#define MAT_SIZE 30	// Print up to 30x30
+		const int MAT_SIZE = 30;	// Print up to 30x30
 		#define CLMAT_LINE_SIZE (1+2+1+MAT_SIZE*2+2)	// 1:{prefix bible}, 2:{cmd index}, 1:{}, separator, 2:{each cmd has state,seperator}, 2:{'@',0x0}
 		char line[CLMAT_LINE_SIZE], *cur = &line[0];
 		nlocks = cmds->locksets->nlocks;

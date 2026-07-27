@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_RDMA_H
 #define NVMEIB_RDMA_H
 
@@ -67,7 +62,7 @@ struct nvmeib_rdma_listen_ib_params {
 
 /* roce specific parameters */
 struct nvmeib_rdma_listen_roce_params {
-	int port;	/* port -> in NVMesh case the tcp port */
+	int port;	/* port -> in Excelero case the tcp port */
 	bool ipv4_only;
 	bool iw_primary;		/* For iWARP, is this the primary listener */
 	int iw_2nd_base_port;		/* Base port for iWARP secondary listeners */
@@ -244,6 +239,10 @@ struct ib_qp *nvmeib_rdma_create_qp(struct nvmeib_rdma_cm *cm_id,
 	struct ib_pd *pd, struct ib_qp_init_attr *qp_init, int port, u16 pkey,
 	int qp_access);
 
+struct ib_qp *nvmeib_rdma_create_rdda_qp(struct nvmeib_rdma_cm *cm_id,
+	struct ib_pd *pd, struct ib_qp_init_attr *qp_init, int port, u16 pkey,
+	int qp_access);
+
 /**
  *  destroys a QP, will deallocate qp on cm_id in case of roce
  *
@@ -253,6 +252,8 @@ struct ib_qp *nvmeib_rdma_create_qp(struct nvmeib_rdma_cm *cm_id,
  * @param qp - qp, required only in infiniband case
  */
 void nvmeib_rdma_destroy_qp(struct nvmeib_rdma_cm *cm_id, struct ib_qp *qp);
+
+void nvmeib_rdma_destroy_rdda_qp(struct nvmeib_rdma_cm *cm_id, struct ib_qp *qp);
 
 struct rdma_conn_param;
 int nvmeib_rdma_accept(struct nvmeib_rdma_cm *cm_id, struct ib_qp *qp,

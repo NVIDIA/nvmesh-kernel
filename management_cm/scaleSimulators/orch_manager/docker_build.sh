@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
-
-
 cd ../../
 
 # using the -f flag allows us to include files from a directory out of the 'context'

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_MANAGEMENT_VOLUME_CONF_CHECK_H_
 #define NVMEIBC_MANAGEMENT_VOLUME_CONF_CHECK_H_
 

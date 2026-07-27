@@ -1,17 +1,12 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #ifndef U_DC_H_INCLUDED
 #define U_DC_H_INCLUDED
 
 #define WAIT_FOR_SOMETHING (5 * HZ)
 #define N_COMP_ENTRIES 256
 #define DC_KEY 0xdeadbeef
-#define NVMEIB_SERVICE_ID 6988676976697999ULL
-#define NVMEIB_SERVICE_ID_MASK (~RDMA_IB_IP_PS_MASK)
-#define NVMEIB_PKEY 0xffff
+#define NVMEIB_EXCELERO_SERVICE_ID 6988676976697999ULL
+#define NVMEIB_EXCELERO_SERVICE_ID_MASK (~RDMA_IB_IP_PS_MASK)
+#define NVMEIB_EXCELERO_PKEY 0xffff
 
 struct u_iu {
 	int index;

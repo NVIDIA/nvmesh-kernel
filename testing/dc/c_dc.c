@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "kr_version.h"
 #include "ib_incs.h"
@@ -410,9 +405,9 @@ static ssize_t store_ib_address(struct dc_info *p, char *page, size_t count)
 		goto out;
 	}
 	q->sib_family = AF_IB;
-	q->sib_sid = cpu_to_be64(NVMEIB_SERVICE_ID);
-	q->sib_sid_mask = cpu_to_be64(NVMEIB_SERVICE_ID_MASK);
-	q->sib_pkey = cpu_to_be16(NVMEIB_PKEY);
+	q->sib_sid = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID);
+	q->sib_sid_mask = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID_MASK);
+	q->sib_pkey = cpu_to_be16(NVMEIB_EXCELERO_PKEY);
 	trace("server input gid %s\n", srv);
 	q = (struct sockaddr_ib *)&p->s_sin;
 	if (in6_pton(srv, -1, q->sib_addr.sib_raw, -1, NULL))
@@ -423,10 +418,10 @@ static ssize_t store_ib_address(struct dc_info *p, char *page, size_t count)
 	}
 	q->sib_family = AF_IB;
 	q->sib_sid = cpu_to_be64(
-		((NVMEIB_SERVICE_ID & NVMEIB_SERVICE_ID_MASK) |
+		((NVMEIB_EXCELERO_SERVICE_ID & NVMEIB_EXCELERO_SERVICE_ID_MASK) |
 		 RDMA_IB_IP_PS_IB));
-	q->sib_sid_mask = cpu_to_be64(NVMEIB_SERVICE_ID_MASK);
-	q->sib_pkey = cpu_to_be16(NVMEIB_PKEY);
+	q->sib_sid_mask = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID_MASK);
+	q->sib_pkey = cpu_to_be16(NVMEIB_EXCELERO_PKEY);
 
 	trace("client GID %pI6 server GID is %pI6\n",
 		((struct sockaddr_ib *)&info->c_sin)->sib_addr.sib_raw,

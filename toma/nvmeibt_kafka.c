@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_debug.h"
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -10,8 +5,12 @@
 #include <signal.h>
 #include <stdarg.h>
 #include <pthread.h>
-#include "nvmeibt_kafka.h"
+#include "../common/nvmeib_shared.h"
+#include "nvmeibt_common.h"
+#include "nvmeibt_params.h"
+#include "nvmeibt_uuid.h"
 #include "nvmeibt_block_device.h"
+#include "nvmeibt_kafka.h"
 #include "nvmeibt_toma.h"
 #include "nvmeibt_raft.h"
 #include "nvmeibt_mm_json.h"
@@ -20,25 +19,9 @@
 /*
  * The protocol with MGMT is described in:
  * https://nvidia-my.sharepoint.com/:w:/r/personal/tleibo_nvidia_com/_layouts/15/doc2.aspx?sourcedoc=%7B42ddc038-38b6-493c-a722-cd3c63c48d06%7D&action=edit&wdPid=79c0c0e&cid=59845700-e917-4431-a94a-eab1034bff32
- * There are several variables that hold the kafka_offset :
- *  k_incremental_updates_consumer_offset	// Only the leader actually uses it
- *  										// A target-node that was just added (has no persistence) also reads it, and can become a raft candidate only if it is the first added target
- *  										// When kafka reads a new record it sends it to the toma leader using a TOMA_WAKEUP_TYPE_KAFKA
- *
- *  leader_kafka_offset_mgmt;					// Updated upon TOMA_WAKEUP_TYPE_KAFKA, when updating the mgmt_config
- *	leader_kafka_offset_calculating;			// The offset_mgmt used in calculate, will become offset_to_commit upon successful calculate
- *	leader_kafka_offset_to_commit;				// Updated after calc (that updated from mgmt config)
- *	leader_kafka_offset_committed_by_majority;	// Updated when offset has a majority
- *	follower_kafka_offset_submitted;			// To persistence
- *	follower_kafka_offset_committed;			// On persistence
- *  follower_kafka_offset_applied;				// When told to apply
- *
- * 	leader_kafka_offset_blocking_incremental_TARGET_updates	// Can continue when == (KAFKA_OFFSET, leader_committed_by_majority)
  */
 
 /*******************    offset service functions         **********************/
-#define getnstimeofday_boot getnstimeofday
-#define KAFKA_TOPIC_CHANGE_NO 1		// Between 3.2 and 3.3 we changed the kafka topics naming convention (change_no went 0-->1)
 int64_t purify_offset(int64_t offset_with_topic_change_no) {
 	union offset_with_topic_change_no u = { .all = offset_with_topic_change_no };
 	u.a[7] = u.a[6] = u.a[5];	// Sign extend since the Kafka special values are -1, -2000, etc.
@@ -69,7 +52,9 @@ static bool is_RD_KAFKA_OFFSET_VALID(int64_t offset) {
 }
 
 /******************************************************************************/
-static char *kafka_event_type_str(enum KAFKA_EVENT_TYPE event_type) {
+
+char *kafka_event_type_str(enum KAFKA_EVENT_TYPE event_type)
+{
 	switch (event_type) {
 	case KAFKA_EVENT_TYPE_UNKNOWN: return "KAFKA_EVENT_TYPE_UNKNOWN";
 	case KAFKA_EVENT_TYPE_VOL_ADD: return "KAFKA_EVENT_TYPE_VOL_ADD";
@@ -135,11 +120,9 @@ static void __intercept_toma_certificate_copy_file_and_save_content(struct __t_c
 			continue;
 		{	// Step 1: Copy file aaaa.crt -> /var dir aaaa.crt_dont_touch for atomicity
 			char sys_cmd[1024];
-			const char *in_file_name = basename(in_path);
 			int cmd_len;
-			const __mode_t file_permissions = (in_file_name && strstr(in_file_name, "key")) ? 0440 : 0444;	// Read-Only default permissions. For certificate less restrictive than for key
 			s->file_path[i] = NNVMEIBT_STR_ALLOC(titccfasc6);
-			nvmeibt_Str_sprintf(s->file_path[i], "%s/%s_dont_touch", s->dir, in_file_name);
+			nvmeibt_Str_sprintf(s->file_path[i], "%s/%s_dont_touch", s->dir, basename(in_path));
 			out_path = s->file_path[i]->text_buf;
 			unlink(out_path);									// Remove possible file from a previous run.
 			cmd_len = snprintf(sys_cmd, sizeof(sys_cmd), "cp %s %s", in_path, out_path);
@@ -149,9 +132,7 @@ static void __intercept_toma_certificate_copy_file_and_save_content(struct __t_c
 			if (system(sys_cmd) != 0) {							// Copy failed, cannot continue
 				rv = -__LINE__; goto _err;
 			}
-			if (chmod(out_path, file_permissions) != 0) {		// Copy successful, Set as read only to prevent messing with file
-				rv = -__LINE__; goto _err;
-			}
+			chmod(out_path, 0444);								// Copy successful, Set as read only to prevent messing with file
 			*orig_path_ptr[i] = out_path;						// Inject new path back into input variables
 		}
 		{	// Step 2: Now load the certificate file into a buffer, to be able to print it
@@ -195,6 +176,7 @@ static void __t_certificate_storage_print(const struct __t_certificate_storage *
 }
 
 /*************************           Globals          *************************/
+
 extern int64_t nvmeibt_follower_keep_alive_secs;
 extern int64_t nvmeibt_leader_keep_alive_secs;
 
@@ -224,7 +206,7 @@ static volatile int64_t			requested_incremental_VOL_updates_consumer_offset = RD
 static volatile int64_t			requested_incremental_TARGET_updates_consumer_offset = RD_KAFKA_OFFSET_INVALID;   // For a new node, start reading from whatever was committed
 static volatile int64_t			requested_incremental_TARGET_updates_consumer_seq_no = -1;   // For a new node, start reading from whatever was committed
 static volatile bool			kafka_requested_is_kafka_shutdown = 0;
-static volatile bool			kafka_is_done_shutdown = 0;			// Set from kafka thread, read from other threads
+static volatile bool			kafka_is_done_shutdown = 0;
 static atomic_t					kafka_n_sends_in_the_air;			// inc/dec from kafka thread, print from stats/main thread
 //
 static unsigned long long		kafka_requested_consuming_leader_VOL_msgs_raft_term = 0;
@@ -234,11 +216,12 @@ static unsigned long long		kafka_applied_consuming_leader_TARGET_msgs_raft_term 
 static pthread_mutex_t 			kafka_toma_requested_term_and_offset_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 #define IS_AWAITING_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(name)	({																								\
-	const int64_t		incremental_TARGET_updates_offset = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_committed_by_majority);															\
-	const bool is = (kafka_leader_offset_blocking_incremental_TARGET_updates > incremental_TARGET_updates_offset);																				\
+	bool		is;																																									\
+	int64_t		incremental_TARGET_updates_offset = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_committed_by_majority);															\
+	is = (purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates) > purify_offset(incremental_TARGET_updates_offset));												\
 	if (is) {																																										\
-		N_Tf(name, "Awaiting offset_blocking_incremental_TARGET_updates=@KAFKA_OFST>@KAFKA_OFST",																									\
-			 kafka_leader_offset_blocking_incremental_TARGET_updates, incremental_TARGET_updates_offset);												\
+		N_Tf(name, "Awaiting offset_blocking_incremental_TARGET_updates=@LD>@LD",																									\
+			 purify_offset(kafka_leader_offset_blocking_incremental_TARGET_updates), purify_offset(incremental_TARGET_updates_offset));												\
 	}																																												\
 	(is);																																											\
 })
@@ -262,8 +245,9 @@ int64_t nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt(void)
 {
 	return kafka_follower_keepalive_token_provided_by_mgmt;
 }
-static void kafka_set_follower_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval) {
-	N_Tf(kdiw5ma, "token=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX",
+static void kafka_set_follower_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval)
+{
+	N_Tf(kdiw5ma, "follower_keepalive_token=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX",
 		 kafka_follower_keepalive_token_provided_by_mgmt, new_token,
 		 nvmeibt_follower_keep_alive_secs, keepaliveInterval);
 	if ((new_token > kafka_follower_keepalive_token_provided_by_mgmt) ||
@@ -274,12 +258,13 @@ static void kafka_set_follower_keepalive_token_provided_by_mgmt(int64_t new_toke
 	}
 }
 
-int64_t nvmeibt_kafka_get_leader_keepalive_token_provided_by_mgmt(void) {	// Called from multiple threads
+int64_t nvmeibt_kafka_get_leader_keepalive_token_provided_by_mgmt(void)
+{
 	return kafka_leader_keepalive_token_provided_by_mgmt;
 }
-
-static void kafka_set_leader_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval) {
-	N_Tf(4vs8skl, "token=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX",
+static void kafka_set_leader_keepalive_token_provided_by_mgmt(int64_t new_token, int64_t keepaliveInterval)
+{
+	N_Tf(4vs8skl, "kafka_leader_keepalive_token_provided_by_mgmt=@INT64_TX-->@INT64_TX keepaliveInterval=@INT64_TX-->@INT64_TX ",
 		 kafka_leader_keepalive_token_provided_by_mgmt, new_token, nvmeibt_leader_keep_alive_secs, keepaliveInterval);
 	kafka_leader_keepalive_token_provided_by_mgmt = max(kafka_leader_keepalive_token_provided_by_mgmt, new_token);
 	nvmeibt_leader_keep_alive_secs = keepaliveInterval;
@@ -311,12 +296,12 @@ static int	k_heartbeat_interval_ms = (3 * 1000);			// heartbeat.interval.ms (def
 	{"socket.timeout.ms",			"600"},				\
 	{"enable.auto.commit",			"false"},			/* enable.auto.commit (default true), Kafka commits consumer's offset in the background. We disable it and use explicit commit when we done asyncronously processing the message*/ \
 	{"auto.offset.reset",			"earliest"},		/* Start on the msg following the last committed one. Can use "latest".  none: throw exception to the consumer if no previous offset is found for the consumer's group*/ \
-	{"bootstrap.servers",			""},				/* Overridden by the value of KAFKA_SERVERS from nvmesh.conf*/ \
-	{"group.id",					""},				/* Overriden with machine name. We need that to track offset separately for each Toma/group*/ \
+	{"bootstrap.servers",			""},				/* Overidden by the value of KAFKA_SERVERS from nvmesh.conf*/ \
+	{"group.id",					""},				/* Overriden with machine name*/ \
 	{"security.protocol",			"ssl"}, 			\
 	{"enable.ssl.certificate.verification", "true"}, 	\
-	{"ssl.ca.location",				""},				/* Overridden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
-	{"ssl.certificate.location",	""},				/* Overridden by the value of KAFKA_CA from nvmesh.conf. Client's certificate */\
+	{"ssl.ca.location",				""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
+	{"ssl.certificate.location",	""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. Client's certificate */\
 	{"ssl.key.location", 			""},				/* Client's key */\
 	{"ssl.key.password",			""},				/* Key password, if any. */\
 	{"ssl.endpoint.identification.algorithm", "none"}
@@ -324,12 +309,12 @@ static int	k_heartbeat_interval_ms = (3 * 1000);			// heartbeat.interval.ms (def
 
 #define K_DEFAULT_PRODUCER_CONFIG \
 	{"socket.timeout.ms",			"600"},				\
-	{"bootstrap.servers",			""},				/* Overridden by the value of KAFKA_SERVERS from nvmesh.conf*/\
+	{"bootstrap.servers",			""},				/* Overidden by the value of KAFKA_SERVERS from nvmesh.conf*/\
 	{"client.id",					"report_to_mgmt_producer"}, \
 	{"security.protocol",			"ssl"},				\
 	{"enable.ssl.certificate.verification", "true"},	\
-	{"ssl.ca.location",				""},				/* Overridden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
-	{"ssl.certificate.location",	""},				/* Overridden by the value of KAFKA_CA from nvmesh.conf. Client's certificate */\
+	{"ssl.ca.location",				""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. CA certificate file for verifying the broker's certificate.*/\
+	{"ssl.certificate.location",	""},				/* Overidden by the value of KAFKA_CA from nvmesh.conf. Client's certificate */\
 	{"ssl.key.location", 			""},				/* Client's key */\
 	{"ssl.key.password",			""},				/* Key password, if any. */\
 	{"ssl.endpoint.identification.algorithm", "none"}
@@ -396,17 +381,12 @@ static int generate_topic_name_using_zone(char *dst, size_t dst_size, const char
 	return (len < dst_size);
 }
 
-static bool is_waiting_for_reinit(void)
-{
-	return ((kafka_applied_init_counter < kafka_requested_init_counter) || (kafka_applied_init_preserve_state_vars_counter < kafka_requested_init_preserve_state_vars_counter));
-}
-
 static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t err) {
 	struct timespec						now;
 	if (err == RD_KAFKA_RESP_ERR_NO_ERROR)
 		return;
+	N_Wf(j911i0a, "kafka err='@STR'", rd_kafka_err2str(err));
 	switch (err) {
-	case RD_KAFKA_RESP_ERR__FATAL:
 	case RD_KAFKA_RESP_ERR__SSL:
 	case RD_KAFKA_RESP_ERR__AUTHENTICATION:
 	case RD_KAFKA_RESP_ERR_TOPIC_AUTHORIZATION_FAILED:
@@ -417,37 +397,15 @@ static void check_if_kafka_init_preserve_state_vars_required(rd_kafka_resp_err_t
 	case RD_KAFKA_RESP_ERR_TRANSACTIONAL_ID_AUTHORIZATION_FAILED:
 	case RD_KAFKA_RESP_ERR_SASL_AUTHENTICATION_FAILED:
 	case RD_KAFKA_RESP_ERR_DELEGATION_TOKEN_AUTHORIZATION_FAILED:
-		break;			// Fatal or security error. Restart kafka.
-	case RD_KAFKA_RESP_ERR__TRANSPORT:
-	case RD_KAFKA_RESP_ERR_BROKER_NOT_AVAILABLE:
-	case RD_KAFKA_RESP_ERR_NOT_COORDINATOR:
-	case RD_KAFKA_RESP_ERR_COORDINATOR_NOT_AVAILABLE:
-	case RD_KAFKA_RESP_ERR__ALL_BROKERS_DOWN:
-	case RD_KAFKA_RESP_ERR__TIMED_OUT:
-	case RD_KAFKA_RESP_ERR__PARTITION_EOF:		// No more messages in consumer partition
-	case RD_KAFKA_RESP_ERR__WAIT_COORD:
-	case RD_KAFKA_RESP_ERR__WAIT_CACHE:
-	case RD_KAFKA_RESP_ERR__DESTROY:
-		N_Tf(__AUTOID__, "kafka err[@INT]='@STR'", err, rd_kafka_err2str(err));
-		return;		// Definitely ignore transient network errors.
+		break;
 	default:
 		// return;	Should we ignore errors that do not look like security related
 		break;
 	}
-	N_Wf(__AUTOID__, "kafka err[@INT]='@STR'", err, rd_kafka_err2str(err));
-	getnstimeofday_boot(&now);
-	if ((timespec_diff_ns(now, kafka_last_restart_timestamp) > SEC_TO_NSEC(30)) && !is_waiting_for_reinit()) {
+	getnstimeofday(&now);
+	if (timespec_diff_ns(now, kafka_last_restart_timestamp) > SEC_TO_NSEC(30)) {
 		N_IMf(hu8a475, "Marking kafka soft init required");
 		kafka_requested_init_preserve_state_vars_counter++;
-	}
-}
-
-static void __print_partitions_list(const rd_kafka_topic_partition_list_t *pl)
-{
-	int i, n_part = (pl ? pl->cnt : 0);
-	for (i = 0; i < n_part; ++i) {
-		const rd_kafka_topic_partition_t *p = &pl->elems[i];
-		N_Tf(cvbz84k21, "@INT) topic=@STR part[@INT].offset=@LD, err=@INT", i, p->topic, p->partition, p->offset, p->err);
 	}
 }
 
@@ -455,32 +413,12 @@ static void error_event_cb(rd_kafka_t *rk, int err, const char *reason, __attrib
 	if (err == RD_KAFKA_RESP_ERR__FATAL) {
 		char errstr[512];
 		err = rd_kafka_fatal_error(rk, errstr, sizeof(errstr));
-		N_Ef(u8u8nu1, "@STR: err[@INT]=@STR errstr=@STR reason=@STR", rd_kafka_name(rk), err, rd_kafka_err2str(err), errstr, reason);
+		N_Ef(u8u8nu1, "@STR:, err=@STR errstr=@STR reason=@STR", rd_kafka_name(rk), rd_kafka_err2str(err), errstr, reason);
 	} else {
-		N_Wf(u8u8nh4, "@STR: err[@INT]=@STR not_fatal reason=@STR",   rd_kafka_name(rk), err, rd_kafka_err2str(err),         reason);
+		N_Wf(u8u8nh4, "@STR: err=@STR not_fatal reason=@STR",    rd_kafka_name(rk), rd_kafka_err2str(err),         reason);
 	}
 	// Anyhow, something failed, and we do not need to wait for its completion, Can we commit it? Good question. We do not
 	check_if_kafka_init_preserve_state_vars_required(err);
-}
-
-// Rebalancing callback is not needed according to current design as in consumer topic has 1 partition only, and consumer group there contains only 1 Toma
-static void consumer_cb_on_rebalance(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, __attribute__((__unused__)) void *opaque) {
-	N_Tf(u8u8nh6, "@STR: err[@INT]=@STR n_part=@INT", rd_kafka_name(rk), (int)err, rd_kafka_err2str(err), (pl ? pl->cnt : 0));
-	switch (err) {
-	case RD_KAFKA_RESP_ERR__ASSIGN_PARTITIONS:
-		// rd_kafka_assign(rk, pl); // We use manual assignment so no need to do that. The callback just notifies us that a rebalance occurred
-		break;
-	case RD_KAFKA_RESP_ERR__REVOKE_PARTITIONS:
-		if (0) check_if_kafka_init_preserve_state_vars_required(err);	// Our partitions were revoked (due to rebalance, timeout, etc). Since we use manual assignment, we need to trigger reinit to properly re-assign
-		break;
-	default:
-		break;
-	}
-}
-
-void consumer_cb_on_offset_commit(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, __attribute__((__unused__)) void *opaque) {
-	N_Tf(u8u8nh7, "@STR: err[@INT]=@STR n_part=@INT", rd_kafka_name(rk), (int)err, rd_kafka_err2str(err), (pl ? pl->cnt : 0));
-	__print_partitions_list(pl);
 }
 
 static rd_kafka_conf_t *alloc_and_init_kafka_conf(const struct key_val_strs *kv_array, size_t n_kv, const char *group_id_str,
@@ -549,9 +487,6 @@ static rd_kafka_conf_t *alloc_and_init_kafka_conf(const struct key_val_strs *kv_
 	if (dr_msg_cb) {	// Install a delivery-error callback for producers only.
 		rd_kafka_conf_set_dr_msg_cb(conf, dr_msg_cb);
 		N_Tf(vfhjiek, "CB=@PTR", dr_msg_cb);
-	} else {			// For consumers, install rebalance callback
-		rd_kafka_conf_set_rebalance_cb(    conf, consumer_cb_on_rebalance);
-		rd_kafka_conf_set_offset_commit_cb(conf, consumer_cb_on_offset_commit);
 	}
 	rd_kafka_conf_set(conf, "debug", "security,broker,protocol", errstr, sizeof(errstr));	// Write to stderr (or stdout). Anyway, it is lost.
 	rd_kafka_conf_set_error_cb(conf, error_event_cb);
@@ -566,6 +501,11 @@ out:
 	return conf;
 }
 
+static bool is_waiting_for_reinit(void)
+{
+	return ((kafka_applied_init_counter < kafka_requested_init_counter) || (kafka_applied_init_preserve_state_vars_counter < kafka_requested_init_preserve_state_vars_counter));
+}
+
 /******************************************************************************/
 /************                   PRODUCERS                       ***************/
 /******************************************************************************/
@@ -573,6 +513,7 @@ static rd_kafka_t* __create_kafka_new_obj(enum rd_kafka_type_t who, rd_kafka_con
 	char errstr[512];
 	rd_kafka_t *rv = NULL;
 	const bool is_producer = (who == RD_KAFKA_PRODUCER);
+	rd_kafka_topic_conf_t* topic_conf = rd_kafka_topic_conf_new();
 	if (is_producer)
 		*topic_pptr = NULL;									// Topic was not created yet
 	if (*cfg == NULL)
@@ -584,7 +525,7 @@ static rd_kafka_t* __create_kafka_new_obj(enum rd_kafka_type_t who, rd_kafka_con
 	}
 	*cfg = NULL;	// Configuration object is now owned, and freed, by the 'rv' instance.
 	// rd_kafka_conf_set_log_cb(rv, logger);
-	rd_kafka_set_log_level(rv, LOG_NOTICE);
+	rd_kafka_set_log_level(rv, LOG_DEBUG);
 	N_Tf(tkckno1, "@STR[@STR]=@PTR, topic=@STR", (is_producer ? "prod" : "cons"), rd_kafka_name(rv), rv, topic_name);
 
 	if (!is_producer) {	// For consumers, attach polling method (high-level consumer API)
@@ -595,20 +536,22 @@ static rd_kafka_t* __create_kafka_new_obj(enum rd_kafka_type_t who, rd_kafka_con
 			rv = NULL;
 		} else {}	// High-level consumers don't need rd_kafka_topic_t handles, Topic assignment is done via rd_kafka_assign() or rd_kafka_subscribe()
 	} else {		// Attach a topic (for producers only)
-		// rd_kafka_topic_conf_t* topic_conf = rd_kafka_topic_conf_new();
-		*topic_pptr = rd_kafka_topic_new(rv, topic_name, NULL /*topic_conf*/);
+		*topic_pptr = rd_kafka_topic_new(rv, topic_name, topic_conf);		// Maybe use rd_kafka_topic_conf_set() ?
 		if (!*topic_pptr) {
 			N_Ef(tkckno3, "Failed kafka_topic_new: @STR, destroying kafka obj", topic_name);
 			rd_kafka_destroy(rv);
 			rv = NULL;
-			// rd_kafka_topic_conf_destroy(topic_conf);
-		} else { /* topic destroys its conf as per rdkafka.h */ }
+		} else {
+			topic_conf = NULL;	// topic destroys conf as per rdkafka.h
+		}
 	}
 _out:
 	if (*cfg) {
 		rd_kafka_conf_destroy(*cfg);
 		*cfg = NULL;
 	}
+	if (topic_conf)
+		rd_kafka_topic_conf_destroy(topic_conf);
 	return rv;
 }
 
@@ -652,12 +595,12 @@ static void all_producers_msg_to_mgmt_delivery_cb(rd_kafka_t *k, const rd_kafka_
 static struct t_producer_impl {
 	rd_kafka_t       *msg_to_mgmt_producer;
 	rd_kafka_topic_t *msg_to_mgmt_producer_topic;
-} k_high_priority, k_low_priority, k_keepalive;
+} k_high_priority, k_low_priority;
 
 static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_msg *msg) {
 	rd_kafka_topic_t *k_topic = k->msg_to_mgmt_producer_topic;
-	const char 			*key = (msg->unique_key[0] == '\0') ? NULL : (char*)msg->unique_key;
-	const size_t		key_len = key ? (strnlen(key, sizeof(msg->unique_key)) + 1) : 0;
+	const void 			*key = (void*)msg->unique_key;
+	const size_t		key_len = strlen(msg->unique_key) + 1;
 	char 				*val = msg->val;
 	size_t				val_len = msg->val_len;
 	int	n_in_air, err;
@@ -671,7 +614,7 @@ static int producer_send_msg(struct t_producer_impl *k, struct kafka_outgoing_ms
 	n_in_air = atomic_add(1, &kafka_n_sends_in_the_air);       // If a msg is about to be sent, we know the n_sends_in_the_air was already increased
 	err = rd_kafka_produce(k_topic, RD_KAFKA_PARTITION_UA, RD_KAFKA_MSG_F_COPY, (void*)val, val_len, key, key_len, (void*)msg);
 	if (err == 0) {
-		N_Tf(b5v9skq, "@STR: produced key=@STR msgptr=@PTR, in_air_km=@INT", rd_kafka_topic_name(k_topic), key, msg, n_in_air);
+		N_Tf(b5v9skq, "@STR: produced key=@STR msgptr=@PTR, in_air_km=@INT", rd_kafka_topic_name(k_topic), (const char *)key, msg, n_in_air);
 		NVMEIBT_LONG_TRACE_WRAPPER(tvsh875, "", val, val_len);
 		return 0;
 	}
@@ -701,12 +644,6 @@ static void producer_close(struct t_producer_impl *k) {
 	}
 }
 
-static void producer_purge_inflight(struct t_producer_impl *k)
-{
-	if (k->msg_to_mgmt_producer)
-		rd_kafka_purge(k->msg_to_mgmt_producer, RD_KAFKA_PURGE_F_QUEUE | RD_KAFKA_PURGE_F_INFLIGHT);
-}
-
 static int high_priority_msg_to_mgmt_producer_init(void) {
 	const struct key_val_strs kv[] = { K_DEFAULT_PRODUCER_CONFIG };
 	char str[128];
@@ -723,11 +660,6 @@ static int low_priority_msg_to_mgmt_producer_init(void) {
 	}
 	generate_topic_name_using_zone(str, sizeof(str), ".management.low.1.0.0", 1);
 	return producer_init(&k_low_priority, str, kv, ARRAY_SIZE(kv));
-}
-
-static int keepalive_msg_to_mgmt_producer_init(void) {
-	const struct key_val_strs kv[] = { K_DEFAULT_PRODUCER_CONFIG };
-	return producer_init(&k_keepalive, "default.management.keepalive.1.0.0", kv, ARRAY_SIZE(kv));
 }
 
 /******************************************************************************/
@@ -761,10 +693,7 @@ void nvmeibt_kafka_outgoing_msgs_queue_add(const char *unique_key, const char *v
 	NFIN;
 	msg = NNVMEIBT_BM_CALLOC(tcdvask, sizeof(*msg));
 	msg->val = NNVMEIBT_BM_ALLOC(4rbs8734, val_len);
-	if (unique_key)
-		nvmeibt_strlcpy(msg->unique_key, unique_key, sizeof(msg->unique_key));
-	else
-		msg->unique_key[0] = '\0';
+	nvmeibt_strlcpy(msg->unique_key, unique_key, sizeof(msg->unique_key));
 	memcpy(msg->val, val, val_len);
 	msg->val_len = val_len;
 	msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_NOT_SENT;
@@ -843,11 +772,8 @@ static void kafka_outgoing_msgs_queue_send_pending_msgs_to_kafka_producer(void) 
 		const enum KAFKA_OUTGOING_MSG_STATE m_state = msg->kafka_outgoing_msg_state;
 		if ((m_state == KAFKA_OUTGOING_MSG_STATE_NOT_SENT) || (m_state == KAFKA_OUTGOING_MSG_STATE_REJECTED_BY_KAFKA)) {
 			msg->kafka_outgoing_msg_state = KAFKA_OUTGOING_MSG_STATE_SENT_TO_KAFKA;
-			if (msg->out_priority == NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH) {
+			if (    msg->out_priority == NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH) {
 				if (producer_send_msg(&k_high_priority, msg) != 0)
-					break;
-			} else if (msg->out_priority == NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE) {
-				if (producer_send_msg(&k_keepalive, msg) != 0)
 					break;
 			} else {
 				if (msg->out_priority != NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW)
@@ -879,7 +805,7 @@ int nvmeibt_kafka_generic_log_msg_to_mgmt_send(const char *unique_key, char *hea
 		sprintf(key, "unique_key:%x", ++unique_key_counter);
 	}
 	nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT "\"header\": \"%s\", \"errText\": \"%s\"}", KAFKA_PRODUCER_MSG_HEADER_VAR("genericLogMsg", 1), header, str);
-	nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*key*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, priority);
+	nvmeibt_kafka_outgoing_msgs_queue_add(key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, priority);
 	NFOUT;
 #else	// #if 0	// If we decide to send a genericLogMsg to MGMT
 	(void)unique_key; (void)priority;
@@ -891,40 +817,35 @@ int nvmeibt_kafka_generic_log_msg_to_mgmt_send(const char *unique_key, char *hea
 /******************************************************************************/
 /************                   CONSUMERS                       ***************/
 /******************************************************************************/
-#define CONSUMER_DEFAULT_INIT(c_type) {{0}, NULL, 0 /*zero partition*/, 0, RD_KAFKA_OFFSET_INVALID, RD_KAFKA_OFFSET_INVALID, c_type}
+#define CONSUMER_DEFAULT_INIT {{0}, NULL, 0, RD_KAFKA_OFFSET_INVALID, RD_KAFKA_OFFSET_INVALID}
 static struct t_consumer_impl {
 	char topic_name[128];					// Topic name for high-level consumer API
 	rd_kafka_t *consumer;
 	int32_t consumer_partition;
-	int32_t	cnt_zero_consecutive_consumes;
 	int64_t consumer_offset;				// Latest received message
 	int64_t	offset_committed;				// ACK'ed to kafka
-	char type;								// 1[byte] logging to which identifies consumer, instead of long name and topic_name
-} k_CMD = CONSUMER_DEFAULT_INIT('C'), k_HW_full_config = CONSUMER_DEFAULT_INIT('H'),		// Each Toma consumes such queue
-  k_incremental_VOL_updates = CONSUMER_DEFAULT_INIT('V'), k_incremental_TARGET_updates = CONSUMER_DEFAULT_INIT('R');	// Only leader consumes from here
+} k_CMD = CONSUMER_DEFAULT_INIT, k_HW_full_config = CONSUMER_DEFAULT_INIT,		// Each Toma consumes such queue
+  k_incremental_VOL_updates = CONSUMER_DEFAULT_INIT, k_incremental_TARGET_updates = CONSUMER_DEFAULT_INIT;	// Only leader consumes from here
 
-#define KC_TYPE     "KCONSUMER@CHAR_K"			// Short efficient print to logs
-#define KC_FULL_FMT KC_TYPE "(@STR|@STR)"		// Full info
-#define KC_FULL_VAL(K) (K)->type, rd_kafka_name((K)->consumer), (K)->topic_name
 static void __consumer_stop_on_raft(struct t_consumer_impl *k) {
 	if (k->consumer) {
 		rd_kafka_assign(k->consumer, NULL);	// Stop consuming by unassigning all partitions
-		N_Tf(yzbh7dk, KC_TYPE " Stopping msgs consumer->@KAFKA_OFST", k->type, k->consumer_offset);
+		N_Tf(yzbh7dk, "@STR: raft is stopping to receive incremental updates, consumer_offset=@LD", rd_kafka_name(k->consumer), purify_offset(k->consumer_offset));
 	}
 }
 
 static void consumer_close(struct t_consumer_impl *k) {
 	rd_kafka_resp_err_t			k_err;
 	if (k->consumer) {
-		N_Tf(vbsjdy3, KC_FULL_FMT, KC_FULL_VAL(k));
+		N_Tf(vbsjdy3, "@STR @STR", rd_kafka_name(k->consumer), k->topic_name);
 		rd_kafka_assign(k->consumer, NULL);		// Unassign all partitions (stops consumption)
 		N_Tf(vbsjdy30, "rd_kafka_assign(NULL) ended");
 		k_err = rd_kafka_consumer_close(k->consumer);
 		N_Tf(vbsjdy34, "close ended");
 		if (k_err)
-			N_Ef(vbsjdy33, KC_FULL_FMT " close err=@STR", KC_FULL_VAL(k), rd_kafka_err2str(k_err));
+			N_Ef(vbsjdy33, "close err (consumer='@STR' err=@STR", rd_kafka_name(k->consumer), rd_kafka_err2str(k_err));
 		rd_kafka_destroy(k->consumer);
-		N_Tf(vbsjdy35, "destroy ended");
+		N_Tf(vbsjdy35, "close ended");
 		k->consumer = NULL;
 	}
 }
@@ -935,11 +856,6 @@ static rd_kafka_resp_err_t __consumer_assign_partition_and_offset(struct t_consu
 	rd_kafka_topic_partition_list_add(pl, k->topic_name, k->consumer_partition)->offset = purify_offset(start_offset);
 	k_err = rd_kafka_assign(k->consumer, pl);
 	rd_kafka_topic_partition_list_destroy(pl);
-	if (k_err == RD_KAFKA_RESP_ERR_NO_ERROR) {
-		N_Tf(evweyha, KC_FULL_FMT " rd_kafka_assign(@KAFKA_OFST), consumer->@KAFKA_OFST", KC_FULL_VAL(k), start_offset, k->consumer_offset);
-		if (start_offset > 0)
-			k->consumer_offset = start_offset - 1;	// As If previous message was read
-	}
 	return k_err;
 }
 
@@ -950,10 +866,10 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 	rd_kafka_resp_err_t k_err;
 	if (already_have_starting_point)
 		calc_offset = (k->consumer_offset + 1);			// Non purified
-	N_Tf(90elhjt2, "@STR: initial_@KAFKA_OFST", name, calc_offset);
+	N_Tf(90elhjt2, "@STR: initial_offset=@LD", name, purify_offset(calc_offset));
 	k_err = __consumer_assign_partition_and_offset(k, calc_offset);	// Assign partition - rdkafka will resolve RD_KAFKA_OFFSET_STORED to actual committed offset
 	if (k_err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-		N_Wf(cvniev8, "@STR Failed assign partition_@KAFKA_OFST err='@STR'", name, calc_offset, rd_kafka_err2str(k_err));
+		N_Wf(cvniev8, "@STR Failed assign partition, offset=@LD err='@STR'", name, purify_offset(calc_offset), rd_kafka_err2str(k_err));
 		return -1;
 	}
 
@@ -968,7 +884,7 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 		if ((k_err == RD_KAFKA_RESP_ERR_NO_ERROR) && (pl->elems[0].offset >= 0L)) {	// May return RD_KAFKA_OFFSET_INVALID if queue just created and was never read from
 			calc_offset = pl->elems[0].offset;
 			if ((k_err_watermark == RD_KAFKA_RESP_ERR_NO_ERROR) && ((calc_offset < low_wm) || (calc_offset > high_wm)))
-				N_Wf(minwusk, "@STR Kafka error. commited_@KAFKA_OFST is NOT in watermarks [@LD..@LD]", name, calc_offset, low_wm, high_wm);		// This is a valid, When kafka client connets, broker will respond “offset out of range, and "auto.offset.reset" will take the earliest message
+				N_Wf(minwusk, "@STR Kafka error. commited offset @LD is NOT in watermarks [@LD..@LD]", name, calc_offset, low_wm, high_wm);
 		} else {
 			calc_offset = RD_KAFKA_OFFSET_BEGINNING;	// Now default is use beginning as fallback
 			k_err = __consumer_assign_partition_and_offset(k, calc_offset);
@@ -978,10 +894,10 @@ static int consumer_start_from_last_committed_offset(const char *name, struct t_
 			}
 		}
 		if (calc_offset > 0)
-			k->consumer_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, calc_offset - 1);	// As If previous message was read
+			k->consumer_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, calc_offset - 1);	// Not mandatory: As If previous message was read
 		rd_kafka_topic_partition_list_destroy(pl);
 	}
-	N_Tf(3vx723k3, "@STR: consumer->@KAFKA_OFST, next_@KAFKA_OFST", name, k->consumer_offset, calc_offset);
+	N_Tf(3vx723k3, "@STR: consumer_offset=@LD (next will be @LD)", name, purify_offset(k->consumer_offset), purify_offset(calc_offset));
 	return 0;
 }
 
@@ -997,7 +913,7 @@ void nvmeibt_kafka_new_kafka_mgmt_zone_number_received(int64_t zone_number) {
 }
 
 static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messageType_params_ctx *out_msg, struct mm_json_elem **out_json_tree_root) {
-	rd_kafka_message_t					*k_msg;
+	rd_kafka_message_t					*k_msg = NULL;
 	int									rv;		// -1:err msg, 0:consumed, 1:stop reading
 	NTOMA_ASSERT(fvwu2ic, k->consumer, "k_consumer=NULL");
 
@@ -1006,98 +922,102 @@ static int consumer_read_msg_from_kafka(struct t_consumer_impl *k, struct messag
 
 	k_msg = rd_kafka_consumer_poll(k->consumer, 0 /* non-blocking*/);
 	if (!k_msg) {
-		N_Df(cvbz84k, KC_TYPE " returned NULL", k->type);
-		if ((++k->cnt_zero_consecutive_consumes % 1024) == 0) {		// Periodically check if we still have partition assignment
-			rd_kafka_topic_partition_list_t *pl = NULL;
-			const rd_kafka_resp_err_t err = rd_kafka_assignment(k->consumer, &pl);
-			const int n_part = (pl ? pl->cnt : 0);
-			if ((err == RD_KAFKA_RESP_ERR_NO_ERROR) && (n_part != 1)) {
-				N_Wf(cvbz84k2, KC_FULL_FMT " unexpected num partitions=@INT will reinit", KC_FULL_VAL(k), n_part);
-				__print_partitions_list(pl);
-				check_if_kafka_init_preserve_state_vars_required(RD_KAFKA_RESP_ERR__FATAL);
-			}
-			if (pl) rd_kafka_topic_partition_list_destroy(pl);
-		}
+		N_Df(cvbz84k, "(@STR) returned NULL", rd_kafka_name(k->consumer));
 		return 1;
 	}
-	k->cnt_zero_consecutive_consumes = 0;
-	N_Tf(fhs8lad, KC_TYPE ".k_msg(err=@INT).msg_@KAFKA_OFST, consumer->@KAFKA_OFST", k->type, (int)k_msg->err, k_msg->offset, k->consumer_offset);
-	if (k_msg->err == RD_KAFKA_RESP_ERR_NO_ERROR) {
+	N_Tf(fhs8lad, "(@STR) returned k_msg(err=@STR, k_offset=@LD)", rd_kafka_name(k->consumer), rd_kafka_err2str(k_msg->err), k_msg->offset);
+	switch (k_msg->err) {
+	case RD_KAFKA_RESP_ERR_NO_ERROR: {
 		const int64_t new_offset = glue_topic_change_no_and_offset(KAFKA_TOPIC_CHANGE_NO, k_msg->offset);
 		if (strstr((char *)(k_msg->payload), "assphrase")) { // Don't print passphrases to log
 			N_IMf(hueom23, "Encrypt msg received, don't print !");
 		} else {
 			NVMEIBT_LONG_TRACE_WRAPPER(vgsurjk, "", (char *)(k_msg->payload), k_msg->len);
 		}
-		if (k->consumer_offset >= new_offset) {
-			N_Ef(__AUTOID__, KC_FULL_FMT " offset going back consumer->@KAFKA_OFST >= msg_@KAFKA_OFST, ignorring message", KC_FULL_VAL(k), k->consumer_offset, new_offset);
-			rv = 1;		// Ignore the message
-			goto out;
-		}
-
 		// Parse as much as possible in this thread, and not in TOMA's main thread
 		*out_json_tree_root = parse_json_txt_into_kv_tree(k_msg->payload, k_msg->len);
 		if (!*out_json_tree_root) {
-			char msg[MGMT_LOG_MSG_MSG_LEN];
-			snprintf(msg, sizeof(msg), "Failed parsing of msg from MGMT %.200s", (char*)k_msg->payload);
-			nvmeibt_kafka_generic_log_msg_to_mgmt_send(NULL, NULL, msg, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH); // no-op; for future proof
 			rv = -1;
 			goto out;
 		}
 		rv = extract_messageType_params_from_json_first_level(*out_json_tree_root, out_msg);
-		getnstimeofday_boot(&kafka_last_consume_timespec);
+		getnstimeofday(&kafka_last_consume_timespec);
 		rv = 0;
 		k->consumer_offset = new_offset;	// Decision: Update offset only if message is well formatetd. Can change it. Decided by Ronen: Change-Id: I37dad733615fdacd58d144245d306f78d2133eb7
-	} else {
+		break;
+	}
+	case RD_KAFKA_RESP_ERR__PARTITION_EOF:
+		N_Tf(brvjh59, "No more messages");
+		rv = 1;
+		break;
+	case RD_KAFKA_RESP_ERR__TIMED_OUT:
+		N_Tf(vmzh7s0, "Timed out");
+		rv = 1;
+		break;
+	default:
 		rv = 1;
 		check_if_kafka_init_preserve_state_vars_required(k_msg->err);
 	}
 out:
-	rd_kafka_message_destroy(k_msg);	// Done with this message
+	if (k_msg) {
+		rd_kafka_message_destroy(k_msg);	// Done with this message
+	}
 	return rv;
 }
 
-static int parse_name_and_uuid(struct mm_json_elem *root, struct name_and_uuid_params_ctx *out)
+static int parse_name_and_uuid(struct mm_json_elem *root, struct name_and_uuid_params_ctx *name_and_uuid_params)
 {
-	int						i, j, rv;
+	int						i, j;
+	struct mm_json_kv_pair	*root_kv;
+	struct mm_json_kv_pair	*payload_kv;
 	unsigned int			parsed_mask = 0;
+	int						rv;
 
 	NFIN;
 	for (i = 0; i < root->dict.len; i++) {
-		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
-		if (strcmp(root_kv->key, "payload"))
-			continue;
-		for (j = 0; j < root_kv->value->dict.len; j++) {
-			struct mm_json_kv_pair *payload_kv = &root_kv->value->dict.elements[j];
-			if 			(!strcmp(payload_kv->key, "nodeID")) {
-				parsed_mask |= 0x1;
-				nvmeibt_strlcpy(out->hostname, payload_kv->value->str, sizeof(out->hostname));
-			} else if	(!strcmp(payload_kv->key, "uuid")) {
-				parsed_mask |= 0x2;
-				nvmeibt_urn_uuid_str_to_union_uuid(&(out->uuid), payload_kv->value->str);
-			} else if	(!strcmp(payload_kv->key, "targetsInZone")) {
-				parsed_mask |= 0x4;
-				out->n_members_total_before_add_del = payload_kv->value->num;
-			} else if	(!strcmp(payload_kv->key, "targetUpdatesSequence")) {
-				parsed_mask |= 0x8;
-				out->targets_updates_sequence = payload_kv->value->num;
-			} else {
-				N_Tf(0an3hja, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
+		root_kv = &root->dict.elements[i];
+		if (!strcmp(root_kv->key, "payload")) {
+			N_Tf(4cs64ha, "parsing payload");
+			for (j = 0; j < root_kv->value->dict.len; j++) {
+				payload_kv = &root_kv->value->dict.elements[j];
+				if 			(!strcmp(payload_kv->key, "nodeID")) {
+					parsed_mask |= 0x1;
+					nvmeibt_strlcpy(name_and_uuid_params->hostname, payload_kv->value->str, sizeof(name_and_uuid_params->hostname));
+				} else if	(!strcmp(payload_kv->key, "uuid")) {
+					parsed_mask |= 0x2;
+					nvmeibt_urn_uuid_str_to_union_uuid(&(name_and_uuid_params->uuid), payload_kv->value->str);
+				} else if	(!strcmp(payload_kv->key, "targetsInZone")) {
+					parsed_mask |= 0x4;
+					name_and_uuid_params->n_members_total_before_add_del = payload_kv->value->num;
+				} else if	(!strcmp(payload_kv->key, "targetUpdatesSequence")) {
+					parsed_mask |= 0x8;
+					name_and_uuid_params->targets_updates_sequence = payload_kv->value->num;
+				} else {
+					if (payload_kv->value->type == JSON_E_STR) {
+						N_Ef(0an3hja, "Unexpected @STR=@STR", payload_kv->key, payload_kv->value->str);
+					} else {
+						N_Ef(7vcbkje, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
+					}
+				}
 			}
+			break;
 		}
 	}
 	// N_Tf(rbzi3l2, "hostname=@STR uuid=@UUID_LE n_members_total_before_add_del=@INT targets_updates_sequence=@LLD", name_and_uuid_params->hostname, &(name_and_uuid_params->uuid), name_and_uuid_params->n_members_total_before_add_del, name_and_uuid_params->targets_updates_sequence);
-	rv = (parsed_mask == 0xf ? 0 : -1);
-	if (rv < 0)
-		N_Ef(vb6kiem, "Failed to find the exact fields @X", parsed_mask);
 	NFOUT;
+	rv = (parsed_mask == 0xf ? 0 : -1);
+	if (rv < 0) {
+		N_Ef(vb6kiem, "Failed to find the exact fields");
+	}
 	return rv;
 }
 
 /******************************************************************************/
 /*********************             CMD_consumer           *********************/
 /******************************************************************************/
-static atomic_t			CMD_consumer_n_msgs_awaiting_toma_processing;		// Ronen Hod: This is a simple criteria. Commit is not mandatory or urgent. It is used only on the next restart, and it is an optimization.
+
+atomic_t			CMD_consumer_n_msgs_awaiting_toma_processing;		// Ronen Hod: This is a simple criteria. Commit is not mandatory or urgent. It is used only on the next restart, and it is an optimization.
+
 struct keepAliveToken_params_ctx {
 	char			nodeID[64];
 	int64_t			zone_number;
@@ -1105,38 +1025,48 @@ struct keepAliveToken_params_ctx {
 	uint64_t		keepaliveInterval;
 };
 
-static int parse_updateTomaKeepaliveToken(struct mm_json_elem *root, struct keepAliveToken_params_ctx *out, bool is_updateTomaKeepaliveToken_msg)
+static int parse_updateTomaKeepaliveToken(struct mm_json_elem *root, struct keepAliveToken_params_ctx *out_keepAliveToken_params, bool is_updateTomaKeepaliveToken_msg)
 {
-	int						i, j, rv;
+	int						i, j;
+	struct mm_json_kv_pair	*root_kv;
+	struct mm_json_kv_pair	*payload_kv;
 	unsigned int			parsed_mask = 0;
+	int						rv;
 
 	NFIN;
 	for (i = 0; i < root->dict.len; i++) {
-		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
-		if (strcmp(root_kv->key, "payload"))
-			continue;
-		for (j = 0; j < root_kv->value->dict.len; j++) {
-			struct mm_json_kv_pair *payload_kv = &root_kv->value->dict.elements[j];
-			if 			(!strcmp(payload_kv->key, "nodeID")) {
-				parsed_mask |= 0x1;
-				nvmeibt_strlcpy(out->nodeID, payload_kv->value->str, sizeof(out->nodeID));
-			} else if	(!strcmp(payload_kv->key, "zone")) {
-				parsed_mask |= 0x2;
-				out->zone_number = atoll(payload_kv->value->str);
-			} else if	(!strcmp(payload_kv->key, "token")) {
-				parsed_mask |= 0x4;
-				out->token = payload_kv->value->num;
-			} else if	(!strcmp(payload_kv->key, "keepaliveInterval")) {
-				parsed_mask |= 0x8;
-				out->keepaliveInterval = payload_kv->value->num;
-			} else {
-				N_Tf(cvmau3j, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
+		root_kv = &root->dict.elements[i];
+		if (!strcmp(root_kv->key, "payload")) {
+			N_Tf(8x03498, "parsing payload");
+			for (j = 0; j < root_kv->value->dict.len; j++) {
+				payload_kv = &root_kv->value->dict.elements[j];
+				if 			(!strcmp(payload_kv->key, "nodeID")) {
+					parsed_mask |= 0x1;
+					nvmeibt_strlcpy(out_keepAliveToken_params->nodeID, payload_kv->value->str, sizeof(out_keepAliveToken_params->nodeID));
+				} else if	(!strcmp(payload_kv->key, "zone")) {
+					parsed_mask |= 0x2;
+					out_keepAliveToken_params->zone_number = atoll(payload_kv->value->str);
+				} else if	(!strcmp(payload_kv->key, "token")) {
+					parsed_mask |= 0x4;
+					out_keepAliveToken_params->token = payload_kv->value->num;
+				} else if	(!strcmp(payload_kv->key, "keepaliveInterval")) {
+					parsed_mask |= 0x8;
+					out_keepAliveToken_params->keepaliveInterval = payload_kv->value->num;
+				} else {
+					if (payload_kv->value->type == JSON_E_STR) {
+						N_Ef(cvmau3j, "Unexpected @STR=@STR", payload_kv->key, payload_kv->value->str);
+					} else {
+						N_Ef(362has7, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
+					}
+				}
 			}
+			break;
 		}
 	}
 	rv = (is_updateTomaKeepaliveToken_msg ? (parsed_mask == 0xF ? 0 : -1) : (parsed_mask == 0xC ? 0 : -1));
-	if (rv < 0)
-		N_Ef(jsuwmna, "Failed to find the exact fields @X", parsed_mask);
+	if (rv < 0) {
+		N_Ef(jsuwmna, "Failed to find the exact fields");
+	}
 	NFOUT;
 	return rv;
 }
@@ -1155,161 +1085,183 @@ struct send_praid_report_ctx {
 	uint64_t		lastKnownVersion_raft_term;
 };
 
-struct generic_CMD_params_ctx {							// A ~ 8.5[KB] struct
+struct generic_CMD_params_ctx {
 	char							generic_uuid[40];	// E.g., disk_obj_guid
+	struct nvmeibt_ascii_uuid		ldisk_id;
+	char							formatType[32];
 	union nvmeib_uuid				volumeUUID;
 	uint64_t						reservationVersion;
 	int64_t							bootTime;
+	unsigned int					vendor;
 	int								tomaToken;
+	int								formatRequestCounter;
+	int								blockSize;
+	int								metadataSize;
 	struct nvmeibt_urn_uuid			dbUUID;
-	union {
-		struct report_disks_t {
-			struct resend_report_disk_ctx	arr[NVMEIBT_MAX_N_DISKS_PER_NODE];
-			int								num;
-		} report_disks;
-		struct report_praids_t {
-			struct send_praid_report_ctx	arr[128 + 0 *NVMEIBT_MAX_N_PRAIDS];		// Dont allow this struct to be huge. If mgmt wants more than N praids in report, Toma will send at most N and later magmt can request the remaining praids
-			int								num;
-		} report_praids;
-		struct encrypt_cmd_t {
-			int								commandIndex;
-			int								slot;
-			int								keySize;
-			char							passphrase[   PASSPHRASE_MAX_LEN];
-			char							newPassphrase[PASSPHRASE_MAX_LEN];
-		} enc;
-		struct format_disk_cmd_t {
-			struct nvmeibt_ascii_uuid		ldisk_id;
-			char							formatType[32];
-			struct nvmeibt_ascii_uuid		native_serial;
-			int								nsid;
-			int								formatRequestCounter;
-			char							native_nguid[32];
-			int								blockSize;
-			int								metadataSize;
-			unsigned int					vendor;
-		} fmt;
-	};
+	struct resend_report_disk_ctx	disks_to_report[NVMEIBT_MAX_N_DISKS_PER_NODE];
+	int								n_disks_to_report;
+	struct send_praid_report_ctx	praids_to_report[NVMEIBT_MAX_N_PRAIDS];
+	int								n_praids_to_report;
+	int								encryptionCommandIndex;
+	int								slot;
+	int								keySize;
+	char							passphrase[PASSPHRASE_MAX_LEN];
+	char							newPassphrase[PASSPHRASE_MAX_LEN];
+	struct nvmeibt_ascii_uuid		native_serial;
+	int								nsid;
+	char							native_nguid[32];
 };
 
-static void parse_CMD_report_disk(struct resend_report_disk_ctx *rp, const struct mm_json_dict *json)
+static int parse_CMD(struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params)
 {
-	for (int l = 0; l < json->len; l++) {
-		const struct mm_json_kv_pair *kv = &(json->elements[l]);
-		if	(!strcmp(kv->key, "diskID")) {		nvmeibt_strlcpy( rp->ldiskID, kv->value->str, sizeof(rp->ldiskID));
-		} else if	(!strcmp(kv->key, "vendor")) {				 rp->vendor = kv->value->num;	// Such as 0x144d
-		} else if	(!strcmp(kv->key, "reappearingCounter")) {	 rp->reappearingCounter =   kv->value->num;
-		} else if	(!strcmp(kv->key, "reappearingOutOfSync")) { rp->reappearingOutOfSync = kv->value->num;
-		} else { N_Tf(cbheujw, "Unknown key @STR skipped", kv->key);		// Future compatibility
-		}
-	}
-	N_Tf(rvchs8k, "diskID=@STR vendor=@INT reappearingCounter=@INT reappearingOutOfSync=@BOOL", rp->ldiskID, rp->vendor, rp->reappearingCounter, rp->reappearingOutOfSync);
-}
+	// Somewhat slopy. Parse all the commands parameters at once
+	int						i, j, k, l;
+	struct mm_json_kv_pair	*root_kv;
+	struct mm_json_kv_pair	*payload_kv;
+	struct mm_json_kv_pair	*kv;
+	struct mm_json_elem		*arr;
+	struct mm_json_dict		*drive_json_dict, *praid_json_dict;
+	int						rv = 0;
 
-static void parse_CMD_report_praid(struct send_praid_report_ctx *rp, const struct mm_json_dict *json)
-{
-	for (int l = 0; l < json->len; l++) {
-		const struct mm_json_kv_pair *kv = &(json->elements[l]);
-		if (!strcmp(kv->key, "uuid")) {
-			nvmeibt_strlcpy(rp->praid_uuid, kv->value->str, sizeof(rp->praid_uuid));
-		} else if (!strcmp(kv->key, "lastKnownVersion")) {	// "lastKnownVersion": "<major,minor,raftTerm>"
-			const int scanf_rv = sscanf(kv->value->str, "<%d,%d,%lu>", &rp->lastKnownVersion_major, &rp->lastKnownVersion_minor, &rp->lastKnownVersion_raft_term);
-			if (scanf_rv != 3)
-				N_Ef(__AUTOID__, "praid report cannot parse known version |@STR|", kv->value->str);
-		} else {
-			N_Tf(__AUTOID__, "Unknown key @STR skipped", kv->key);		// Future compatibility
-		}
-	}
-}
-
-static int parse_CMD(const char* msg_type, struct mm_json_elem *root, struct generic_CMD_params_ctx *CMD_params) {
-	// Somewhat slopy. Parse all the commands parameters at once.  DHS: There are many different cmd messages but a few payloads, so payload parsing code is generic
-	int i, j, k, rv = 0;
 	NFIN;
+	CMD_params->n_disks_to_report = 0;
+	CMD_params->n_praids_to_report = 0;
 	for (i = 0; i < root->dict.len; i++) {
-		struct mm_json_kv_pair *root_kv = &root->dict.elements[i];
-		if (strcmp(root_kv->key, "payload"))			// We parse only payload, not message type
-			continue;
-		N_Tf(657sniw, "parsing payload of msg=@STR", msg_type);
-		for (j = 0; j < root_kv->value->dict.len; j++) {
-			const struct mm_json_kv_pair *payload_kv = &(root_kv->value->dict.elements[j]);
-			if (!strcmp(payload_kv->key, "drives")) {
-				const struct mm_json_elem	*arr = payload_kv->value;
-				if (arr->type != JSON_E_ARRAY) {
-					N_Ef(bi3jsia, "@STR is supposed to be array", payload_kv->key);
-					rv = -1;
-					continue;
+		root_kv = &root->dict.elements[i];
+		if (!strcmp(root_kv->key, "payload")) {
+			N_Tf(657sniw, "parsing payload");
+			for (j = 0; j < root_kv->value->dict.len; j++) {
+				payload_kv = &(root_kv->value->dict.elements[j]);
+				if (!strcmp(payload_kv->key, "drives")) {
+					arr = payload_kv->value;
+					if (arr->type != JSON_E_ARRAY) {
+						N_Ef(bi3jsia, "@STR is supposed to be array", payload_kv->key);
+						rv = -1;
+						continue;
+					}
+					if (arr->array.len >= NVMEIBT_MAX_N_DISKS_PER_NODE) {
+						N_Wf(f67fbhw, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
+					}
+					CMD_params->n_disks_to_report = arr->array.len;
+					for (k = 0; k < arr->array.len; k++) {
+						drive_json_dict = &(arr->array.elements[k]->dict);
+						for (l = 0; l < drive_json_dict->len; l++) {
+							kv = &(drive_json_dict->elements[l]);
+							if	(!strcmp(kv->key, "diskID")) {
+								nvmeibt_strlcpy(CMD_params->disks_to_report[k].ldiskID, kv->value->str, sizeof(CMD_params->disks_to_report[k].ldiskID));
+							} else if	(!strcmp(kv->key, "vendor")) {
+								CMD_params->disks_to_report[k].vendor = kv->value->num;	// Such as 0x144d
+							} else if	(!strcmp(kv->key, "reappearingCounter")) {
+								CMD_params->disks_to_report[k].reappearingCounter = kv->value->num;
+							} else if	(!strcmp(kv->key, "reappearingOutOfSync")) {
+								CMD_params->disks_to_report[k].reappearingOutOfSync = kv->value->num;
+							} else {
+								if (kv->value->type == JSON_E_STR) {
+									N_Ef(cbheujw, "Unexpected @STR=@STR", kv->key, kv->value->str);
+								} else {
+									N_Ef(xvhajk2, "Unexpected @STR=@INT64_TD", kv->key, kv->value->num);
+								}
+							}
+						}
+						N_Tf(rvchs8k,
+							 "diskID=@STR vendor=@INT reappearingCounter=@INT reappearingOutOfSync=@BOOL",
+							 CMD_params->disks_to_report[k].ldiskID, CMD_params->disks_to_report[k].vendor, CMD_params->disks_to_report[k].reappearingCounter, CMD_params->disks_to_report[k].reappearingOutOfSync);
+					}
+				} else if (!strcmp(payload_kv->key, "pRaids")) {
+					arr = payload_kv->value;
+					if (arr->type != JSON_E_ARRAY) {
+						N_Ef(4vhdj56, "@STR is supposed to be array", payload_kv->key);
+						rv = -1;
+						continue;
+					}
+					if (arr->array.len >= NVMEIBT_MAX_N_PRAIDS) {
+						N_Wf(fnbekof, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
+					}
+					for (k = 0; k < arr->array.len; k++) {
+						praid_json_dict = &(arr->array.elements[k]->dict);
+						for (l = 0; l < praid_json_dict->len; l++) {
+							kv = &(praid_json_dict->elements[l]);
+							if (!strcmp(kv->key, "uuid")) {
+								nvmeibt_strlcpy(CMD_params->praids_to_report[k].praid_uuid, kv->value->str, sizeof(CMD_params->praids_to_report[k].praid_uuid));
+							} else if (!strcmp(kv->key, "lastKnownVersion")) {
+							   // "lastKnownVersion": "<major,minor,raftTerm>"
+							   sscanf(kv->value->str, "<%d,%d,%lu>",
+									  &(CMD_params->praids_to_report[k].lastKnownVersion_major), &(CMD_params->praids_to_report[k].lastKnownVersion_minor), &(CMD_params->praids_to_report[k].lastKnownVersion_raft_term));
+							} else {
+								if (kv->value->type == JSON_E_STR) {
+									N_Ef(ctvsauj, "Unexpected @STR=@STR", kv->key, kv->value->str);
+								} else {
+									N_Ef(nai3stz, "Unexpected @STR=@INT64_TD", kv->key, kv->value->num);
+								}
+							}
+						}
+				   }
+				} else if (!strcmp(payload_kv->key, "tomaToken")) {
+					CMD_params->tomaToken = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "diskID")) {
+					nvmeibt_strlcpy(CMD_params->ldisk_id.str, payload_kv->value->str, sizeof(CMD_params->ldisk_id.str));
+				} else if (!strcmp(payload_kv->key, "uuid")) {
+					nvmeibt_strlcpy(CMD_params->generic_uuid, payload_kv->value->str, sizeof(CMD_params->generic_uuid));
+				} else if (!strcmp(payload_kv->key, "vendor")) {
+					CMD_params->vendor = payload_kv->value->num;	// Such as 0x144d
+				} else if (!strcmp(payload_kv->key, "formatRequestCounter")) {
+					CMD_params->formatRequestCounter = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "blockSize")) {
+					CMD_params->blockSize = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "metadataSize")) {
+					CMD_params->metadataSize = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "dbUUID")) {
+					nvmeibt_strlcpy(CMD_params->dbUUID.str, payload_kv->value->str, sizeof(CMD_params->dbUUID.str));
+				} else if (!strcmp(payload_kv->key, "formatType")) {
+					nvmeibt_strlcpy(CMD_params->formatType, payload_kv->value->str, sizeof(CMD_params->formatType));
+				} else if (!strcmp(payload_kv->key, "volumeID")) {
+					// Do nothing, we don't need this param
+				} else if (!strcmp(payload_kv->key, "volumeName")) {
+					// Do nothing, we don't need this param
+				} else if (!strcmp(payload_kv->key, "volumeUUID")) {
+					nvmeibt_urn_uuid_to_union_uuid(&CMD_params->volumeUUID,
+												   (struct nvmeibt_urn_uuid *)(payload_kv->value->str));
+				} else if (!strcmp(payload_kv->key, "reservationMode")) {
+					// Do nothing, we don't need this param
+				} else if (!strcmp(payload_kv->key, "reservationVersion")) {
+					CMD_params->reservationVersion = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "encryptionCommandIndex")) {
+					CMD_params->encryptionCommandIndex = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "slot")) {
+					CMD_params->slot = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "currentSlot")) {
+					CMD_params->slot = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "keySize")) {
+					CMD_params->keySize = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "passphrase")) {
+					nvmeibt_strlcpy(CMD_params->passphrase, payload_kv->value->str, sizeof(CMD_params->passphrase));
+				} else if (!strcmp(payload_kv->key, "currentPassphrase")) {
+					nvmeibt_strlcpy(CMD_params->passphrase, payload_kv->value->str, sizeof(CMD_params->passphrase));
+				} else if (!strcmp(payload_kv->key, "newPassphrase")) {
+					nvmeibt_strlcpy(CMD_params->newPassphrase, payload_kv->value->str, sizeof(CMD_params->newPassphrase));
+				} else if (!strcmp(payload_kv->key, "bootTime")) {
+					CMD_params->bootTime = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "serial")) {
+					nvmeibt_strlcpy(CMD_params->native_serial.str, payload_kv->value->str, sizeof(CMD_params->native_serial.str));
+				} else if (!strcmp(payload_kv->key, "nsid")) {
+					CMD_params->nsid = payload_kv->value->num;
+				} else if (!strcmp(payload_kv->key, "nguid")) {
+					nvmeibt_strlcpy(CMD_params->native_nguid, payload_kv->value->str, sizeof(CMD_params->native_nguid));
+				} else {
+					if (payload_kv->value->type == JSON_E_STR) {
+						N_Ef(ct326bd, "Unexpected @STR=@STR", payload_kv->key, payload_kv->value->str);
+					} else {
+						N_Ef(meiyzx5, "Unexpected @STR=@INT64_TD", payload_kv->key, payload_kv->value->num);
+					}
 				}
-				CMD_params->report_disks.num = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->report_disks.arr));
-				if (arr->array.len > CMD_params->report_disks.num)
-					N_Wf(f67fbhw, "@STR arr.len=@INT truncated", payload_kv->key, arr->array.len);
-				for (k = 0; k < CMD_params->report_disks.num; k++)
-					parse_CMD_report_disk(&CMD_params->report_disks.arr[k], &(arr->array.elements[k]->dict));
-			} else if (!strcmp(payload_kv->key, "pRaids")) {
-				const struct mm_json_elem	*arr = payload_kv->value;
-				if (arr->type != JSON_E_ARRAY) {
-					N_Ef(4vhdj56, "@STR is supposed to be array", payload_kv->key);
-					rv = -1;
-					continue;
-				}
-				CMD_params->report_praids.num = min(arr->array.len, (int)ARRAY_SIZE(CMD_params->report_praids.arr));
-				if (arr->array.len > CMD_params->report_praids.num)
-					N_Wf(fnbekof, "@STR arr.len=@INT", payload_kv->key, arr->array.len);
-				for (k = 0; k < CMD_params->report_praids.num; k++)
-					parse_CMD_report_praid(&CMD_params->report_praids.arr[k], &arr->array.elements[k]->dict);
-			} else if (!strcmp(payload_kv->key, "tomaToken")) {
-				CMD_params->tomaToken = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "diskID")) {
-				nvmeibt_strlcpy(CMD_params->fmt.ldisk_id.str, payload_kv->value->str, sizeof(CMD_params->fmt.ldisk_id.str));
-			} else if (!strcmp(payload_kv->key, "uuid")) {
-				nvmeibt_strlcpy(CMD_params->generic_uuid, payload_kv->value->str, sizeof(CMD_params->generic_uuid));
-			} else if (!strcmp(payload_kv->key, "vendor")) {
-				CMD_params->fmt.vendor = payload_kv->value->num;	// Such as 0x144d
-			} else if (!strcmp(payload_kv->key, "formatRequestCounter")) {
-				CMD_params->fmt.formatRequestCounter = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "blockSize")) {
-				CMD_params->fmt.blockSize = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "metadataSize")) {
-				CMD_params->fmt.metadataSize = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "dbUUID")) {
-				nvmeibt_strlcpy(CMD_params->dbUUID.str, payload_kv->value->str, sizeof(CMD_params->dbUUID.str));
-			} else if (!strcmp(payload_kv->key, "formatType")) {
-				nvmeibt_strlcpy(CMD_params->fmt.formatType, payload_kv->value->str, sizeof(CMD_params->fmt.formatType));
-			} else if (!strcmp(payload_kv->key, "volumeID")) {			// Do nothing, we don't need this param
-			} else if (!strcmp(payload_kv->key, "volumeName")) {		// Do nothing, we don't need this param
-			} else if (!strcmp(payload_kv->key, "volumeUUID")) {
-				nvmeibt_urn_uuid_to_union_uuid(&CMD_params->volumeUUID,(struct nvmeibt_urn_uuid *)(payload_kv->value->str));
-			} else if (!strcmp(payload_kv->key, "reservationMode")) {	// Do nothing, we don't need this param
-			} else if (!strcmp(payload_kv->key, "reservationVersion")) {
-				CMD_params->reservationVersion = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "encryptionCommandIndex")) {
-				CMD_params->enc.commandIndex = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "slot") || !strcmp(payload_kv->key, "currentSlot")) {
-				CMD_params->enc.slot = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "keySize")) {
-				CMD_params->enc.keySize = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "passphrase") || !strcmp(payload_kv->key, "currentPassphrase")) {
-				nvmeibt_strlcpy(CMD_params->enc.passphrase, payload_kv->value->str, sizeof(CMD_params->enc.passphrase));
-			} else if (!strcmp(payload_kv->key, "newPassphrase")) {
-				nvmeibt_strlcpy(CMD_params->enc.newPassphrase, payload_kv->value->str, sizeof(CMD_params->enc.newPassphrase));
-			} else if (!strcmp(payload_kv->key, "bootTime")) {
-				CMD_params->bootTime = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "serial")) {
-				nvmeibt_strlcpy(CMD_params->fmt.native_serial.str, payload_kv->value->str, sizeof(CMD_params->fmt.native_serial.str));
-			} else if (!strcmp(payload_kv->key, "nsid")) {
-				CMD_params->fmt.nsid = payload_kv->value->num;
-			} else if (!strcmp(payload_kv->key, "nguid")) {
-				nvmeibt_strlcpy(CMD_params->fmt.native_nguid, payload_kv->value->str, sizeof(CMD_params->fmt.native_nguid));
-			} else {
-				N_Tf(__AUTOID__, "Unknown key @STR skipped", payload_kv->key);		// Future compatibility
 			}
-		}		// Payload parsing
+			break;	// Do we need to break after parsing the payload? Probably meaningless
+		}
 	}
-	if (!strncmp(msg_type, "formatDrive", 11))
-		N_Tf(4vsdywb,
-			"Format: " LOCAL_DISK_LOG_FMT " vendor=@INT uuid=@STR tomaToken=@INT formatType=@STR formatRequestCounter=@INT @INT+@INT[B] dbUUID=@STR",
-			LOCAL_DISK_LOG_obj_ARGS(&CMD_params->fmt), CMD_params->fmt.vendor, CMD_params->generic_uuid, CMD_params->tomaToken, CMD_params->fmt.formatType, CMD_params->fmt.formatRequestCounter, CMD_params->fmt.blockSize,
-			CMD_params->fmt.metadataSize, CMD_params->dbUUID.str);
+	N_Tf(4vsdywb,
+		 LOCAL_DISK_LOG_FMT " vendor=@INT uuid=@STR tomaToken=@INT formatType=@STR formatRequestCounter=@INT blockSize=@INT metadataSize=@INT dbUUID=@STR",
+		 LOCAL_DISK_LOG_obj_ARGS(CMD_params), CMD_params->vendor, CMD_params->generic_uuid, CMD_params->tomaToken, CMD_params->formatType, CMD_params->formatRequestCounter, CMD_params->blockSize,
+		 CMD_params->metadataSize, CMD_params->dbUUID.str);
 	NFOUT;
 	return rv;
 }
@@ -1327,7 +1279,7 @@ static int CMD_consumer_init(bool is_full_init) {
 		k->offset_committed = k->consumer_offset = RD_KAFKA_OFFSET_INVALID;
 		atomic_set(&CMD_consumer_n_msgs_awaiting_toma_processing, 0);
 	}
-	snprintf(group_id_str,  sizeof(group_id_str),  "CMD_%s", nvmeibt_get_my_hostname());			// Dont change it! Mgmt relies on it to remove old produced messages
+	snprintf(group_id_str,  sizeof(group_id_str),  "CMD_%s", nvmeibt_get_my_hostname());
 	snprintf(k->topic_name, sizeof(k->topic_name), "%s.TOMA.commands.1.0.0", nvmeibt_get_my_hostname());
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
@@ -1340,60 +1292,37 @@ static int CMD_consumer_init(bool is_full_init) {
 }
 
 static void mark_CMD_k_msg_for_kafka_commit(int64_t kafka_offset, bool is_called_by_toma) {
-	N_Tf(vbdsk30, "Done msg_@KAFKA_OFST", kafka_offset);
+	N_Tf(vbdsk30, "Done k_offset=@LD", purify_offset(kafka_offset));
 	if (is_called_by_toma) {
 		atomic_add(-1, &CMD_consumer_n_msgs_awaiting_toma_processing);
 	}
 }
 
-void nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(int64_t kafka_offset) {
+void nvmeibt_kafka_mark_CMD_k_msg_for_kafka_commit_by_toma(int64_t kafka_offset)
+{
 	mark_CMD_k_msg_for_kafka_commit(kafka_offset, 1);
-}
-
-static void __wakeup_toma_params_free(struct kafka_wakeup_params *wap) {
-	switch (wap->event_type) {
-	case KAFKA_EVENT_TYPE_HW_FULL_CONFIG:
-		HW_conf_free_tree((struct HW_mgmt_conf*)wap->event_data);
-		break;
-	case KAFKA_EVENT_TYPE_VOL_ADD:
-	case KAFKA_EVENT_TYPE_VOL_DEL:
-	case KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED:
-	case KAFKA_EVENT_TYPE_VOL_UPD:
-		mm_conf_free_tree((struct mm_mgmt_conf *)wap->event_data);
-		break;
-	case KAFKA_EVENT_TYPE_TARGET_ADD:
-	case KAFKA_EVENT_TYPE_TARGET_DEL:
-	case KAFKA_EVENT_TYPE_CMD:
-		NNVMEIBT_BM_FREE(tbsi84l, wap->event_data);
-		break;
-	default:
-		N_Ef(vsh398a, "*******************************   FIX ME   ****************************** conf=@PTR event_type=@INT", wap, wap->event_type);
-		break;
-	}
-	NNVMEIBT_BM_FREE(2kzx0oe, wap);
-}
-
-static void __wakeup_toma_main_tread(struct kafka_wakeup_params *wap) {
-	const int wakeup_rv = nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wap);
-	if (wakeup_rv < 0)
-		__wakeup_toma_params_free(wap);	// Just free the memory, toma main thread cannot wakeup
 }
 
 static int CMD_consume(void) {
 	struct messageType_params_ctx		messageType_params;
+	struct keepAliveToken_params_ctx	keepAliveToken_params;
 	struct mm_json_elem 				*json_tree_root = NULL;
+	struct kafka_wakeup_params			*wakeup_params;
 	int									rv;		// -1: err, 0:consumed something, 1:OK_skipped
+	bool								is_updateTomaKeepaliveToken_msg;
 	struct generic_CMD_params_ctx		*CMD_params;
 	bool								commit_it_now = 0;
 
 	if (!k_CMD.consumer) {
+		rv = 1;
 		N_Tf(y788u22, "Not initialized");
-		return 1;
+		goto out;
 	}
 	if (atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing) > 0) {
 		// In order to have 100% control of the offset of the consumed CMDs, we run one at a time
 		N_Tf(kd94md6, "Skipping is_CMD_processing_and_blocking_other_CMDs");
-		return 2000;
+		rv = 2000;
+		goto out;
 	}
 	rv = consumer_read_msg_from_kafka(&k_CMD, &messageType_params, &json_tree_root);
 	if (rv != 0) {
@@ -1401,40 +1330,44 @@ static int CMD_consume(void) {
 			N_Tf(y7k1u22, "rv=@INT", rv);
 		goto out;
 	}
-	if (strcmp(messageType_params.messageType, "updateTomaKeepaliveToken") == 0) {
-		struct keepAliveToken_params_ctx kap; // The token-update messages are internal to toma_kafka. No need for wakeup
+	//
+	is_updateTomaKeepaliveToken_msg = (strcmp(messageType_params.messageType, "updateTomaKeepaliveToken") == 0);
+	if (is_updateTomaKeepaliveToken_msg) {
+		// The token-update messages are internal to toma_kafka. No need for wakeup
 		commit_it_now = 1;
-		rv = parse_updateTomaKeepaliveToken(json_tree_root, &kap, 1);
-		if (strcmp(kap.nodeID, nvmeibt_get_my_hostname()) != 0) {
-			N_Ef(5a82nas, "OOOOPS, this msg nodeID='@STR' != @STR", kap.nodeID, nvmeibt_get_my_hostname());
+		rv = parse_updateTomaKeepaliveToken(json_tree_root, &keepAliveToken_params, 1);
+		if (strcmp(keepAliveToken_params.nodeID, nvmeibt_get_my_hostname()) != 0) {
+			N_Ef(5a82nas, "OOOOPS, this msg nodeID='@STR' != @STR", keepAliveToken_params.nodeID, nvmeibt_get_my_hostname());
 			rv = -1;
 			goto out;
 		}
-		nvmeibt_kafka_new_kafka_mgmt_zone_number_received(kap.zone_number);
-		kafka_set_follower_keepalive_token_provided_by_mgmt(kap.token, kap.keepaliveInterval);
+		nvmeibt_kafka_new_kafka_mgmt_zone_number_received(keepAliveToken_params.zone_number);
+		kafka_set_follower_keepalive_token_provided_by_mgmt(keepAliveToken_params.token, keepAliveToken_params.keepaliveInterval);
 		rv = 0;
 		goto out;
 	}
 	// All other CMDs, are handled by TOMA's main thread from wakeup. They receive the parsed json tree
 	CMD_params = NNVMEIBT_BM_CALLOC(uzxhn2k, sizeof(*CMD_params));
-	parse_CMD(messageType_params.messageType, json_tree_root, CMD_params);
+	parse_CMD(json_tree_root, CMD_params);
 	if (CMD_params->tomaToken && (CMD_params->tomaToken < nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt())) {
 		N_Tf(koo0o09, "old msg received (token @INT<@INT), skipping", CMD_params->tomaToken, nvmeibt_kafka_get_follower_keepalive_token_provided_by_mgmt());
 		commit_it_now = 1;
 		rv = 0;
-		NNVMEIBT_BM_FREE(uzxhn2k1, CMD_params);
-	} else {
-		struct kafka_wakeup_params *wap = NNVMEIBT_BM_CALLOC(sueklwl, sizeof(*wap));
-		wap->messageType_params = messageType_params;
-		wap->event_type = KAFKA_EVENT_TYPE_CMD;
-		wap->event_data = CMD_params;
-		wap->kafka_offset = k_CMD.consumer_offset;
-		atomic_add(1, &CMD_consumer_n_msgs_awaiting_toma_processing);
-		__wakeup_toma_main_tread(wap);
+		goto out;
 	}
+	//
+	wakeup_params = NNVMEIBT_BM_ALLOC(sueklwl, sizeof(*wakeup_params));
+	wakeup_params->messageType_params = messageType_params;
+	wakeup_params->event_type = KAFKA_EVENT_TYPE_CMD;
+	wakeup_params->event_data = CMD_params;
+	wakeup_params->kafka_offset = k_CMD.consumer_offset;
+	atomic_add(1, &CMD_consumer_n_msgs_awaiting_toma_processing);
+	nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
 out:
-	if (commit_it_now)
-		mark_CMD_k_msg_for_kafka_commit(k_CMD.consumer_offset, 0);	// Progress the offset. Avoid re-reading already processed messages
+	if (commit_it_now) {
+		// Progress the offset. Avoid re-reading already processed messages
+		mark_CMD_k_msg_for_kafka_commit(k_CMD.consumer_offset, 0);
+	}
 	nvmeibt_mm_json_free_kv_tree(json_tree_root);      // No other consumers
 	return rv;
 }
@@ -1444,9 +1377,11 @@ out:
 /******************************************************************************/
 // All the TOMAs consume from the same queue.
 // We do not really care that this is a queue, and we only consume the last message (config)
-static int64_t		HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
-static int64_t		HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
-static int64_t		incremental_VOL_updates_offset_to_commit = RD_KAFKA_OFFSET_INVALID;
+
+static int64_t		HW_full_config_consumer_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
+static int64_t		HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
+static int64_t								HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
+static int64_t								HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
 
 static int HW_full_config_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".TOMA.hardwareConfiguration.1.0.0";
@@ -1469,7 +1404,7 @@ static int HW_full_config_consumer_init(bool is_full_init) {
 		HW_full_config_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 		HW_full_config_consumer_offset_committed_by_toma = RD_KAFKA_OFFSET_INVALID;
 	}
-	snprintf(group_id_str, sizeof(group_id_str), "HW_%s", nvmeibt_get_my_hostname());		// 1 queue for all Toma's but each machine in its own group_id. From each group.id only 1 consumer can read. Dont change it! Mgmt relies on it to remove old produced messages!
+	snprintf(group_id_str, sizeof(group_id_str), "HW_%s", nvmeibt_get_my_hostname());
 	generate_topic_name_using_zone(k->topic_name, sizeof(k->topic_name), topic_str_base, 0);
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
@@ -1482,20 +1417,20 @@ out:
 	return rv;
 }
 
-static void mark_HW_full_config_k_msg_for_kafka_commit(int64_t kafka_offset, bool is_this_offset_a_good_starting_point_after_the_next_boot)
+static void mark_HW_full_config_k_msg_for_kafka_commit(int64_t kafka_offset, bool is_called_by_toma, bool is_this_offset_a_good_starting_point_after_the_next_boot)
 {
-	N_Tf(7vsso4l, "Done_@KAFKA_OFST", kafka_offset);
-	if (is_this_offset_a_good_starting_point_after_the_next_boot) {
-		HW_full_config_consumer_offset_committed_by_toma = max(HW_full_config_consumer_offset_committed_by_toma, kafka_offset);
-	} else {
-		N_Wf(3178bsm, "@KAFKA_OFST was ignored. Hopefully recoverable", kafka_offset);
-		HW_full_config_consumer_offset_submitted_to_toma = HW_full_config_consumer_offset_committed_by_toma;	// release HW_full_config_consume()
+	N_Tf(7vsso4l, "Done k_offset=@LD", purify_offset(kafka_offset));
+	if (is_called_by_toma) {
+		if (is_this_offset_a_good_starting_point_after_the_next_boot) {
+			HW_full_config_consumer_offset_committed_by_toma = max(HW_full_config_consumer_offset_committed_by_toma, kafka_offset);
+		} else {
+			N_Wf(3178bsm, "k_offset=@LD was ignored. Hopefully recoverable", purify_offset(kafka_offset));
+			HW_full_config_consumer_offset_submitted_to_toma = HW_full_config_consumer_offset_committed_by_toma;	// release HW_full_config_consume()
+		}
 	}
 }
 
 static int HW_full_config_consume(void) {
-	static int64_t						__value_of__highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;		// 2 fields to protect against msg reordering, we care aboust msg with highest config version, not highest kafka offset
-	static int64_t						__offset_of_highest_version_of_msg_received_to_date = RD_KAFKA_OFFSET_INVALID;
 	struct messageType_params_ctx		highest_version_messageType_params;
 	struct mm_json_elem 				*json_tree_root = NULL;
 	struct HW_mgmt_conf					*highest_HW_mgmt_conf = NULL;
@@ -1505,9 +1440,9 @@ static int HW_full_config_consume(void) {
 		N_Tf(y788u33, "Not initialized");
 		return 1;
 	}
-	if (HW_full_config_consumer_offset_committed_by_toma < HW_full_config_consumer_offset_submitted_to_toma) {
+	if (purify_offset(HW_full_config_consumer_offset_committed_by_toma) < purify_offset(HW_full_config_consumer_offset_submitted_to_toma)) {
 		// In order to have 100% control of the offset of the consumed HW_full_configs, we run one at a time
-		N_Tf(tvs84kw, "Skipping, committed_by_toma_@KAFKA_OFST < submitted_to_toma_@KAFKA_OFST", HW_full_config_consumer_offset_committed_by_toma, HW_full_config_consumer_offset_submitted_to_toma);
+		N_Tf(tvs84kw, "Skipping, offset_committed_by_toma=@LD < offset_submitted_to_toma=@LD", purify_offset(HW_full_config_consumer_offset_committed_by_toma), purify_offset(HW_full_config_consumer_offset_submitted_to_toma));
 		return 1;
 	}
 	// We are only interested in the last (highest) configuration. Due to reordering (multi-mgmt) it may not have the highest kafka offset, so we need to read the entire queue, use latest and reset the offset to the last msg in the queue
@@ -1527,28 +1462,29 @@ static int HW_full_config_consume(void) {
 		}
 		N_Tf(6wphucs, "msg received");
 		conf = NNVMEIBT_BM_CALLOC(4vs6k9s,  sizeof(*conf));	//	Fully parse it (in order to get payload->configurationVersion)
-		nvmeibt_mm_json_tree_to_HW_mgmt_conf(conf, json_tree_root, __offset_of_highest_version_of_msg_received_to_date);	// Do as much processing as possible before TOMA's main thread
+		nvmeibt_mm_json_tree_to_HW_mgmt_conf(conf, json_tree_root, HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date);	// Do as much processing as possible before TOMA's main thread
 
 		N_Tf(iqhfy6s, "Received configurationVersion=@INT64_TX", conf->configurationVersion);
-		if (conf->configurationVersion < __value_of__highest_version_of_msg_received_to_date) {
-			N_Tf(6sbk3l5, "Received older H/W config version=@INT64_TX<@INT64_TX, skipping", conf->configurationVersion, __value_of__highest_version_of_msg_received_to_date);
+		if (conf->configurationVersion < HW_full_config_consumer_highest_version_of_msg_received_to_date) {
+			N_Tf(6sbk3l5, "Received older H/W config version=@INT64_TX<@INT64_TX, skipping", conf->configurationVersion, HW_full_config_consumer_highest_version_of_msg_received_to_date);
 			HW_conf_free_tree(conf);
 			continue;
 		}
 		// Adopt the new highest ever
 		HW_conf_free_tree(highest_HW_mgmt_conf);
 		highest_HW_mgmt_conf = conf;
-		__value_of__highest_version_of_msg_received_to_date = highest_HW_mgmt_conf->configurationVersion;
-		__offset_of_highest_version_of_msg_received_to_date = k_HW_full_config.consumer_offset;
+		HW_full_config_consumer_highest_version_of_msg_received_to_date = highest_HW_mgmt_conf->configurationVersion;
+		HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date = k_HW_full_config.consumer_offset;
 		highest_version_messageType_params = messageType_params;
 	}	// while()
 	if (highest_HW_mgmt_conf) {	// If we received a higher than ever before
-		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_CALLOC(djaioqk, sizeof(*wakeup_params));
+		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_ALLOC(djaioqk, sizeof(*wakeup_params));
 		wakeup_params->messageType_params = highest_version_messageType_params;
 		wakeup_params->event_type = KAFKA_EVENT_TYPE_HW_FULL_CONFIG;
 		wakeup_params->event_data = highest_HW_mgmt_conf;
-		wakeup_params->kafka_offset = HW_full_config_consumer_offset_submitted_to_toma = __offset_of_highest_version_of_msg_received_to_date;
-		__wakeup_toma_main_tread(wakeup_params);
+		wakeup_params->kafka_offset = HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date;
+		HW_full_config_consumer_offset_submitted_to_toma = HW_full_config_consumer_offset_of_highest_version_of_msg_received_to_date;
+		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
 	}
 	nvmeibt_mm_json_free_kv_tree(json_tree_root);
 	return rv;
@@ -1557,9 +1493,11 @@ static int HW_full_config_consume(void) {
 /******************************************************************************/
 /***  incremental_VOL_updates_consumer (add/del VOLUME & updateLeaderKeepaliveToken)  ***/
 /******************************************************************************/
+static int64_t								incremental_VOL_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
+
 static int incremental_VOL_updates_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".leader.incrementalUpdates.1.0.0";
-	char group_id_str[32];	// All leaders commit/store/consume using the same group_id
+	char group_id_str[24];	// All leaders commit/store/consume using the same group_id
 	const struct key_val_strs k_conf_kv[] = {
 		K_DEFAULT_CONSUMER_CONFIG, {"client.id", "" /* Overriden with machine name */ }
 	};
@@ -1573,12 +1511,13 @@ static int incremental_VOL_updates_consumer_init(bool is_full_init) {
 	}
 	if (is_full_init) {
 		k->consumer_offset = RD_KAFKA_OFFSET_INVALID;
+		incremental_VOL_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 	} else if (is_RD_KAFKA_OFFSET_VALID(k->consumer_offset)) {
 		// Reinit requested_incremental_VOL_updates_consumer_offset only if we succeeded to read a message from the topic
 		// If we didn't even start, use the initial value
 		requested_incremental_VOL_updates_consumer_offset = k->consumer_offset + 1;
 	}
-	snprintf(group_id_str, sizeof(group_id_str), "LEADER_%ld", kafka_mgmt_zone_number);		// Dont change it! Mgmt relies on it to remove old produced messages
+	snprintf(group_id_str, sizeof(group_id_str), "LEADER_%ld", kafka_mgmt_zone_number);
 	generate_topic_name_using_zone(k->topic_name, sizeof(k->topic_name), topic_str_base, 0);
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
@@ -1595,14 +1534,12 @@ static int incremental_VOL_updates_consume(void) {
 	int									rv;		// -1: err, 0:consumed something, 1:OK_skipped
 	bool								is_delVolCompleted = false, is_new_or_updateVol = false;
 	enum KAFKA_EVENT_TYPE				k_event = KAFKA_EVENT_TYPE_UNKNOWN;
-	static int64_t						incremental_VOL_updates_last_vol_msg_offset = RD_KAFKA_OFFSET_INVALID;
 
 	if (!is_consuming_leader_VOL_msgs()) {
 		N_Tf(hasume5, "Not is_consuming_leader_VOL_msgs, skipping");
 		return 0;
 	}
 	NTOMA_ASSERT(rvar6oa, k_incremental_VOL_updates.consumer, "No incremental_VOL_updates_consumer");
-
 	rv = consumer_read_msg_from_kafka(&k_incremental_VOL_updates, &msg_param, &json_tree_root);
 	if (rv != 0) {
 		if (rv != 1)
@@ -1613,25 +1550,22 @@ static int incremental_VOL_updates_consume(void) {
 	if (strcmp(msg_param.messageType, "deleteVolume"         ) == 0) { k_event = KAFKA_EVENT_TYPE_VOL_DEL; }
 	if (strcmp(msg_param.messageType, "deleteVolumeCompleted") == 0) { k_event = KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED; is_delVolCompleted =  1; }
 	if (strcmp(msg_param.messageType, "updateVolume"         ) == 0) { k_event = KAFKA_EVENT_TYPE_VOL_UPD;           is_new_or_updateVol = 1; }
-
 	if (strcmp(msg_param.messageType, "updateLeaderKeepaliveToken") == 0) {
 		struct keepAliveToken_params_ctx keepAliveToken_params;			// The token-update messages are internal to toma_kafka. No need for wakeup
 		rv = parse_updateTomaKeepaliveToken(json_tree_root, &keepAliveToken_params, 0);
 		kafka_set_leader_keepalive_token_provided_by_mgmt(keepAliveToken_params.token, keepAliveToken_params.keepaliveInterval);
-		if (incremental_VOL_updates_last_vol_msg_offset <= k_incremental_VOL_updates.offset_committed) { // The last VOL_XXX msg was committed, so we can commit till this updateLeaderKeepaliveToken msg
-			incremental_VOL_updates_offset_to_commit = k_incremental_VOL_updates.consumer_offset;
-		}
 		rv = 0;
 	} else if (k_event != KAFKA_EVENT_TYPE_UNKNOWN) {
 		struct mm_mgmt_conf *mgmt_conf = NNVMEIBT_BM_CALLOC(rygaj4l,  sizeof(*mgmt_conf));					// Parse them just the same, although deleteVolume has just two fields
-		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_CALLOC(5vsyc8e, sizeof(*wakeup_params));
+		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_ALLOC(5vsyc8e, sizeof(*wakeup_params));
 		rv = nvmeibt_mgmt_msg_json_tree_to_mgmt_conf(mgmt_conf, json_tree_root, k_incremental_VOL_updates.consumer_offset, is_new_or_updateVol, is_delVolCompleted);	// Do as much processing as possible before TOMA's main thread
 		wakeup_params->messageType_params = msg_param;
 		wakeup_params->event_type = k_event;
 		wakeup_params->event_data = (void *)mgmt_conf;
-		wakeup_params->kafka_offset = incremental_VOL_updates_last_vol_msg_offset = k_incremental_VOL_updates.consumer_offset;
+		wakeup_params->kafka_offset = k_incremental_VOL_updates.consumer_offset;
 		wakeup_params->kafka_raft_term_when_started_consuming_leader_msgs = kafka_applied_consuming_leader_VOL_msgs_raft_term;
-		__wakeup_toma_main_tread(wakeup_params);
+		incremental_VOL_updates_consumer_offset_submitted_to_toma = k_incremental_VOL_updates.consumer_offset;
+		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
 	} else {
 		N_Ef(ajk348z, "Unexpected messageType=@STR", msg_param.messageType);
 		rv = -1;
@@ -1644,11 +1578,13 @@ out:
 /******************************************************************************/
 /********    incremental_TARGET_updates_consumer  (add/del TARGET)   **********/
 /******************************************************************************/
+
 XDLIST_DECLARE(, struct kafka_wakeup_params, kafka_raft_members_sorted_msgs_queue_link)			kafka_raft_members_sorted_msgs_queue = XDLIST_INIT(kafka_raft_members_sorted_msgs_queue);
 #define FREE_RAFT_MEMBERS_WAKEUP_PARAMS(name, wakeup_p)			\
 		NNVMEIBT_BM_FREE(name ## _1, wakeup_p->event_data);		\
 		NNVMEIBT_BM_FREE(name ## _2, wakeup_p)
 
+static int64_t		first_ever_mgmt_targets_updates_seq_no = 1;		// MGMT starts with 1
 static int64_t		last_sent_to_toma_targets_updates_seq_no = -1;
 void nvmeibt_kafka_set_last_sent_to_toma_targets_updates_seq_no(int64_t seq_no)
 {
@@ -1668,16 +1604,19 @@ static void kafka_raft_members_sorted_msgs_queue_init(void) {
 static void kafka_raft_members_sorted_msgs_queue_send_all_sequential_to_toma(void)
 {
 	struct kafka_wakeup_params	*wakeup_params;
+	bool						is_accepting;
+
 	XDLIST_FOREACH_SAFE(wakeup_params, &kafka_raft_members_sorted_msgs_queue) {
-		const int64_t expected_seq_no = is_offset_zero(wakeup_params->kafka_offset) ? ((int64_t)1 /*MGMT start*/) : (last_sent_to_toma_targets_updates_seq_no + 1);
-		if (wakeup_params->seq_no != expected_seq_no) {
+		is_accepting = ((wakeup_params->seq_no == first_ever_mgmt_targets_updates_seq_no && is_offset_zero(wakeup_params->kafka_offset)) ||
+						(wakeup_params->seq_no == (last_sent_to_toma_targets_updates_seq_no + 1)));
+		if (!is_accepting) {
 			N_Wf(hwuscri, "First sequence_no=@INT64_TD last_accepted_targets_updates_sequence=@INT64_TD", wakeup_params->seq_no, last_sent_to_toma_targets_updates_seq_no);
 			break;	// The next sequential msg is missing. Try again later
 		}
 		// Accept it
 		XDLIST_DEL(&(wakeup_params->kafka_raft_members_sorted_msgs_queue_link));
 		nvmeibt_kafka_set_last_sent_to_toma_targets_updates_seq_no(wakeup_params->seq_no);
-		__wakeup_toma_main_tread(wakeup_params);
+		nvmeibt_toma_trigger_wakeup(NVMEIBT_TOMA_WAKEUP_TYPE_KAFKA, wakeup_params);
 	}
 	if (!XDLIST_EMPTY(&kafka_raft_members_sorted_msgs_queue)) {
 		N_Wf(rcaj1kn, "Queue not empty after processing");
@@ -1686,7 +1625,7 @@ static void kafka_raft_members_sorted_msgs_queue_send_all_sequential_to_toma(voi
 
 static bool is_raft_members_wakeup_params_OK(struct kafka_wakeup_params *wakeup_params, int seq_no_for_comparison, bool is_LessEqual) {
 	if (is_LessEqual ? (wakeup_params->seq_no <= seq_no_for_comparison) : (wakeup_params->seq_no == seq_no_for_comparison)) {
-		N_Wf(ak3nxyp, "Ignoring duplicate sequence_no=@INT64_TD, @KAFKA_OFST", wakeup_params->seq_no, wakeup_params->kafka_offset);
+		N_Wf(ak3nxyp, "Ignoring duplicate sequence_no=@INT64_TD (k_offset=@LD)", wakeup_params->seq_no, purify_offset(wakeup_params->kafka_offset));
 		FREE_RAFT_MEMBERS_WAKEUP_PARAMS(vtsie4m, wakeup_params);
 		return false;
 	}
@@ -1724,9 +1663,12 @@ out:
 }
 
 /******************************************************************************/
+static int64_t								incremental_TARGET_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
+static int64_t								incremental_TARGET_updates_consumer_offset_commitetd_by_toma = RD_KAFKA_OFFSET_INVALID;
+
 static int incremental_TARGET_updates_consumer_init(bool is_full_init) {
 	const char topic_str_base[] = ".leader.incrementalTargetUpdates.1.0.0";
-	char group_id_str[32];	// All leaders commit/store/consume using the same group_id
+	char group_id_str[24];	// All leaders commit/store/consume using the same group_id
 	const struct key_val_strs k_conf_kv[] = {
 		K_DEFAULT_CONSUMER_CONFIG, {"client.id", "" /* Overriden with machine name */ }
 	};
@@ -1741,6 +1683,8 @@ static int incremental_TARGET_updates_consumer_init(bool is_full_init) {
 	if (is_full_init) {
 		last_sent_to_toma_targets_updates_seq_no = -1;
 		k->consumer_offset = RD_KAFKA_OFFSET_INVALID;
+		incremental_TARGET_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
+		incremental_TARGET_updates_consumer_offset_commitetd_by_toma = RD_KAFKA_OFFSET_INVALID;
 	} else {
 		if (is_RD_KAFKA_OFFSET_VALID(k->consumer_offset)) {
 			// Reinit requested_incremental_VOL_updates_consumer_offset only if we succeeded to read a message from the topic
@@ -1749,7 +1693,7 @@ static int incremental_TARGET_updates_consumer_init(bool is_full_init) {
 		}
 		requested_incremental_TARGET_updates_consumer_seq_no = last_sent_to_toma_targets_updates_seq_no;
 	}
-	snprintf(group_id_str, sizeof(group_id_str), "LEADER_%ld", kafka_mgmt_zone_number);			// Dont change it! Mgmt relies on it to remove old produced messages
+	snprintf(group_id_str, sizeof(group_id_str), "LEADER_%ld", kafka_mgmt_zone_number);
 	generate_topic_name_using_zone(k->topic_name, sizeof(k->topic_name), topic_str_base, 0);
 	k_conf = alloc_and_init_kafka_conf(k_conf_kv, ARRAY_SIZE(k_conf_kv), group_id_str, NULL);
 	k->consumer = __create_kafka_new_obj(RD_KAFKA_CONSUMER, &k_conf, k->topic_name, NULL);
@@ -1790,7 +1734,7 @@ static int incremental_TARGET_updates_consume(void) {
 		rv = -1;
 	} else {
 		struct name_and_uuid_params_ctx *data = NNVMEIBT_BM_CALLOC(bxhs83j, sizeof(*data));
-		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_CALLOC(c6shnse, sizeof(*wakeup_params));		// Only add/delete_target are done one-by-one, and need to wait for the leader to commit the change with the majority
+		struct kafka_wakeup_params *wakeup_params = NNVMEIBT_BM_ALLOC(c6shnse, sizeof(*wakeup_params));		// Only add/delete_target are done one-by-one, and need to wait for the leader to commit the change with the majority
 		rv = parse_name_and_uuid(json_tree_root, data);
 		wakeup_params->messageType_params = msg_param;
 		wakeup_params->event_type = k_event;
@@ -1838,15 +1782,16 @@ void send_keepalive_msgs_as_needed(void)
 	static struct timespec		last_leader_keepalive_ts = TIMESPEC_ZERO;
 	static struct timespec		now;
 	static struct nvmeibt_Str	*json_payload = NULL;
+	char 						unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
 
 	if (!json_payload) {
 		json_payload = NNVMEIBT_STR_ALLOC(4vc7usk);
 	}
-	getnstimeofday_boot(&now);
+	getnstimeofday(&now);
 	// Follower (node) keepalive
 	if (now.tv_sec - last_follower_keepalive_ts.tv_sec > nvmeibt_follower_keep_alive_secs) {
-		char unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
-		snprintf(unique_key, sizeof(unique_key), "%s.TOMA.keepalive", nvmeibt_get_my_hostname());		// Exact key format agreed with Mgmt-Team. Dont touch!
+		nvmeibt_strlcpy(unique_key, "keep_alive_follower-", sizeof(unique_key));
+		nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_get_my_hostname(), sizeof(unique_key) - strlen(unique_key));
 		nvmeibt_Str_reuse(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT
 							"\"keepaliveInterval\": %lld, "
@@ -1859,13 +1804,13 @@ void send_keepalive_msgs_as_needed(void)
 		rebuild_stats_to_json(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "}}");
 		N_Tf(jsghw7b, "Sending follower keep_alive to management, seconds from last update=@LLD msg=@STR", now.tv_sec - last_follower_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
-		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE);
+		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 		last_follower_keepalive_ts = now;
 	}
 	// Leader keepalive
 	if (nvmeibt_raft_is_leader_ever_committed_by_majority() && ((now.tv_sec - last_leader_keepalive_ts.tv_sec) > (long)nvmeibt_leader_keep_alive_secs) && nvmeibt_raft_is_leader()) {
-		char unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
-		snprintf(unique_key, sizeof(unique_key), "%s.TOMA.leaderKeepalive", nvmeibt_get_my_hostname());		// Exact key format agreed with Mgmt-Team. Dont touch!
+		nvmeibt_strlcpy(unique_key, "keep_alive_leader", sizeof(unique_key));
+		nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_get_my_hostname(), sizeof(unique_key) - strlen(unique_key));
 		nvmeibt_Str_reuse(json_payload);
 		nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT_L
 							"\"keepaliveInterval\": %lld, \"payload\": {\"raftTerm\": %lld, \"zone\": \"%ld\", \"featureCompatibilityVersion\": \"%ld\", \"tomaSoftwareVersion\": \"%ld\", \"version\": \"%s\", \"buildNumber\": \"%s\"}}",
@@ -1873,7 +1818,7 @@ void send_keepalive_msgs_as_needed(void)
 							nvmeibt_leader_keep_alive_secs, nvmeibt_raft_get_current_term(),
 							kafka_mgmt_zone_number, nvmeibt_raft_get_guaranteed_sw_ver() >> 16, nvmeibt_raft_get_guaranteed_sw_ver() & 0xFFFF, BUILD_VERSION_FOR_MGMT, BUILD_NUMBER_FOR_MGMT);
 		N_Tf(fbdsiuh, "Sending leader keep_alive to management, seconds from last update=@LLD msg=@STR", now.tv_sec - last_follower_keepalive_ts.tv_sec, nvmeibt_Str_str(json_payload));
-		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_KEEPALIVE);
+		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 		last_leader_keepalive_ts = now;
 	}
 }
@@ -1891,7 +1836,7 @@ void nvmeibt_kafka_req_stop_consuming_leader_TARGET_msgs(void) {
 void nvmeibt_kafka_req_start_consuming_leader_VOL_msgs(int64_t kafka_offset_VOL, unsigned long long raft_term)
 {
 	// TOMA request runs in the TOMA thread, and only marks for the kafka thread
-	N_Tf(trvgh9x, "@KAFKA_OFST, raft_term=@LLX", kafka_offset_VOL, raft_term);
+	N_Tf(trvgh9x, "k_offset=@LD  raft_term=@LLX", purify_offset(kafka_offset_VOL), raft_term);
 	pthread_mutex_lock(&(kafka_toma_requested_term_and_offset_mutex));
 	requested_incremental_VOL_updates_consumer_offset = kafka_offset_VOL;
 	kafka_requested_consuming_leader_VOL_msgs_raft_term = raft_term;
@@ -1901,7 +1846,7 @@ void nvmeibt_kafka_req_start_consuming_leader_VOL_msgs(int64_t kafka_offset_VOL,
 void nvmeibt_kafka_req_start_consuming_leader_TARGET_msgs(int64_t kafka_offset_TARGET, int64_t seq_no_TARGET, unsigned long long raft_term)
 {
 	// TOMA request runs in the TOMA thread, and only marks for the kafka thread
-	N_Tf(usmek2l, "@KAFKA_OFST, raft_term=@LLX", kafka_offset_TARGET, raft_term);
+	N_Tf(usmek2l, "k_offset=@LD raft_term=@LLX", purify_offset(kafka_offset_TARGET), raft_term);
 	pthread_mutex_lock(&(kafka_toma_requested_term_and_offset_mutex));
 	requested_incremental_TARGET_updates_consumer_offset = kafka_offset_TARGET;
 	requested_incremental_TARGET_updates_consumer_seq_no = seq_no_TARGET;
@@ -1937,7 +1882,7 @@ static void fix_start_offset_if_topic_was_reset(int64_t *offset, int8_t topic_ch
 	}
 
 	topic_change_no_from_offset = get_topic_change_no_from_offset(*offset);
-	N_Tf(nchfi42, "in_@KAFKA_OFST topic_change_no_from_v_3_3_persistence=@INT8_TX", *offset, topic_change_no_from_v_3_3_persistence);
+	N_Tf(nchfi42, "in_offset=@INT64_TX topic_change_no_from_v_3_3_persistence=@INT8_TX", *offset, topic_change_no_from_v_3_3_persistence);
 	if (topic_change_no_from_offset == KAFKA_TOPIC_CHANGE_NO)
 		return;
 
@@ -1970,10 +1915,10 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 	// raft_term changed. We need to either stop consuming leader msgs or start from scratch
 	// Get all the related values
 	pthread_mutex_lock(&(kafka_toma_requested_term_and_offset_mutex));
-	sampled_req_VOL_raft_term =    kafka_requested_consuming_leader_VOL_msgs_raft_term;
+	sampled_req_VOL_raft_term = kafka_requested_consuming_leader_VOL_msgs_raft_term;
 	sampled_req_TARGET_raft_term = kafka_requested_consuming_leader_TARGET_msgs_raft_term;
-	sampled_req_offset_VOL =       requested_incremental_VOL_updates_consumer_offset;
-	sampled_req_offset_TARGET =    requested_incremental_TARGET_updates_consumer_offset;
+	sampled_req_offset_VOL = requested_incremental_VOL_updates_consumer_offset;
+	sampled_req_offset_TARGET = requested_incremental_TARGET_updates_consumer_offset;
 	nvmeibt_kafka_set_last_sent_to_toma_targets_updates_seq_no(requested_incremental_TARGET_updates_consumer_seq_no);
 	pthread_mutex_unlock(&(kafka_toma_requested_term_and_offset_mutex));
 	//
@@ -1983,15 +1928,20 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 		} else if (sampled_req_VOL_raft_term > 0) {
 			struct t_consumer_impl *k = &k_incremental_VOL_updates;
 			if (!is_RD_KAFKA_OFFSET_VALID(sampled_req_offset_VOL)) {
-				N_Ef(ggy1218, "Invalid VOL_@KAFKA_OFST", sampled_req_offset_VOL);
+				N_Ef(ggy1218, "Invalid VOL offset=@LD", purify_offset(sampled_req_offset_VOL));
 				nvmeibt_abort(ES_FATAL);
 			}
 			N_Tf(6visumr, "starting VOL consumption with raft_term=@LLX", sampled_req_VOL_raft_term);
 			kafka_applied_consuming_leader_VOL_msgs_raft_term = sampled_req_VOL_raft_term;
+			//k->consumer_offset = sampled_req_offset_VOL;
+			//
+			incremental_VOL_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 			k->offset_committed = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, follower_committed);
+			//
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_VOL,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->kafka_mgmt_config_ctx)));
-			k_err = __consumer_assign_partition_and_offset(k, sampled_req_offset_VOL);
+			k_err = __consumer_assign_partition_and_offset(k, purify_offset(sampled_req_offset_VOL));
+			N_Tf(evweyha, "rd_kafka_assign(VOL_updates_consumer_offset=@LD)", purify_offset(sampled_req_offset_VOL));
 			if (k_err) {
 				N_Wf(cvn4do8, "Failed rd_kafka_assign err='@STR'", rd_kafka_err2str(k_err));
 				rv = -1;
@@ -2004,17 +1954,22 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 		} else if (sampled_req_TARGET_raft_term > 0) {
 			struct t_consumer_impl *k = &k_incremental_TARGET_updates;
 			if (!is_RD_KAFKA_OFFSET_VALID(sampled_req_offset_TARGET)) {
-				N_Ef(ggy1214, "Invalid TARGET, @KAFKA_OFST", sampled_req_offset_TARGET);
+				N_Ef(ggy1214, "Invalid TARGET offset=@LD", purify_offset(sampled_req_offset_TARGET));
 				nvmeibt_abort(ES_FATAL);
 			}
 			N_Tf(yvbo3le, "starting TARGET consumption with raft_term=@LLX", sampled_req_TARGET_raft_term);
 			kafka_raft_members_sorted_msgs_queue_init();
 			kafka_applied_consuming_leader_TARGET_msgs_raft_term = sampled_req_TARGET_raft_term;
+			// k->consumer_offset = sampled_req_offset_TARGET;
+			//
+			incremental_TARGET_updates_consumer_offset_submitted_to_toma = RD_KAFKA_OFFSET_INVALID;
 			k->offset_committed = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, follower_committed);
+			//
 			NVMEIBT_KAFKA_SET_LEADER_KAFKA_OFFSET_BLOCKING_INCREMENTAL_TARGET_UPDATES(rygba82, nvmeibt_offset_and_idx_uninitialized);	// A new leader starts from committed and is not in the middle of adding a target node to raft
 			fix_start_offset_if_topic_was_reset(&sampled_req_offset_TARGET,
 												nvmeibt_tlv_get_v_3_3_kafka_topic_change_no(&(nvmeibt_raft_get_my_raft()->follower_to_commit_persist_and_wire_buf_full->raft_members_ctx)));
-			k_err = __consumer_assign_partition_and_offset(k, sampled_req_offset_TARGET);
+			k_err = __consumer_assign_partition_and_offset(k, purify_offset(sampled_req_offset_TARGET));
+			N_Tf(psiwjrn, "rd_kafka_assign(TARGET_updates_consumer_offset=@INT64_TD)", purify_offset(sampled_req_offset_TARGET));
 			if (k_err) {
 				N_Wf(vybsi4l, "Failed rd_kafka_assign err='@STR'", rd_kafka_err2str(k_err));
 				rv = -1;
@@ -2026,56 +1981,40 @@ static int kafka_apply_consuming_leader_msgs_as_needed(void) {
 }
 
 static void kafka_poll_all_producers_in_order_to_get_their_cb(int timeout_ms) {
-	if (k_high_priority.msg_to_mgmt_producer) {
-		const int n_events_served = rd_kafka_poll(k_high_priority.msg_to_mgmt_producer, timeout_ms);
-		if (n_events_served > 0)													// Otherwise clutters the log
-			N_Tf(bse3kjb, "Poll k_high_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
-	}
-	if (k_low_priority.msg_to_mgmt_producer) {
-		const int n_events_served = rd_kafka_poll(k_low_priority.msg_to_mgmt_producer, timeout_ms);
-		if (n_events_served > 0)
-			N_Tf(uxjdn3k, "Poll k_low_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
-	}
-	if (k_keepalive.msg_to_mgmt_producer) {
-		const int n_events_served = rd_kafka_poll(k_keepalive.msg_to_mgmt_producer, timeout_ms);
-		if (n_events_served > 0)													// Otherwise clutters the log
-			N_Tf(bse3k8a, "Poll k_keepalive.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
+	if (kafka_applied_init_counter) {		// Poll all the producers. This is the way to trigger their CB
+		if (k_high_priority.msg_to_mgmt_producer) {
+			const int n_events_served = rd_kafka_poll(k_high_priority.msg_to_mgmt_producer, timeout_ms);
+			if (n_events_served > 0)													// Otherwise clutters the log
+				N_Tf(bse3kjb, "Poll k_high_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
+		}
+		if (k_low_priority.msg_to_mgmt_producer) {
+			const int n_events_served = rd_kafka_poll(k_low_priority.msg_to_mgmt_producer, timeout_ms);
+			if (n_events_served > 0)
+				N_Tf(uxjdn3k, "Poll k_low_priority.msg_to_mgmt_producer n_events_served=@INT", n_events_served);
+		}
 	}
 }
 
 static void kafka_commit_done_offsets_of_all_consumer_queues(void);
 static void kafka_close_all_blocking(void) {
-	int total_producer_wait_msec = 0;
-	bool did_force_purge = false;
 	NFIN;
+ _wait_loop:
 	kafka_commit_done_offsets_of_all_consumer_queues();	// Commit whatever we can (An optimization)
-	for (int msec = 100; atomic_read(&kafka_n_sends_in_the_air) > 0; msec++) {		// Do not close things when still in use, Linear backoff
-		const int max_ms_wait = min(msec, 1000);									// Limit polling at 1[hz]
-		N_Tf(__AUTOID__, "n_sends_in_the_air=@INT. Waiting @INT[msec]", atomic_read(&kafka_n_sends_in_the_air), max_ms_wait);
-		kafka_poll_all_producers_in_order_to_get_their_cb(max_ms_wait);
-		kafka_commit_done_offsets_of_all_consumer_queues();	// Commit whatever we can (An optimization)
-		total_producer_wait_msec += max_ms_wait;
-		if (!did_force_purge && (total_producer_wait_msec > 30*1000)) {	// After 30[sec] speed up shutdown by purging
-			N_Tf(__AUTOID__, "Force purging producers start");
-			producer_purge_inflight(&k_high_priority);
-			producer_purge_inflight(&k_low_priority);
-			producer_purge_inflight(&k_keepalive);
-			N_Tf(__AUTOID__, "Force purging producers end");
-			did_force_purge = true;
-		}
+	if (atomic_read(&kafka_n_sends_in_the_air) > 0) {	// Do not close things when still in use
+		N_Tf(jsnewij, "n_sends_in_the_air=@INT. Waiting.", atomic_read(&kafka_n_sends_in_the_air));
+		kafka_poll_all_producers_in_order_to_get_their_cb(10 /*msec*/);
+		goto _wait_loop;
 	}
-	N_Tf(5nduq93, "n_sends_in_the_air=0. Waited=@INT[sec], force_purge=@BOOL_YN, Closing.", (total_producer_wait_msec/1000), did_force_purge);
+	N_Tf(5nduq93, "n_sends_in_the_air=0. Closing.");
 	producer_close(&k_high_priority);
 	producer_close(&k_low_priority);
-	producer_close(&k_keepalive);
-	consumer_close(&k_incremental_VOL_updates);		// Takes session.timeout.ms 45[sec]. Consider doing the 4 in parallel (using rd_kafka_queue_new() anc rd_kafka_consumer_close_queue()
+	consumer_close(&k_incremental_VOL_updates);
 	consumer_close(&k_incremental_TARGET_updates);
 	consumer_close(&k_HW_full_config);
 	consumer_close(&k_CMD);
 	kafka_apply_stop_consuming_leader_VOL_msgs(0);  // Do not affect the requested_is_raft_leader. Turn off the applied_is_raft_leader and close everything
 	kafka_apply_stop_consuming_leader_TARGET_msgs(0);  // Do not affect the requested_is_raft_leader. Turn off the applied_is_raft_leader and close everything
-	if (rd_kafka_wait_destroyed(2000) != 0)	// Since destroy is async. We want a clean shutdown
-		N_Ef(__AUTOID__, "Failed wait for kafka destroy. May stuck on next kafka restart");
+	rd_kafka_wait_destroyed(2000);	// Since destroy is async. We want a clean shutdown
 	NFOUT;
 }
 
@@ -2089,8 +2028,7 @@ static int kafka_init(bool is_full_init) {
 		 (HW_full_config_consumer_init(is_full_init) < 0) ||
 		 (CMD_consumer_init(is_full_init) < 0) ||
 		 (high_priority_msg_to_mgmt_producer_init() < 0) ||
-		 (low_priority_msg_to_mgmt_producer_init() < 0) ||
-		 (keepalive_msg_to_mgmt_producer_init() < 0)) {
+		 (low_priority_msg_to_mgmt_producer_init() < 0)) {
 		rv = -1;
 	}
 	N_IMf(kamweuj, "k_heartbeat_interval_ms=@INT, k_client_id=@STR", k_heartbeat_interval_ms, nvmeibt_get_my_hostname());
@@ -2102,11 +2040,11 @@ static int kafka_commit_by_offset_async(struct t_consumer_impl *k, const int64_t
 	rd_kafka_resp_err_t rv = RD_KAFKA_RESP_ERR_NO_ERROR;
 	if (k->consumer) {
 		rd_kafka_topic_partition_list_t *offsets = rd_kafka_topic_partition_list_new(1);
-		N_Tf(76hd89e, KC_TYPE " committing_@KAFKA_OFST, last_read_msg_@KAFKA_OFST", k->type, offset, k->consumer_offset);
+		N_Tf(76hd89e, "@STR: Commiting k_offset=@LD", rd_kafka_name(k->consumer), purify_offset(offset));
 		rd_kafka_topic_partition_list_add(offsets, k->topic_name, k->consumer_partition);
 		offsets->elems[0].offset = purify_offset(offset) + 1;	// The API says "last_consumed(processed) + 1"
 		rv = rd_kafka_commit(k->consumer, offsets, 1 /*async*/);
-		NTOMA_ASSERT(mdvewks, rv == RD_KAFKA_RESP_ERR_NO_ERROR, KC_FULL_FMT " commit_@KAFKA_OFST rv=@INT '@STR'", KC_FULL_VAL(k), offsets->elems[0].offset, rv, rd_kafka_err2str(rv));
+		NTOMA_ASSERT(mdvewks, rv == RD_KAFKA_RESP_ERR_NO_ERROR, "@STR: rd_kafka_commit(@INT64) rv=@INT '@STR'", k->topic_name, offsets->elems[0].offset, rv, rd_kafka_err2str(rv));
 		rd_kafka_topic_partition_list_destroy(offsets);
 		k->offset_committed = offset;
 	}
@@ -2120,25 +2058,26 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 	// Some CMDs are handled immediately (updKeepaliveToken)
 	// Some CMDs are sent to TOMA, and handled by the TOMA thread.
 	// CMDs are not guaranteed to finish in-order by TOMA (One format might take longer than the other)
+	// We only commit if there are no CMDs awaiting_toma_processing
 	const int64_t CMD_kafka_offset_to_commit = k_CMD.consumer_offset;			// Might be ahead, but not committed because TOMA is still processing an older CMD
 	if (k_CMD.offset_committed != CMD_kafka_offset_to_commit) {
-		if (atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing) == 0) {  // Otherwise an older msg did not yet finish processing, We only commit if there are no CMDs awaiting_toma_processing
+		if (atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing) == 0) {  // Otherwise an older msg did not yet finish processing
 			kafka_commit_by_offset_async(&k_CMD, CMD_kafka_offset_to_commit);	// If nothing is processed by TOMA (and naturally all the immediate ones finished processing), we can commit the latest
 		} else {
-			N_Tf(bs7i2ja, "Skipping Commit_@KAFKA_OFST CMD_consumer_n_msgs_awaiting_toma_processing=@INT", CMD_kafka_offset_to_commit, atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing));
+			N_Tf(bs7i2ja, "Skipping Commit k_offset=@LD CMD_consumer_n_msgs_awaiting_toma_processing=@INT", purify_offset(CMD_kafka_offset_to_commit), atomic_read(&CMD_consumer_n_msgs_awaiting_toma_processing));
 		}
 	}
 	{ // All HW_full_config updated are handled by TOMA, (in order)
 		const int64_t offset_to_commit = HW_full_config_consumer_offset_committed_by_toma - 1;	// Commit all but the last one
-		if ((purify_offset(offset_to_commit) >= 0) && (offset_to_commit > k_HW_full_config.offset_committed))
+		if (purify_offset(offset_to_commit) >= 0 && (purify_offset(offset_to_commit) > purify_offset(k_HW_full_config.offset_committed)))
 			kafka_commit_by_offset_async(&k_HW_full_config, offset_to_commit);
 	}
-	if (is_consuming_leader_VOL_msgs()) {	// VOL updates are handled by toma (in order) (VOL), Keep alive Tokens are handled immediately by the kafka code
+	if (is_consuming_leader_VOL_msgs()) {
+		// VOL updates are handled by toma (in order) (VOL), Tokens are handled immediately by the kafka code
 		const int64_t offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(KAFKA_MGMT_CONFIG, leader_committed_by_majority);
-		if (incremental_VOL_updates_offset_to_commit < offset_to_commit)
-			incremental_VOL_updates_offset_to_commit = offset_to_commit;
-		if (incremental_VOL_updates_offset_to_commit > k_incremental_VOL_updates.offset_committed) {
-			kafka_commit_by_offset_async(&k_incremental_VOL_updates, incremental_VOL_updates_offset_to_commit);
+		if (purify_offset(offset_to_commit) > purify_offset(k_incremental_VOL_updates.offset_committed)) {
+			N_Tf(vnd8oel, "VOL: Commiting k_offset=@INT64_TD incremental_VOL_updates_consumer_offset_submitted_to_toma=@INT64_TD", purify_offset(offset_to_commit), purify_offset(incremental_VOL_updates_consumer_offset_submitted_to_toma));
+			kafka_commit_by_offset_async(&k_incremental_VOL_updates, offset_to_commit);
 		}
 	}
 	if (is_consuming_leader_TARGET_msgs()) {
@@ -2146,7 +2085,7 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 		// They might be handled out-of-order offset-wise, since we have a queue that reorders them according to seq-no
 		// - We only commit (the highest offset ever, already committed by the raft-majority) if the seq_no committed by the raft_majority is equal to the last one we submitted to toma, and the queue is empty
 		const int64_t offset_to_commit = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS, leader_committed_by_majority);	// If we decide to commit
-		if (offset_to_commit > k_incremental_TARGET_updates.offset_committed) {
+		if (purify_offset(offset_to_commit) > purify_offset(k_incremental_TARGET_updates.offset_committed)) {
 			const int64_t incremental_TARGET_update_seq_no_committed_by_raft_majority = RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_committed_by_majority);
 			if ((incremental_TARGET_update_seq_no_committed_by_raft_majority == last_sent_to_toma_targets_updates_seq_no) && XDLIST_EMPTY(&kafka_raft_members_sorted_msgs_queue)) {
 				kafka_commit_by_offset_async(&k_incremental_TARGET_updates, offset_to_commit);
@@ -2155,7 +2094,8 @@ static void kafka_commit_done_offsets_of_all_consumer_queues(void) {
 	}
 }
 
-static void *nvmeibt_kafka_main_thread(void *args __attribute__((__unused__))) {
+static void *nvmeibt_kafka_main_thread(void *args __attribute__((__unused__)))
+{
 	unsigned long long		nsec_sleep_when_producer_msgs_in_the_air = MSEC_TO_NSEC(5);
 	unsigned long long		nsec_sleep_when_nothing_to_do = MSEC_TO_NSEC(10);
 	unsigned long long		nsec_sleep_when_CMD_awaiting_toma_processing = 100000;
@@ -2174,7 +2114,6 @@ static void *nvmeibt_kafka_main_thread(void *args __attribute__((__unused__))) {
 	nanosleep(&(struct timespec){0, 100}, NULL);
 	while (1) {
 		N_Df(8sh34bh, "Loop start");
-		getnstimeofday_boot(&(nvmeibt_global_get_global()->kafka_last_activity_time));
 		if (is_consume_skipped_due_to_awaiting_toma_processing) {
 			n_is_consume_skipped_due_to_awaiting_toma_processing++;
 		} else {
@@ -2352,35 +2291,16 @@ out:
 	NFOUT;
 }
 
-static bool __is_compatible_kafka_version(void)
-{
-	const unsigned int v = rd_kafka_version();
-	const char *err_msg = NULL;
-	     if ((v & 0xff) != 0xff) err_msg = "Unstable pre-release";
-	else if (v < 0x1060200)		 err_msg = "Too old, Unsupported";
-	else if (v < 0x20102ff)		 err_msg = "Old Unrecommended";
-	else if (v > 0x20600ff)		 err_msg = "Too new, never tested";
-	if (err_msg) {
-		N_Ef(__AUTOID__, "Wrong librdkafka version=@X, @STR! @STR", v, rd_kafka_version_str(), err_msg);
-		return false;
-	}
-	return true;
-}
-
 int nvmeibt_kafka_launch(void) {
 	int						rv = 0;
-	int						pt_err;
 	pthread_t kafka_maintenance_thread_tid;
 	NFIN;
 	//nvmeibt_kafka_upd_from_nvmesh_conf();	// No need, was already called by nvmeibt_toma_init(), we did not reread nvmesh conf since then
-	__is_compatible_kafka_version();		// Upon failure, do nothing. Attempt to work, maybe everything will be fine
 	// Launch the nvmeibt_kafka_maintenance_thread (consumer & trigger callbacks)
-	getnstimeofday_boot(&(nvmeibt_global_get_global()->kafka_last_activity_time));
-	pt_err = pthread_create(&kafka_maintenance_thread_tid, NULL, nvmeibt_kafka_main_thread, NULL);
-	if (pt_err == 0) {
+	if (pthread_create(&kafka_maintenance_thread_tid, NULL, nvmeibt_kafka_main_thread, NULL) == 0) {
 		pthread_setname_np(kafka_maintenance_thread_tid, "kafka_main");
 	} else {
-		N_Ef(4aikrbw, "failed to launch the nvmeibt_kafka_maintenance_thread err=@INT (@STR)", pt_err, strerror(pt_err));
+		N_Ef(4aikrbw, "failed to launch the nvmeibt_kafka_maintenance_thread (@AUTO_ERRNO)");
 		rv = -1;
 	}
 	NFOUT;
@@ -2409,7 +2329,7 @@ static void toma_incremental_vol_update_handler(struct mm_mgmt_conf *mgmt_conf, 
 {
 	NFIN;
 	if (!nvmeibt_raft_is_leader()) {
-		N_Tf(sk4i2nw, "Not a leader, probably an old msg. Skipping event=@STR @KAFKA_OFST", kafka_event_type_str(event_type), kafka_offset);
+		N_Tf(sk4i2nw, "Not a leader, probably an old msg. Skipping");
 		goto out;
 	}
 	if (event_type == KAFKA_EVENT_TYPE_VOL_ADD || event_type == KAFKA_EVENT_TYPE_VOL_UPD) {
@@ -2441,7 +2361,7 @@ out:
 
 static int toma_incremental_target_update_handler(struct name_and_uuid_params_ctx *add_del_member_params, enum KAFKA_EVENT_TYPE event_type, int64_t kafka_offset) {
 	if (!nvmeibt_raft_is_leader() && (event_type != KAFKA_EVENT_TYPE_TARGET_ADD)) {
-		N_Tf(tvajhwi, "Not a leader, probably an old msg. Skipping_@KAFKA_OFST", kafka_offset);
+		N_Tf(tvajhwi, "Not a leader, probably an old msg. Skipping. k_offset=@INT64_TD", purify_offset(kafka_offset));
 		return 0;
 	}
 	if (add_del_member_params->targets_updates_sequence <= RAFT_COMMIT_LIFECYCLE_VAL(RAFT_MEMBERS_SEQ_NO, leader_calculated)) {
@@ -2472,9 +2392,8 @@ static int toma_HW_full_config_handler(struct HW_mgmt_conf **conf_ptr, int64_t k
 	static int64_t			max_configurationVersion = -1;	// The max we have seen in this instance of TOMA
 	NFIN;
 	if (conf->configurationVersion <= max_configurationVersion) {
-		N_Tf(fniz6q3, "Received configurationVersion=@INT64_TD prev max_configurationVersion=@INT64_TD", conf->configurationVersion, max_configurationVersion);
+		N_Wf(fniz6q3, "Received configurationVersion=@INT64_TD prev max_configurationVersion=@INT64_TD", conf->configurationVersion, max_configurationVersion);
 		if (conf->configurationVersion < max_configurationVersion) {
-			N_Wf(vgfu28i, "Received configurationVersion=@INT64_TD prev max_configurationVersion=@INT64_TD", conf->configurationVersion, max_configurationVersion);
 			rv = -1;
 			goto out;
 		} else {
@@ -2502,16 +2421,17 @@ static int toma_HW_full_config_handler(struct HW_mgmt_conf **conf_ptr, int64_t k
 		TODO(nvmeibt_dumper_event_mgmt_config());
 	}
 out:
-	mark_HW_full_config_k_msg_for_kafka_commit(kafka_offset, (conf->configurationVersion >= max_configurationVersion));    // GOOD/BAD config. We do not want to reread. Possibly not commit
+	mark_HW_full_config_k_msg_for_kafka_commit(kafka_offset, 1, (conf->configurationVersion >= max_configurationVersion));    // GOOD/BAD config. We do not want to reread. Possibly not commit
 	max_configurationVersion = max(max_configurationVersion, conf->configurationVersion);
 	NFOUT;
 	return rv;
 }
 
-void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name, const struct nvmeibt_urn_uuid *vol_uuid,
+void nvmeibt_kafka_send_encrypt_cmd_response(char *vol_name, struct nvmeibt_urn_uuid *vol_uuid,
 											 int encrypt_idx, enum ENCRYPT_CMD_RESPONSE error_code,
-											 bool is_retryable, const char *error_str) {
+											 bool is_retryable, char *error_str) {
 	static struct nvmeibt_Str				*json_payload = NULL;
+	char									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "Encript_res_";
 	if (!json_payload)
 		json_payload = NNVMEIBT_STR_ALLOC(i877ud3);
 	nvmeibt_Str_reuse(json_payload);
@@ -2520,52 +2440,58 @@ void nvmeibt_kafka_send_encrypt_cmd_response(const char *vol_name, const struct 
 			KAFKA_PRODUCER_MSG_HEADER_VAR("encryptionCommandResponse", 1),
 			vol_name, vol_uuid->str,
 			encrypt_idx, error_code, is_retryable ? "true" : "false", error_str);
-	//char unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "Encript_res_";
-	//nvmeibt_strlcpy(unique_key + strlen(unique_key), vol_uuid->str, sizeof(unique_key) - strlen(unique_key));
-	nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*unique_key*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+	nvmeibt_strlcpy(unique_key + strlen(unique_key), vol_uuid->str, sizeof(unique_key) - strlen(unique_key));
+	nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 }
 
 static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
-								 const char *encrypt_cmd, const char *encrypt_args, const char *old_passphrase, const char *new_passphrase, int64_t kafka_offset)
+								 char *encrypt_cmd, char *encrypt_args, char *old_passphrase, char *new_passphrase, int64_t kafka_offset)
 {
 	union nvmeib_uuid					*vol_uuid = &CMD_params->volumeUUID;
-	int									encrypt_idx = CMD_params->enc.commandIndex;
+	int									encrypt_idx = CMD_params->encryptionCommandIndex;
 	struct nvmeibt_block_device			*vol;
 	struct nvmeibt_encrypt_params		*encrypt_params = NULL;
 	bool								rv = 1;
+	struct nvmeibt_urn_uuid				urn_uuid;
 	char								shadow_vol_name[32];
 	int									n_written;
 
 	NFIN;
 	N_Tf(nzzxgt6, "cmd='@STR', args='@STR'", encrypt_cmd, encrypt_args);
 	if (CMD_params->bootTime != nvmeibt_global_get_startup_timestamp_msec()) {
-		const struct nvmeibt_urn_uuid urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
-		nvmeibt_kafka_send_encrypt_cmd_response("", &urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_MANUAL_ACTION_NEEDED, 1, "Boot time mismatch");
+		urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
+		nvmeibt_kafka_send_encrypt_cmd_response("", &urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_MANUAL_ACTION_NEEDED, 1, "Boot time mismatch");
 		goto out;
 	}
 	vol = nvmeibt_block_device_get_block_device_by_id(vol_uuid);
 	if (!vol) {
-		const struct nvmeibt_urn_uuid urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
-		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
+		urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
+		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
 		goto out;
 	}
 	if (encrypt_idx <= vol->encrypt_idx) {
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Old or duplicate command");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Old or duplicate command");
 		goto out;
 	}
 	if (vol->encrypt_params) {
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Prev command didn't complete");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Prev command didn't complete");
 		goto out;
 	}
 	if (NVMEIBT_HASH_IS_OBJ_MARKED_OUTDATED(vol)) {
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume already deleted");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume already deleted");
 		goto out;
 	}
 	//
 	n_written = snprintf(shadow_vol_name, sizeof(shadow_vol_name), "e_%s", vol->from_config.client_blkdev_name);
 	if (n_written >= (int)sizeof(shadow_vol_name)) {
 		N_Ef(cbs7uuj2, "vol_name='@STR' is too long", vol->from_config.client_blkdev_name);
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume name is too long");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume name is too long");
 		goto out;
 	}
 	//
@@ -2593,15 +2519,8 @@ static bool start_encrypt_action(struct generic_CMD_params_ctx *CMD_params,
 				 "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s %.256s",
 				 encrypt_args, encrypt_params->old_passphrase_file_name, shadow_vol_name, encrypt_params->new_passphrase_file_name);
 	} else {
-		const char *key_path = (old_passphrase[0] ? encrypt_params->old_passphrase_file_name : encrypt_params->new_passphrase_file_name);
-		#define CRYPT_SETUP_CMD "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s"
-		snprintf(encrypt_params->exec_ctx.executable_str, sizeof(encrypt_params->exec_ctx.executable_str),
-			#if 1
-				CRYPT_SETUP_CMD,
-			#else					// Enable to run with strace, need to remember clean up tohose files, as each one is ~0.5[mb]
-				"strace -o /tmp/out_%s " CRYPT_SETUP_CMD, shadow_vol_name,
-			#endif
-				encrypt_args, key_path, shadow_vol_name);
+		snprintf(encrypt_params->exec_ctx.executable_str, sizeof(encrypt_params->exec_ctx.executable_str), "cryptsetup %s --key-file=%.256s /dev/nvmesh/%s",
+				 encrypt_args, (old_passphrase[0] ? encrypt_params->old_passphrase_file_name : encrypt_params->new_passphrase_file_name), shadow_vol_name);
 	}
 	nvmeibt_attach_vol_for_encryption(vol, shadow_vol_name, encrypt_params);
 	rv = 0;
@@ -2614,69 +2533,79 @@ out:
 	return rv;
 }
 
-static bool encrypt_command_request_response(struct generic_CMD_params_ctx *CMD_params) {
+static bool encrypt_command_request_response(struct generic_CMD_params_ctx *CMD_params)
+{
 	union nvmeib_uuid					*vol_uuid = &CMD_params->volumeUUID;
-	int									encrypt_idx = CMD_params->enc.commandIndex;
+	int									encrypt_idx = CMD_params->encryptionCommandIndex;
 	struct nvmeibt_block_device			*vol;
+	struct nvmeibt_urn_uuid				urn_uuid;
+
 	NFIN;
 	vol = nvmeibt_block_device_get_block_device_by_id(vol_uuid);
 	if (!vol) {
-		const struct nvmeibt_urn_uuid urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
-		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
-	} else if (vol->encrypt_idx == NVMEIBT_BLOCK_DEVICE_UNINITIALIZED_ENCRYPT_IDX) {
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_MANUAL_ACTION_NEEDED, 0, "Vol index is uninitialized");
+		urn_uuid = nvmeibt_union_uuid_to_urn_uuid(vol_uuid);
+		nvmeibt_kafka_send_encrypt_cmd_response("Not_found", &urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_TOMA_ERR, 0, "Volume doesn't exist");
+		goto out;
+	}
+	if (vol->encrypt_idx == NVMEIBT_BLOCK_DEVICE_UNINITIALIZED_ENCRYPT_IDX) {
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_MANUAL_ACTION_NEEDED, 0, "Vol index is uninitialized");
 	} else if (encrypt_idx > vol->encrypt_idx) {
 		vol->encrypt_idx = encrypt_idx; // Ignore all commands with less encrypt_idx
-		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid, encrypt_idx, ENCRYPT_CMD_RESPONSE_UNSEEN, 1, "Index has never been seen");
+		nvmeibt_kafka_send_encrypt_cmd_response(vol->from_config.client_blkdev_name, &vol->urn_uuid,
+												encrypt_idx, ENCRYPT_CMD_RESPONSE_UNSEEN, 1, "Index has never been seen");
 	}
+
+out:
 	NFOUT;
 	return 1;
 }
 
 static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t kafka_offset, struct messageType_params_ctx *messageType_params)
-{	// Called by TOMA's main thread from wakeup to process cmds 1 by 1
+{
 	int				i;
 	bool			commit_now = 1;
 	char			encrypt_args[MAX_EXEC_WITH_ARGS_STR_LEN];
 
 	NFIN;
-	if (strncmp(messageType_params->messageType, "formatDrive", 11) == 0) {
-		const struct format_disk_cmd_t *fmt = &CMD_params->fmt;
-		wakeup_format_event(&fmt->ldisk_id, fmt->vendor, CMD_params->generic_uuid, fmt->blockSize,
-							fmt->metadataSize, fmt->formatRequestCounter, CMD_params->bootTime, &(CMD_params->dbUUID),
-							&fmt->native_serial, fmt->nsid, fmt->native_nguid);
+	if (strcmp(messageType_params->messageType, "formatDrive") == 0) {
+		wakeup_format_event(&(CMD_params->ldisk_id), CMD_params->vendor, CMD_params->generic_uuid, CMD_params->blockSize,
+							CMD_params->metadataSize, CMD_params->formatRequestCounter, CMD_params->bootTime, &(CMD_params->dbUUID),
+							&(CMD_params->native_serial), CMD_params->nsid, CMD_params->native_nguid);
 		TODO(Make sure that when this is done, the format will go all the way even if we boot, and there is no need for resend of format CMD by MGMT);
 	} else if (strcmp(messageType_params->messageType, "reservationModeChange") == 0) {
 		nvmeibt_block_device_reservation_mode_change(&CMD_params->volumeUUID, CMD_params->reservationVersion);
 	} else if (strcmp(messageType_params->messageType, "resendReport") == 0) {
-		for (i = 0; i < CMD_params->report_disks.num; i++) {
-			struct resend_report_disk_ctx	*dsk = &(CMD_params->report_disks.arr[i]);
+		for (i = 0; i < CMD_params->n_disks_to_report; i++) {
+			struct resend_report_disk_ctx	*dsk = &(CMD_params->disks_to_report[i]);
 			nvmeibt_local_disk_mark_is_specific_disk_report_req(dsk->ldiskID, dsk->reappearingCounter);
 		}
 	} else if (strcmp(messageType_params->messageType, "initEncryption") == 0) {
 		// since cryptsetup did not autodetect sector size in versions <2.5.0 we force it to 4096, note the block autodetection is enable in 2.5.0 and later.
 		#define LUKS_ARGS "--verbose --force-password --pbkdf-force-iterations 1000 --pbkdf-memory 100 --pbkdf-parallel 1"
-		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksFormat --sector-size=4096 " LUKS_ARGS " --key-slot=%d --key-size=%d", CMD_params->enc.slot, CMD_params->enc.keySize);
-		commit_now = start_encrypt_action(CMD_params, "init_enc", encrypt_args, "", CMD_params->enc.passphrase, kafka_offset);
+		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksFormat --sector-size=4096 " LUKS_ARGS " --key-slot=%d --key-size=%d", CMD_params->slot, CMD_params->keySize);
+		commit_now = start_encrypt_action(CMD_params, "init_enc", encrypt_args, "", CMD_params->passphrase, kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "rotatePassphrase") == 0) {
-		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksChangeKey " LUKS_ARGS " --key-slot=%d", CMD_params->enc.slot);
-		commit_now = start_encrypt_action(CMD_params, "rotate_pass", encrypt_args, CMD_params->enc.passphrase, CMD_params->enc.newPassphrase, kafka_offset);
+		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksChangeKey " LUKS_ARGS " --key-slot=%d", CMD_params->slot);
+		commit_now = start_encrypt_action(CMD_params, "rotate_pass", encrypt_args, CMD_params->passphrase, CMD_params->newPassphrase, kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "deletePassphrase") == 0) {
 		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksRemoveKey --verbose");
-		commit_now = start_encrypt_action(CMD_params, "del_pass", encrypt_args, CMD_params->enc.passphrase, "", kafka_offset);
+		commit_now = start_encrypt_action(CMD_params, "del_pass", encrypt_args, CMD_params->passphrase, "", kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "addPassphrase") == 0) {
-		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksAddKey " LUKS_ARGS " --key-slot=%d", CMD_params->enc.slot);
-		commit_now = start_encrypt_action(CMD_params, "add_pass", encrypt_args, CMD_params->enc.passphrase, CMD_params->enc.newPassphrase, kafka_offset);
+		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "luksAddKey " LUKS_ARGS " --key-slot=%d", CMD_params->slot);
+		commit_now = start_encrypt_action(CMD_params, "add_pass", encrypt_args, CMD_params->passphrase, CMD_params->newPassphrase, kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "testPassphrase") == 0) {
 		snprintf(encrypt_args, MAX_EXEC_WITH_ARGS_STR_LEN, "open --verbose --test-passphrase /dev/nvmesh/d_<vol_name>");
-		commit_now = start_encrypt_action(CMD_params, "test_pass", encrypt_args, CMD_params->enc.passphrase, "", kafka_offset);
+		commit_now = start_encrypt_action(CMD_params, "test_pass", encrypt_args, CMD_params->passphrase, "", kafka_offset);
 	} else if (strcmp(messageType_params->messageType, "encryptionRequestResponse") == 0) {
 		commit_now = encrypt_command_request_response(CMD_params);
 	} else if (strcmp(messageType_params->messageType, "sendPRaidReport") == 0) {
 		N_Ef(rbasdrf78fh2, "******************** Need to send a pRAID report for a specific pRAID");
-		for (i = 0; i < CMD_params->report_praids.num; i++) {
-			const struct send_praid_report_ctx *r = &(CMD_params->report_praids.arr[i]);
-			N_Ef(stamvuk, "uuid=@STR <@INT,@INT,@LU>", r->praid_uuid, r->lastKnownVersion_major, r->lastKnownVersion_minor, r->lastKnownVersion_raft_term);
+		for (i = 0; i < CMD_params->n_praids_to_report; i++) {
+			struct send_praid_report_ctx	*prd = &(CMD_params->praids_to_report[i]);
+			N_Ef(stamvuk, "uuid=@STR lastKnownVersion_major=@INT lastKnownVersion_minor=@INT lastKnownVersion_raft_term=@LU",
+				 prd->praid_uuid, prd->lastKnownVersion_major, prd->lastKnownVersion_minor, prd->lastKnownVersion_raft_term);
 		}
 	} else if (strcmp(messageType_params->messageType, "--- shutdown_me ---") == 0) {
 		N_Ef(p53ksmnz753bh, "******************** Use handle_update_state_shutdown() in the commands consumer");
@@ -2690,6 +2619,7 @@ static void toma_CMD_handler(struct generic_CMD_params_ctx *CMD_params, int64_t 
 	} else {
 		N_Ef(rvzqi2m, "Unsupported messageType='@STR'", messageType_params->messageType);
 	}
+	// All other CMDs, are handled by TOMA's main thread from wakeup. They receive the parsed json tree
 	if (commit_now)
 		mark_CMD_k_msg_for_kafka_commit(kafka_offset, 1);
 	NFOUT;
@@ -2701,7 +2631,8 @@ static inline bool is_event_type_incremental(enum KAFKA_EVENT_TYPE event_type)
 			event_type == KAFKA_EVENT_TYPE_TARGET_ADD || event_type == KAFKA_EVENT_TYPE_TARGET_DEL);
 }
 
-void nvmeibt_kafka_toma_wakeup_dispatcher(struct kafka_wakeup_params *wakeup_params) {
+void nvmeibt_kafka_toma_wakeup_dispatcher(struct kafka_wakeup_params *wakeup_params)
+{
 	NFIN;
 	if (	(is_event_type_incremental(wakeup_params->event_type) &&
 			 (wakeup_params->kafka_raft_term_when_started_consuming_leader_msgs != nvmeibt_raft_get_current_term()) &&
@@ -2738,16 +2669,34 @@ void nvmeibt_kafka_toma_wakeup_dispatcher(struct kafka_wakeup_params *wakeup_par
 		break;
 	}
 out:
-	__wakeup_toma_params_free(wakeup_params); // Free it. Used or not
+	// Free it. Used or not
+	switch (wakeup_params->event_type) {
+	case KAFKA_EVENT_TYPE_UNKNOWN:
+		N_Ef(ycvbd92, "KAFKA_EVENT_TYPE_UNKNOWN");
+		break;
+	case KAFKA_EVENT_TYPE_HW_FULL_CONFIG:
+		HW_conf_free_tree((struct HW_mgmt_conf*)wakeup_params->event_data);
+		break;
+	case KAFKA_EVENT_TYPE_VOL_ADD:
+	case KAFKA_EVENT_TYPE_VOL_DEL:
+	case KAFKA_EVENT_TYPE_VOL_DEL_COMPLETED:
+	case KAFKA_EVENT_TYPE_VOL_UPD:
+		mm_conf_free_tree((struct mm_mgmt_conf *)wakeup_params->event_data);
+		break;
+	case KAFKA_EVENT_TYPE_TARGET_ADD:
+	case KAFKA_EVENT_TYPE_TARGET_DEL:
+	case KAFKA_EVENT_TYPE_CMD:
+		NNVMEIBT_BM_FREE(tbsi84l, wakeup_params->event_data);
+		break;
+	default:
+		N_Ef(vsh398a, "*******************************   FIX ME   ****************************** conf=@PTR", wakeup_params);
+		break;
+	}
+	NNVMEIBT_BM_FREE(2kzx0oe, wakeup_params);
 	NFOUT;
 }
 
-static void __print_kafka_consumer_info(const struct t_consumer_impl *k, char who, int (*fn)(void *ctx, const char *fmt, ...), void *ctx)
-{
-	(*fn)(ctx, "\t[%c]: commit=%ld, last_read=%ld\n", who, purify_offset(k->offset_committed), purify_offset(k->consumer_offset));
-}
-
-int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx) {
+int nvmeibt_raft_print_kafka_status(int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx) {
 	struct tm					timeinfo;
 	char						time_str[64];
 
@@ -2755,10 +2704,8 @@ int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...)
 	localtime_r(&kafka_last_restart_timestamp.tv_sec, &timeinfo);
 	strftime(time_str, sizeof(time_str), "%b %d %X ", &timeinfo);
 	(*printf_fn)(printf_ctx, "\n- - - - -   Kafka Stats   - - - - -\n");
-	(*printf_fn)(printf_ctx, "librdkafka version=0x%x, %s\n", rd_kafka_version(), rd_kafka_version_str());
-	//(*printf_fn)(printf_ctx,"\tbroker.version=%s\n", rd_kafka_conf_get((rd_kafka_t*)rk, "broker.version.fallback", NULL, NULL) ? "?" : "?");
 	(*printf_fn)(printf_ctx, "Last init at: %s\nparams:\n", time_str);
-	(*printf_fn)(printf_ctx, "\tmtls_ssl_enabled=%c\n\thost_verification_disabled=%c\n", bool_YN(kafka_mtls_ssl__is_enabled), bool_YN(kafka_mtls_ssl__is_hostname_verification_disabled));
+	(*printf_fn)(printf_ctx, "\tmtls_ssl_enabled=%c\nhost_verification_disabled=%c\n", bool_YN(kafka_mtls_ssl__is_enabled), bool_YN(kafka_mtls_ssl__is_hostname_verification_disabled));
 	if (kafka_mtls_ssl__is_enabled) {
 		(*printf_fn)(printf_ctx, "\tssl_cach_path=%*s\n", kafka_mtls_ssl__ca->str_len, kafka_mtls_ssl__ca->text_buf);
 		(*printf_fn)(printf_ctx, "\tssl_cert_path=%*s\n", kafka_mtls_ssl__toma_certificate->str_len, kafka_mtls_ssl__toma_certificate->text_buf);
@@ -2771,13 +2718,8 @@ int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...)
 	(*printf_fn)(printf_ctx, "full_init{applied=%d,init=%d}\nsoft_init{applied=%d,init=%d}\n", kafka_applied_init_counter, kafka_requested_init_counter, kafka_applied_init_preserve_state_vars_counter, kafka_requested_init_preserve_state_vars_counter);
 	if (kafka_bootstrap_servers_str_from_nvmesh_conf)
 		(*printf_fn)(printf_ctx, "\nservers=%*s\n", kafka_bootstrap_servers_str_from_nvmesh_conf->str_len, kafka_bootstrap_servers_str_from_nvmesh_conf->text_buf);
-	(*printf_fn)(printf_ctx, "KeepAlive Mgmt token={Leader=%ld, Follow=%ld}\n", kafka_leader_keepalive_token_provided_by_mgmt, kafka_follower_keepalive_token_provided_by_mgmt);
+	(*printf_fn)(printf_ctx, "KeepAlive Mgmt toke={Leader=%ld, Follow=%ld}\n", kafka_leader_keepalive_token_provided_by_mgmt, kafka_follower_keepalive_token_provided_by_mgmt);
 	(*printf_fn)(printf_ctx, "Leaders Raft-Term:\n\tVolume={req=%ld, apply=%ld}\n\tTarget={req=%ld, apply=%ld}\n", kafka_requested_consuming_leader_VOL_msgs_raft_term, kafka_applied_consuming_leader_VOL_msgs_raft_term, kafka_requested_consuming_leader_TARGET_msgs_raft_term, kafka_applied_consuming_leader_TARGET_msgs_raft_term);
-	(*printf_fn)(printf_ctx, "Consumer offsets:\n");
-	__print_kafka_consumer_info(&k_CMD,                        'C', printf_fn, printf_ctx);
-	__print_kafka_consumer_info(&k_HW_full_config,             'H', printf_fn, printf_ctx);
-	__print_kafka_consumer_info(&k_incremental_VOL_updates,    'V', printf_fn, printf_ctx);
-	__print_kafka_consumer_info(&k_incremental_TARGET_updates, 'R', printf_fn, printf_ctx);
 	if (kafka_mtls_ssl__is_enabled) {
 		__t_certificate_storage_print(&_ssl, printf_fn, printf_ctx);
 	}
@@ -2787,12 +2729,7 @@ int nvmeibt_kafka_print_status(int (*printf_fn)(void *ctx, const char *fmt, ...)
 	(*printf_fn)(printf_ctx, "./kafka-consumer-groups.sh  --bootstrap-server <machine>:9092 --describe --group managements-group\n");
 	(*printf_fn)(printf_ctx, "./kafka-console-consumer.sh --bootstrap-server <machine>:9092 --topic zone1.management.priority.1.0.0 | grep updatePRaidReport | jq .\n");
 	(*printf_fn)(printf_ctx, "./kafka-console-consumer.sh --bootstrap-server <machine>:9092 --topic zone1.leader.incrementalUpdates.1.0.0 --from-beginning\n");
-	(*printf_fn)(printf_ctx, "./kafka-dump-log.sh --print-data-log --files /var/lib/kafka/zone1.leader.incremental*/*.log\n");
 	return 0;
 }
 
-void nvmeibt_kafka_get_real_time_errors_str(struct nvmeibt_Str *out)
-{
-	if (!__is_compatible_kafka_version())
-		nvmeibt_Str_sprintf(out, "Wrong kafka version,\n");
-}
+/******************************************************************************/

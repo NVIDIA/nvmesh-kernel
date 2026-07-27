@@ -1,24 +1,12 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_ec_gf_arm_defs.h"
 #ifdef NVMEIBC_GF_ARM_USER_SPACE_IMPLEMENTATION
 #ifdef __KERNEL__
 #include "arm_neon.h"
 
-#ifndef __clang__
 #define __crc32cd(a,b) __builtin_aarch64_crc32cx(a,b)
 #define __crc32cb(a,b) __builtin_aarch64_crc32cb(a,b)
 #define __crc32ch(a,b) __builtin_aarch64_crc32ch(a,b)
 #define __crc32cw(a,b) __builtin_aarch64_crc32cw(a,b)
-#else
-#define __crc32cd(a,b) __builtin_arm_crc32cd(a,b)
-#define __crc32cb(a,b) __builtin_arm_crc32cb(a,b)
-#define __crc32ch(a,b) __builtin_arm_crc32ch(a,b)
-#define __crc32cw(a,b) __builtin_arm_crc32cw(a,b)
-#endif
 
 #define alloca(len) __builtin_alloca(len)
 #else
@@ -29,62 +17,14 @@
 #endif
 
 #include "common/kr_incs.h"
-#include "common/nvmeib_str.h"		/* unsafe_memcpy: fortify-bypass memcpy.
-					 * Required because the GF entry functions
-					 * carry target("general-regs-only"), and
-					 * kernel fortify-string.h declares
-					 * fortify_memcpy_chk as always_inline with
-					 * default target attributes — GCC then
-					 * refuses to inline it into a
-					 * general-regs-only caller. */
 #include "nvmeibc_block_dp_ec_gf_arm_neon.h"
 #include "nvmeibc_block_dp_ec_gf_arm_um.h"
-
-/*
- * Fallback in case the userspace build of this TU does not pull in
- * common/nvmeib_str.h (or whatever else might provide unsafe_memcpy).
- * In userspace there is no fortify wrapper to bypass, so plain memcpy
- * is fine; the justification arg is just dropped.
- */
-#ifndef unsafe_memcpy
-#define unsafe_memcpy(_dst, _src, _len, _just) memcpy(_dst, _src, _len)
-#endif
 
 
 #ifdef __KERNEL__
 #include <linux/ptrace.h>
-#include <linux/preempt.h>
 
-/*
- * IMPORTANT: every function that calls nvmeibc_arm_save_regs() /
- * nvmeibc_arm_rstr_regs() MUST be marked with the
- * NVMEIBC_ARM_GF_ENTRY attribute (see below). That attribute compiles the
- * surrounding C body with -mgeneral-regs-only, which is what prevents the
- * compiler from emitting V-register instructions in the function's prologue
- * (e.g. picking V31 as a zero source for an `stp q31, q31, ...` memset of
- * a local array). Without that guarantee, the compiler is free to write to
- * V0..V31 *before* the save asm runs, and we'd silently save and then
- * restore the wrong (compiler-clobbered) value back into the user task's
- * FP state on the return-to-user path — i.e. the bug this fix is for.
- *
- * The save asm itself does not declare V0..V31 as inputs because doing so
- * does not help when the asm is inlined into a caller whose prologue has
- * already corrupted a V reg; only the caller-side `target` attribute can
- * stop that. The rstr asm does declare V0..V31 as clobbers so the compiler
- * can't keep a live value across the call.
- *
- * Belt-and-suspenders: the helpers themselves are also marked
- * __always_inline + NVMEIBC_ARM_GF_ENTRY. __always_inline guarantees they
- * fold into their caller (where the caller's -mgeneral-regs-only attribute
- * dominates), and NVMEIBC_ARM_GF_ENTRY ensures that even if a future
- * caller ever forgets the attribute, the helper bodies themselves still
- * cannot be emitted out-of-line with a V-reg-using prologue.
- */
-#define NVMEIBC_ARM_GF_ENTRY \
-	__attribute__((target("general-regs-only")))
-
-static __always_inline NVMEIBC_ARM_GF_ENTRY
-void nvmeibc_arm_save_regs(struct user_fpsimd_state *save_buf)
+static void nvmeibc_arm_save_regs(struct user_fpsimd_state *save_buf)
 {
 	uint64_t tmp;
 	__asm__ volatile(
@@ -117,8 +57,7 @@ void nvmeibc_arm_save_regs(struct user_fpsimd_state *save_buf)
 	);
 }
 
-static __always_inline NVMEIBC_ARM_GF_ENTRY
-void nvmeibc_arm_rstr_regs(struct user_fpsimd_state *save_buf)
+static void nvmeibc_arm_rstr_regs(struct user_fpsimd_state *save_buf)
 {
 	uint32_t tmp;
 	uint32_t save_fpcr;
@@ -139,13 +78,13 @@ void nvmeibc_arm_rstr_regs(struct user_fpsimd_state *save_buf)
 		"ldp   q24, q25, [%[s], #16*24]  \n"
 		"ldp   q26, q27, [%[s], #16*26]  \n"
 		"ldp   q28, q29, [%[s], #16*28]  \n"
-		/* last pair + pre-index writeback to bump save_buf by #16*30 */
+		/* last pair + post-index to bump save_buf by #16*30 */
 		"ldp   q30, q31, [%[s], #16*30]! \n"
-
+		
 		/* restore FPSR from save_buf+32 */
 		"ldr   %w[tmp], [%[s], #16*2]    \n"  /* tmp = *(uint32_t*)(state+32) */
 		"msr   fpsr, %x[tmp]             \n"
-
+		
 		/* grab new FPCR from state+36 into tmp, then do the conditional write */
 		"ldr   %w[save_fpcr], [%[s], #16*2+4] \n"
 		"mrs   %x[tmp], fpcr                  \n"  /* tmp = current FPCR */
@@ -157,15 +96,9 @@ void nvmeibc_arm_rstr_regs(struct user_fpsimd_state *save_buf)
 			[tmp] "=&r" (tmp),
 			[save_fpcr] "=&r" (save_fpcr)
 			:
-			: "memory", "cc",
-			  "v0",  "v1",  "v2",  "v3",  "v4",  "v5",  "v6",  "v7",
-			  "v8",  "v9",  "v10", "v11", "v12", "v13", "v14", "v15",
-			  "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23",
-			  "v24", "v25", "v26", "v27", "v28", "v29", "v30", "v31"
+			: "memory", "cc"
 	);
 }
-#else
-#define NVMEIBC_ARM_GF_ENTRY
 #endif
 
 static void xor_blocks_into(unsigned int count, unsigned int len, void *dest, void **srcs)
@@ -188,17 +121,10 @@ static void xor_blocks_into(unsigned int count, unsigned int len, void *dest, vo
 		}
 
 		/* store */
-#ifndef __clang__
 		vst1q_u64(((uint64_t *)(dest+offset))+0, v0);
 		vst1q_u64(((uint64_t *)(dest+offset))+2, v1);
 		vst1q_u64(((uint64_t *)(dest+offset))+4, v2);
 		vst1q_u64(((uint64_t *)(dest+offset))+6, v3);
-#else
-		vst1q_u64(((unsigned long *)(dest+offset))+0, v0);
-		vst1q_u64(((unsigned long *)(dest+offset))+2, v1);
-		vst1q_u64(((unsigned long *)(dest+offset))+4, v2);
-		vst1q_u64(((unsigned long *)(dest+offset))+6, v3);
-#endif
 	}
 }
 
@@ -222,28 +148,21 @@ __attribute__((unused)) static void xor_blocks(unsigned int count, unsigned int 
 		}
 
 		/* store */
-#ifndef __clang__
 		vst1q_u64(((uint64_t *)(dest+offset))+0, v0);
 		vst1q_u64(((uint64_t *)(dest+offset))+2, v1);
 		vst1q_u64(((uint64_t *)(dest+offset))+4, v2);
 		vst1q_u64(((uint64_t *)(dest+offset))+6, v3);
-#else
-		vst1q_u64(((unsigned long *)(dest+offset))+0, v0);
-		vst1q_u64(((unsigned long *)(dest+offset))+2, v1);
-		vst1q_u64(((unsigned long *)(dest+offset))+4, v2);
-		vst1q_u64(((unsigned long *)(dest+offset))+6, v3);
-#endif
 	}
 }
 
-#if KS_CRC32C_USES_SIZE_T
-u32 crc32c(u32 init_crc, const void *buf, size_t len);
-#else
 u32 crc32c(u32 init_crc, const void *buf, unsigned int len);
-#endif
 
 static inline u32 __impl_crc32c(u32 init_crc, const void *buf, unsigned int len)
 {
+#if defined(PARALLELS_COMPILATION_ONLY) && PARALLELS_COMPILATION_ONLY
+	oops;	// Functions __crc32c..() Not available on MacOS UM VM that runs on the virtual ARM CPU
+	return 0;
+#else
 	while (len >= sizeof(uint64_t)) {
 		init_crc = __crc32cd(init_crc, *(uint64_t *)buf);
 		buf += sizeof(uint64_t);
@@ -262,6 +181,7 @@ static inline u32 __impl_crc32c(u32 init_crc, const void *buf, unsigned int len)
 	if (len >= sizeof(uint8_t))
 		init_crc = __crc32cb(init_crc, *(uint8_t *)buf);
 	return init_crc;
+#endif
 }
 /*
    Generate the P[] encoding of the given data. Use 3 indeirect calls.
@@ -275,7 +195,6 @@ static inline u32 __impl_crc32c(u32 init_crc, const void *buf, unsigned int len)
         A pointer of NULL means that the crc is not wanted.
 */
 
-NVMEIBC_ARM_GF_ENTRY
 enum gf_return_val ec_encode_data_arm_optimized(int len, int k, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc, unsigned char **data_copy) {
 
 	void *ptrs[16];
@@ -290,20 +209,11 @@ enum gf_return_val ec_encode_data_arm_optimized(int len, int k, int rows, unsign
 		return GF_SUCCESS;	// Nothing to do.
 
 #ifdef __KERNEL__
-	/*
-	 * Block task switches across the save/use/restore window so the kernel's
-	 * lazy-FP context-switch machinery can't observe (and persist) the GF
-	 * intermediate V-reg state as if it were the user task's FP state.
-	 * In hardirq/softirq context this is a no-op; in process context it
-	 * matters.
-	 */
-	preempt_disable();
 	nvmeibc_arm_save_regs(&save_buf);
 #endif
 	for (i = 0; i < rows; i++) {
 		if (data_copy && data_copy[i]) {
-			unsafe_memcpy(data_copy[i], data[i], len,
-				      "GF ARM encode: caller-validated buffers of len bytes");
+			memcpy(data_copy[i], data[i], len);
 			ptrs[i] = data_copy[i];
 		}
 		else
@@ -328,7 +238,6 @@ enum gf_return_val ec_encode_data_arm_optimized(int len, int k, int rows, unsign
 	}
 #ifdef __KERNEL__
 	nvmeibc_arm_rstr_regs(&save_buf);
-	preempt_enable();
 #endif
 
 	return GF_SUCCESS;
@@ -347,7 +256,6 @@ enum gf_return_val ec_encode_data_arm_optimized(int len, int k, int rows, unsign
 
    crc is an array of K+1 entries, that hold the encoded buffer crc, and the P and (maybe) Q crcs.
 */
-NVMEIBC_ARM_GF_ENTRY
 enum gf_return_val ec_encode_data_update_arm_optimized(int len, int k, int vec_i, unsigned char **data, unsigned char **coding, u32 *crc, unsigned char *data_copy)
 {
 	void *ptrs[16] = {0};
@@ -359,12 +267,10 @@ enum gf_return_val ec_encode_data_update_arm_optimized(int len, int k, int vec_i
 		return GF_ERROR;
 
 #ifdef __KERNEL__
-	preempt_disable();
 	nvmeibc_arm_save_regs(&save_buf);
 #endif
 	if (data_copy) {
-		unsafe_memcpy(data_copy, data[1], len,
-			      "GF ARM update: caller-validated buffers of len bytes");
+		memcpy(data_copy, data[1], len);
 		data[1] = data_copy;
 	}
 	if (k == 1) {
@@ -373,11 +279,9 @@ enum gf_return_val ec_encode_data_update_arm_optimized(int len, int k, int vec_i
 	else if (k == 2) {
 		unsigned char *x = alloca((len+63)&~63);
 		if (coding[0] != data[2])
-			unsafe_memcpy(coding[0], data[2], len,
-				      "GF ARM update: caller-validated buffers of len bytes");
+			memcpy(coding[0], data[2], len);
 		if (coding[1] != data[3])
-			unsafe_memcpy(coding[1], data[3], len,
-				      "GF ARM update: caller-validated buffers of len bytes");
+			memcpy(coding[1], data[3], len);
 		xor_blocks_into(2, len, x, (void **)data);
 		ptrs[vec_i] = x;
 		ptrs[vec_i+1] = coding[0];
@@ -395,7 +299,6 @@ enum gf_return_val ec_encode_data_update_arm_optimized(int len, int k, int vec_i
 
 #ifdef __KERNEL__
 	nvmeibc_arm_rstr_regs(&save_buf);
-	preempt_enable();
 #endif
 	return GF_SUCCESS;
 }
@@ -411,7 +314,6 @@ enum gf_return_val ec_encode_data_update_arm_optimized(int len, int k, int vec_i
         (Reduced buffers are -1, and aren't used to repair, and aren't part of new_data).
    new_data: (New Ds) (From ptr 0 D pointers)
 */
-NVMEIBC_ARM_GF_ENTRY
 enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsigned char ** data,  unsigned char ** new_data, u32 *crc)
 {
     /*
@@ -427,17 +329,15 @@ enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsign
                 are desired. Ptr 0 means we want it. Ptr -1 means we don't.
        Anything else (k > 2) comes later, and probably requires matrix inversion.
     */
-    int i, d_index, p_index, d[2], d_notme;
+    int i, d_index, p_index, d[k], d_notme;
 #ifdef __KERNEL__
 	struct user_fpsimd_state save_buf;
 #endif
-	enum gf_return_val rv = GF_ERROR;
 
 	if (k <= 0 || k > 2)
 		return GF_ERROR;
 
 #ifdef __KERNEL__
-	preempt_disable();
 	nvmeibc_arm_save_regs(&save_buf);
 #endif
     /* Get a list of all the missing Ds. Keep track of which Ds we want. */
@@ -446,22 +346,22 @@ enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsign
     for (i = 0; i < rows; i++) {
         if (data[i] == (void *)0 || data[i] == (void *)(-1)) {
 			if (d_index > k)
-				goto out;
+				return GF_ERROR;
             d[d_index] = i;
             d_index++;
         }
         if (data[i] == (void *)(-1)) {              // Don't want this D.
 			if (d_notme != -1)		// Change this for k > 2.
-				goto out;
+				return GF_ERROR;
             d_notme = i;
         }
     }
 	if (d_index == 0)
-		goto out;
+		return GF_ERROR;
 
     /* Get a list of all the bad Ps */
 	if (new_data[0] == 0)
-		goto out;
+		return GF_ERROR;
     p_index = 0;
 
     for (i = 0; i < k; i++) {
@@ -470,7 +370,7 @@ enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsign
 		}
 		if (data[rows+i] == 0) {
 			if (d_index + p_index > k)
-				goto out;
+				return GF_ERROR;
             p_index++;
         }
     }
@@ -488,7 +388,7 @@ enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsign
     }
     /* Everything after this requires at least 2 parity. */
     else if (k < 2) {
-		goto out;
+		return GF_ERROR;
     }
 
     /* Case 5: One D and parity missing. Fix it with Q.*/
@@ -536,22 +436,15 @@ enum gf_return_val ec_decode_data_arm_optimized(int len, int k, int rows, unsign
 		}
     }
 
-	rv = GF_SUCCESS;
-out:
 #ifdef __KERNEL__
 	nvmeibc_arm_rstr_regs(&save_buf);
-	preempt_enable();
 #endif
-	return rv;
+	return GF_SUCCESS;
 
 }
 
 #ifdef __KERNEL__
-	#if KS_CRC32C_USES_SIZE_T
-u32 		ec_crc_arm_optimized(u32 init_crc, const void *buf, size_t len)
-	#else
 u32 		ec_crc_arm_optimized(u32 init_crc, const void *buf, unsigned int len)
-	#endif
 #else
 unsigned int 	ec_crc_arm_optimized(unsigned int init_crc, const u8 *buf, unsigned int len)
 #endif

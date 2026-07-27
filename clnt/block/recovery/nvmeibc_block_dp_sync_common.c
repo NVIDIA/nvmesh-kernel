@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block.h"					// Must be first for simulator
 #include "block/nvmeibc_block_common.h"
 #include "nvmeibc_disk.h"
@@ -21,11 +16,11 @@
 // a module parameter to set limit of concurrent sync operations
 uint nvmeibc_sync_max_operations_per_dev = NVMEIBC_MAX_ALLOWED_SYNC_OPS_DEFAULT;
 module_param(nvmeibc_sync_max_operations_per_dev, uint, 0644);
-MODULE_PARM_DESC(nvmeibc_sync_max_operations_per_dev, "Maximum number of outstanding sync (recovery) operations per volume. Maximum is 6144.");
+MODULE_PARM_DESC(nvmeibc_sync_max_operations_per_dev, "Set the max number of sync operations in execution (per device)");
 
 uint nvmeibc_sync_full_lockset_probability_factor = NVMEIBC_SYNC_PROB_DEFAULT;
 module_param(nvmeibc_sync_full_lockset_probability_factor, uint, 0644);
-MODULE_PARM_DESC(nvmeibc_sync_full_lockset_probability_factor, "Defines the probability of sync'ing full 128K blocks instead of the current IO requested. It is used to avoid very slow IO during recovery, while avoiding wasteful repeat synchronizations. If the entire block is not synchronized, this will still need to be done by the regular recovery mechanism. The probability is computed by multiplying the number of blocks in the IO x param value / 3200. Range is 0 to 3200. 0 = never synchronize the full block. 3200 = always.");
+MODULE_PARM_DESC(nvmeibc_sync_full_lockset_probability_factor, "Set probability for full blockset fixup [0..100..3200], 0 - minimal fixup, 100 - default, 3200 full");
 
 
 NVMEIBC_MEMMGR_METRIC(dp_recov_operation, "component=raid.io_ctrl.recovery");
@@ -249,7 +244,7 @@ static void __free_so(struct recovery_sync_op *so)
 
 bool nvmeibc_should_sync_reuse_memory = true;
 module_param(nvmeibc_should_sync_reuse_memory, bool, 0644);
-MODULE_PARM_DESC(nvmeibc_should_sync_reuse_memory, "Reuse pages across syncs (internal storage recovery operations) to reduce the number of page allocations and deallocations.");
+MODULE_PARM_DESC(nvmeibc_should_sync_reuse_memory, "Set true to reduce amount of pages alloc/dealloc during syncs");
 static bool _resource_reuse_should_resue_if_not_free(struct recovery_sync_op *so)
 {
 	if (nvmeibc_should_sync_reuse_memory && !nvmeibc_pages_is_empty(&so->pages) && (so->n_slices == LOCKSET_SLICES)) {
@@ -1653,9 +1648,9 @@ int nvmeibc_sync_submit(struct nvmeibc_block_device *nd)
 	nvmeibc_operation_alloc_dbg_id(so->o);
 	if (should_autofail) {
 		__free_sync_op(so, true);
-	} else if (!NVMEIB_CPU_MASK_INFO_IS_EMPTY(so->o->cpu_mask_info)) {
+	} else if (so->o->cpu_id != NR_CPUS) {
 		WQ_INIT_WORK(&so->o->work_rso_execute, __execute_sync_operation_work);
-		dp_block_schedule_work(so->o->cpu_id, &so->o->work_rso_execute);
+		dp_block_schedule_operation_work(so->o, &so->o->work_rso_execute);
 	} else {
 		__execute_sync_operation(so);
 	}

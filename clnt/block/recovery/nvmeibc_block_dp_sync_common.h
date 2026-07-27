@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_BLOCK_DP_SYNC_COMMON_H
 #define NVMEIBC_BLOCK_DP_SYNC_COMMON_H
 /* Sync operations are not bio based (in contrast to READ / WRITE / TRIM).
@@ -93,10 +88,6 @@ enum sync_op_stage_e {
 	      Daniel: Todo: Use so->cmds->raid_cur_stage for this state-machine */
 	sync_stage_recov_read_cmds_sent,	// Read the data
 	sync_stage_recov_restore_complete,
-
-	/* 4.0 Stages of maintenance sync */
-	sync_stage_recov_mainten_sbs_loop_end,	// If encountered readfail, read slice-by-slice
-	sync_stage_recov_mainten_resolve_binfo,	// All reads complete, resolve unknown parts of binfo from on-disk MD
 
 	/* 4.1. States of recovering stale-special locks and dirtybyte */
 	sync_stage_recov_do_sync_stale,

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_BLOCK_API_OS_COMMON_H
 #define NVMEIBC_BLOCK_API_OS_COMMON_H
 /* Internal API for all interfaces of block device to the kernel (io, ioctls,
@@ -31,11 +26,10 @@ void disk_id_allocator_mark( struct disk_id_allocator_t* al, struct gendisk *dis
 
 struct nvmeibc_os_apis_container {
 	struct block_device_operations bdev_fops_io;// nvmeibc our block device methods with OS with IO enabled (submit_bio)
-	#if NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING && !KS_REQUEST_QUEUE_HAS_REQUEST_FN
+	#if !KS_REQUEST_QUEUE_HAS_REQUEST_FN
 		struct block_device_operations bdev_fops_de;// nvmeibc our block device methods with OS while detaching (reject bio), when request queue exists, q->function is changed so no need for different fops
 	#endif
 	struct nvmeibc_driver_version  drv_ver;		// nvmeibc driver
-	u8 atom_protocol_version;
 	atomic_t num_read_part_in_flight;			// Debug counter, number of running read partitions
 	struct proc_dir_entry *proc_root;		// Root directory in /proc where os api's will create directory for each volume. Example: /proc/nvmeibc/volumes
 	const struct nvmeibc_cinst_params_blk *cips;// Ptr to params of current client instance

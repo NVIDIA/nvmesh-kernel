@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "uni_scenarios/uni_scenario_tx_history_ec.h"
 #include "nvmeib_jdr.h"
 #include "uni_framework/range_algorithms.h"

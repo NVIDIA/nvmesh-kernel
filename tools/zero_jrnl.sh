@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # Writes Zeroes to Journal MD
 # Usage:
 # zero_jrnl.sh <disk_id> [<start_rng> <end_rng>] [-y]

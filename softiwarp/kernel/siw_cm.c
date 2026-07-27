@@ -72,46 +72,19 @@ module_param(sock_buff_sz, int, 0644);
 static unsigned comp_vector_cpu0 = 0;
 module_param(comp_vector_cpu0, int, 0644);
 
-MODULE_PARM_DESC(mpa_crc_required, "MPA CRC required (bool).");
-MODULE_PARM_DESC(mpa_crc_strict, "MPA CRC off enforced (bool).");
-MODULE_PARM_DESC(tcp_nodelay, "Set TCP NODELAY (bool).");
-MODULE_PARM_DESC(tcp_quickack, "Set TCP QUICKACK (bool).");
-MODULE_PARM_DESC(sock_buff_sz, "Socket buffers size in bytes.");
+MODULE_PARM_DESC(mpa_crc_required, "MPA CRC required");
+MODULE_PARM_DESC(mpa_crc_strict, "MPA CRC off enforced");
+MODULE_PARM_DESC(tcp_nodelay, "Set TCP NODELAY");
+MODULE_PARM_DESC(tcp_quickack, "Set TCP QUICKACK");
+MODULE_PARM_DESC(sock_buff_sz, "Socket Buffers Size");
 
 bool connect_non_block = 1;
 module_param(connect_non_block, bool, 0644);
-MODULE_PARM_DESC(connect_non_block, "Perform non-block TCP connects (bool).");
+MODULE_PARM_DESC(connect_non_block, "Connect non-blocking");
 
 bool use_so_incoming_cpu = 1;
 module_param(use_so_incoming_cpu, bool, 0644);
-MODULE_PARM_DESC(use_so_incoming_cpu, "Set the RX CPU of socket to RCQ's comp-vector index (after connect/accept).");
-
-#ifndef NVMESH_IS_PRODUCTION_COMPILATION
-#define NVMEIBNVMESH_IS_PRODUCTION_COMPILATION 0
-#endif
-
-unsigned long siw_cm_err_inj = 0;
-
-#define FOREACH_SIW_CM_ERR_INJ(OP) \
-	OP(0, NVMESH_7719)
-
-#define SIW_CM_ERR_INJ_BIT_ENUM(IDX, BIT) SIW_CM_ERR_INJ_BIT_##BIT = IDX,
-#define SIW_CM_ERR_INJ_MASK_ENUM(IDX, BIT) SIW_CM_ERR_INJ_MASK_##BIT = (1 << SIW_CM_ERR_INJ_BIT_##BIT),
-#define SIW_CM_ERR_INJ_BIT_STRING(BIT) #BIT
-#define SIW_CM_ERR_INJ_BIT_MODPARAM_DESC(IDX, BIT) #IDX " = " SIW_CM_ERR_INJ_BIT_STRING(BIT) "\n"
-
-enum siw_cm_err_inj_bit {
-	FOREACH_SIW_CM_ERR_INJ(SIW_CM_ERR_INJ_BIT_ENUM)
-};
-
-enum siw_cm_err_inj_bit_mask {
-	FOREACH_SIW_CM_ERR_INJ(SIW_CM_ERR_INJ_MASK_ENUM)
-};
-
-#if !NVMESH_IS_PRODUCTION_COMPILATION
-module_param(siw_cm_err_inj, ulong, 0644);
-MODULE_PARM_DESC(siw_cm_err_inj, "SIW CM error injection bits via FOREACH_SIW_CM_ERR_INJ(SIW_CM_ERR_INJ_BIT_MODPARAM_DESC). Not for production use!");
-#endif
+MODULE_PARM_DESC(use_so_incoming_cpu, "Set the RX CPU of socket to RCQ's comp-vector index (after connect/accept)");
 
 atomic64_t siw_cm_wq_work_idx = ATOMIC_INIT(0);
 
@@ -258,11 +231,8 @@ static int siw_sock_nodelay(struct socket *sock, char *orig_ca, int orig_ca_len)
 #	if !KS_HAS_TCP_SETSOCKOPT
 	rv = sock->ops->setsockopt(sock, SOL_TCP, TCP_NODELAY,
 				   optval, sizeof(val));
-#	elif KS_TCP_SETSOCKOPT_EXPORTED
-	rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_NODELAY,
-			     optval, sizeof(val));
 #	else
-	rv = sock->sk->sk_prot->setsockopt(sock->sk, SOL_TCP, TCP_NODELAY,
+	rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_NODELAY,
 			     optval, sizeof(val));
 #	endif
 #else
@@ -276,11 +246,8 @@ static int siw_sock_nodelay(struct socket *sock, char *orig_ca, int orig_ca_len)
 #	if !KS_HAS_TCP_SETSOCKOPT
 		rv = sock->ops->setsockopt(sock, SOL_TCP, TCP_QUICKACK,
 					   optval, sizeof(val));
-#	elif KS_TCP_SETSOCKOPT_EXPORTED
-		rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_QUICKACK,
-				     optval, sizeof(val));
 #	else
-		rv = sock->sk->sk_prot->setsockopt(sock->sk, SOL_TCP, TCP_QUICKACK,
+		rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_QUICKACK,
 				     optval, sizeof(val));
 #	endif
 #else
@@ -299,11 +266,8 @@ static int siw_sock_nodelay(struct socket *sock, char *orig_ca, int orig_ca_len)
 #	if !KS_HAS_TCP_SETSOCKOPT
 		rv = sock->ops->getsockopt(sock, SOL_TCP, TCP_CONGESTION,
 					   get_cong_optval, get_cong_optlen);
-#	elif KS_TCP_SETSOCKOPT_EXPORTED
-		rv = tcp_getsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
-				    get_cong_optval, get_cong_optlen);
 #	else
-		rv = sock->sk->sk_prot->getsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
+		rv = tcp_getsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
 				    get_cong_optval, get_cong_optlen);
 #	endif
 		if (rv < 0) {
@@ -318,11 +282,8 @@ static int siw_sock_nodelay(struct socket *sock, char *orig_ca, int orig_ca_len)
 #	if !KS_HAS_TCP_SETSOCKOPT
 		rv = sock->ops->setsockopt(sock, SOL_TCP, TCP_CONGESTION,
 					set_cong_optval, sizeof(siw_tcp_cong_ctrl_name));
-#	elif KS_TCP_SETSOCKOPT_EXPORTED
-		rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
-				set_cong_optval, sizeof(siw_tcp_cong_ctrl_name));
 #	else
-		rv = sock->sk->sk_prot->setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
+		rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
 				set_cong_optval, sizeof(siw_tcp_cong_ctrl_name));
 #	endif
 		if (rv < 0) {
@@ -347,11 +308,12 @@ out:
 /*
  * siw_sock_nodelay() - Disable Nagle algorithm
  */
-static int siw_socket_restore_ca(struct socket *sock, char *orig_ca_name, size_t orig_ca_name_len)
+static int siw_cep_socket_restore_ca(struct siw_cep *cep)
 {
+	struct socket *sock = cep->llp.sock;
 	int rv;
-	tcp_setsockopt_val_t set_cong_optval = TCP_SETSOCKOPT_VAL_PTR(orig_ca_name);
-	size_t optval_len = orig_ca_name_len;
+	tcp_setsockopt_val_t set_cong_optval = TCP_SETSOCKOPT_VAL_PTR(cep->orig_ca_name);
+	size_t optval_len = sizeof(cep->orig_ca_name);
 
 #if KS_HAS_SET_FS && defined(KERNEL_DS)
 	mm_segment_t oldfs;
@@ -361,7 +323,7 @@ static int siw_socket_restore_ca(struct socket *sock, char *orig_ca_name, size_t
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
 #endif
-	if (!strnlen(orig_ca_name, orig_ca_name_len)) {
+	if (!cep->orig_ca_name[0]) {
 		rv = -EALREADY;
 		goto out;
 	}
@@ -369,31 +331,13 @@ static int siw_socket_restore_ca(struct socket *sock, char *orig_ca_name, size_t
 #	if !KS_HAS_TCP_SETSOCKOPT
 	rv = sock->ops->setsockopt(sock, SOL_TCP, TCP_CONGESTION,
 				   set_cong_optval, optval_len);
-#	elif KS_TCP_SETSOCKOPT_EXPORTED
-	rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
-			set_cong_optval, optval_len);
 #	else
-	rv = sock->sk->sk_prot->setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
+	rv = tcp_setsockopt(sock->sk, SOL_TCP, TCP_CONGESTION,
 			set_cong_optval, optval_len);
 #	endif
 
-out:
-
-#if KS_HAS_SET_FS && defined(KERNEL_DS)
-	set_fs(oldfs);
-#endif
-	return rv;
-}
-
-static int siw_cep_socket_restore_ca(struct siw_cep *cep)
-{
-	int rv;
-
-	rv = siw_socket_restore_ca(cep->llp.sock, cep->orig_ca_name,
-		 sizeof(cep->orig_ca_name));
-
 	if (rv < 0) {
-		dprint_cep(DBG_CM|DBG_ON, cep, "Failed (%d) to restore original congestion algorithm %s\n",
+		dprint_cep(DBG_CM, cep, "Failed (%d) to restore original congestion algorithm %s\n",
 			   rv, cep->orig_ca_name);
 		goto out;
 	}
@@ -402,6 +346,10 @@ static int siw_cep_socket_restore_ca(struct siw_cep *cep)
 	cep->orig_ca_name[0] = 0;
 
 out:
+
+#if KS_HAS_SET_FS && defined(KERNEL_DS)
+	set_fs(oldfs);
+#endif
 	return rv;
 }
 
@@ -1465,8 +1413,6 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	struct siw_cep		*new_cep = NULL;
 	int			rv = 0, val; /* debug only. should disappear */
 	sock_setsockopt_val_t optval = SOCK_SETSOCKOPT_VAL_PTR(&val);
-	char orig_ca_name[TCP_CA_NAME_MAX] = "";
-	bool new_cep_inuse = false;
 
 	if (cep->state != SIW_EPSTATE_LISTENING)
 		goto error;
@@ -1486,10 +1432,6 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	new_cep->sk_data_ready   = cep->sk_data_ready;
 	new_cep->sk_write_space  = cep->sk_write_space;
 	new_cep->sk_error_report = cep->sk_error_report;
-
-	/* Prevent race with SIW_CM_WORK_PEER_CLOSE if socket is closed by peer while we are accepting the new connection */
-	siw_cep_set_inuse(new_cep);
-	new_cep_inuse = true;
 	
 	/* [NVMESH-3371]: Queue the delayed work before we call accept
 	 * in case we get state-change callback with TCP_CLOSE before the
@@ -1526,16 +1468,13 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	rv = sock_setsockopt(new_s, SOL_SOCKET, SO_SNDBUF,
 			     optval, sizeof(val));
 	if (rv < 0) {
-		dprint_cep(DBG_CM|DBG_ON, cep, "new_s=" dprint_ptr_str() 
-			", Error %d setting SO_SNDBUF to %d\n", 
-			new_s, rv, sock_buff_sz);
+		pr_err("Error %d setting SO_SNDBUF\n", rv);
 		goto error;
 	}
 	rv = sock_setsockopt(new_s, SOL_SOCKET, SO_RCVBUF,
 			     optval, sizeof(val));
 	if (rv < 0) {
-		dprint_cep(DBG_CM|DBG_ON, cep, "new_s=" dprint_ptr_str()
-			", Error %d setting SO_RCVBUF to %d\n", new_s, rv, sock_buff_sz);
+		pr_err("Error %d setting SO_SNDBUF\n", rv);
 		goto error;
 	}
 
@@ -1546,13 +1485,12 @@ static void siw_accept_newconn(struct siw_cep *cep)
 	dprint_cep(DBG_CM, cep, "s=" dprint_ptr_str() ", new_s=" dprint_ptr_str() "): "
 		"New LLP connection accepted\n", s, new_s);
 
-	rv = siw_sock_nodelay(new_s, orig_ca_name, sizeof(orig_ca_name));
+	rv = siw_sock_nodelay(new_s, new_cep->orig_ca_name, sizeof(new_cep->orig_ca_name));
 	if (rv != 0) {
 		dprint_cep(DBG_CM|DBG_ON, new_cep, "ERROR: "
 			"siw_sock_nodelay(): rv=%d\n", rv);
 		goto error;
 	}
-	memcpy(new_cep->orig_ca_name, orig_ca_name, sizeof(new_cep->orig_ca_name));
 
 	siw_cep_state_change(new_cep, SIW_EPSTATE_AWAIT_MPAREQ); /* siw-accept-newconn */
 
@@ -1568,14 +1506,9 @@ static void siw_accept_newconn(struct siw_cep *cep)
 		 */
 		dprint_cep(DBG_CM, new_cep, "Immediate MPA req.\n");
 
+		siw_cep_set_inuse(new_cep);
 		rv = siw_proc_mpareq(new_cep);
-
-#if !NVMESH_IS_PRODUCTION_COMPILATION
-		if (test_and_clear_bit(SIW_CM_ERR_INJ_BIT_NVMESH_7719, &siw_cm_err_inj)) {
-			dprint_cep(DBG_CM|DBG_ON, new_cep, "[NVMESH-7719]: Injecting error\n");
-			rv = -EPROTO;
-		}
-#endif
+		siw_cep_set_free(new_cep);
 
 		if (rv != -EAGAIN) {
 			/* rv is either 0 (succesful read or a critical error).
@@ -1585,13 +1518,13 @@ static void siw_accept_newconn(struct siw_cep *cep)
 			siw_cep_put(cep);
 			new_cep->listen_cep = NULL;
 			if (rv) {
+				/* Remove reference to sock */
+				new_cep->llp.sock = NULL;
 				dprint_cep(DBG_CM|DBG_ON, new_cep, "Immediate MPA req. ERROR: rv=%d\n", rv);
 				goto error;
 			}
 		}
 	}
-	/* Allow any scheduled works to run */
-	siw_cep_set_free(new_cep);
 	return;
 
 error:
@@ -1601,15 +1534,12 @@ error:
 		siw_cep_state_change(new_cep, SIW_EPSTATE_CLOSED);
 		siw_cancel_peer_close(new_cep);
 		siw_cancel_mpatimer(new_cep);
-		new_cep->llp.sock = NULL; /* avoid dangling pointer after sock_release */
-		if (new_cep_inuse)
-			siw_cep_set_free(new_cep);
+		siw_cep_socket_restore_ca(new_cep);
 		siw_cep_put(new_cep);
 	}
 
 	if (new_s) {
 		siw_socket_disassoc(new_s);
-		siw_socket_restore_ca(new_s, orig_ca_name, sizeof(orig_ca_name));
 		sock_release(new_s);
 	}
 	dprint_cep(DBG_CM|DBG_ON, cep, "ERROR: rv=%d\n", rv);
@@ -1791,12 +1721,6 @@ static void siw_cm_work_handler(struct work_struct *w)
 				 *       FIXME: is that needed?
 				 */
 				pre_jif = jiffies;
-				if (cep->qp) {
-					/* speed up the close by triggering a QP_FATAL event so we won't be delayed by iw_cm workqueue */
-					dprint_cep(DBG_CM | DBG_ON, cep, " QP: %d/" dprint_ptr_str() " triggering QP_FATAL event",
-						cep->qp ? QP_ID(cep->qp) : -1, cep->qp);
-					siw_qp_event(cep->qp, IB_EVENT_QP_FATAL);
-				}
 				siw_cm_upcall(cep, IW_CM_EVENT_DISCONNECT, 0);
 				siw_cm_upcall(cep, IW_CM_EVENT_CLOSE, 0);
 				post_jif = jiffies;
@@ -1986,32 +1910,6 @@ static void siw_cm_work_handler(struct work_struct *w)
 			pre_jif = jiffies;
 			siw_cep_socket_restore_ca(cep);
 			siw_socket_disassoc(cep->llp.sock);
-			post_jif = jiffies;
-			if (post_jif - pre_jif > HZ / 5) {
-				dprint_cep(DBG_CM | DBG_ON, cep, "QP: %d/" dprint_ptr_str() " siw_socket_disassoc took %lu ms",
-					cep->qp ? QP_ID(cep->qp) : -1, cep->qp,
-					(1000UL * (post_jif - pre_jif)) / HZ);
-			}
-		}
-		if (cep->qp) {
-			/*
-			 * Cancel rx_work after siw_socket_disassoc (no new
-			 * callbacks) but before sock_release (handler may
-			 * still hold a reference to sk).
-			 */
-			struct siw_qp *qp = cep->qp;
-
-			pre_jif = jiffies;
-			siw_rx_cancel_work(qp);
-			post_jif = jiffies;
-			if (post_jif - pre_jif > HZ / 5) {
-				dprint_cep(DBG_CM | DBG_ON, cep, "QP: %d/" dprint_ptr_str() " cancel_delayed_work_sync took %lu ms",
-					   cep->qp ? QP_ID(cep->qp) : -1, cep->qp,
-					   (1000UL * (post_jif - pre_jif)) / HZ);
-			}
-		}
-		if (cep->llp.sock) {
-			pre_jif = jiffies;
 			sock_release(cep->llp.sock);
 			cep->llp.sock = NULL;
 			post_jif = jiffies;
@@ -2022,7 +1920,18 @@ static void siw_cm_work_handler(struct work_struct *w)
 			}
 		}
 		if (cep->qp) {
+			/* Bring down the QP - Part #2 (after siw_socket_disassoc()) */
 			struct siw_qp *qp = cep->qp;
+
+			/* Cancel any rx_work scheduled by data-ready callback */
+			pre_jif = jiffies;
+			siw_rx_cancel_work(qp);
+			post_jif = jiffies;
+			if (post_jif - pre_jif > HZ / 5) {
+				dprint_cep(DBG_CM | DBG_ON, cep, "QP: %d/" dprint_ptr_str() " cancel_delayed_work_sync took %lu ms",
+					   cep->qp ? QP_ID(cep->qp) : -1, cep->qp,
+					   (1000UL * (post_jif - pre_jif)) / HZ);
+			}
 
 			/* Ref put for the cep->qp pointer */
 			siw_qp_put(qp);

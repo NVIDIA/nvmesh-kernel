@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_CONSTS_H
 #define NVMEIB_CONSTS_H
 
@@ -98,8 +93,8 @@ enum {
 
 enum {
 	/*                                 e x c e l e r o       */
-	NVMEIB_SERVICE_ID =      6988676976697999ULL,			/* 18446744073709551615 */
-	NVMEIB_PORT_ID = 7914,
+	NVMEIB_EXCELERO_SERVICE_ID =      6988676976697999ULL,			/* 18446744073709551615 */
+	NVMEIB_EXCELERO_PORT_ID = 7914,
 	NVMEIB_IB_PORT_PRIORITY 	= 0,
 	NVMEIB_ROCE_PORT_PRIORITY	= 10,
 	NVMEIB_TCP_PORT_PRIORITY 	= 20,

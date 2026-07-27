@@ -1,14 +1,9 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "u.h"
 #include "s_dc.h"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMesh DC test driver - server");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_LICENSE("Dual BSD/GPL");
 
 static int __init _in_(void) /* Constructor */
 {

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_PROCFS_H
 #define NVMEIB_PROCFS_H
 
@@ -11,12 +6,9 @@
 struct nvmeib_public_procfs_ent;
 typedef ssize_t proc_fill_t(void *arg, char *buf, size_t len);
 typedef ssize_t proc_chng_t(void *arg, char *buf, size_t len);
-typedef int proc_oneshot_show_t(struct seq_file *m, void *arg);
 
 struct nvmeib_public_procfs_ent *nvmeib_public_proc_create(const char *name,
 	struct proc_dir_entry *dir, proc_fill_t *fill, proc_chng_t *chng, void *arg);
-struct nvmeib_public_procfs_ent *nvmeib_public_proc_create_oneshot_data(const char *name,
-	struct proc_dir_entry *dir, proc_oneshot_show_t *show, proc_chng_t *chng, void *arg);
 void nvmeib_public_proc_remove(struct nvmeib_public_procfs_ent *p);
 
 /* Backport of proc_create_seq_data */

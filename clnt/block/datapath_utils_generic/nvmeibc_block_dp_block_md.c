@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "common/kr_incs.h"
 #if defined(UM_APP)
@@ -18,18 +13,18 @@
 #include "nvmeibc_memmgr_metrics.h"
 
 #ifndef UM_APP
-bool nvmeibc_warn_on_edic_verification_failure = true;				// Default true
-module_param(nvmeibc_warn_on_edic_verification_failure, bool, 0644);
-MODULE_PARM_DESC(nvmeibc_warn_on_edic_verification_failure, "Issue kernel warning upon CRC-based read block verification failure. Useful for detecting data that has been correct on drives.");
+bool nvmeibc_warn_on_edic_werification_failure = true;				// Default true
+module_param(nvmeibc_warn_on_edic_werification_failure, bool, 0644);
+MODULE_PARM_DESC(nvmeibc_warn_on_edic_werification_failure, "Issue kernel warning upon crc read block verification failure");
 
 uint nvmeibc_jmd_wr_version = NVMEIBC_JOURNAL_MD_VERSION_PACKED;				// Default, backwards compatibale, Todo: Consider using mgmt based trigger, not module param
 module_param(nvmeibc_jmd_wr_version, uint, 0644);
-MODULE_PARM_DESC(nvmeibc_jmd_wr_version, "Version of JMD (journal metadata) to use to facilitate backwards compatibility: 0 = packed, 1 = unpacked.");	// Dont touch this! This is part of EC version, in future, make this module param read only! it was needed to upgrade versions.
+MODULE_PARM_DESC(nvmeibc_jmd_wr_version, "Version of jmd to write. 0-unpacked, 1-packed");	// Dont touch this! This is part of EC version, in future, make this module param read only! it was needed to upgrade versions.
 
 #else // UM_APP
 	#include "module_params.h"
-	bool nvmeibc_warn_on_edic_verification_failure = true;				// Default true
-	MPARAM(bool, nvmeibc_warn_on_edic_verification_failure, "nvmeibc_warn_on_edic_verification_failure");
+	bool nvmeibc_warn_on_edic_werification_failure = true;				// Default true
+	MPARAM(bool, nvmeibc_warn_on_edic_werification_failure, "nvmeibc_warn_on_edic_werification_failure");
 
 	uint32_t nvmeibc_jmd_wr_version = NVMEIBC_JOURNAL_MD_VERSION_PACKED;
 	MPARAM(uint32_t, nvmeibc_jmd_wr_version, "Version of jmd to write. 0-unpacked, 1-packed");
@@ -94,7 +89,7 @@ int nvmeibc_check_metadata_read_cmd(struct nvmeibc_block_command *cmd, u64 rlba,
 					if (unlikely(enable_di_debug_mode)) {
 						dp_dbgdi_mark_edic(blk_data, EDIC_FAIL, read_edic, exp_edic, rlba);
 					}
-					WARN(nvmeibc_warn_on_edic_verification_failure, "EC-7676 - %s: op=%u, Disk %s, Seg %x, stg=%d edic fail: rlba:%llu, P=%d, read_edic=0x%08x, calc_edic=0x%08x, slice_ofst=%u, blk_data=0x%016llx\n", cmd->o->nd->name, cmd->o->op, cmd->ds->disk->name, cmd->ds->dbg_uuid, cmd->my_stage, rlba, cmd->is_parity, read_edic, exp_edic, (j / NVMEIBC_SECTOR_SIZE), *(u64*)blk_data);
+					WARN(nvmeibc_warn_on_edic_werification_failure, "EC-7676 - %s: op=%u, Disk %s, Seg %x, stg=%d edic fail: rlba:%llu, P=%d, read_edic=0x%08x, calc_edic=0x%08x, slice_ofst=%u, blk_data=0x%016llx\n", cmd->o->nd->name, cmd->o->op, cmd->ds->disk->name, cmd->ds->dbg_uuid, cmd->my_stage, rlba, cmd->is_parity, read_edic, exp_edic, (j / NVMEIBC_SECTOR_SIZE), *(u64*)blk_data);
 					IO_STATS_INCR(dp_io_stats, DP_IO_STATS_MD_EDIC_CHECK_ERRORS);
 					return EPERM_READ_FAIL;
 				} else if (unlikely(enable_di_debug_mode)) {

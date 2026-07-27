@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_io_stats.h"
 #include "compat/kr_incs_types.h"
 #include "nvmeib_types.h"
@@ -80,7 +75,7 @@ static unsigned short io_sizes_hist[MAX_IO_SIZES_HIST_BINS] = {	/* Bins of histo
 static unsigned int io_sizes_hist_n_bins = 8;
 
 module_param_array_named(io_stats_sizes_hist, io_sizes_hist, ushort, &io_sizes_hist_n_bins, 0444);
-MODULE_PARM_DESC(io_stats_sizes_hist, "Defines the buckets for the iostats histogram using an array.");
+MODULE_PARM_DESC(io_stats_sizes_hist, "Sizes of the buckets for iostats histogram");
 
 /* Look-up-table from io-size (in blocks) to histogram bin */
 #define MAX_IO_SIZES_LUT_BLOCK_SIZE 256 // 128kb / 512b
@@ -263,20 +258,6 @@ void nvmeib_io_stats_free(struct nvmeib_io_stats *ds)
 {
 	NFIN;
 	if (ds != NULL) {
-		if (ds->percpu) {
-			struct nvmeib_io_counters c = {0};
-			int i;
-			for (i = 0; i < N_IO_STAT_VERBS; i++) {
-				if (!nvmeib_io_stats_counts_verb(ds, i))
-					continue;
-				memset(&c, 0, sizeof(c));
-				nvmeib_io_stats_readc(ds, (const enum nvmeib_io_stat_verbs)i, 0, &c);
-				_NI(trace_nvmeib_io_stats_free, "STATS: @IOSTATS_NAME @IOSTATS_VERB - total_iops: "
-					"@IOSTATS_IOPS_COUNT total_size: @IOSTATS_IOPS_SIZE total_latency: @IOSTATS_IOPS_LATENCY",
-					ds->name, i, c.total_ops, c.total_size, c.total_latency);
-			}
-		}
-
 		nvmeib_public_free_percpu(ds->percpu_traced);
 		nvmeib_public_free_percpu(ds->percpu);
 		kfree(ds);

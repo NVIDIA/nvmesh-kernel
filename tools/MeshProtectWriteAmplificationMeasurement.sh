@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 #
 # This script is measuring write amplification on a MeshProtect volume.
 # It will provides the client-side OS statistics about the same volume 

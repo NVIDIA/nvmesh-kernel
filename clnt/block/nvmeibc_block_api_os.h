@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_BLOCK_API_OS_H
 #define NVMEIBC_BLOCK_API_OS_H
 /* Inherits from nvmeiba_atom:
@@ -78,7 +73,7 @@ struct nvmeibc_os_api {
 	bool is_init_error;						// Creation/Initialization/Adoption of OS_API. Calling Destroy upon error
 	//bool 8th byte in u64 of flags.		// Todo make bit field
 	u64  ro_header_sectors;
-	u64 reserved[1];						// Reserve some bytes for future versions
+	u64 reserved[4];						// Reserve some bytes for future versions
 };
 
 #define get_nvmeibc_os_api_uptime(os) (jiffies - (os)->atom.attach_jiff)

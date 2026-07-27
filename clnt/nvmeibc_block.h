@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_BLOCK_H
 #define NVMEIBC_BLOCK_H
 
@@ -152,8 +147,6 @@ int nvmeibc_block_try_detach(struct nvmeibc_block_device *dev,
  * will not be reported to the user.
  */
 enum_io_perm nvmeibc_get_io_perm_for_reporting(struct nvmeibc_block_device *dev);
-
-bool nvmeibc_block_is_during_attach_stabilization_period(struct nvmeibc_block_device *dev);
 
 /**
  * @brief Get block device reservation information

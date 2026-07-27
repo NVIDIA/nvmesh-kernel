@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # mk_local_rpm
 # $0 = mk_client_rpm / mk_target_rpm / mk_local_rpm
 # $1 = Kernel Version

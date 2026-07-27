@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 Note: For proper editing in slickedit, I associated the extention ".txt" with "C/C++" (tools/options/languages/file_extention_manager)
 
 Indentation:

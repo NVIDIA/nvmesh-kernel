@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import sys
 import json
 import ctypes
@@ -460,8 +456,8 @@ def resolve(so):
         except AttributeError as e:
             # To avoid spamming with error messages, assume static functions end with _ or begin with __
             if not func.endswith('_') and not func.startswith('__'):
-                print("Error importing {0}. Static? Probably can ignore this message. {1}".format(
-                    func, str(e)), file=sys.stderr)
+                print >> sys.stderr, "Error importing {0}. Static? Probably can ignore this message. {1}".format(
+                    func, str(e))
 
     return dll, types, funcs, enums
 

@@ -5,9 +5,9 @@ Name:				nvmesh-client
 Version:			%{version}
 Release:			%{release}
 Group:				System Environment/Kernel
-Summary:			"nvmesh-client" by NVIDIA
+Summary:			"nvmesh-client" by Nvidia
 
-License:			GPL-2.0-only OR Apache-2.0 at your choice
+License:			Commercial Non OSI
 URL:				http://www.nvidia.com
 Source0:			%{name}
 
@@ -16,7 +16,7 @@ Autoreq:                        0
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+© Copyright 2025 Nvidia Corporation. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
 
 "Nvidia nvmesh-client" includes NVMesh client and common components.
 	Branch: %{branch}
@@ -58,6 +58,8 @@ cp -rf %{_builddir}/%{name}/sysctl %{buildroot}/opt/nvmesh/
 cp -rf %{_builddir}/%{name}/scripts/client %{buildroot}/opt/nvmesh/client-repo/scripts
 cp     %{_builddir}/%{name}/clnt/block/datapath_utils_generic/profiling/nvmesh_profiling.py %{buildroot}/opt/nvmesh/client-repo/scripts/
 cp -rf %{_builddir}/%{name}/scripts/common %{buildroot}/opt/nvmesh/common-repo/scripts
+cp -rf %{_builddir}/%{name}/mlnx_fw/Excelero_mlxconfig.db %{buildroot}/etc/nvmesh
+cp -rf %{_builddir}/%{name}/mlnx_fw/patch_mlxconfig.db.sql %{buildroot}/etc/nvmesh
 cp -rf %{_builddir}/%{name}/client_* %{buildroot}/opt/nvmesh/client-repo
 cp -rf %{_builddir}/%{name}/uninstall-client %{buildroot}/opt/nvmesh/client-repo/installation-scripts-%{version}-%{release}
 cp -rf %{_builddir}/%{name}/install.py %{buildroot}/opt/nvmesh/client-repo/installation-scripts-%{version}-%{release}
@@ -105,14 +107,16 @@ echo "/opt/nvmesh
 /lib/systemd/system/nvmeshtrace@.service
 /etc/modprobe.d/nvmesh.conf
 /etc/depmod.d/zz02-nvmesh.conf
+/etc/nvmesh/Excelero_mlxconfig.db
+/etc/nvmesh/patch_mlxconfig.db.sql
 /etc/udev/rules.d/60-nvmesh.rules
 %ghost /var/opt/nvmesh/client_upgrade_version" > files.lst
 
 %pre
 # an upgrade
-if [ "$1" = "2" ] || [ "$1" = "upgrade" ]; then
+if [ $1 -gt 1 ] || [ "$1" == "upgrade" ]; then
 	MDIRS="/opt/nvmesh/client-repo /opt/nvmesh/common-repo"
-	compressed_kos=`find -L $MDIRS -name '*.ko.xz*' -type f 2>/dev/null`
+	compressed_kos=`find -L $MDIRS -name '*.ko.xz' -type f 2>/dev/null`
 	# if compressed kos found then remove old decompressed kos
 	if [ ! -z "$compressed_kos" ]; then
 		find -L $MDIRS -name '*.ko' -type f -exec rm -f {} +
@@ -121,8 +125,8 @@ fi
 
 %post
 /opt/nvmesh/client-repo/installation-scripts-%{version}-%{release}/post_install "$1" "$2" "%{version}" "%{release}" "client"
-# this should either move to the infra post install phase or the rpm creation phase (since we now work with xz.bcp which is not recognized by modinfo)
-# modinfo $(find -L /opt/nvmesh/client-repo/ -name 'nvmeibc.ko' -o -name 'nvmeibc.ko.xz' -type f) -F nvmeibc_capabilities > /opt/nvmesh/client-repo/.capabilities
+modinfo $(find -L /opt/nvmesh/client-repo/ -name 'nvmeibc.ko' -o -name 'nvmeibc.ko.xz' -type f) -F nvmeibc_capabilities > /opt/nvmesh/client-repo/.capabilities
+
 
 %preun
 /opt/nvmesh/client-repo/installation-scripts-%{version}-%{release}/uninstall-client $1

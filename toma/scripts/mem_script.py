@@ -1,8 +1,4 @@
 #!/usr/bin/python3
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # DanielHsH, 2025/Nov, this script is deprecated. Originally tried to find mem leaks from logs. Better use compiler for that, because logs can be missing
 
 import os

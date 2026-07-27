@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef KR_INCS_PERCPU_H
 #define KR_INCS_PERCPU_H
 
@@ -39,7 +34,7 @@
 	// rather, we treat the percpu allocation as a simple array.
 	// so an aligned allocation will allocate more memory than required but that's ok for a simulator.
 	#define USE_SMP_PER_CPU		// whether the real percpu is in use
-	extern unsigned nr_cpu_ids;
+	extern int nr_cpu_ids;
 	#define ____page_aligned __attribute__((__aligned__(PAGE_SIZE)))
 
 	// static per-cpu variable declaration & use
@@ -56,7 +51,7 @@
 	#define this_cpu_ptr(var) ({typeof(var) rv = per_cpu_ptr(var, get_cpu()); put_cpu(); rv; })
 	int  get_cpu(void);
 	void put_cpu(void);
-	#define for_each_possible_cpu(i) for (i=0; i<(typeof(i))nr_cpu_ids; i++)
+	#define for_each_possible_cpu(i)  for (i=0; i<nr_cpu_ids; i++)
 	#define for_each_online_cpu(i)   for_each_possible_cpu(i)
 	#define __percpu
 	void __percpu *__alloc_percpu(size_t size, size_t align);

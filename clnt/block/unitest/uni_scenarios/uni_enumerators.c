@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "uni_enumerators.h"
 #include "../nvmeibc_block_common.h"
 #include "../uni_framework/unitest_defs.h"
@@ -245,33 +240,19 @@ struct topologies_enumerator create_no_protection_topo_enum(struct TstPRaid srai
 
 const enum NVMEIBTC_DS_MODE nvmeibtc_dgdrd_modes[] = {NVMEIBTC_DS_MODE_W, NVMEIBTC_DS_MODE_DEAD, NVMEIBTC_DS_MODE_W_NO_DIRTY, NVMEIBTC_DS_MODE_W_IS_DIRTY};
 
-struct topologies_enumerator create_topo_random_enum(struct TstPRaid sraid, u16 max_non_deg, u16 max_1_deg, u16 max_2_deg)
-{
-	struct topologies_enumerator topo_enum;
-	__init_topologies_enumerator(&topo_enum);
-	topo_enum.impl.n_permutations = 0;
-	BUG_ON((size_t)(max_non_deg + max_1_deg + max_2_deg) > ARRAY_SIZE(topo_enum.impl.permutations));
-
-	for (int n_deg = 0; n_deg < 3; n_deg++) {
-		u16 max_deg_perms = n_deg == 0 ? max_non_deg : (n_deg == 1 ? max_1_deg : max_2_deg);
-		u16 n_deg_perms;
-		struct topologies_enumerator deg_topo_enum;
-		if (!max_deg_perms)
-			continue;
-		deg_topo_enum = create_all_topo_enum(sraid, n_deg);
-		n_deg_perms = min(deg_topo_enum.impl.n_permutations, max_deg_perms);
-		if (!n_deg_perms)
-			continue;
-		range_shuffle(deg_topo_enum.impl.permutations, deg_topo_enum.impl.permutations + deg_topo_enum.impl.n_permutations);
-		range_copy(&deg_topo_enum.impl.permutations[0], &deg_topo_enum.impl.permutations[n_deg_perms], (&topo_enum.impl.permutations[topo_enum.impl.n_permutations]));
-		topo_enum.impl.n_permutations += n_deg_perms;
-	}
-
+struct topologies_enumerator create_all_topo_random_enum(struct TstPRaid sraid, u16 n_perms, bool all_topos) {
+	struct topologies_enumerator topo_enum = create_all_topo_enum(sraid);
 	range_shuffle(topo_enum.impl.permutations, topo_enum.impl.permutations + topo_enum.impl.n_permutations);
+	if (!all_topos)
+		topo_enum.impl.n_permutations = n_perms;
+	else {
+		BUG_ON(n_perms);
+	}
 	return topo_enum;
 };
 
-struct topologies_enumerator create_all_topo_enum(struct TstPRaid sraid, u16 n_deg) {
+struct topologies_enumerator create_all_topo_enum(struct TstPRaid sraid) {
+	u32 curr_i = 0;
 	u8 sgmnts[N_MAX_RAID_SLICE_LEN];
 	const u8 n_relevant_sgs = __init_relevant_sgmnts_mapping(sraid, sgmnts);
 	struct topologies_enumerator ienum;
@@ -279,43 +260,42 @@ struct topologies_enumerator create_all_topo_enum(struct TstPRaid sraid, u16 n_d
 	BUG_ON((sraid.vsi.chunk != 0) && (sraid.vsi.raid != 0));
 
 	__init_topologies_enumerator(&ienum);
-	ienum.impl.n_permutations = 0;
 
-	switch (n_deg) {
-	case 0:
-		// Add non degraded topo
-		ienum.impl.permutations[ienum.impl.n_permutations++] = create_itopo_enum_perm_state(0, NVMEIBTC_DS_MODE_RW, 1, NVMEIBTC_DS_MODE_RW);
-		break;
-	case 1:
-		// Generate all single degraded possibilities
-		for (u8 x = 0; x < n_relevant_sgs; ++x) {
+	// Add non degraded topo
+	ienum.impl.permutations[curr_i++] = create_itopo_enum_perm_state(0, NVMEIBTC_DS_MODE_RW, 1, NVMEIBTC_DS_MODE_RW);
+
+	// Generate all single degraded possibilities
+	for (u8 x = 0; x < n_relevant_sgs; ++x) {
+		const u8 sx = sgmnts[x];
+		const u8 sy = sgmnts[(sx + 1) % n_relevant_sgs]; // sy should be different than sx
+		array_foreach(m, nvmeibtc_dgdrd_modes)
+			ienum.impl.permutations[curr_i++] = create_itopo_enum_perm_state(sx, *m, sy, NVMEIBTC_DS_MODE_RW);
+	}
+
+	// Generate all double degraded (including w+) possibilities
+	for (u8 x = 0; x < n_relevant_sgs; ++x) {
+		for (u8 y = x+1; y < n_relevant_sgs; ++y){
 			const u8 sx = sgmnts[x];
-			const u8 sy = sgmnts[(sx + 1) % n_relevant_sgs]; // sy should be different than sx
-			array_foreach(m, nvmeibtc_dgdrd_modes)
-				ienum.impl.permutations[ienum.impl.n_permutations++] = create_itopo_enum_perm_state(sx, *m, sy, NVMEIBTC_DS_MODE_RW);
-		}
-		break;
-	case 2:
-		// Generate all double degraded (including w+) possibilities
-		for (u8 x = 0; x < n_relevant_sgs; ++x) {
-			for (u8 y = x+1; y < n_relevant_sgs; ++y){
-				const u8 sx = sgmnts[x];
-				const u8 sy = sgmnts[y];
-				array_foreach(mx, nvmeibtc_dgdrd_modes) {
-					range_foreach(my, mx, nvmeibtc_dgdrd_modes + ARRAY_SIZE(nvmeibtc_dgdrd_modes)) {
-						ienum.impl.permutations[ienum.impl.n_permutations++] = create_itopo_enum_perm_state(sx, *mx, sy, *my);
-						if (*mx==*my)
-							continue;
-						ienum.impl.permutations[ienum.impl.n_permutations++] = create_itopo_enum_perm_state(sx, *my, sy, *mx);
-					}
+			const u8 sy = sgmnts[y];
+			array_foreach(mx, nvmeibtc_dgdrd_modes) {
+				range_foreach(my, mx, nvmeibtc_dgdrd_modes + ARRAY_SIZE(nvmeibtc_dgdrd_modes)) {
+					ienum.impl.permutations[curr_i++] = create_itopo_enum_perm_state(sx, *mx, sy, *my);
+					if (*mx==*my)
+						continue;
+					ienum.impl.permutations[curr_i++] = create_itopo_enum_perm_state(sx, *my, sy, *mx);
 				}
 			}
 		}
-		break;
-	default:
-		BUG();
 	}
 
+	ienum.impl.n_permutations = curr_i;
+
+	{   // Check all possibilities are covered
+		u16 n_deg_modes = ARRAY_SIZE(nvmeibtc_dgdrd_modes);
+		u16 n_single_deg = n_deg_modes * n_relevant_sgs;
+		u16 n_double_deg = (n_deg_modes * n_deg_modes) * choose_t(n_relevant_sgs, 2);
+		BUG_ON(ienum.impl.n_permutations != n_double_deg + n_single_deg + 1);  // + 1 because of non degraded topo
+	}
 	return ienum;
 };
 

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
 /* Enable RDRAND Hardware RNG Hash Seed */

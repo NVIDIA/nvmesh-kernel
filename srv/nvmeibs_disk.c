@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -27,7 +22,7 @@
 
 bool nvmeibs_disk_collect_stats = true;
 module_param_named(disk_collect_stats, nvmeibs_disk_collect_stats, bool, 0644);
-MODULE_PARM_DESC(disk_collect_stats, "Enable collecting statistics for disk operations. Can be used for performance optimization.");
+MODULE_PARM_DESC(disk_collect_stats, "Enable collecting stats for disk");
 
 
 static LIST_HEAD(disk_info_list);
@@ -417,11 +412,6 @@ static void destroy_disk_procfs(struct nvmeibs_disk_info *di)
 		nvmeib_public_proc_remove(priv->procfs.nvme_qp_stats);
 		priv->procfs.nvme_qp_stats = NULL;
 	}
-	if (priv->procfs.qp_stats_json) {
-		_NT(destroy_disk_procfs_qp_stats_json, "Remove qp_stats.json proc");
-		nvmeib_public_proc_remove(priv->procfs.qp_stats_json);
-		priv->procfs.qp_stats_json = NULL;
-	}
 	if (priv->procfs.dir) {
 		_NT(t3_destroy_disk_procfs, "Remove dir");
 		remove_proc_entry(di->disk_id, nvmeibs_proc_disks_dir);
@@ -439,28 +429,6 @@ static ssize_t stats_nvme_qps(void *priv, char *buf, size_t len)
 
 	return nvmeibs_nvme_fill_stats_nvme_qps(di, buf, len);
 #undef BUF_ADD
-}
-
-static ssize_t fill_qp_stats_json(void *priv, char *buf, size_t len)
-{
-	struct nvmeibs_disk_info *di = priv;
-
-	if (!di)
-		return 0;
-
-	return nvmeibs_nvme_fill_qp_stats_json(di, buf, len);
-}
-
-static ssize_t clear_qp_stats_json(void *priv, char *buf, size_t len)
-{
-	struct nvmeibs_disk_info *di = priv;
-	int reset;
-
-	if (sscanf(buf, "%d", &reset) != 1 || reset != 0)
-		return -EINVAL;
-
-	nvmeibs_nvme_qp_stats_reset(di);
-	return len;
 }
 
 #define CORE_SERVER_IOSTATS_PROC_FRMT_VER 2 /* Bumped to 2 due to fix for [NVMESH-6726] */
@@ -532,13 +500,6 @@ static int create_disk_procfs(struct nvmeibs_disk_info *di) {
 		_NT(create_disk_procfs_nvme_qps, "Create file /proc/nvmeibs/disks/@DISK_NAME/nvme_qps", di->disk_id);
 		if (!(priv->procfs.nvme_qp_stats = nvmeib_public_proc_create("nvme_qps", priv->procfs.dir,
 													&stats_nvme_qps, NULL, di))) {
-			rv = -EEXIST;
-			goto err;
-		}
-
-		_NT(create_disk_procfs_qp_stats_json, "Create file /proc/nvmeibs/disks/@DISK_NAME/qp_stats.json", di->disk_id);
-		if (!(priv->procfs.qp_stats_json = nvmeib_public_proc_create("qp_stats.json", priv->procfs.dir,
-													&fill_qp_stats_json, &clear_qp_stats_json, di))) {
 			rv = -EEXIST;
 			goto err;
 		}
@@ -1853,7 +1814,7 @@ void nvmeibs_disk_record_stats(struct nvmeibs_disk_info *di, struct nvmeibs_nvme
 	if (status) { /* Record failure */
 			di->stats.total_err ++;
 		} else { /* Record success */
-			ktime_t end_time = ktime_get();
+			ktime_t end_time = nvmeib_public_ktime_get();
 			ktime_t start_time = req->stats.start_time;
 			u64 lat = ktime_after(end_time, start_time) ? ktime_to_ns(ktime_sub(end_time, start_time)) : 0;
 			switch (req->nvme_op) {

@@ -1,8 +1,4 @@
 #!/usr/bin/env python
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import json, yaml, glob, time, socket, re, os, sys, jmespath, urllib3, subprocess, shutil, signal, threading
 from copy import deepcopy
 import logging.handlers
@@ -17,7 +13,7 @@ from argparse import ArgumentParser
 from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
 from threading import Lock, RLock
-from prometheus_client import Gauge, MetricsHandler
+from prometheus_client import start_http_server, Gauge
 from prometheus_client.metrics import MetricWrapperBase
 from prometheus_client.registry import REGISTRY
 
@@ -26,7 +22,7 @@ from xlro.core import infra_conf
 from xlro.core.entities import Manager, Host
 from xlro.core.sdk.ConnectionManager import ConnectionManager, ConnectionManagerError
 from xlro.core.util.general_utils import host_name, wait_for_it
-from xlro.core.util.ssh import Connection, local_execute
+from xlro.core.util.ssh import Connection
 from xlro.core.util.dict_util import merge_dicts, del_path
 import tracemalloc, psutil
 
@@ -34,7 +30,7 @@ import tracemalloc, psutil
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 GIT_SPEC = {}
-EXPORTER_VERSION = 'v2.4.0'  # support readyness and liveness
+EXPORTER_VERSION = 'v2.3.1'  # support labels list
 Connection.LOCALHOST_CHECK = True
 
 # TODO: move to some utils lib once it's completely in nvmesh repo
@@ -67,18 +63,11 @@ TLS_KEY = None
 TLS_CA = None
 TLS_CLIENT_AUTH_REQUIRED = False
 TLS_RUNTIME_DIR = '/var/run/nvmesh/tls/exporter'
-CERT_AUTO_RELOAD = False
-EXIT_ON_CERT_CHANGE = False
 MEMORY_PROFILING = False
 MEMORY_REPORT_INTERVAL = 60
 MEMORY_TRACEMALLOC_LIMIT = 10
-LIVENESS_THRESHOLD_LOOPS = 5  # Number of missed loops before liveness probe fails
 # source (i.e. /proc/nvmeibc/volumes/*/iostats.json) -> MetricParser object
 SOURCE_CONF = {}
-
-_last_successful_loop: float = 0.0
-_exporter_ready: bool = False
-_management_connected: bool = False
 host = Host.instance(name=socket.gethostname())
 cycle_count = 0
 cache_size_metric : Optional[MetricWrapperBase] = None
@@ -146,8 +135,6 @@ parser.add_argument('--exporter-key', default=get_default('TLS_KEY'), help='key 
 parser.add_argument('--exporter-ca', default=get_default('TLS_CA'), help='ca file for tls connection with exporter')
 parser.add_argument('--exporter-client-auth-required', type=bool_check, default=get_default('TLS_CLIENT_AUTH_REQUIRED'), help='Enforce mutual TLS with exporter')
 parser.add_argument('--tls-runtime-dir', default=get_default('TLS_RUNTIME_DIR'), help='Runtime directory for certificate copies (for observability)')
-parser.add_argument('--cert-auto-reload', type=bool_check, default=get_default('CERT_AUTO_RELOAD'), help='Auto reload certs if file updated')
-parser.add_argument('--exit-on-cert-change', type=bool_check, default=get_default('EXIT_ON_CERT_CHANGE'), help='Exit on cert change (for k8 pod) - implies cert auto-reload')
 parser.add_argument('-u', '--user', default=get_default('MANAGEMENT_USER'), help='management user log in')
 parser.add_argument('-V', '--version', action='store_true', help='NVMesh exporter version')
 parser.add_argument("-L", "--loglevel", help='Logging-level for stderr', default=get_default('LOGGING_LEVEL'))
@@ -156,7 +143,6 @@ parser.add_argument("--logfile", help='Log file', default=get_default('LOGGING_F
 parser.add_argument('--memory-profiling', type=bool_check, default=get_default('MEMORY_PROFILING'), help='Enable memory profiling and periodic reporting')
 parser.add_argument('--memory-report-interval', type=int, default=get_default('MEMORY_REPORT_INTERVAL'), help='Memory report interval in seconds (default: 60)')
 parser.add_argument('--memory-tracemalloc-limit', type=int, default=get_default('MEMORY_TRACEMALLOC_LIMIT'), help='Number of top memory allocations to report (default: 10)')
-parser.add_argument('--liveness-threshold-loops', type=int, default=get_default('LIVENESS_THRESHOLD_LOOPS'), help='Number of missed loops before liveness probe fails (default: 5)')
 parsed_args = parser.parse_args()
 
 # Set runtime certificate directories based on parsed argument
@@ -184,8 +170,7 @@ AGG_LOCK = Lock()
 
 profiler = None
 profiler_enabled = parsed_args.memory_profiling  # Global flag for runtime control of memory profiler
-exit_on_cert_change = parsed_args.exit_on_cert_change
-cert_auto_reload = parsed_args.cert_auto_reload or exit_on_cert_change
+cert_auto_reload_enabled = False  # Global flag for optional auto-reload of certificates (disabled by default)
 
 # Certificate reload infrastructure (signal-based + optional auto-reload)
 exporter_certs = [parsed_args.exporter_cert, parsed_args.exporter_key, parsed_args.exporter_ca]
@@ -201,7 +186,7 @@ loaded_mgmt_cert: Optional[str] = os.path.join(MANAGEMENT_TLS_RUNTIME_DIR, 'cert
 loaded_mgmt_key: Optional[str] = os.path.join(MANAGEMENT_TLS_RUNTIME_DIR, 'key.key') if parsed_args.mgmt_key else None
 loaded_mgmt_ca: Optional[str] = os.path.join(MANAGEMENT_TLS_RUNTIME_DIR, 'ca.crt') if parsed_args.mgmt_ca else None
 
-prometheus_server = None  # Will hold the server object for graceful shutdown
+prometheus_server = None  # Will hold the server object for graceful shutdown  
 prometheus_thread = None  # Will hold the server thread
 start_time = time.time()  # Track process start time for uptime calculation
 
@@ -266,14 +251,9 @@ class ParsingStrategy(object):
         self.pattern_re, pattern_labels = self.re_to_labels_data(metrics_conf.get('pattern_labels_re'))
         self.query_labels = metrics_conf.get('query_labels', {})
         self.query_labels_list = metrics_conf.get('query_labels_list', {})
-        self.query_labels_re = {}
-        for field, regex_str in metrics_conf.get('query_labels_re', {}).items():
-            compiled = re.compile(regex_str)
-            self.query_labels_re[field] = compiled
         self.transform = metrics_conf.get('transform')
 
-        query_labels_re_names = [name for pat in self.query_labels_re.values() for name in pat.groupindex.keys()]
-        general_labels = list(set((parser_labels or []) + list(self.additional_labels().keys()) + glob_labels + pattern_labels + list(self.query_labels.keys()) + self.query_labels_list.get('names', []) + query_labels_re_names))
+        general_labels = list(set((parser_labels or []) + list(self.additional_labels().keys()) + glob_labels + pattern_labels + list(self.query_labels.keys()) + self.query_labels_list.get('names', [])))
         self.metrics : Dict[Union[re.Pattern, List], MetricWrapperBase] = {}
         for m_name, m_conf in metrics_conf.get('metrics', {}).items():
             # METRIC specific configurations
@@ -297,7 +277,7 @@ class ParsingStrategy(object):
 
         general_conf = {}
         for k, v in metrics_conf.items():
-            if k not in ['metrics', 'aggregates', 'collections', 'query_labels', 'query_labels_list', 'query_labels_re', 'transform']:
+            if k not in ['metrics', 'aggregates', 'collections', 'query_labels', 'query_labels_list', 'transform']:
                 general_conf[k] = v
 
         self.collections = {}
@@ -363,24 +343,24 @@ class MetricParser(object):
     def remove_inactive_metrics(cls):
         non_active_metrics = set()
         removed_count = 0
-
+        
         for metric_data in cls.ACTIVE_METRICS_DATA:
             if metric_data.del_threshold <= 0:
                 try:
                     # Record before removal for debugging
                     metric_name = getattr(metric_data.metric, '_name', 'unknown')
-
+                    
                     # Remove from Prometheus registry
                     metric_data.metric.remove(*metric_data.label_values)
                     removed_count += 1
-
+                    
                     # Log significant removals for debugging
                     if removed_count <= 5:  # Log first 5 removals
                         logger.debug(f"Removed metric: {metric_name} with labels {metric_data.label_values}")
-
+                        
                 except Exception as e:
                     logger.error(f"Error removing metric {getattr(metric_data.metric, '_name', 'unknown')}: {e}")
-
+                
                 non_active_metrics.add(metric_data)
 
         # Clean up the instances cache to prevent memory leak
@@ -389,7 +369,7 @@ class MetricParser(object):
             MetricData._instances.pop(key, None)
 
         cls.ACTIVE_METRICS_DATA -= non_active_metrics
-
+        
         if removed_count > 0:
             logger.debug(f"Removed {removed_count} inactive metrics from Prometheus registry")
 
@@ -426,22 +406,14 @@ class MetricParser(object):
 
 
 class CmdParser(MetricParser):
+    sp_run_kwargs = {'shell': True, 'check': True, 'capture_output': True, 'text': True}
+
     @classmethod
     def run_cmd(cls, cmd: str) -> str:
-        stdout, stderr, code = local_execute(cmd)
-        if code != 0:
-            raise subprocess.CalledProcessError(code, cmd, stdout, stderr)
-        return stdout
+        return subprocess.run(cmd, **cls.sp_run_kwargs).stdout
 
     def fetch_metrics_dict(self, path: str) -> Dict[str, Any]:
-        try:
-            return json.loads(self.run_cmd(path))
-        except FileNotFoundError as e:
-            logger.warning(f"Command not available (distroless container?): {path} - {e}")
-            raise
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Command failed: {path} - exit code {e.returncode}")
-            raise
+        return json.loads(self.run_cmd(path))
 
 
 class UmRpcParser(CmdParser):
@@ -517,10 +489,8 @@ class RestParser(MetricParser):
                         self._connection_cache[endpoint_key] = connection
                         #JJW: Does global API version make sense with multiple endpoints?
                         self._api_version = conn_mgmt.api_version
-                        set_management_connected(True)
                         logger.info(f'Connection acquired successfully for endpoint key: {endpoint_key}! API Version: {self._api_version}')
                     except Exception as e:
-                        set_management_connected(False)
                         next_retry = time.time() + parsed_args.mgmt_retry_login
                         self._connection_cache[endpoint_key] = next_retry
                         raise ConnectionError(f'Unable to acquire connection for endpoint key: {endpoint_key} - {repr(e)}. Retry login after {time.ctime(next_retry)}')
@@ -593,23 +563,23 @@ class MemoryProfiler:
             # Always start tracemalloc when profiling is enabled
             tracemalloc.start()
             logger.info("[MEMORY] Tracemalloc memory tracking started")
-
+    
     def get_memory_info(self) -> Dict[str, Any]:
         """Get current memory usage information"""
         if not self.enabled:
             return {}
-
+            
         try:
             memory_info = self.process.memory_info()
             memory_percent = self.process.memory_percent()
-
+            
             info = {
                 'rss_mb': round(memory_info.rss / 1024 / 1024, 2),
                 'vms_mb': round(memory_info.vms / 1024 / 1024, 2),
                 'memory_percent': round(memory_percent, 2),
                 'timestamp': time.time()
             }
-
+            
             # Add system memory info
             system_memory = psutil.virtual_memory()
             info.update({
@@ -617,7 +587,7 @@ class MemoryProfiler:
                 'system_available_mb': round(system_memory.available / 1024 / 1024, 2),
                 'system_percent': system_memory.percent
             })
-
+            
             # Add tracemalloc info (always enabled when profiling is on)
             if tracemalloc.is_tracing():
                 current_size, peak_size = tracemalloc.get_traced_memory()
@@ -625,17 +595,17 @@ class MemoryProfiler:
                     'tracemalloc_current_mb': round(current_size / 1024 / 1024, 2),
                     'tracemalloc_peak_mb': round(peak_size / 1024 / 1024, 2)
                 })
-
+            
             return info
         except Exception as e:
             logger.error(f"[MEMORY] Error getting memory info: {e}")
             return {}
-
+    
     def take_snapshot(self, label: str = "") -> Optional[Any]:
         """Take a memory snapshot using tracemalloc"""
         if not self.enabled or not tracemalloc.is_tracing():
             return None
-
+            
         try:
             snapshot = tracemalloc.take_snapshot()
             snapshot.label = label
@@ -644,77 +614,77 @@ class MemoryProfiler:
         except Exception as e:
             logger.error(f"[MEMORY] Error taking memory snapshot: {e}")
             return None
-
+    
     def set_baseline(self):
         """Set the baseline memory snapshot"""
         if not self.enabled:
             return
-
+            
         self.baseline_snapshot = self.take_snapshot("baseline")
         if self.baseline_snapshot:
             memory_info = self.get_memory_info()
             logger.info(f"[MEMORY] Memory baseline set - RSS: {memory_info.get('rss_mb', 0)}MB")
-
+    
     def report_memory_usage(self, force: bool = False):
         """Report current memory usage"""
         if not self.enabled:
             return
-
+            
         current_time = time.time()
         if not force and (current_time - self.last_report_time) < self.report_interval:
             return
-
+            
         memory_info = self.get_memory_info()
         if memory_info:
             logger.info(f"[MEMORY] Memory Report - RSS: {memory_info['rss_mb']}MB, VMS: {memory_info['vms_mb']}MB, "
                        f"Process%: {memory_info['memory_percent']}%, System%: {memory_info['system_percent']}%")
-
+            
             if 'tracemalloc_current_mb' in memory_info:
                 logger.info(f"[MEMORY] Tracemalloc - Current: {memory_info['tracemalloc_current_mb']}MB, "
                            f"Peak: {memory_info['tracemalloc_peak_mb']}MB")
-
+        
         self.last_report_time = current_time
-
+    
     def report_top_allocations(self):
         """Report top memory allocations using tracemalloc"""
         if not self.enabled or not tracemalloc.is_tracing():
             return
-
+            
         try:
             snapshot = tracemalloc.take_snapshot()
             top_stats = snapshot.statistics('lineno')
-
+            
             logger.info(f"[MEMORY] Top {self.tracemalloc_limit} memory allocations:")
             for index, stat in enumerate(top_stats[:self.tracemalloc_limit], 1):
                 logger.info(f"[MEMORY] #{index}: {stat}")
-
+                
         except Exception as e:
             logger.error(f"[MEMORY] Error reporting top allocations: {e}")
-
+    
     def detect_memory_leaks(self, current_snapshot):
         """Compare current snapshot with baseline to detect potential leaks"""
         if not self.enabled or not self.baseline_snapshot or not current_snapshot:
             return
-
+            
         try:
             top_stats = current_snapshot.compare_to(self.baseline_snapshot, 'lineno')
-
+            
             # Filter for significant increases (>1MB)
             significant_increases = [stat for stat in top_stats if stat.size_diff > 1024 * 1024]
-
+            
             if significant_increases:
                 logger.warning(f"[MEMORY] Potential memory leaks detected ({len(significant_increases)} locations):")
                 for stat in significant_increases[:5]:  # Top 5 increases
                     logger.warning(f"[MEMORY]   {stat}")
-
+                    
         except Exception as e:
             logger.error(f"[MEMORY] Error detecting memory leaks: {e}")
-
+    
     def report_cache_sizes(self):
         """Report sizes of known caches that might leak"""
         if not self.enabled:
             return
-
+            
         try:
             cache_info = {k: len(v) for k, v in MemoryProfiler.tracked_caches.items()}
             # Try to get version maps from all parsers
@@ -723,28 +693,28 @@ class MemoryProfiler:
                 if hasattr(parser, '_version_map'):
                     total_version_maps += len(parser._version_map)
             cache_info['Total _version_maps'] = total_version_maps
-
+            
             logger.info(f"[MEMORY] Cache sizes: {cache_info}")
-
+            
             # Report prometheus registry size
             try:
                 from prometheus_client.registry import REGISTRY
                 registry_size = len(REGISTRY._names_to_collectors)
                 total_metrics = sum(len(getattr(collector, '_metrics', {})) for collector in REGISTRY._names_to_collectors.values())
                 logger.info(f"[MEMORY] Prometheus Registry - Collectors: {registry_size}, Total Metric Instances: {total_metrics}")
-
+                
                 # Calculate estimated memory from Prometheus metrics
                 estimated_prometheus_mb = total_metrics * 1.5 / 1024  # Rough estimate: 1.5KB per metric instance
                 logger.info(f"[MEMORY] Estimated Prometheus Memory Usage: {estimated_prometheus_mb:.1f}MB")
-
+                
             except Exception as e:
                 logger.warning(f"[MEMORY] Could not get prometheus registry info: {e}")
-
+            
             # Force garbage collection and report
             import gc
             collected = gc.collect()
             logger.info(f"[MEMORY] Garbage collection freed {collected} objects")
-
+            
             # Report RSS vs tracemalloc gap
             memory_info = self.get_memory_info()
             if memory_info:
@@ -753,7 +723,7 @@ class MemoryProfiler:
                 gap_mb = rss_mb - tracemalloc_mb
                 logger.warning(f"[MEMORY] Memory Gap Analysis - RSS: {rss_mb}MB, Tracemalloc: {tracemalloc_mb}MB, "
                                    f"Untracked: {gap_mb}MB ({gap_mb/rss_mb*100:.1f}%)")
-
+            
         except Exception as e:
             logger.error(f"[MEMORY] Error reporting cache sizes: {e}")
 
@@ -777,7 +747,7 @@ class MemoryProfiler:
         """Test if memory is actually freed when metrics are removed"""
         if not self.enabled:
             return
-
+            
         try:
             # Get memory before cleanup
             before_memory = self.get_memory_info()
@@ -788,44 +758,44 @@ class MemoryProfiler:
             # Get memory after cleanup
             after_memory = self.get_memory_info()
             after_rss = after_memory.get('rss_mb', 0)
-
+            
             memory_freed = before_rss - after_rss
             logger.info(f"[MEMORY] Memory cleanup test - Before: {before_rss}MB, After: {after_rss}MB, "
                            f"Freed: {memory_freed:.2f}MB")
-
+            
             if memory_freed < 0.1:
                 logger.info("[MEMORY] ℹ️  RSS memory was not returned to OS (normal Python behavior)")
                 logger.info("[MEMORY]    Python keeps freed memory for reuse - not a leak!")
             else:
                 logger.info(f"[MEMORY] ✅ Successfully freed {memory_freed:.2f}MB of memory")
-
+                
         except Exception as e:
             logger.error(f"[MEMORY] Error testing memory freeing: {e}")
-
+    
     def check_memory_stability(self, cycle_count: int):
         """Check if RSS memory stabilizes (indicating reuse rather than growth)"""
         if not self.enabled:
             return
-
+            
         try:
             memory_info = self.get_memory_info()
             current_rss = memory_info.get('rss_mb', 0)
-
+            
             # Store last 10 RSS measurements for trend analysis
             if not hasattr(self, '_rss_history'):
                 self._rss_history = []
-
+                
             self._rss_history.append(current_rss)
             if len(self._rss_history) > 10:
                 self._rss_history.pop(0)
-
-            # Analyze trend every 10 cycles
+                
+            # Analyze trend every 10 cycles  
             if cycle_count % 10 == 0 and len(self._rss_history) >= 5:
                 recent_rss = self._rss_history[-5:]  # Last 5 measurements
                 min_rss = min(recent_rss)
                 max_rss = max(recent_rss)
                 rss_variation = max_rss - min_rss
-
+                
                 if rss_variation < 5:  # Less than 5MB variation
                     logger.info(f"[MEMORY] ✅ Memory appears stable: {min_rss:.1f}-{max_rss:.1f}MB range (variation: {rss_variation:.1f}MB)")
                     logger.info("[MEMORY]    This suggests memory reuse rather than continuous growth")
@@ -833,42 +803,42 @@ class MemoryProfiler:
                     logger.info(f"[MEMORY] 📊 Memory variation: {rss_variation:.1f}MB over last 5 reports - monitoring...")
                 else:
                     logger.warning(f"[MEMORY] ⚠️  High memory variation: {rss_variation:.1f}MB - possible continued growth")
-
+                    
         except Exception as e:
             logger.error(f"[MEMORY] Error checking memory stability: {e}")
-
+    
     def detect_memory_leak_via_recreate_test(self, cycle_count: int, active_metrics_count: int):
         """Detect memory leaks by monitoring RSS when recreating similar workloads"""
         if not self.enabled:
             return
-
+            
         try:
             memory_info = self.get_memory_info()
             current_rss = memory_info.get('rss_mb', 0)
-
+            
             # Track RSS at different metric counts
             if not hasattr(self, '_workload_memory_map'):
                 self._workload_memory_map = {}  # metric_count -> [rss_measurements]
-
+                
             # Group metrics count into bins (to handle minor variations)
             metric_bin = (active_metrics_count // 1000) * 1000  # Round to nearest 1000
-
+            
             if metric_bin not in self._workload_memory_map:
                 self._workload_memory_map[metric_bin] = []
-
+                
             self._workload_memory_map[metric_bin].append(current_rss)
-
+            
             # Keep only last 5 measurements per workload level
             if len(self._workload_memory_map[metric_bin]) > 5:
                 self._workload_memory_map[metric_bin].pop(0)
-
+                
             # Analysis: Check if RSS increases for same workload size
             if len(self._workload_memory_map[metric_bin]) >= 3:
                 measurements = self._workload_memory_map[metric_bin]
                 first_measurement = measurements[0]
                 recent_measurement = measurements[-1]
                 growth = recent_measurement - first_measurement
-
+                
                 # Log analysis every 20 cycles
                 if cycle_count % 20 == 0:
                     if growth > 20:  # More than 20MB growth for same workload
@@ -881,8 +851,8 @@ class MemoryProfiler:
                         logger.warning(f"[MEMORY]    Workload: ~{metric_bin} metrics, RSS growth: +{growth:.1f}MB over {len(measurements)} cycles")
                     else:
                         logger.info(f"[MEMORY] ✅ Memory reuse working correctly for ~{metric_bin} metrics (growth: +{growth:.1f}MB)")
-
-            # Report workload summary periodically
+                        
+            # Report workload summary periodically  
             if cycle_count % 50 == 0 and self._workload_memory_map:
                 logger.info("[MEMORY] 📊 Workload Memory Analysis:")
                 for workload, measurements in sorted(self._workload_memory_map.items()):
@@ -891,7 +861,7 @@ class MemoryProfiler:
                         min_rss = min(measurements)
                         max_rss = max(measurements)
                         logger.info(f"[MEMORY]    ~{workload} metrics: {min_rss:.1f}-{max_rss:.1f}MB (avg: {avg_rss:.1f}MB, {len(measurements)} samples)")
-
+                        
         except Exception as e:
             logger.error(f"[MEMORY] Error in recreate test: {e}")
 
@@ -914,14 +884,14 @@ def _run_memory_profiling_reports():
     cycle_end_snapshot = profiler.take_snapshot(f"cycle_{cycle_count}_end")
     profiler.report_memory_usage()
     profiler.check_memory_stability(cycle_count)
-
+    
     current_metrics_count = len(MetricParser.ACTIVE_METRICS_DATA)
     profiler.detect_memory_leak_via_recreate_test(cycle_count, current_metrics_count)
-
+    
     if cycle_count % 10 == 0:
         profiler.report_cache_sizes()
         profiler.report_top_allocations()
-
+    
     if cycle_count % 60 == 0:
         profiler.detect_memory_leaks(cycle_end_snapshot)
         profiler.test_memory_freeing()
@@ -929,24 +899,18 @@ def _run_memory_profiling_reports():
 
 def _check_and_reload_certificates():
     """Check for certificate changes and reload if needed (only when auto-reload is enabled)."""
-    if not cert_auto_reload:
+    if not cert_auto_reload_enabled:
         return  # Auto-reload is disabled
-
+    
     try:
         if has_exporter_certs and check_certificate_changes(exporter_certs):
-            if exit_on_cert_change:
-                logger.warning("Exporter certificates changed - exiting process")
-                sys.exit(0)
             logger.info("Auto-reload: Exporter certificates changed - performing full server restart")
             if not reload_exporter_certificates():
                 logger.error("Failed to reload exporter certificates")
-
+        
         if has_mgmt_certs and check_certificate_changes(mgmt_certs):
-            if exit_on_cert_change:
-                logger.warning("Management certificates changed - exiting process")
-                sys.exit(0)
             logger.info("Auto-reload: Management certificates changed - clearing connection cache")
-            if not reload_management_certificates():
+            if reload_management_certificates():
                 logger.error("Failed to reload management certificates")
     except Exception as e:
         logger.error(f"Error checking certificates: {e}")
@@ -972,7 +936,7 @@ def _record_timing(start_time):
 def instrumented_loop(enable_timing=True, enable_gc=True, gc_interval=60):
     """
     Decorator to add comprehensive instrumentation to loop functions.
-
+    
     Features:
     - Timing metrics (tracks current and max duration)
     - Memory profiling (when enabled via runtime flag)
@@ -980,7 +944,7 @@ def instrumented_loop(enable_timing=True, enable_gc=True, gc_interval=60):
     - Cache size monitoring
     - Periodic garbage collection
     - Cycle counting
-
+    
     Args:
         enable_timing: Enable loop duration timing metrics (default: True)
         enable_gc: Enable periodic garbage collection (default: True)
@@ -989,43 +953,43 @@ def instrumented_loop(enable_timing=True, enable_gc=True, gc_interval=60):
     def decorator(func):
         def wrapper(*args, **kwargs):
             global profiler_enabled, cycle_count, profiler
-
+            
             start_time = time.time() if enable_timing else None
-
+            
             try:
                 # Initialize memory profiler if enabled
                 if profiler_enabled:
                     _initialize_memory_profiler()
-
+                
                 # Execute the core function
                 result = func(*args, **kwargs)
-
+                
                 # Post-execution instrumentation
                 _update_cache_metrics()
-
+                
                 _check_and_reload_certificates()
-
+                
                 if profiler_enabled:
                     _run_memory_profiling_reports()
-
+                
                 if enable_gc and cycle_count % gc_interval == 0 and not profiler:
                     MemoryProfiler.free_memory()
-
+                
                 cycle_count += 1
-
+                
                 return result
-
+                
             finally:
                 # Always record timing (even on exception)
                 if enable_timing and start_time is not None:
                     _record_timing(start_time)
-
+        
         return wrapper
     return decorator
 
 def check_certificate_changes(certs_list: List[str]) -> bool:
     """Check which certificate files have changed.
-
+    
     Returns:
         has_changed: bool indicating if certificates have changed
     """
@@ -1037,19 +1001,19 @@ def check_certificate_changes(certs_list: List[str]) -> bool:
                 cert_mtimes[filepath] = current_mtime
                 logger.info(f"Certificate file change detected: {filepath}")
                 has_changed = True
-
+    
     return has_changed
 
-def copy_cert_files(source_cert: Optional[str], source_key: Optional[str], source_ca: Optional[str],
+def copy_cert_files(source_cert: Optional[str], source_key: Optional[str], source_ca: Optional[str], 
                     dest_dir: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Copy certificate files to runtime directory for observability.
-
+    
     Args:
         source_cert: Path to source certificate file
         source_key: Path to source key file
         source_ca: Path to source CA file
         dest_dir: Destination directory for copied certificates
-
+        
     Returns:
         Tuple of (dest_cert_path, dest_key_path, dest_ca_path) - paths to copied files
         Returns None for any file that doesn't exist or couldn't be copied
@@ -1060,33 +1024,39 @@ def copy_cert_files(source_cert: Optional[str], source_key: Optional[str], sourc
     except Exception as e:
         logger.error(f"Failed to create certificate directory {dest_dir}: {e}")
         return None, None, None
-
+    
     dest_cert = None
     dest_key = None
     dest_ca = None
-
+    
     try:
         if source_cert and os.path.exists(source_cert):
             dest_cert = os.path.join(dest_dir, 'cert.crt')
+            # Remove existing read-only file if present
             if os.path.exists(dest_cert):
                 os.remove(dest_cert)
             shutil.copy2(source_cert, dest_cert)
-            logger.info(f"Copied certificate: {source_cert} -> {dest_cert}")
-
+            os.chmod(dest_cert, 0o444)  # Read-only for all
+            logger.info(f"Copied certificate: {source_cert} -> {dest_cert} (read-only)")
+        
         if source_key and os.path.exists(source_key):
             dest_key = os.path.join(dest_dir, 'key.key')
+            # Remove existing read-only file if present
             if os.path.exists(dest_key):
                 os.remove(dest_key)
             shutil.copy2(source_key, dest_key)
-            logger.info(f"Copied key: {source_key} -> {dest_key}")
-
+            os.chmod(dest_key, 0o400)  # Read-only for owner only (private key)
+            logger.info(f"Copied key: {source_key} -> {dest_key} (read-only, owner only)")
+        
         if source_ca and os.path.exists(source_ca):
             dest_ca = os.path.join(dest_dir, 'ca.crt')
+            # Remove existing read-only file if present
             if os.path.exists(dest_ca):
                 os.remove(dest_ca)
             shutil.copy2(source_ca, dest_ca)
-            logger.info(f"Copied CA: {source_ca} -> {dest_ca}")
-
+            os.chmod(dest_ca, 0o444)  # Read-only for all
+            logger.info(f"Copied CA: {source_ca} -> {dest_ca} (read-only)")
+        
         return dest_cert, dest_key, dest_ca
     except Exception as e:
         logger.error(f"Error copying certificate files to {dest_dir}: {e}")
@@ -1094,13 +1064,13 @@ def copy_cert_files(source_cert: Optional[str], source_key: Optional[str], sourc
 
 def update_certificates(component: str) -> bool:
     """Copy certificates from original paths to runtime directory.
-
+    
     The loaded_* global variables point to constant runtime directory paths.
     This function copies the certificates from parsed_args (original paths) to those locations.
-
+    
     Args:
         component: Either 'exporter' or 'management'
-
+        
     Returns:
         True if successful, False otherwise.
     """
@@ -1119,150 +1089,54 @@ def update_certificates(component: str) -> bool:
     else:
         logger.error(f"Invalid certificate component: {component}")
         return False
-
+    
     dest_cert, dest_key, dest_ca = copy_cert_files(
         source_cert,
         source_key,
         source_ca,
         dest_dir
     )
-
+    
     if not (dest_cert and dest_key):
         logger.error(f"Failed to copy {component} certificates to runtime directory")
         return False
-
+    
     logger.info(f"{component.capitalize()} certificates copied to runtime directory")
     return True
 
 def initialize_certificates():
     """Initialize certificates at startup by copying to runtime directory.
-
+    
     Copies certificates from original paths (parsed_args) to constant runtime directory paths.
     If copying fails, the application will attempt to read from runtime paths which may not exist.
     """
     # Try to copy exporter certs to runtime dir
     if has_exporter_certs and not update_certificates('exporter'):
         raise Exception("Failed to copy exporter certificates to runtime directory")
-
+    
     # Try to copy management certs to runtime dir
     if has_mgmt_certs and not update_certificates('management'):
         raise Exception("Failed to copy management certificates to runtime directory")
 
-
-class HealthMetricsHandler(MetricsHandler):
-    """Custom HTTP handler that adds health check endpoints for prometheus probes.
-    
-    Endpoints:
-        /healthz, /health - Liveness probe: checks if metrics loop is running
-        /readyz, /ready  - Readiness probe: checks if exporter is initialized
-        /metrics         - Standard Prometheus metrics (inherited)
-    """
-    
-    def do_GET(self):
-        if self.path == '/healthz' or self.path == '/health':
-            self._handle_liveness()
-        elif self.path == '/readyz' or self.path == '/ready':
-            self._handle_readiness()
-        else:
-            # Default prometheus metrics handling
-            super().do_GET()
-    
-    def _handle_liveness(self):
-        """Liveness probe - check if the process is alive and not deadlocked.
-        
-        Returns 200 if the metrics loop has run within the expected interval.
-        Considers unhealthy if no successful loop in last N intervals (configurable).
-        """
-        global _last_successful_loop
-        
-        max_stale_time = parsed_args.interval * parsed_args.liveness_threshold_loops
-        time_since_last_loop = time.time() - _last_successful_loop
-        
-        # Allow startup grace period (first loop hasn't run yet)
-        if _last_successful_loop == 0:
-            self._send_response(200, "OK (starting up)")
-        elif time_since_last_loop < max_stale_time:
-            self._send_response(200, "OK")
-        else:
-            self._send_response(503, f"Stale: last loop {time_since_last_loop:.1f}s ago (threshold: {max_stale_time}s)")
-    
-    def _handle_readiness(self):
-        """Readiness probe - check if the exporter is ready to serve traffic.
-        
-        Returns 200 if exporter is initialized, with status indicating management connection.
-        """
-        global _exporter_ready, _management_connected
-        
-        if _exporter_ready:
-            if _management_connected:
-                self._send_response(200, "Ready, management connected")
-            else:
-                self._send_response(200, "Ready, management disconnected")
-        else:
-            self._send_response(503, "Not ready")
-    
-    def _send_response(self, status_code: int, message: str):
-        self.send_response(status_code)
-        self.send_header('Content-Type', 'text/plain; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(message.encode('utf-8'))
-
-
-def set_last_successful_loop():
-    """Called at the end of each successful metrics collection loop."""
-    global _last_successful_loop
-    _last_successful_loop = time.time()
-
-
-def set_exporter_ready(ready: bool = True):
-    """Called when the exporter is ready/not-ready to serve traffic."""
-    global _exporter_ready
-    _exporter_ready = ready
-    logger.info(f"Exporter readiness set to: {ready}")
-
-
-def set_management_connected(connected: bool = True):
-    """Called when management connection status changes."""
-    global _management_connected
-    if _management_connected != connected:
-        _management_connected = connected
-        logger.info(f"Management connection status: {'connected' if connected else 'disconnected'}")
-
-
 def start_prometheus_server():
-    """Start prometheus HTTP server with health check endpoints.
-
+    """Start prometheus HTTP server using prometheus_client built-in TLS support.
+    
     Certificate rotation can be triggered via:
     - SIGHUP signal for manual reload
     - Auto-reload when file changes are detected (if enabled via SIGUSR2)
     """
     global prometheus_server, prometheus_thread
-    from http.server import ThreadingHTTPServer
-    import ssl
-
     port = int(parsed_args.port)
     is_https = loaded_exporter_cert and loaded_exporter_key
-
+    https_kwargs = {
+        'certfile': loaded_exporter_cert,
+        'keyfile': loaded_exporter_key,
+        'client_cafile': loaded_exporter_ca if loaded_exporter_ca else None,
+        'client_auth_required': parsed_args.exporter_client_auth_required
+    } if is_https else {}
+    
     logger.info(f"Starting prometheus server on port {port}. IS_HTTPS: {is_https}")
-
-    # Create server with custom handler that includes health endpoints
-    prometheus_server = ThreadingHTTPServer(('', port), HealthMetricsHandler)
-
-    # Configure TLS if certificates are provided
-    if is_https:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(certfile=loaded_exporter_cert, keyfile=loaded_exporter_key)
-        if loaded_exporter_ca:
-            context.load_verify_locations(cafile=loaded_exporter_ca)
-        if parsed_args.exporter_client_auth_required:
-            context.verify_mode = ssl.CERT_REQUIRED
-        prometheus_server.socket = context.wrap_socket(prometheus_server.socket, server_side=True)
-
-    # Start server in background thread
-    prometheus_thread = threading.Thread(target=prometheus_server.serve_forever)
-    prometheus_thread.daemon = True
-    prometheus_thread.start()
-
+    prometheus_server, prometheus_thread = start_http_server(port, **https_kwargs)
     _setup_signal_handlers()
     logger.info(f"Server started successfully")
 
@@ -1271,30 +1145,28 @@ def start_prometheus_server():
     if certs_list:
         check_certificate_changes(certs_list)
 
-    set_exporter_ready(True)
-
 def reload_management_certificates() -> bool:
     """Reload management certificates by copying to runtime dir and clearing connection cache."""
     if not parsed_args.mgmt_use_tls:
         logger.warning("Management certificate reload requested but TLS is disabled for management connections")
         return False
-
+        
     logger.info("Reloading management certificates...")
     try:
         # Update certificates (copies from parsed_args to runtime dir, updates loaded_mgmt_*)
         if not update_certificates('management'):
             return False
-
+        
         # Clear connection cache so new connections will use the updated loaded_mgmt_* certificates
         RestParser._connection_cache.clear()
         logger.info("Management connection cache cleared - connections will use new certificates")
-
+        
         # Update metrics
         if cert_reload_counter:
             cert_reload_counter.labels(cert_component='management').inc()
         if cert_reload_timestamp:
             cert_reload_timestamp.labels(cert_component='management').set(time.time())
-
+        
         return True
     except Exception as e:
         logger.error(f"Management certificate reload failed: {e}")
@@ -1303,17 +1175,17 @@ def reload_management_certificates() -> bool:
 def reload_exporter_certificates() -> bool:
     """Reload exporter certificates by copying to runtime dir and restarting the Prometheus server."""
     global prometheus_server, prometheus_thread
-
+    
     with cert_reload_lock:
         logger.info("Reloading exporter certificates (server restart)...")
-
+        
         try:
             # Update certificates (copies from parsed_args to runtime dir, updates loaded_exporter_*)
             if not update_certificates('exporter'):
                 return False
-
+            
             port = int(parsed_args.port)
-
+            
             # 1. Shutdown Prometheus server
             logger.info("Shutting down existing server...")
             try:
@@ -1351,13 +1223,13 @@ def reload_exporter_certificates() -> bool:
             try:
                 start_prometheus_server()
                 logger.info("Exporter certificate reload completed successfully!")
-
+                
                 # Update metrics
                 if cert_reload_counter:
                     cert_reload_counter.labels(cert_component='exporter').inc()
                 if cert_reload_timestamp:
                     cert_reload_timestamp.labels(cert_component='exporter').set(time.time())
-
+                
                 return True
             except OSError as e:
                 if "Address already in use" in str(e):
@@ -1387,7 +1259,7 @@ def reload_exporter_certificates() -> bool:
                 else:
                     logger.error(f"Server startup failed: {e}")
                     return False
-
+            
         except Exception as e:
             logger.error(f"Certificate reload failed: {e}")
             return False
@@ -1406,7 +1278,7 @@ def _setup_signal_handlers():
                     logger.info("Exporter certificates reloaded successfully")
                 else:
                     logger.error("Failed to reload exporter certificates")
-
+            
             # Reload management certificates
             if has_mgmt_certs:
                 logger.info("Reloading management certificates...")
@@ -1421,7 +1293,7 @@ def _setup_signal_handlers():
         """Toggle memory profiler on/off"""
         global profiler_enabled, profiler
         profiler_enabled = not profiler_enabled
-
+        
         if profiler_enabled:
             logger.info("Received SIGUSR1 signal - ENABLING memory profiler")
             # Profiler will be initialized on next cycle if needed
@@ -1431,16 +1303,16 @@ def _setup_signal_handlers():
 
     def handle_sigusr2(signum, frame):
         """Toggle certificate auto-reload on/off"""
-        global cert_auto_reload
-        cert_auto_reload = not cert_auto_reload
-
-        if cert_auto_reload:
+        global cert_auto_reload_enabled
+        cert_auto_reload_enabled = not cert_auto_reload_enabled
+        
+        if cert_auto_reload_enabled:
             logger.info("Received SIGUSR2 signal - ENABLING certificate auto-reload")
             logger.info("Certificates will now be automatically reloaded when file changes are detected")
         else:
             logger.info("Received SIGUSR2 signal - DISABLING certificate auto-reload")
             logger.info("Certificates will only be reloaded via SIGHUP signal")
-
+        
     try:
         signal.signal(signal.SIGHUP, handle_sighup)
         signal.signal(signal.SIGUSR1, handle_sigusr1)
@@ -1448,7 +1320,7 @@ def _setup_signal_handlers():
         logger.info("Signal handlers configured:")
         logger.info("  SIGHUP  = Reload both exporter and management certificates (manual)")
         logger.info("  SIGUSR1 = Toggle memory profiler")
-        logger.info(f"  SIGUSR2 = Toggle certificate auto-reload (currently: {'enabled' if cert_auto_reload else 'disabled'})")
+        logger.info("  SIGUSR2 = Toggle certificate auto-reload (currently: disabled)")
     except Exception as e:
         logger.warning(f"Failed to register signal handlers: {e}")
 
@@ -1467,18 +1339,6 @@ def get_query_label_values(obj: Any, query_labels: Dict[str, str]) -> Dict[str, 
 def get_query_labels_list_values(obj: Any, query_labels_list: Dict[str, str]) -> Dict[str, Union[int, float, bool, str]]:
     """ Take raw dictionary, query labels list and return values dict """
     return {k: v for k, v in dict(item.split("=", 1) for item in jmespath.search(query_labels_list['path'], obj).split(";")).items() if k in query_labels_list['names']}
-
-
-def get_query_labels_re_values(obj: Any, query_labels_re: Dict[str, re.Pattern]) -> Dict[str, str]:
-    """ Extract labels by applying regex to a field value """
-    label_values = {}
-    for field, pattern in query_labels_re.items():
-        value = jmespath.search(field, obj)
-        if value and isinstance(value, str):
-            match = pattern.search(value)
-            if match:
-                label_values.update(match.groupdict())
-    return label_values
 
 
 def load_metrics_config() -> Dict[str, list]:
@@ -1609,8 +1469,6 @@ def iterate_collection(collection: Any, parsing_strategy: ParsingStrategy, path:
                 e_lables.update(get_query_label_values(obj, parsing_strategy.query_labels))
             if getattr(parsing_strategy, 'query_labels_list'):
                 e_lables.update(get_query_labels_list_values(obj, parsing_strategy.query_labels_list))
-            if getattr(parsing_strategy, 'query_labels_re'):
-                e_lables.update(get_query_labels_re_values(obj, parsing_strategy.query_labels_re))
         except (KeyError, AttributeError) as e:
             logger.debug(f"Unable to calculate general query label of file {path} - {repr(e)}")
 
@@ -1672,8 +1530,6 @@ def populate_metrics(sources: Dict[str, list]):
             else:
                 path2source += [(source, source)]
 
-    path2source += [(source, source) for source in sources['cmd']]
-
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_FOPEN) as executor:
         executor.map(lambda source_args: _populate_metrics(*source_args), path2source)
 
@@ -1701,12 +1557,12 @@ class ReloadExporterServerError(Exception):
 def metrics_collection_loop(sources: Dict[str, list]):
     """
     Main metrics collection loop.
-
+    
     Core responsibilities:
     - Decrease metric thresholds for stale metrics
     - Populate metrics from all configured sources
     - Remove inactive metrics
-
+    
     Note: Timing, profiling, optional certificate auto-reload, garbage collection,
     and other instrumentation is handled by the @instrumented_loop decorator.
     Certificate auto-reload is disabled by default and can be enabled via SIGUSR2.
@@ -1714,7 +1570,7 @@ def metrics_collection_loop(sources: Dict[str, list]):
     MetricParser.decrease_metric_threshold()
     populate_metrics(sources)
     MetricParser.remove_inactive_metrics()
-    set_last_successful_loop()  
+
 
 def main():
     logger.info(f'Starting NVMesh prometheus metrics exporter {EXPORTER_VERSION} on {host.name}: {parsed_args}')

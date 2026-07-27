@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -29,9 +24,9 @@
 #include "u.h"
 #include "u.c"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("IB Client Test Driver");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_LICENSE("Dual BSD/GPL");
 
 static LIST_HEAD(dev_list);
 

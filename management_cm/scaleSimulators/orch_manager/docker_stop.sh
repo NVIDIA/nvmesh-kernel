@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
-
 if [ "$1" == "all" ]; then
     echo "Stopping all containers on $(hostname)"
     for id in `docker ps -a --format "{{.Names}}" | grep scale-`; do

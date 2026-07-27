@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_disk.h"
 #include "nvmeibt_seg_active.h"
 #include "nvmeibt_topology.h"
@@ -130,13 +125,22 @@ enum nvmeibt_add_rv nvmeibt_disk_add(struct mm_disk_conf *conf, int config_tag)
 	if ((int)f->vendor_id == -1) {
 		N_Wf(mmq339c, "got disk with id=@UUID_LE and vendor_id=-1 from MGMT probably from upgrade, skipping for now", &f->id);
 		rv = NVMEIBT_ADD_SKIPPED;
-	} else {
+		goto out;
+	}
+
 	rv = NNVMEIBT_HASH_ADD_OBJ(trace_1_disk_nvmeibt_disk_add,
 					&nvmeibt_global_get_global()->disks_hash,
 					new_disk,
 					config_tag,
 					NVMEIBT_MAX_N_DISKS, disk, NULL, disk);
-	}
+
+	if (rv == NVMEIBT_ADD_FAILED || rv == NVMEIBT_ADD_FAILED_OTHERS_FUNCTIONAL)
+		goto out;
+
+	// In any case, update the following config-driven fields
+	// None
+
+out:
 	if ((rv == NVMEIBT_ADD_NEW) || (rv == NVMEIBT_ADD_MODIFIED)) {
 		if (rv == NVMEIBT_ADD_NEW)
 			disk->urn_uuid = nvmeibt_union_uuid_to_urn_uuid(&conf->uuid);
@@ -150,8 +154,7 @@ enum nvmeibt_add_rv nvmeibt_disk_add(struct mm_disk_conf *conf, int config_tag)
 				}
 			}
 		}
-	}
-	if (rv != NVMEIBT_ADD_NEW) {
+	} else {
 		N_Tf(trace_2_disk_nvmeibt_disk_add, "Freeing unused new ldisk=@STR", nvmeibt_disk_get_ldisk_id_str(new_disk));
 		NNVMEIBT_BM_FREE(trace_3_disk_nvmeibt_disk_add, new_disk);
 	}

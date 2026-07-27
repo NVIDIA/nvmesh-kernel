@@ -2,15 +2,15 @@ Name:				nvmesh-cli
 Version:			%{version}
 Release:			%{release}
 Group:				System Environment/Kernel
-Summary:			"nvmesh-cli" by NVIDIA
+Summary:			"nvmesh-cli" by Excelero
 
-License:			GPL-2.0-only OR Apache-2.0 at your choice
+License:			Commercial Non OSI
 URL:				http://www.nvidia.com
 Source0:			%{name}
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+© Copyright 2025 Nvidia Corporation. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
 
 "Nvidia nvmesh-cli" components.
 	Branch: %{branch}

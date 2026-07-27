@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 /* The keeper module is used to hold resources for the client/target during restart,
  * speeding up the restart and reducing the time that IO is paused (hiatus time).
  * 
@@ -88,7 +83,6 @@
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
-#include "nvmeib_jdr.h"
 
 #define MODULE_NAME "nvmeib_keeper"
 #define MODULE_VERS "1.0"
@@ -122,9 +116,9 @@ static inline const char *basename(const char *path)
 
 #include "nvmeib_keeper_iface.h"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("NVIDIA");
 MODULE_DESCRIPTION("Keeps NVMesh resources during upgrade");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_LICENSE("Dual BSD/GPL");
 
 /* Keeper Ops Functions Signatures */
 static DEFINE_KEEPER_PUSH_FRS_FN(push_frs_op_fn);
@@ -363,7 +357,7 @@ static DEFINE_KEEPER_PUSH_FRS_FN(push_frs_op_fn) {
 		goto out;
 	}
 	
-	if (strnlen(inst_name, CINST_NAME_LEN) >= CINST_NAME_LEN) {
+	if (strlen(inst_name) >= CINST_NAME_LEN) {
 		keeper_print(ERR, "inst_name %s is too long", inst_name);
 		rv = -EINVAL;
 		goto api_done;
@@ -653,13 +647,15 @@ static int frs_show(struct seq_file *m, void *v)
 	struct radix_tree_iter frs_iter;
 	struct frs_tree_node *frs_node;
 	void **dev_slot, **frs_slot;
+	int i = 0, j = 0;
 	struct timespec64 ts;
 	struct tm tm;
-	struct jdr jdr = jdr_make_seq(m);
 	
 	if (atomic_read(&keeper_dying) || !atomic_inc_not_zero(&keeper_api_entry)) {
-		jdr_write_var(&jdr, status, -1);
-		jdr_write_var(&jdr, error, (char const *)"keeper is going down");
+		seq_printf(m, "{\n"); /* begin JSON */
+		seq_printf(m, "\"status\": -1,\n");
+		seq_printf(m, "\"error\": \"keeper is going down\"\n");
+		seq_printf(m, "}\n"); /* end JSON */
 		goto out;
 	}
 	
@@ -671,49 +667,54 @@ static int frs_show(struct seq_file *m, void *v)
 	
 	/* Check dying flag again after potential sleep of mutex_lock */
 	if (atomic_read(&keeper_dying)) {
-		jdr_write_var(&jdr, status, -1);
-		jdr_write_var(&jdr, error, (char const *)"keeper is going down");
+		seq_printf(m, "{\n"); /* begin JSON */
+		seq_printf(m, "\"status\": -1,\n");
+		seq_printf(m, "\"error\": \"keeper is going down\"\n");
+		seq_printf(m, "}\n"); /* end JSON */
 		goto unlock;
 	}
 
-	jdr_write_var(&jdr, format_version, FRS_PROC_VERSION);
-	jdr.ops.ascii_format(&jdr, "time", "%04ld-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-	{
-		jdr_array_scope(&jdr, "devices");
-		radix_tree_for_each_slot(dev_slot, &nvmeib_keeper_ib_dev_tree, &dev_iter, 0) {
-			dev_node = *dev_slot;
-			{
-				jdr_object_scope(&jdr, NULL);
-				jdr_write_var(&jdr, name, (char const *)dev_node->ib_dev->name);
-				{
-					jdr_array_scope(&jdr, "instances");
-					list_for_each_entry(inst_node, &dev_node->inst_list, link) {
-						jdr_object_scope(&jdr, NULL);
-						jdr_write_var(&jdr, name, (char const *)inst_node->inst_name);
-						{
-							jdr_array_scope(&jdr, "frs");
-							radix_tree_for_each_slot(frs_slot, &inst_node->frs_tree, &frs_iter, 0) {
-								frs_node = *frs_slot;
-								{
-									jdr_object_scope(&jdr, NULL);
-									jdr_write_var(&jdr, version, frs_node->info.version);
-									ts = frs_node->push_ts;
-									ts.tv_sec -= sys_tz.tz_minuteswest * 60;
-									time64_to_tm(ts.tv_sec, 0, &tm);
-									jdr.ops.ascii_format(&jdr, "push_time", "%04ld-%02d-%02d %02d:%02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-									jdr_write_var(&jdr, num_mrs, frs_node->info.n_mr);
-									jdr_write_var(&jdr, mr_page_mask, frs_node->info.mr_page_mask);
-									jdr_write_var(&jdr, mr_page_size, frs_node->info.mr_page_size);
-									jdr_write_var(&jdr, mr_max_size, frs_node->info.mr_max_size);
-									jdr_write_var(&jdr, max_pages_per_mr, frs_node->info.max_pages_per_mr);
-								}
-							}
-						}
-					}
-				}
+	/* Print out FRs tree in JSON */
+	seq_printf(m, "{\n"); /* begin JSON */
+	seq_printf(m, "\"format_version\": %d,\n", FRS_PROC_VERSION);
+	seq_printf(m, "\"time\": \"%04ld-%02d-%02d %02d:%02d:%02d\",\n", 
+		   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+	seq_printf(m, "\"devices\": [\n"); /* begin devices array */
+	radix_tree_for_each_slot(dev_slot, &nvmeib_keeper_ib_dev_tree, &dev_iter, 0) {
+		dev_node = *dev_slot;
+		seq_printf(m, "{\n");  /* begin device array-entry object */
+		seq_printf(m, "\"name\": \"%s\",\n", dev_node->ib_dev->name);
+		seq_printf(m, "\"instances\": [\n"); /* begin instances array */
+		list_for_each_entry(inst_node, &dev_node->inst_list, link) {
+			seq_printf(m, "{\n"); /* begin instances array-entry object */
+			seq_printf(m, "\"inst_name\": \"%s\",\n", inst_node->inst_name);
+			seq_printf(m, "\"frs\": [\n"); /* begin frs array */
+			j = 0;
+			radix_tree_for_each_slot(frs_slot,  &inst_node->frs_tree, &frs_iter, 0) {
+				frs_node = *frs_slot;
+				seq_printf(m, "{\n"); /* begin frs array-entry object */
+				seq_printf(m, "\"version\": %d,\n", frs_node->info.version);
+				/* Calculate push timestamp in local time and print it */
+				ts = frs_node->push_ts;
+				ts.tv_sec -= sys_tz.tz_minuteswest * 60;
+				time64_to_tm(ts.tv_sec, 0, &tm);
+				seq_printf(m, "\"push_time\": \"%04ld-%02d-%02d %02d:%02d:%02d\",\n", 
+					   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+				seq_printf(m, "\"num_mrs\": %d,\n", frs_node->info.n_mr);
+				seq_printf(m, "\"mr_page_mask\": \"%llx\",\n", frs_node->info.mr_page_mask);
+				seq_printf(m, "\"mr_page_size\": %d,\n", frs_node->info.mr_page_size);
+				seq_printf(m, "\"mr_max_size\": %d,\n", frs_node->info.mr_max_size);
+				seq_printf(m, "\"max_pages_per_mr\": %d\n", frs_node->info.max_pages_per_mr);
+				seq_printf(m, "}%s\n", ++j < inst_node->num_frs ? "," : ""); /* end frs array-entry object */
 			}
+			seq_printf(m, "]%s\n", inst_node->link.next != &dev_node->inst_list ? "," : ""); /* end frs array object */
+			seq_printf(m, "}\n"); /* end instances array-entry object */
 		}
+		seq_printf(m, "]\n"); /* end instances array */
+		seq_printf(m, "}%s\n", ++i < num_ib_dev ? "," : ""); /* end device array-entry object */
 	}
+	seq_printf(m, "]\n"); /* end devices array */
+	seq_printf(m, "}\n"); /* end JSON */
 
 unlock:
 	mutex_unlock(&nvmeib_keeper_guard);
@@ -724,7 +725,6 @@ unlock:
 	}
 	
 out:
-	jdr_finalize(&jdr);
 	return 0;
 }
 

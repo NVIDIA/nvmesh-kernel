@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "uni_scenario_ec.h"
 #include "../nvmeibc_block_common.h"
 #include "./uni_framework/bunitest_conf.h"
@@ -2330,103 +2325,6 @@ int unitest_PermanentReadError_EC_IO(const struct test_context env, const int de
 	return io_count;
 }
 
-void unitest_PermanentReadError_EC_Maintenance(const struct test_context env, const int degraded_seg_index, u8 *mem, const int is_dead) {
-	const int volInd = env.sraid.vsi.volume;
-	struct tTopoOfPraid  *r1 = env.sraid.tpr;
-	const struct disk_range *seg = env.sraid.cpr;
-	const bool n_slices = 1;
-	const int slice_size = seg->slice_size;
-	int replicas = (int)seg->replicas;
-	int rv, li, i;
-	int segs[3] = { -1, -1, -1 };
-	int n_max_injections = (degraded_seg_index < 0) ? 3 : 2;
-	int n_locksets = seg->length / LOCKSET_SLICES;
-
-	(void)is_dead;
-	segs[2] = degraded_seg_index;
-	for (li = 0; li < n_locksets; li++) {
-		// Slice info
-		const int tested_slice = rand() % LOCKSET_SLICES;
-		const int tested_slice_dlba = tested_slice + li * LOCKSET_SLICES;
-		const u64 vlba = (tested_slice_dlba * slice_size);
-		struct io_traits io_traits = get_io_traits(env, vlba, slice_size * n_slices);
-		struct block_inject_ptrs owner_ram[N_MAX_RAID_SLICE_LEN] = { 0 };
-		int owner_seg = io_traits.slices[0].role2sgmnt[0];
-		int actual_owner_seg;
-		int copy_i;
-
-		// Injection randomization
-		__randomize_segments(degraded_seg_index, replicas, segs);
-
-		actual_owner_seg = -1;
-		for (copy_i = 0; copy_i < 3; copy_i++) {
-			int cur_owner_seg = (owner_seg + replicas - copy_i) % replicas;
-			if (cur_owner_seg == degraded_seg_index)
-				continue;
-			if (actual_owner_seg == -1)
-				actual_owner_seg = cur_owner_seg;
-			owner_ram[cur_owner_seg] = serverSimulator_get_block_inject_ptrs(&env.sys->servers[cur_owner_seg], io_traits.slices[0].sgmnt2dlba[cur_owner_seg], 0, 0, 0);
-		}
-
-		__unitest_fill_blocks_unique_pattern(mem, slice_size*n_slices);
-		rv = osSimulator_writeArrWait(&env.client->OS, volInd, vlba, slice_size * n_slices, mem);	REPORT_ERROR(rv);
-
-		for (int n_inject = 1; n_inject <= n_max_injections; n_inject++) { // Up to 3 readfail injections
-			for (i = 0; i < n_inject; i++) { // Inject
-				const u32 node_id = seg[segs[i]].node_id;
-				ramDiskSimulator_do_bad_sector(&env.sys->servers[node_id].ramDisk, seg[segs[i]].dlba_start + tested_slice_dlba, get_random_error());
-				BUG_ON(node_id != (u32)segs[i]);
-			}
-
-			// Inject unresolved binfo
-			for (copy_i = 0; copy_i < 3; copy_i++) {
-				int cur_owner_seg = (owner_seg + replicas - copy_i) % replicas;
-				if (cur_owner_seg == degraded_seg_index)
-					continue;
-				owner_ram[cur_owner_seg].ram.dbits->all_bits = nvmeib_dbits_entry_build_unk(-1, -1).all_bits;
-				*owner_ram[cur_owner_seg].ram.txid = INITIAL_LAZY_READ_TXID;
-			}
-
-			// Run maintenance sync
-			if (1) {
-				struct sim_recovery_hooks hooks = sim_recovery_hooks_create(0, 0, 1 /* follow_x_cleanups */, 0); //don't sleep, wait for recovery cleanup
-				int recov_status;
-				sim_recovery_setup_hooks(&hooks);
-				BUG_ON(tomaSimulator_recoverThingStatus(r1, &seg[actual_owner_seg], RCVR_EC_FIX_UNK_BINFO, &recov_status) < 0);
-				nvmeibc_multi_completion_wait_for(&hooks.cleaned);
-				BUG_ON(recov_status < 0);
-				sim_recovery_clean_hooks();
-			}
-
-			// Clean up
-
-			// Verify bad sectors were not resolved and clear
-			for (i = 0; i < n_inject; i++) {
-				const u32 node_id = seg[segs[i]].node_id;
-				ramDiskSimulator_un_bad_sector(&env.sys->servers[node_id].ramDisk, seg[segs[i]].dlba_start + tested_slice_dlba);
-			}
-
-			// Verify dbits were resolved to worst case by maintenance sync and clear if needed
-			for (copy_i = 0; copy_i < 3; copy_i++) {
-				int cur_owner_seg = (owner_seg + replicas - copy_i) % replicas;
-				if (cur_owner_seg == degraded_seg_index)
-					continue;
-				if (owner_ram[cur_owner_seg].ram.dbits->all_bits != 0) {
-					BUG_ON(degraded_seg_index == -1);
-					owner_ram[cur_owner_seg].ram.dbits->all_bits = 0;
-				} else {
-					BUG_ON(degraded_seg_index != -1);
-				}
-			}
-
-			if (n_inject == n_max_injections) {
-				rv = osSimulator_writeArrWait(&env.client->OS, volInd, vlba, slice_size * n_slices, mem);	REPORT_ERROR(rv);
-			}
-		} // n_inject
-		free_io_traits(&io_traits);
-	} //li
-}
-
 /* Base test for checking behaviour of Read failures in EC  */
 TEST_FUNC int unitest_PermanentReadError_EC(bunitest_s *B) {					// On EC volumes permanent failure should succeed to restore data if up to n_parities are down/non-readable
 	struct test_context env = { .sys = B->sys
@@ -2462,13 +2360,11 @@ TEST_FUNC int unitest_PermanentReadError_EC(bunitest_s *B) {					// On EC volume
 
 		// Test IO with degraded seg + 1-2 RF sectors per slice
 		io_count += unitest_PermanentReadError_EC_IO(env, degraded_seg, mem, true);
-		unitest_PermanentReadError_EC_Maintenance(env, degraded_seg, mem, true);
 
 		__restore_seg_to_write(env.sys, env.client, env.sraid.tpr, env.sraid.cpr, degraded_seg, false);
 
 		// Test IO with write only seg + 1-2 RF sectors per slice
 		io_count += unitest_PermanentReadError_EC_IO(env, degraded_seg, mem, false);
-		unitest_PermanentReadError_EC_Maintenance(env, degraded_seg, mem, false);
 
 		__restore_seg_to_read_write(env.sys, env.sraid.tpr, degraded_seg);	// Todo: Use tomaSimulator_switchSegmentTopo() instead
 		unitest_print("PermanentReadFail Test Degraded Segment is %u - seed=%d sent %llu Readfailed IOs result => PASS took %d[mSec]\n", degraded_seg, rand_seed, io_count, (int)(((jiffies-timer)*1000)/HZ));
@@ -2479,7 +2375,6 @@ TEST_FUNC int unitest_PermanentReadError_EC(bunitest_s *B) {					// On EC volume
 	timer = jiffies;
 	unitest_print("PermanentReadFail Test No Degraded Segments\n");
 	io_count += unitest_PermanentReadError_EC_IO(env, -1, mem, false);
-	unitest_PermanentReadError_EC_Maintenance(env, -1, mem, false);
 	unitest_print("PermanentReadFail Test No Degraded Segments - sent %llu Readfailed IOs result => PASS took %d[mSec]\n", io_count, (int)(((jiffies-timer)*1000)/HZ));
 	BUG_ON(!NVMeshSystem_is_stable(env.sys));	// Extremely rarelly reports unreal bug when prev topo did not have time to delete.
 	NVMeshSystem_all_clients_dbg_di(env.sys, false);
@@ -3200,7 +3095,7 @@ int unitest_scrubRecovery_ec(bunitest_s* B) {
 	NVMeshSystem_all_clients_dbg_di(sys, true);
 	st.restored.block = sim_kzalloc(NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
 	nvmeibc_nowhole_stats_reset();
-	nvmeibc_warn_on_edic_verification_failure = false;							// Unitest cases edic failure
+	nvmeibc_warn_on_edic_werification_failure = false;							// Unitest cases edic failure
 	nvmeibc_warn_on_parities_sync_missmatch = false;							// Unitest can inject 1 parity as written, the other as not written
 	for (rep = 0; rep < 75; rep++) {
 		const u64 n_blksets_in_praid = sraid.cpr->length/LOCKSET_SLICES;
@@ -3370,7 +3265,7 @@ int unitest_scrubRecovery_ec(bunitest_s* B) {
 	sim_kfree(st.inj.blocks[0][0]);
 	sim_kfree(st.restored.block);
 	clientSimulator_wait_for_all_sync_ops(env.client);
-	nvmeibc_warn_on_edic_verification_failure = true;							// Unitest cases edic failure
+	nvmeibc_warn_on_edic_werification_failure = true;							// Unitest cases edic failure
 	nvmeibc_warn_on_parities_sync_missmatch = true;
 	NVMeshSystem_all_clients_dbg_di(sys, false);
 	NVMeshSystem_serialize(sys);
@@ -3689,7 +3584,7 @@ TEST_FUNC int unitest_ECHotJgcRecovery(bunitest_s *B) {
 	char iter_descript[64], *itr_txt_cur;
 	u8* mem = sim_kmalloc(env.sraid.cpr->slice_size * NVMEIBC_SECTOR_SIZE, GFP_KERNEL);
 	u64 magic_pattern;
-	struct topologies_enumerator topos = create_topo_random_enum(env.sraid, 1, 10, 10);
+	struct topologies_enumerator topos = create_all_topo_random_enum(env.sraid, 20, false);
 	bunitest_tic(B);
 	nvmeibc_htr_stats_reset();
 

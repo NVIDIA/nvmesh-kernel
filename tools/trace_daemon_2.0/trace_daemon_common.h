@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #ifndef TRACE_DAEMON_COMMON_H
 #define TRACE_DAEMON_COMMON_H
 
@@ -10,10 +5,8 @@
 #include <string.h>
 #include <assert.h>
 
-#define MAX_FILENAME_STRLEN 1023
-#define MAX_FILENAME (MAX_FILENAME_STRLEN + 1) /* buffer size including NUL */
-#define MAX_CGROUP_STRLEN 119
-#define MAX_CGROUP_NAME_SIZE (MAX_CGROUP_STRLEN + 1) /* buffer size including NUL */
+#define MAX_FILENAME 1024
+#define MAX_CGROUP_NAME 120
 
 typedef struct trace_channel_cfg {
 	char *name;
@@ -31,19 +24,8 @@ typedef struct trace_daemon_cfg {
 	trace_channel_cfg_t *channel_cfg;
 	int nfs;
 	int ramfs;
-	char cgroup[MAX_CGROUP_NAME_SIZE];
+	char cgroup[MAX_CGROUP_NAME];
 } trace_daemon_cfg_t;
-
-
-//Pay attention - those are compiled time defaults, they don't take into account the number of CPU's.
-//Thus if the system has more then 63 CPU we have a problem - no history.
-//The correct solution would be merging:
-//	* compile time defaults
-//	* run time defaults
-//	* user settings
-//As always, we have limited time and resources, so the trace_channel calculates the final settings on start
-//Also it looks like max_logs definition as "total number of log files" is problematic. 
-//I think we should have "max_logs_per_channel". Unfortunatelly, we cannot change this easily - backward compaibility.
 
 #define INIT_TRACE_CFG                                                                                   \
 	(trace_daemon_cfg_t)                                                                             \

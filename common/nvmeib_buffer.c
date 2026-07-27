@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 int nvmeib_buffer_alloc_sgl_from_pages(struct nvmeib_buffer *buf, struct page **pages, 
 				       unsigned int n_pages, unsigned int size, unsigned int offset, gfp_t gfp_mask)
 {

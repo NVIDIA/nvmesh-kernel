@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "memmgr_metrics_tests.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "kr_incs.h"
@@ -37,7 +32,6 @@ void __ut_mm_test_section(void)
 void __ut_mm_test_json_serialize(void)
 {
 	struct charvec buffer = {.base = malloc(1024*1024), .len = 1024*1024};
-	BUG_ON(!buffer.base);
 	nvmesh_memmgr_metrics_json_serialize(buffer, true /* dump_all_cpus */, false /* dump_each_cpu_separately */, __start_nvmeibc_memmgr_metrics, __stop_nvmeibc_memmgr_metrics);
 
 #ifdef DO_JSON_DUMP

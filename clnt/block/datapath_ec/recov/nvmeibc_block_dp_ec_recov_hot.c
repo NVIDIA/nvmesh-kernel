@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "block/datapath_utils_generic/nvmeibc_block_dp_common.h"
 #include "nvmeibc_block_dp_ec_recov_hot.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
@@ -1199,7 +1194,7 @@ static int scan_jmdc(struct htr_ctx *h, int si, bool is_pivot)
 	if (!nvmeibc_is_readable(&r1->segments[si])) {
 		_NDh(t_02_ehsj, h, "Scanning non RW (@INT) si @SI in JGC HTR", si, r1->segments[si].toma_acm);
 		if (unlikely(!h->params.is_hot_jgc)) { // Only allowed in hot JGC
-			_NE_to_user(t_04_ehsj, DMESG_PD_PREFIX("@HTR_PARAM"), "Unexpected internal error, crashing the operating system to prevent data corruption. Error code: 1015. Internal info {@SI @INT}.", h->name, si, r1->segments[si].toma_acm);
+			_NE_to_user(t_04_ehsj, DMESG_PD_PREFIX("@HTR_PARAM"), "Unexpected internal error, crashing the operating system to prevent data corruption, contact Excelero support. Error code: 1015. Internal info {@SI @INT}.", h->name, si, r1->segments[si].toma_acm);
 			BUG();
 		}
 	}

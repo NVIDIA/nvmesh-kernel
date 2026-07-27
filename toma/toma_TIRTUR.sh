@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 usage_str="Usage: $0 [-rt <runtime>] [-dt <downtime>] [-release/-delease (default=debug)] [-s log_size]"
 # Parse the arguments
 runtime_base=10

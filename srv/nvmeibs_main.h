@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBS_MAIN_H
 #define NVMEIBS_MAIN_H
 
@@ -16,14 +11,8 @@
 #include "nvmeib_public.h"
 
 extern bool nvmeibs_defer_recv_comps;
-extern bool nvmeibs_defer_recv_comps_tcp;
 extern unsigned nvmeibs_max_nic_srqs;
 extern bool nvmeibs_use_pcpu_cq;
-
-static inline bool nvmeibs_defer_recv_comps_enabled(enum nvmeib_dev_type dev_type)
-{
-	return dev_type == DT_siw ? nvmeibs_defer_recv_comps_tcp : nvmeibs_defer_recv_comps;
-}
 
 /*
  * Device private stuff.

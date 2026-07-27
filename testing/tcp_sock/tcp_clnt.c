@@ -1,9 +1,4 @@
 /*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
-/*
  *  TCP client
  */
 #include <linux/module.h>
@@ -12,9 +7,9 @@
 #include "common.h"
 #include "common.c"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("TCP Client Test");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_LICENSE("Dual BSD/GPL");
 
 static struct workqueue_struct *cwq;
 

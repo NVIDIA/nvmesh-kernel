@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # Just use as a wrapper to trace_daemon executable so we would able to use linux/python cmds before running the trace_daemon itself.
 tracer_pid=""
 

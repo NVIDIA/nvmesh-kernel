@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibs_main.h"
 #include "nvmeibs_defs.h"
 #include "nvmeibs_ib_port.h"
@@ -30,10 +25,14 @@
 #include "nvmeib_io_stats.h"
 #include "common/proc_epilog.h"
 #include "nvmeibs_memmgr_metrics.h"
-#include "nvmeibs_nordda.h"
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMe storage device over Infiniband");
-MODULE_LICENSE("GPL and additional rights");
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+MODULE_LICENSE("Dual BSD/GPL");
+#else
+MODULE_LICENSE("Proprietary");
+#endif
 
 #define DRV_VERSION "0.0.1"
 const char nvmeibs_driver_version[] = DRV_VERSION;
@@ -48,54 +47,62 @@ int tracer_nvmeibs_debug_level = 4;	// Equivalent to: nvmeibc_debug_level = 2
 int goodpath_nvmeibs_debug_level = 2;
 
 module_param_named(debug_level, nvmeibs_debug_level, int, 0644);
-MODULE_PARM_DESC(debug_level, "Enables debug logging (to the system log not NVMesh tracer) if set above 1. Deprecated.");
+MODULE_PARM_DESC(debug_level, "Debug tracing level [0..2]");
 
 module_param_named(tracer_debug_level, tracer_nvmeibs_debug_level, int, 0644);
-MODULE_PARM_DESC(tracer_debug_level, "This determines the level of tracing for this module. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(tracer_debug_level, "Control path tracing debug level [0..4]");
 
 module_param_named(goodpath_debug_level, goodpath_nvmeibs_debug_level, int, 0644);
-MODULE_PARM_DESC(goodpath_debug_level, "This determines the level of tracing for the regular data path. Only traces with this level or lower will be issued, see tracer severities above.");
+MODULE_PARM_DESC(goodpath_debug_level, "Data path tracing debug level");
 
 #define MAX_FP 1024
 static char nvmeibs_filter_ports[MAX_FP] = "";
 module_param_string(ports, nvmeibs_filter_ports, MAX_FP, 0644);
-MODULE_PARM_DESC(ports, "Used for port filtering functionality. This is typically set by service startup based on nvmesh.conf information.");
+MODULE_PARM_DESC(ports, "Option to filter nics and ports\n"
+   "\t\t If empty, no filter is used otherwise the format is either:\n"
+   "\t\t    <hca_id> - use this nic and all its ports\n"
+   "\t\t    <hca_id>:port id\n"
+   "\t\t For example:\n"
+   "\t\t    mlx4_0:1,mlx_4:2,mlx4_1:1 - will use three ports of two nics");
 
 static char nvmeibs_filter_guids[MAX_FP] = "";
 module_param_string(guids, nvmeibs_filter_guids, MAX_FP, 0644);
-MODULE_PARM_DESC(guids, "Used for port filtering functionality. Typically populated from nvmesh.conf parameters.");
+MODULE_PARM_DESC(guids, "option to filter ports according to port\'s hardware guids");
 
-bool nvmeibs_defer_recv_comps = true;
+bool nvmeibs_defer_recv_comps = false;
 module_param_named(defer_recv_comps, nvmeibs_defer_recv_comps, bool, 0644);
-MODULE_PARM_DESC(defer_recv_comps, "Defer handling of IO receive completions, so it is not done in the interrupt context.");
+MODULE_PARM_DESC(defer_recv_comps, "Defer no-rdda receive completions");
 
-bool nvmeibs_defer_recv_comps_tcp = false;
-module_param_named(defer_recv_comps_tcp, nvmeibs_defer_recv_comps_tcp, bool, 0644);
-MODULE_PARM_DESC(defer_recv_comps_tcp, "Same as defer_recv_comps, but applied for TCP/SIW NICs.");
+static bool mlx_rdda_enabled = false;
+#ifdef ALLOW_CLIENT_RDDA
+module_param_named(mlx_rdda_enabled, mlx_rdda_enabled, bool, 0444);
+MODULE_PARM_DESC(mlx_rdda_enabled, "enable mlx rdda support");
+#endif
 
 unsigned nvmeibs_max_nic_srqs = NVMEIB_MAX_NIC_SRQS;
 module_param_named(max_nic_srqs, nvmeibs_max_nic_srqs, int, 0444);
-MODULE_PARM_DESC(max_nic_srqs, "Maximum number of shared receive queues to define per NIC.");
+MODULE_PARM_DESC(max_nic_srqs, "Maximum SRQs per nic");
 
 static bool roce_ipv4_only = false;
 module_param_named(roce_ipv4_only, roce_ipv4_only, bool, 0444);
-MODULE_PARM_DESC(roce_ipv4_only, "Deprecated. Use IPv4 only for RoCE, which was needed for CX-3.");
+MODULE_PARM_DESC(roce_ipv4_only, "Use IPv4 only for RoCE (Needed for CX-3)");
 
 bool nvmeibs_use_pcpu_cq = false; /* Disabled by service script for TCP */
 module_param_named(use_pcpu_cq, nvmeibs_use_pcpu_cq, bool, 0444);
-MODULE_PARM_DESC(use_pcpu_cq, "Use a per-cpu shared completion queue (SCQ) and shared receive queue (SRQ).");
+MODULE_PARM_DESC(use_pcpu_cq, "Use a per CPU shared completion queue (SCQ) and shared receive queue (SRQ)");
 
 bool nvmeibs_pcpu_cq_poll_proc = false;
 module_param_named(pcpu_cq_poll_proc, nvmeibs_pcpu_cq_poll_proc, bool, 0444);
-MODULE_PARM_DESC(pcpu_cq_poll_proc, "Create /proc files for polling the nvmeibs shared completion queues from SPDK. This requires pcpu_cq_all_cpus=Y for nvmeib_common.");
+MODULE_PARM_DESC(pcpu_cq_poll_proc, "Create proc files for polling the nvmeibs shared completion queues from SPDK - (Requires pcpu_cq_all_cpus=Y for nvmeib_common)");
 
 unsigned max_outstanding_cm_work_items = 8;
 module_param(max_outstanding_cm_work_items, uint, 0644);
-MODULE_PARM_DESC(max_outstanding_cm_work_items, "Max outstanding CM (connection manager) work items. Important for larger environments using RDMA.");
+MODULE_PARM_DESC(max_outstanding_cm_work_items, "Max outstanding CM work items");
 
 unsigned int nvmeibs_tcp_mode = 0;
 module_param_named(tcp_mode, nvmeibs_tcp_mode, uint, 0444);
-MODULE_PARM_DESC(tcp_mode, "Activate the SIW communicate mode exclusively, i.e., filter out any RoCE devices. Usually set by service startup from nvmesh.conf information.");
+MODULE_PARM_DESC(tcp_mode, "TCP transport mode, 0 = RoCE only, 1 = TCP Only, 2 or greater = TCP and RoCE "
+						   "(If TCP is enabled, locks to all disks are done via CPU i.e. RPC or SIW)");
 
 bool nvmeibs_use_tcp_locks = false;
 static void set_lock_dev_mode(void)
@@ -107,11 +114,11 @@ static void set_lock_dev_mode(void)
 
 bool nvmeibs_local_skip_disk_access = false;
 module_param_named(local_skip_disk_access, nvmeibs_local_skip_disk_access, bool, 0644);
-MODULE_PARM_DESC(local_skip_disk_access, "Unsafe debug mode. Skip local disk access, i.e., complete disk operations immediately instead of performing them. Used for debugging and performance optimization.");
+MODULE_PARM_DESC(local_skip_disk_access, "Unsafe debug mode: Local client skip disk access");
 
 unsigned nvmeibs_nic_io_stats_block_size = 1 << NVMEIBC_SECTOR_SHIFT;
 module_param_named(nic_io_stats_block_size, nvmeibs_nic_io_stats_block_size, uint, 0444);
-MODULE_PARM_DESC(nic_io_stats_block_size, "Defines the block-size to use for NIC iostats.json.");
+MODULE_PARM_DESC(nic_io_stats_block_size, "Block-size to use for NIC iostats.json");
 
 NVMEIBS_MEMMGR_METRIC(s_dev_srq, "component=target.dev.srq");
 NVMEIBS_MEMMGR_METRIC(s_dev_fr_pool, "component=target.dev.fr_pool");
@@ -125,6 +132,13 @@ static struct list_head used_dev_list;
 static bool disk_scan_done_called = false;
 
 static bool nvmeibs_exit_called = false;
+
+static void set_mlx_rdda_enable_ind(void)
+{
+	nvmeib_ib_driver_enable_cap(DT_mlx5, NVMEIB_DEVCAP_RDDA, mlx_rdda_enabled);
+	_NI(trace_main_set_mlx_rdda_enable_ind,
+		"mlx rdda support is @STR", mlx_rdda_enabled ? "enabled" : "disabled");
+}
 
 int nvmeib_debug_level(void)
 {
@@ -179,6 +193,9 @@ struct nvmeibs_um_comm * nvmeibs_get_um_comm(void)
 /* params */
 static u64 nvmeibs_service_guid;
 
+#define NVMEIBS_FRAME_SIZE_USECS (1000)
+#define NVMEIBS_MAX_BURST (64)
+#define NVMEIBS_INTR_MAX_PCT_CPU (10)
 struct nvmeib_intr_shaper *s_intr_shaper;
 
 #if KS_MODULE_PARAM_CB
@@ -218,7 +235,8 @@ module_param_call(service_guid, nvmeibs_set_service_guid_param,
 	nvmeibs_get_service_guid_param, &nvmeibs_service_guid, S_IRUGO | S_IWUSR);
 #endif
 
-MODULE_PARM_DESC(service_guid, "Override cm_listen_id with this value.");
+MODULE_PARM_DESC(service_guid, "Use this value for cm_listen_id"
+	" instead of using the node_guid of the first HCA");
 
 u64 nvmeibs_get_service_guid(void)
 {
@@ -227,7 +245,8 @@ u64 nvmeibs_get_service_guid(void)
 
 static int nvmeibs_max_req_size = roundup_pow_of_two(NVMEIBC_MAX_ADMIN_CLIENT_MSG_SIZE);
 module_param_named(max_req_size, nvmeibs_max_req_size, int, 0444);
-MODULE_PARM_DESC(max_req_size, "Maximum size of client-target messages.");
+MODULE_PARM_DESC(max_req_size,
+	"Maximum size of client/server message in bytes");
 
 int nvmeibs_get_max_req_size(void)
 {
@@ -246,7 +265,7 @@ static int nvmeibs_shared_rq_size =
 	NVMEIBS_DEF_MAX_N_DISKS *
 	NVMEIB_MAX_NORDDA_IO_REQ) >> 2;
 module_param_named(shared_rq_size, nvmeibs_shared_rq_size, int, 0644);
-MODULE_PARM_DESC(shared_rq_size, "Networking shared receive queue (SRQ) size.");
+MODULE_PARM_DESC(shared_rq_size, "Shared receive queue (SRQ) size [bytes]");
 
 int nvmeibs_get_shared_recv_queue_size(void)
 {
@@ -255,11 +274,11 @@ int nvmeibs_get_shared_recv_queue_size(void)
 
 static unsigned int nvmeibs_nordda_io_req_num = NVMEIB_MAX_NORDDA_IO_REQ;
 module_param_named(nvmeibs_nordda_io_req_num, nvmeibs_nordda_io_req_num, int, 0644);
-MODULE_PARM_DESC(nvmeibs_nordda_io_req_num, "Number of IO requests per IO channel. More can increase throughput, but may hurt caching. Less reduces memory consumption.");
+MODULE_PARM_DESC(nvmeibs_nordda_io_req_num, "Number of IO requests per no-RDDA IO channel");
 
 uint nvmeibs_nr_max_wrs_per_req = 0;
 module_param_named(nr_max_wrs_per_req, nvmeibs_nr_max_wrs_per_req, int, 0644);
-MODULE_PARM_DESC(nr_max_wrs_per_req, "The maximum number of WRs (RDMA work requests) per IO channel request, used in response to a read request. For 0, use system's default.");
+MODULE_PARM_DESC(nr_max_wrs_per_req, "Maximum of WRs per no-RDDA channel's request, used in response to read-req. If 0, use system's default");
 
 u32 nvmeibs_get_nordda_io_req_num(void)
 {
@@ -1070,7 +1089,7 @@ static void cl_dma_unmap_resources(struct ib_device *ib, struct nvmeibs_q_info *
 	}
 	/* JH IOMMU: DMA_FROM_DEVICE is correct, used as a sink for Remote RDMA_WRITE */
 	cl_dma_unmap_phys(ib, &info->cq_db, sizeof(*qs->cq_doorbell), DMA_FROM_DEVICE);
-	/* JH IOMMU: DMA_TO_DEVICE is correct, used as a source for Local RDMA_WRITE and a source for Remote RDMA_READ (OE) */
+	/* JH IOMMU: DMA_TO_DEVICE is correct, used as a source for Local RDMA_WRITE (RDDA) and a source for Remote RDMA_READ (OE) */
 	cl_dma_unmap_virt(ib, &info->cq, PAGE_SIZE, DMA_TO_DEVICE);
 	/* JH IOMMU: DMA_FROM_DEVICE is correct, (Not used, but would be a sink for Remote RDMA_WRITE) */
 	cl_dma_unmap_phys(ib, &info->prpl, PAGE_SIZE, DMA_FROM_DEVICE);
@@ -1123,7 +1142,7 @@ static int cl_dma_map_resources(struct ib_device *ib, struct nvmeibs_q_info *qs,
 		goto err_unmap_rscs;
 	}
 
-	/* JH IOMMU: DMA_TO_DEVICE is correct, used as a source for Local RDMA_WRITE and a source for Remote RDMA_READ (OE) */
+	/* JH IOMMU: DMA_TO_DEVICE is correct, used as a source for Local RDMA_WRITE (RDDA) and a source for Remote RDMA_READ (OE) */
 	rc = cl_dma_map_virt(ib, qs->cq, PAGE_SIZE, &info->cq, DMA_BIDIRECTIONAL);
 	if (rc) {
 		_NE(error_4_main_cl_dma_map_resources, "Failed mapping NVME CQ to NIC");
@@ -1226,8 +1245,16 @@ static int nvmeibs_register_disk_resources(struct nvmeibs_dev *nis_dev,
 		}
 	}
 
+	/* Skip devices that do not support RDDA */
+	if (!nvmeib_device_sup_cap(nis_dev->dev->dev_type, NVMEIB_DEVCAP_RDDA)) {
+		_NT(trace_register_disk_resources_not_supp,
+		    "device @STR does not support RDDA", ib->name);
+		rv = -ENOTSUPP;
+		goto out;
+	}
+
 	mem = kzalloc(sizeof(*mem), GFP_KERNEL);
-	ib_dma = kcalloc(disk->n_qs, sizeof(*ib_dma), GFP_KERNEL);
+	ib_dma = kcalloc(sizeof(*ib_dma), disk->n_qs, GFP_KERNEL);
 	bb_maps = kzalloc(sizeof(*bb_maps) * disk->n_qs, GFP_KERNEL);
 	/* allocate memory info array */
 	if (!mem || (disk->n_qs && (!bb_maps || !ib_dma))) {
@@ -1343,6 +1370,44 @@ void nvmeibs_deregister_disk_resources(struct nvmeibs_dev *nis_dev,
 			free_disk_resources(mem, disk);
 		}
 	NFOUT;
+}
+
+static int register_disks_resources(struct nvmeibs_dev *nis_dev)
+{
+	struct list_head *disks;
+	struct nvmeibs_disk_info *disk;
+	int rv = 0;
+
+	NFIN;
+	if (!nvmeib_device_sup_cap(nis_dev->dev->dev_type, NVMEIB_DEVCAP_RDDA)) {
+		_NT(trace_2_main_register_disks_resources,
+		    "device @STR does not support RDDA", nis_dev->dev->ib_dev->name);
+		rv = -ENOTSUPP;
+		goto out;
+	}
+	if (!(disks = nvmeibs_disk_get_disks(NULL))) {
+		_NT(trace_main_register_disks_resources, "No disks on controller");
+		goto unlock_disks;
+	}
+	nvmeibs_get_devices(NULL);
+	list_for_each_entry(disk, disks, link) {
+		if (!disk->n_qs) {
+			_NT(trace_3_main_register_disk_resources, "Disk @DISK_NAME has no queues to register", disk->disk_id);
+			continue;
+		}
+		if ((rv = nvmeibs_register_disk_resources(nis_dev, disk)) < 0) {
+			_NT(trace_1_main_register_disks_resources, "Fail (@RV) to register disk @DISK_ID_STR resources", rv, disk->disk_id);
+			goto unlock_devices;
+		}
+	}
+
+unlock_devices:
+	nvmeibs_put_devices();
+unlock_disks:
+	nvmeibs_disk_put_disks();
+out:
+	NFOUT;
+	return rv;
 }
 
 static void deregister_disks_resources(struct nvmeibs_dev *nis_dev)
@@ -1698,7 +1763,7 @@ static int do_add_one(struct nvmeibs_dev *nis_dev)
 	}
 
 	if (!nvmeibs_service_guid)
-		nvmeibs_service_guid = NVMEIB_SERVICE_ID;
+		nvmeibs_service_guid = NVMEIB_EXCELERO_SERVICE_ID;
 
 	/* print out target login information */
 	_ND(trace_2_main_do_add_one, "Host info: guid=@GUID_LLONG", nvmeibs_service_guid);
@@ -1706,6 +1771,14 @@ static int do_add_one(struct nvmeibs_dev *nis_dev)
 	if ((rv = allocate_fmr(nis_dev)) < 0) {
 		_NE(error_1_main_do_add_one, "@DEVICE_NAME allocate_fmr() failed.", device->name);
 		goto remove_dev;
+	}
+
+	if (nvmeib_device_sup_cap(nis_dev->dev->dev_type, NVMEIB_DEVCAP_RDDA)) {
+		/* NIC supports RDDA - Register disk resources with the HCA */
+		if ((rv = register_disks_resources(nis_dev)) < 0) {
+			_NE(error_2_main_do_add_one, "@DEVICE_NAME failed to register disk resources", device->name);
+			goto remove_dev;
+		}
 	}
 
 	if ((rv = nvmeibs_disk_lock_disks_map_segs_for_dev(nis_dev))) {
@@ -1738,7 +1811,7 @@ static int do_add_one(struct nvmeibs_dev *nis_dev)
 	} else if (rdma_node_get_transport(N2IB(nis_dev)->node_type) == RDMA_TRANSPORT_IWARP) {
 		int primary_tcp_base_port = nvmeib_get_tcp_base_port_id();
 		int _2nd_tcp_base_port = primary_tcp_base_port + 1;
-		int _2nd_tcp_num_ports = nvmeib_get_tcp_num_ports(nis_dev->dev) - 1;
+		int _2nd_tcp_num_ports = nvmeib_get_tcp_num_ports() - 1;
 		int i;
 
 		/* Start iWARP Listener */
@@ -1755,7 +1828,7 @@ static int do_add_one(struct nvmeibs_dev *nis_dev)
 		params.on_peer_event = client_cm_event;
 		params.context = nis_dev;
 
-		/* Primary listener on NVMEIB_IWARP_PORT_ID */
+		/* Primary listener on NVMEIB_EXCELERO_IWARP_PORT_ID */
 		if (!(nis_dev->iw_prim_l_cm_id = nvmeib_rdma_listen(&params))) {
 			_NE(error_main_do_add_one_prim_l_fail, "@DEVICE_NAME iw_cm_listen() failed.", device->name);
 			rv = -EIO;
@@ -1842,7 +1915,7 @@ static void remove_nis(struct nvmeibs_dev *nis_dev)
 
 	/* stop all listener so no new connection requests */
 	nvmeib_rdma_stop_listen(nis_dev->ib_l_cm_id);
-	for (i = 0; i < nvmeib_get_tcp_num_ports(nis_dev->dev) - 1; i++)
+	for (i = 0; i < nvmeib_get_tcp_num_ports(); i++)
 		nvmeib_rdma_stop_listen(nis_dev->iw_2nd_l_cm_id[i]);
 	nvmeib_rdma_stop_listen(nis_dev->iw_prim_l_cm_id);
 	list_for_each_entry(ib_port, &nis_dev->port_list, port_list_n) {
@@ -2959,20 +3032,20 @@ static int remove_clients_fc(struct nvmeibs_client *cl, void *arg)
 	char *node_name = arg;
 
 	if (!strnstr(cl->name, node_name, NVMEIB_HOST_NAME_LEN))
-		return 0;
+		return;
 
 	_ND(remove_clients_fc_d1, "Removing client @STR", node_name);
 	_ND(remove_clients_fc_d2, "Will call free client @PTR @INT", cl, cl->cid);
 
-	nvmeibs_ib_port_free_client(cl->ib_port, cl->cid, NVMEIBS_LOGOUT_REASON_DEBUG);
-
-	return 0;
+	nvmeibs_ib_port_free_client(cl->ib_port, cl->cid);
 }
 
 static void remove_clients(struct workqe_struct *work)
 {
 	struct snode_workq *swork =
 		container_of(work, struct snode_workq, work);
+	struct hlist_node *hlink;
+	struct nvmeibs_client *cl;
 	unsigned long flags;
 
 	NFIN;
@@ -2985,6 +3058,8 @@ static void remove_clients(struct workqe_struct *work)
 	else
 		nvmeibs_cdb_all_fast_call_locked(remove_clients_fc, swork->node_name);
 
+	kfree(close_acked);
+	close_acked = NULL;
 	nvmeibs_cdb_unlock(flags);
 	NFOUT;
 }
@@ -3287,7 +3362,7 @@ int nvmeibs_start_roce(void)
 	_ND(trace_main_nvmeibs_start_roce, "initializing roce!!!!");
 	/*initialize roce listener*/
 	params.type = _rdma_roce;
-	params.roce.port = NVMEIB_PORT_ID;
+	params.roce.port = NVMEIB_EXCELERO_PORT_ID;
 	params.roce.ipv4_only = roce_ipv4_only;
 	params.new_connection = cm_req_recv;
 	params.on_peer_event = client_cm_event;
@@ -3917,6 +3992,9 @@ void nvmeibs_register_disk_resources_at_all_nics(struct nvmeibs_disk_info *disk)
 		if (!disk->n_qs) {
 			_NT(trace_4_main_nvmeibs_register_disk_resources_at_all_nics,
 			    "disk @DISK_NAME has no queues to register", disk->disk_id);
+		} else if (!nvmeib_device_sup_cap(nis_dev->dev->dev_type, NVMEIB_DEVCAP_RDDA)) {
+			_NT(trace_3_main_nvmeibs_register_disk_resources_at_all_nics,
+			    "device @STR does not support RDDA, not registering resources", nis_dev->dev->ib_dev->name);
 		} else {
 			if ((rv = nvmeibs_register_disk_resources(nis_dev, disk) < 0)) {
 				_ND(trace_main_nvmeibs_register_disk_resources_at_all_nics, "Registering disk @DISK_ID_STR failed (@RV)",
@@ -4036,6 +4114,7 @@ int nvmeibs_init(void) /* Constructor */
 		_NE(error_main_nvmeibs_init_pcpu_alloc, "Failed to initialize memmgr metrics");
 		goto unlock;
 	}
+	set_mlx_rdda_enable_ind();
 	set_lock_dev_mode();
 	mutex_lock(&guard);
 	nvmeib_set_debug_level(nvmeib_debug_level);
@@ -4046,6 +4125,7 @@ int nvmeibs_init(void) /* Constructor */
 		rv = -EINVAL;
 		goto unlock;
 	}
+
 	INIT_LIST_HEAD(&used_dev_list);
 	nvmeib_set_used_dev_list(nvmeibs_filter_ports, MAX_FP, &used_dev_list);
 	nvmeib_set_used_pots_guids(nvmeibs_filter_guids, MAX_FP, &used_dev_list);
@@ -4053,32 +4133,32 @@ int nvmeibs_init(void) /* Constructor */
 		nvmeib_get_utsname_nodename());
 	atomic64_set(&client_uid, NVMEIBS_CLIENT_UID_BASE);
 	nvmeibs_client_registered = false;
-	if (!(s_intr_shaper = nvmeib_get_intr_shaper())) {
-		_NE(error_main_nvmeibs_init, "Failed to get interrupts shaper");
+	if (!(s_intr_shaper = nvmeib_intr_shaper_create(NVMEIBS_FRAME_SIZE_USECS,
+							NVMEIBS_MAX_BURST,
+							NVMEIBS_INTR_MAX_PCT_CPU))) {
+		_NE(error_main_nvmeibs_init, "Failed to allocate interrupts shaper");
 		rv = -1;
 		goto unlock;
 	}
 	if (!(main_wq = wq_create_verbose(proc_name_format("S", "WQ", "main")))) {
 		_NE(error_1_main_nvmeibs_init, "Failed to allocate main controller work queue");
 		rv = -1;
-		goto unlock;
+		goto intr_shaper;
 	}
 	if (!(um_comm = nvmeibs_um_comm_start())) {
 		_NE(error_2_main_nvmeibs_init, "Failed to usermode communication channel");
 		rv = -1;
-		goto unlock;
+		goto intr_shaper;
 	}
 	main_wq_pid = wq_pid(main_wq);
-
-	if ((rv = nvmeibs_nordda_kwq_init()) != 0) {
-		_NE(error_3_main_nvmeibs_init, "Failed to initialize nordda kernel workqueue");
-		goto unlock;
-	}
 
 	nvmeibs_serial_console_flag = nvmeib_public_serial_console();
 	if (nvmeibs_serial_console_flag)
 		_NI(trace_1_main_nvmeibs_init, "Kernel has a serial console, reducing output");
 	goto unlock;
+
+intr_shaper:
+	nvmeib_intr_shaper_destroy(s_intr_shaper);
 
 unlock:
 	mutex_unlock(&guard);
@@ -4250,19 +4330,16 @@ void nvmeibs_exit(void) /* Destructor */
 
 	nvmeibs_disk_all_free_lock_resources();
 
-	/* stop nordda kernel workqueue */
-	_NT(trace_12_main_nvmeibs_exit, "Stop nordda kernel wq...");
-	nvmeibs_nordda_kwq_exit();
 	/* wait for main-q works e.g. proc-locks remove */
-	_NT(trace_13_main_nvmeibs_exit, "Stop main wq...");
+	_NT(trace_12_main_nvmeibs_exit, "Stop main wq...");
 	if (main_wq) {
 		wq_drain(main_wq);
 		wq_destroy(main_wq);
 		main_wq = NULL;
 	}
 	/* stop usermode communication */
-	nvmeibs_um_comm_stop(um_comm);	
-	s_intr_shaper = NULL;
+	nvmeibs_um_comm_stop(um_comm);
+	nvmeib_intr_shaper_destroy(s_intr_shaper);
 	nvmesh_memmgr_metrics_free_pcpu(__start_nvmeibs_memmgr_metrics, __stop_nvmeibs_memmgr_metrics);
 	mutex_unlock(&guard);
 	nvmeib_public_set_debug_level(NULL);

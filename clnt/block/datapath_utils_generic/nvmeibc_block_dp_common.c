@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_pausable.h"
 #include "block/nvmeibc_topology.h"
 #include "nvmeibc_block_dp_dbg_tools.h"
@@ -303,7 +298,7 @@ static int __dp_default_ignore_all_operations(const struct operation *o)
 
 bool nvmeibc_default_debug_di = false;		// By default is disabled (corrupts user data)
 module_param(nvmeibc_default_debug_di, bool, 0644);
-MODULE_PARM_DESC(nvmeibc_default_debug_di, "Upon volume attach, enable \"debug di\" mode.");
+MODULE_PARM_DESC(nvmeibc_default_debug_di, "Upon attach, enable debug di mode");
 
 // use_debug_di from mgmt configuration, will be set once and will override local nvmeibc_default_debug_di parameter value
 static inline bool __can_enable_debug_di_for_volume(enum nvmeibc_data_path_type e, const bool use_debug_di)

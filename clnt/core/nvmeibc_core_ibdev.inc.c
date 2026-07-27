@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "main/utils/nvmeibc_main_block_gen_work_sched.h"
 #include "nvmeibc_disk.h"
 #include "common/proc_epilog.h"
@@ -23,36 +18,41 @@
 #define MAX_FP 1024
 static char nvmeibc_filter_ports[MAX_FP] = "";
 module_param_string(ports, nvmeibc_filter_ports, MAX_FP, 0644);
-MODULE_PARM_DESC(ports, "Used for port filtering functionality. This is typically set by service startup based on nvmesh.conf information. If empty, no filter is used otherwise the format is either: <hca_id> - use this nic and all its ports or <hca_id>:<port id> or a net-device name. For example: mlx4_0:1,mlx_4:2,mlx4_1:1 - will use three ports of two nics");
+MODULE_PARM_DESC(ports, "Option to filter nics and ports\n"
+   "\t\t If empty, no filter is used otherwise the format is either:\n"
+   "\t\t    <hca_id> - use this nic and all its ports\n"
+   "\t\t    <hca_id>:port id\n"
+   "\t\t For example:\n"
+   "\t\t    mlx4_0:1,mlx_4:2,mlx4_1:1 - will use three ports of two nics");
 
 static char nvmeibc_filter_guids[MAX_FP] = "";
 module_param_string(guids, nvmeibc_filter_guids, MAX_FP, 0644);
-MODULE_PARM_DESC(guids, "Used for port filtering functionality. Typically populated from nvmesh.conf parameters.");
+MODULE_PARM_DESC(guids, "option to filter ports according to port\'s hardware guids");
 
 unsigned nvmeibc_max_nic_srqs = NVMEIB_MAX_NIC_SRQS;
 module_param_named(max_nic_srqs, nvmeibc_max_nic_srqs, int, 0444);
-MODULE_PARM_DESC(max_nic_srqs, "Maximum number of shared receive queues per NIC.");
+MODULE_PARM_DESC(max_nic_srqs, "Maximum SRQs per nic");
 
 unsigned sm_th = 32;
 module_param(sm_th, uint, 0644);
-MODULE_PARM_DESC(sm_th, "Maximum number of concurrent Infiniband subnet manager requests. Used for throttling subnet manager access.");
+MODULE_PARM_DESC(sm_th, "Maximum concurrent sm-requests per client");
 
-bool nvmeibc_use_pcpu_cq = false; /* Disabled by service script for TCP */
+bool nvmeibc_use_pcpu_cq = true; /* Disabled by service script for TCP */
 module_param_named(use_pcpu_cq, nvmeibc_use_pcpu_cq, bool, 0444);
-MODULE_PARM_DESC(use_pcpu_cq, "Use a per-cpu shared completion queue (SCQ) and shared receive queue (SRQ).");
+MODULE_PARM_DESC(use_pcpu_cq, "Use a per CPU shared completion queue (SCQ) and shared receive queue (SRQ)");
 
 bool nvmeibc_pcpu_cq_poll_proc = false;
 module_param_named(pcpu_cq_poll_proc, nvmeibc_pcpu_cq_poll_proc, bool, 0444);
-MODULE_PARM_DESC(pcpu_cq_poll_proc, "Create /proc files for polling the nvmeibs shared completion queues from SPDK. This requires pcpu_cq_all_cpus=Y for nvmeib_common.");
+MODULE_PARM_DESC(pcpu_cq_poll_proc, "Create proc files for polling the nvmeibc shared completion queues from SPDK (Requires pcpu_cq_all_cpus=Y for nvmeib_common)");
 
 atomic_t nvmeibc_num_ioch_rm_works = ATOMIC_INIT(0);  // num of ioch the ioch remove works currently run
 unsigned nvmeibc_max_ioch_rm_works = 0;
 module_param_named(max_ioch_rm_works, nvmeibc_max_ioch_rm_works, int, 0644);
-MODULE_PARM_DESC(max_ioch_rm_works, "Max concurrent IO communication channel removal operations.");
+MODULE_PARM_DESC(max_ioch_rm_works, "Max concurrent IO communication channel removal operations");
 
 bool nvmeibc_use_rdda = false; // Disable prior 2.5.0 due to rare DI [EC-8005]
 module_param_named(use_rdda, nvmeibc_use_rdda, bool, 0444);
-MODULE_PARM_DESC(use_rdda, "Allow using RDDA operations for IO. As RDDA is deprecated, this should always be false.");
+MODULE_PARM_DESC(use_rdda, "Allow using RDDA for client");
 
 unsigned nvmeibc_nic_io_stats_block_size = 1 << NVMEIBC_SECTOR_SHIFT;
 module_param_named(nic_io_stats_block_size, nvmeibc_nic_io_stats_block_size, uint, 0444);
@@ -81,9 +81,21 @@ static int update_disks_config(const struct nvmeibc_cinst_params_core *p,
 			       do_disk_update_fn_type do_fn, disk_pre_update_fn_type pre_fn,
 			       disk_post_update_fn_type post_fn, bool can_sleep);
 
+#define NVMEIBC_FRAME_SIZE_USECS (1000)
+#define NVMEIBC_MAX_BURST (64)
+#define NVMEIBC_MAX_COMP_INTR_PCT_CPU (10)
+
+int max_rcomp_intr = NVMEIBC_MAX_BURST;
+module_param(max_rcomp_intr, int, 0644);
+MODULE_PARM_DESC(max_rcomp_intr, "Max number of recv completions to handle in an interrupt before entering poll mode");
+
+int max_comp_intr_pct_cpu = NVMEIBC_MAX_COMP_INTR_PCT_CPU;
+module_param(max_comp_intr_pct_cpu, int, 0644);
+MODULE_PARM_DESC(max_comp_intr_pct_cpu, "Max percentage of CPU time to spend processing completions in an interrupt before entering poll mode");
+
 unsigned int nvmeibc_tcp_mode = 0;
 module_param_named(tcp_mode, nvmeibc_tcp_mode, uint, 0444);
-MODULE_PARM_DESC(tcp_mode, "Activate the SIW communicate mode exclusively, i.e., filter out any RoCE devices. Usually set by service startup from nvmesh.conf information.");
+MODULE_PARM_DESC(tcp_mode, "TCP transport mode, 0 = RoCE only, 1 = TCP Only, 2 or greater = TCP and RoCE");
 
 #define nvmeibc_cg_ib_register_client(cg)                                      \
 	({                                                                         \
@@ -124,6 +136,9 @@ static void nvmeibc_core_ibdev_fill_cinst_params_from_module_params(struct nvmei
 	p->max_g_len = MAX_FP;
 	p->filter_ports = nvmeibc_filter_ports;
 	p->max_p_len = MAX_FP;
+	p->shaper_fs = NVMEIBC_FRAME_SIZE_USECS;
+	p->shaper_burst = max_rcomp_intr;
+	p->shaper_max_pct_cpu = max_comp_intr_pct_cpu;
 	p->max_nic_srqs = nvmeibc_max_nic_srqs;
 	p->sm_th = sm_th;
 	p->use_pcpu_cq = nvmeibc_use_pcpu_cq;

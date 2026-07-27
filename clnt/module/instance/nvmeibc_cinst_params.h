@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_CINST_PARAMS_H
 #define NVMEIBC_CINST_PARAMS_H
 
@@ -48,6 +43,9 @@ struct nvmeibc_cinst_params_core {			// Params to core/transport layer
 	const char *filter_guids;
 	unsigned max_p_len;
 	unsigned max_g_len;
+	int shaper_fs;
+	int shaper_burst;
+	int shaper_max_pct_cpu;
 	unsigned max_nic_srqs;
 	unsigned sm_th;
 	bool use_pcpu_cq;

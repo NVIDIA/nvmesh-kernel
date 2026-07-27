@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_ec_recov_maintenance.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_block_md.h"
 #include "nvmeibc_block_dp_ec_recovery_common.h"
@@ -95,16 +90,6 @@ _resolved:
 	return res;
 }
 
-union nvmeibc_dbits_entry nvmeibcbdpec_calc_worst_case_dbits(const struct recovery_sync_op *so)
-{
-	union nvmeibc_dbits_entry res = __calc_worst_case_dbits(so);
-	const int num_parities = nvmeibc_raid1_get_protect_lvl(so->r1);
-
-	nvmeibc_dbits_del_unk(&res, num_parities);
-
-	return res;
-}
-
 void nvmeibcbdpec_inject_binfo_back_to_caller(struct recovery_sync_op *so)
 {
 	const union nvmeib_blkset_info *fix = &so->cmds->rld.post;
@@ -115,66 +100,6 @@ void nvmeibcbdpec_inject_binfo_back_to_caller(struct recovery_sync_op *so)
 	so->cmds->rld.pre.all = fix->all;				// My 'post' is callers 'pre'
 	dp_locks_put_TxID_dbits(so->locks,                     0, *fix, false);	// Commit binfo to SO locks struct
 	// Note: txid may not be NVMEIBC_DP_EC_MD_TX_ID_NO_JOURNALS. Even though we fixed entire blockset, we may not have overwrriten all blocks metadata with lowset txid, so cannot reset it in ram!
-}
-
-static void dp_ec_mainten_sl_by_sl_start(struct recovery_sync_op *so)
-{
-	int i;
-
-	WARN(so->is_sbs_mode, "nvmeibc bug, wrong flow=%d, already in sbs mode\n", so->slice_by_slice_index);
-	_NTSO(trace_dp_ec_mainten_sl_by_sl_start, "Starting slice by slice mode");
-	so->slice_by_slice_index = so->n_slices;	// Start from last slice towards first slice, position beyond the last slice for _next() to be called immediately
-
-	for (i = (so->last_cmd + 1 - so->n_cmds); i <= so->last_cmd; i++) {
-		struct nvmeibc_block_command *cmd = &so->cmds[i];
-		const u32 md_ssize = nvmeibc_sgmnt_sw_md_size(cmd->ds);
-		cmd->iocmd->reqs1.disk_address += so->slice_by_slice_index;
-		cmd->iocmd->reqs1.md += (so->slice_by_slice_index * md_ssize);
-		// No need to fill cmd->first_rlba, since for MD read we won't need it for EDIC check (we can't, no data)
-		BUG_ON(cmd->iocmd->reqs1.ndb->length != NVMEIBC_SECTOR2BYTE(cmd->nlbas));
-		BUG_ON(cmd->nlbas != so->n_slices);
-		cmd->nlbas = 1;
-		cmd->iocmd->reqs1.ndb->length = NVMEIBC_SECTOR_SIZE;
-	}
-	so->is_sbs_mode = true;
-}
-
-static void dp_ec_mainten_sl_by_sl_next(struct recovery_sync_op *so)
-{
-	int i;
-
-	BUG_ON(((u32)so->start_slice + (u32)so->slice_by_slice_index) > LOCKSET_SLICES);
-	BUG_ON(so->slice_by_slice_index == 0);
-
-	for (i = (so->last_cmd + 1 - so->n_cmds); i <= so->last_cmd; i++) {
-		struct nvmeibc_block_command *cmd = &so->cmds[i];
-		const u32 md_ssize = nvmeibc_sgmnt_sw_md_size(cmd->ds);
-		cmd->iocmd->reqs1.disk_address--;
-		cmd->iocmd->reqs1.md -= md_ssize;
-		__cmd_clean_comp_val(cmd);
-		DEBUG_TRANSFERS_init_cb_counter(cmd);
-	}
-
-	so->slice_by_slice_index--;
-}
-
-static void dp_ec_mainten_sl_by_sl_finish(struct recovery_sync_op *so)
-{
-	int i;
-
-	_NTSO(t_01_mainten_sbs_fin, "Finished sbs: slice=@SBS_INDEX, err=@ERR", so->slice_by_slice_index, so->error);
-
-	while (unlikely(so->slice_by_slice_index)) // on error, cleanup (complete the loop)
-		dp_ec_mainten_sl_by_sl_next(so);
-
-	for (i = (so->last_cmd + 1 - so->n_cmds); i <= so->last_cmd; i++) {
-		struct nvmeibc_block_command *cmd = &so->cmds[i];
-		cmd->nlbas = so->n_slices;
-		cmd->iocmd->reqs1.ndb->length = NVMEIBC_SECTOR2BYTE(cmd->nlbas);
-		__cmd_clean_comp_val(cmd);
-	}
-
-	so->is_sbs_mode = false;
 }
 
 void dp_ec_mainten_cb_stg_end(struct recovery_sync_op *so)
@@ -188,82 +113,17 @@ _func_start:
 	}
 
 	switch (so->stage) {
-		case sync_stage_recov_read_cmds_sent: {
-			const int non_read_failure_error = dp_sync_get_any_non_readfail_errors(so);
-			const roles_bmp_t readfail_bmp = dp_sync_gen_read_fail_bit_mask(so);
-
-			if (unlikely(so->is_sbs_mode)) {
-				if (unlikely(non_read_failure_error)) {
-					dp_ec_mainten_sl_by_sl_finish(so);
-					so->error = -10045;
-					goto _func_start;
-				}
-
-				if (readfail_bmp) {
-					// Mark (fake) never-written in MD, so that it will not affect the choice of max. TxID after SBS end
-					int i, bit;
-					for (i = (so->last_cmd + 1 - so->n_cmds), bit = 1; i <= so->last_cmd; i++, bit <<= 1) {
-						if (bit & readfail_bmp) {
-							struct nvmeibc_block_command *c = &so->cmds[i];
-							nbdpec_md_mark_data_never_written_no_dbits(c->iocmd->reqs1.md, c->is_parity);
-						}
-					}
-
-					so->write_unco_mask |= (1U << (so->start_slice + so->slice_by_slice_index)); // Remember this readfail for the unknown dbits resolving step
-				}
-
-				so->stage = sync_stage_recov_mainten_sbs_loop_end;
-				goto _func_start;
-			}
-
-			if (unlikely(non_read_failure_error)) {
+		case sync_stage_recov_read_cmds_sent:{
+			const int rv = nvmeibcbdpec_get_rv_cur_stage_cmds(so);
+			if (unlikely(rv != 0)) {	// TODO: Handle readfail for maintenence - unknown dbits should be resolved to worst case and set to ram -> (then) trigger readfail recovery for failed read of parities
 				so->error = -10045;
 				goto _func_start;
 			}
-
-			if (unlikely(readfail_bmp)) {
-				dp_ec_mainten_sl_by_sl_start(so);
-				so->stage = sync_stage_recov_mainten_sbs_loop_end;
-				goto _func_start;
-			}
-
-			so->stage = sync_stage_recov_mainten_resolve_binfo;
-			goto _func_start;
-		}
-
-		case sync_stage_recov_mainten_sbs_loop_end: {
-			BUG_ON(!so->is_sbs_mode);
-
-			if (so->slice_by_slice_index == 0) { // Done SBS
-				dp_ec_mainten_sl_by_sl_finish(so);
-				so->stage = sync_stage_recov_mainten_resolve_binfo;
-				goto _func_start;
-			}
-
-			so->stage = sync_stage_recov_read_cmds_sent;
-			dp_ec_mainten_sl_by_sl_next(so);
-			nvmeibc_sync_set_uncompleted_cmds(so, so->n_cmds);
-			ASYNC_AWAIT_AND_RESUME(nvmeibc_sync_send_cur_stage_cmds(so));
-			goto _func_start;
-		}
-
-		case sync_stage_recov_mainten_resolve_binfo: {
-
-			if (unlikely(so->write_unco_mask)) {
-				if (dp_ec_mainten_has_txid_unreslvd(rldr) && !nvmeibc_praid_are_all_readable(so->r1) && !dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(so->r1))) {
-					// This should never happen, as there is no flow that resolves dbits without TxID or that sets unknown dbits after TxID was already resolved
-					WARN_ONCE(1, "nvmeibc bug! Cannot resolve dbits to worst case when resolving TxID in the presence of a readfail");
-					_NTSO(trace_2_mainten_cb_stg, "Cannot resolve dbits to worst case when resolving TxID in the presence of a readfail, aborting");
-					so->error = -10049;
-					goto _func_start;
-				}
-			}
-
 			so->stage = sync_stage_recov_write_binfo;
 
 			if (dp_sync_has_unknown_dbits(rldr, nvmeibc_raid1_get_protect_lvl(so->r1))) {
 				union nvmeibc_dbits_entry db;
-				db = so->write_unco_mask ? nvmeibcbdpec_calc_worst_case_dbits(so) : nvmeibcbdpec_calc_max_dbit_in_ram_md(so);
+				db = nvmeibcbdpec_calc_max_dbit_in_ram_md(so);
 				fix->bits.dirty = db.all_bits;
 				atomic_inc(&get_so_fctr(so)->main.n_dbits_resolve);
 				if (nvmeibc_dbits_get_n_unk(&db, nvmeibc_raid1_get_protect_lvl(so->r1))) {
@@ -276,6 +136,7 @@ _func_start:
 				atomic_inc(&get_so_fctr(so)->main.n_txid_resolve);
 			}
 
+			so->stage = sync_stage_recov_write_binfo;
 			goto _func_start;
 		}
 
@@ -300,7 +161,6 @@ _func_start:
 				}
 			}
 			DEBUG_TRANSFERS_init_cb_counters(so->n_cmds, &so->cmds[so->last_cmd + 1 - so->n_cmds]);		// Cleanup counters
-			so->write_unco_mask = 0;	// Clean up this NoWH field which we might have used here
 			return nvmeibcbdpec_return_to_caller_sm(so);
 		}
 	default:;

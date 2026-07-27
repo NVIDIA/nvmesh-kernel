@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "nvmeib_public_mmap.h"
 #include "nvmeib_public_procfs.h"
@@ -321,7 +316,7 @@ static struct nvmeib_capuch *__percpu *nvmeib_trace_channel_pcpu[] = {
 
 static char user_config[MAX_CONFIG_STRING] = "";
 module_param_string(config, user_config, MAX_CONFIG_STRING, 0644);
-MODULE_PARM_DESC(config, "This parameter can be used to alter the binary tracer engine configuration. This string can be up to 4 kbytes. The tracer's configuration defines the resources consumed by the tracer, its performance, and aspects of its ephemeral behaviour.");
+MODULE_PARM_DESC(config, "Binary tracer engine configuration");
 
 /**
  * Utility, pretty print the configuration
@@ -1841,7 +1836,7 @@ static inline bool __sym_resolve_kernel_bug_can_happen(void *addr)
  */
 int nvmeib_symbol_length(void *addr) {
 	return __sym_resolve_kernel_bug_can_happen(addr) ?
-		strlen("<kallsyms-bug>") : snprintf(NULL, 0, "%pf", addr);
+		strlen("<kallsyms-bug>") : snprintf(NULL, 0, "%ps", addr);
 }
 EXPORT_SYMBOL(nvmeib_symbol_length);
 /**
@@ -1849,7 +1844,7 @@ EXPORT_SYMBOL(nvmeib_symbol_length);
  */
 int nvmeib_symbol_strcpy(char *dest, void *addr, int len) {
 	return __sym_resolve_kernel_bug_can_happen(addr) ?
-		scnprintf(dest, len, "%s", "<kallsyms-bug>") : scnprintf(dest, len, "%pf", addr);
+		scnprintf(dest, len, "%s", "<kallsyms-bug>") : scnprintf(dest, len, "%ps", addr);
 }
 EXPORT_SYMBOL(nvmeib_symbol_strcpy);
 
@@ -1860,7 +1855,7 @@ int nvmeib_stack_trace_length(void *addr) {
 	BUG_ON(!addr); /* Case is handled by code generator */
 	for (i = 0; i < st->nr_entries; ++i)
 		if (st->entries[i])
-			sum += snprintf(NULL, 0, "[%016lx] %pF", st->entries[i], (void*)st->entries[i]) + 2;
+			sum += snprintf(NULL, 0, "[%016lx] %pS", st->entries[i], (void*)st->entries[i]) + 2;
 
 	return sum + 1;
 }
@@ -1875,7 +1870,7 @@ int nvmeib_stack_trace_strcpy(char *dest, void *addr, int len) {
 	for (i = 0; i < st->nr_entries; ++i) {
 		if (st->entries[i]) {
 			dest[sum++] = '>';
-			sum += scnprintf(dest + sum, len - sum, "[%016lx] %pF", st->entries[i], (void*)st->entries[i]);
+			sum += scnprintf(dest + sum, len - sum, "[%016lx] %pS", st->entries[i], (void*)st->entries[i]);
 			dest[sum++] = '\n';
 		}
 	}
@@ -1902,7 +1897,7 @@ EXPORT_SYMBOL(nvmeib_public_save_stack_trace_ptr);
 
 bool nvmeib_hide_warnings_stack = NVMESH_IS_PRODUCTION_COMPILATION;							// In production, dont clutter dmesg by default
 module_param_named(hide_warnings_stack, nvmeib_hide_warnings_stack, bool, 0644);
-MODULE_PARM_DESC(hide_warnings_stack, "Hide warnings from dmesg, the kernel log, while keeping them in the binary traces.");
+MODULE_PARM_DESC(hide_warnings_stack, "Hide warnings from dmesg, while keeping them still available in the binary traces.");
 
 bool nvmeib_get_hide_warnings_stack(void);
 bool nvmeib_get_hide_warnings_stack(void) {

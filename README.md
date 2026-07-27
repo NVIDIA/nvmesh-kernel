@@ -1,12 +1,7 @@
-<!--
-SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
--->
-
-# NVMesh by NVIDIA
+# NVMesh by Excelero
 
 ## Description
-NVMesh by NVIDIA provides remote shared storage facilities with in-server flash performance characteristics while using commodity off-the-shelf components.
+NVMesh by Excelero provides remote shared storage facilities with in-server flash performance characteristics while using commodity off-the-shelf components. It leverages Excelero’s patent pending remote direct disk access (RDDA) functionality when working with NVMe devices and RDMA capable NICs.
 
 As NVMesh is a software only solution, it has the flexibility to provide storage in a hyper-converged architecture or as a top-of-rack flash appliance or as part of a dedicated storage rack.
 
@@ -22,22 +17,13 @@ The management server is used for providing storage definitions and monitoring t
 The storage client software implements block device functionality for storage consumers.
 
 ### Storage Target
-The storage target software identifies storage hardware and sets up network pathways to the storage elements on behalf of the storage clients.
+The storage target software identifies storage hardware and sets up RDDA and non-RDDA pathways to the storage elements on behalf of the storage clients.
 TOMA is part of the storage target
+
+### RDMA Transport
+The storage client and the storage target require one or more RDMA NICs installed on the machine which hosts them. Infiniband or ROCE supported. Mellanox OFED 3.x is used, downloadable from [Mellanox OFED download page](http://www.mellanox.com/page/products_dyn?product_family=26 "Mellanox
+OpenFabrics Enterprise Distribution for Linux (MLNX_OFED)").
 
 ## Building
 Use `build.sh` to build NVMesh. See `build.sh --help` output for details.
-
-This repo contains the source for the kernel versions of the storage client and target and the user-mode TOMA component that is in integral part of the target.
-
-## NVMesh Open Source Repositories List
-* https://github.com/NVIDIA/nvmesh-documentation
-* https://github.com/NVIDIA/nvmesh-infra
-* https://github.com/NVIDIA/nvmesh-interop-db
-* https://github.com/NVIDIA/nvmesh-kernel
-* https://github.com/NVIDIA/nvmesh-management
-* https://github.com/NVIDIA/nvmesh-upgrader
-* https://github.com/Excelero/nvmesh-csi-driver
-
-The NVMesh Roadmap is published in the documentation repo
 

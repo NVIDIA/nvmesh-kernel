@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmesh_sim.h"
 #include "uni_scenario_ec.h"
 #include "../nvmeibc_block_common.h"
@@ -35,12 +30,9 @@ struct t_ec_recov_tx *_p;								// Same as above
 
 void ec_tx_boomtrah(struct t_ec_tx_history* hist, char const *file, char const* function, int line, char const * condition)
 {
-	struct jdr jdr;
-	struct charvec json = {0};
 	struct charvec buffer = {.base = malloc(4*1024*1024), .len = 4*1024*1024};
-	if (!buffer.base)
-		return;
-	jdr = jdr_make(buffer);
+	struct jdr jdr = jdr_make(buffer);
+	struct charvec json = {0};
 	jdr_write_ec_tx_history(&jdr, "history", hist);
 	jdr_write_var(&jdr, file, file);
 	jdr_write_var(&jdr, function, function);
@@ -2891,7 +2883,7 @@ static int __unitest_EC_Recovery(bunitest_s* B, const enum NVMEIBT_RECOVERY_TYPE
 		NVMeshSystem_gen_cmd_hooks_setup_all_disks(sys, &hist.disk_hooks);
 	}
 	_hist = &hist;
-	topos = create_topo_random_enum(sraid, 1, 10, 10);
+	topos = create_all_topo_random_enum(sraid, 20, false);
 	__dd_clean_dlba_pointers(env);  /* Todo: remove after dbits rebuild wont turn on dbits on all blockset slices  */
 
 	while (topos.move_next(&topos)) {  // iterate on random topologies - all topologies are possible //__topo_enum_move_2_index(&topos, 19)) {

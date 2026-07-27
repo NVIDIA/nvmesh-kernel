@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_volume.h"
 #include "nvmeib_event.h"
 #include "nvmeibc_defs.h"
@@ -305,7 +300,7 @@ static void nvmeibc_volume_detach(struct nvmeibc_volume *volume, const struct nv
 int nvmeibc_volume_try_detach(struct nvmeibc_volume *volume, struct nvmeibc_vol_detach_cmd how, struct nvmeibc_multi_completion *on_finish)
 {
 	int rv;
-	_NI(trace_volume_nvmeibc_volume_try_detach, "@NDU " DMESG_PREFIX("@DEV_NAME") ": Detach started. Flags = {F=@BOOL_YN, R=@BOOL_YN, H=@BOOL_YN, A=@BOOL_YN}", 0, volume->hdr.devname, how.force, how.recov, how.hidden, how.abandon);
+	_NI(trace_volume_nvmeibc_volume_try_detach, DMESG_PREFIX("@DEV_NAME") ": detaching. Flags = {F=@BOOL_YN, R=@BOOL_YN, H=@BOOL_YN, A=@BOOL_YN}", volume->hdr.devname, how.force, how.recov, how.hidden, how.abandon);
 	rv = nvmeibc_block_try_detach(volume->block_dev, how);
 	if (rv == 0) {
 		how.err_attach = false;
@@ -948,7 +943,7 @@ int nvmeibc_volume_attach(const struct nvmeibc_cinst_params_main *p,
 			goto _detach_newly_created_volume;
 		}
 	}
-	_NI_to_user(t_09_vol_attach, "@NDU " DMESG_PREFIX("@DEV_NAME"), "Attach finished successfully", 0, devname); 	//. Error code: 0
+	_NI_to_user(t_09_vol_attach, DMESG_PREFIX("@DEV_NAME"), "Attach finished successfully", devname); 	//. Error code: 0
 	__set_status(volume, NVS_ATTACHED);
 	goto out;
 
@@ -1156,8 +1151,8 @@ _func_start:
 
 	case volume_detach_state_error_done: /* Detach failed, reschedule.*/
 		_NE(error_volume_nvmeibc_volume_detach_o,
-		    "@NDU @EVENT_TAG" DMESG_PREFIX("@DEV_NAME") ": Force Detach failed. System is unstable!",
-		    0, EV_DETACH_FAILED(), volume->hdr.devname);
+		    "@EVENT_TAG" DMESG_PREFIX("@DEV_NAME") ": Force detach failed. System is unstable!",
+		    EV_DETACH_FAILED(), volume->hdr.devname);
 		nvmeibc_cc_api_notify_detach_completion(volume, NVMEIB_C_TO_M_VOLUME_ACK_DETACH_FAILED);
 		nvmeibc_multi_completion_done(volume->job_comp);
 		volume->job_comp = NULL;
@@ -1171,7 +1166,7 @@ _func_start:
 			const enum_vol_status how = (detach->cmd.abandon) ? NVMEIB_C_TO_M_VOLUME_ACK_UPDATE_READY : ((detach->cmd.shutdown) ? NVMEIB_C_TO_M_VOLUME_ACK_SHUTDOWN : NVMEIB_C_TO_M_VOLUME_ACK_DETACHED);
 			block_api_os_put(detach->os);
 			nvmeibc_cc_api_notify_detach_completion(volume, how);
-			_NI_to_user(trace_1_volume_nvmeibc_volume_detach_o, "@NDU " DMESG_PREFIX("@DEV_NAME"), "Detach finished successfully", 0, volume->hdr.devname);	//. Error code: 0
+			_NI_to_user(trace_1_volume_nvmeibc_volume_detach_o, DMESG_PREFIX("@DEV_NAME"), "Detach finished successfully", volume->hdr.devname);	//. Error code: 0
 			nvmeibc_multi_completion_done(volume->job_comp);
 		} else {
 			BUG_ON(volume->job_comp);	// Not a real job

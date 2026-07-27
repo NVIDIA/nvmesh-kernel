@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_common.h"
 #include "nvmeibt_debug.h"
 #include "nvmeibt_disk_metadata.h"
@@ -2696,7 +2691,7 @@ static void seg_active_zeroing_finalize(struct nvmeibt_wq_entry *wq_entry)
 	struct timespec								diff_timeout;
 	uint64_t									n_4Kblk_zeroed;
 	struct nvmeibt_Str							*json_payload = NULL;
-	//char                                        unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "seg_zeroing";
+	char 										unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "seg_zeroing";
 
 	NFIN;
 
@@ -2753,6 +2748,7 @@ static void seg_active_zeroing_finalize(struct nvmeibt_wq_entry *wq_entry)
 
 	if (is_done_zeroing || (diff_timeout.tv_sec > SEG_ZERO_REPORT_TO_MGMT_FREQUENCY_SEC)) {
 		N_Tf(ko9eu65, "Should send zeroing progress update for seg=@UUID_8", nvmeibt_seg_active_UUID_8(seg_active));
+		nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_seg_active_id_str(seg_active), sizeof(unique_key) - strlen(unique_key));
 		json_payload = NNVMEIBT_STR_ALLOC(vb659sl);
 		nvmeibt_Str_sprintf(json_payload, "{" KAFKA_PRODUCER_MSG_HEADER_FMT "\"payload\": {\"praidVersion\": \"%d.%d\", \"segmentUUID\": \"%s\", \"pRaidUUID\": \"%s\", \"nZeroedBlks\": %llu}}",
 				KAFKA_PRODUCER_MSG_HEADER_VAR("segmentZeroingProgress", 1),
@@ -2762,8 +2758,7 @@ static void seg_active_zeroing_finalize(struct nvmeibt_wq_entry *wq_entry)
 							nvmeibt_seg_active_praid_id_str(seg_active),
 							n_4Kblk_zeroed);
 		N_Tf(5msp64f, "@STR", nvmeibt_Str_str(json_payload));
-		//nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_seg_active_id_str(seg_active), sizeof(unique_key) - strlen(unique_key));
-		nvmeibt_kafka_outgoing_msgs_queue_add(NULL, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 		NNVMEIBT_STR_FREE(bfhbeu3, json_payload);
 		seg_active->last_zeroing_progress_report_time = now;
 	}
@@ -3069,7 +3064,7 @@ bool nvmeibt_seg_active_send_one_seg_rebuild_progress_report_to_mgmt(struct nvme
 {
 	bool									is_any_written = 0;
 	struct nvmeibt_disk_segment_topo_ctx	*seg_topo_ctx;
-	//char									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "Dirty_progress_";
+	char									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN] = "Dirty_progress_";
 
 	seg_topo_ctx = nvmeibt_seg_active_get_active_seg_topo(seg_active);
 	if (nvmeibt_disk_segment_is_any_ec_cold_recoverer(seg_topo_ctx)) {
@@ -3092,8 +3087,8 @@ bool nvmeibt_seg_active_send_one_seg_rebuild_progress_report_to_mgmt(struct nvme
 							seg_active->dirty_rebuild_ctx.prev_report_n_blksets_remaining,
 							nvmeibt_seg_active_get_local_disk(seg_active)->reappearing_counter);
 		N_Tf(c8as76s, "@STR", nvmeibt_Str_str(json_payload));
-		//nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_seg_active_id_str(seg_active), sizeof(unique_key) - strlen(unique_key));
-		nvmeibt_kafka_outgoing_msgs_queue_add(NULL, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW);
+		nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_seg_active_id_str(seg_active), sizeof(unique_key) - strlen(unique_key));
+		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW);
 		is_any_written = 1;
 	}
 	return is_any_written;

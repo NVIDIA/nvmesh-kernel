@@ -61,11 +61,11 @@
 
 bool notify_on_wq = 1;
 module_param(notify_on_wq, bool, 0644);
-MODULE_PARM_DESC(notify_on_wq, "Notify CQ on Workqueue (bool).");
+MODULE_PARM_DESC(notify_on_wq, "Notify CQ on Workqueue\n");
 
 static bool ack_signal_wr = 1;
 module_param(ack_signal_wr, bool, 0644);
-MODULE_PARM_DESC(ack_signal_wr, "Request responder to ack signaled writes (bool).");
+MODULE_PARM_DESC(ack_signal_wr, "Request responder to ack signalled writes\n");
 
 
 #if DPRINT_MASK > 0
@@ -222,7 +222,6 @@ static void siw_qp_llp_data_ready(struct sock *sk)
 #endif
 {
 	struct siw_qp		*qp;
-	unsigned long		rq_flags;
 	int rv;
 
 	read_lock(&sk->sk_callback_lock);
@@ -234,31 +233,25 @@ static void siw_qp_llp_data_ready(struct sock *sk)
 
 	siw_qp_get(qp);
 
-	/*
-	 * Serialize with siw_rx_work_handler using a dedicated flag
-	 * instead of sock_owned_by_user_nocheck(). The socket process
-	 * lock is also held by the TX path (kernel_sendmsg), and
-	 * checking it here would unnecessarily defer RX to the
-	 * workqueue whenever TX is active, hurting latency.
+	/* This check is needed to synchronize with siw_rx_work_handler.
+	 * siw_rx_work_handler acquires a process lock (lock_sock) whereas
+	 * the lock held here is bh_lock_sock. The two locks can be
+	 * held by different threads at the same time, but bh_lock_sock
+	 * allows a thread in BH context to safely check if the process
+	 * lock is held. In this case, if the lock is held, queue work.
 	 */
-	lock_rq_rxsave(qp, rq_flags);
-	if (qp->rx_ctx.rx_in_progress) {
-		unlock_rq_rxsave(qp, rq_flags);
+	if (sock_owned_by_user_nocheck(sk)) {
 		siw_rx_queue_work(qp, 0);
 		goto put_qp;
 	}
-	qp->rx_ctx.rx_in_progress = 1;
-	unlock_rq_rxsave(qp, rq_flags);
 
+	/* Call siw_rx_work_handler internal work handler.
+	 * No need for socket locks as we are in callback context */
 	if ((rv = siw_do_rx_work(qp)) < 0) {
 		dprint(DBG_SK|DBG_RX, "(QP%d): "
 		"siw_do_rx_work() returned error %d\n",
 		       QP_ID(qp), rv);
 	}
-
-	lock_rq_rxsave(qp, rq_flags);
-	qp->rx_ctx.rx_in_progress = 0;
-	unlock_rq_rxsave(qp, rq_flags);
 
 put_qp:
 	siw_qp_put(qp);
@@ -285,7 +278,7 @@ void siw_qp_llp_close(struct siw_qp *qp)
 
 	write_lock_qp(qp);
 	dprint(DBG_CM|DBG_ON, "(QP%d): state locked\n", QP_ID(qp));
-	WRITE_ONCE(qp->attrs.llp_stream_handle, NULL);
+	qp->attrs.llp_stream_handle = NULL;
 
 	switch (qp->attrs.state) {
 
@@ -1419,7 +1412,7 @@ void siw_cq_notify(struct siw_cq *cq, u32 flags, bool force)
 		(*cq->ofa_cq.comp_handler)(&cq->ofa_cq, cq->ofa_cq.cq_context);
 		handler_jif = jiffies - handler_start_jif;
 		if (handler_jif > SIW_CQ_HANDLER_TIMEOUT_LOG) {
-			dprint(DBG_ON, "(CQ%d): handler %pF (context " dprint_ptr_str() ") took %u ms\n", OBJ_ID(cq), cq->ofa_cq.comp_handler, cq->ofa_cq.cq_context, jiffies_to_msecs(handler_jif));
+			dprint(DBG_ON, "(CQ%d): handler %pS (context " dprint_ptr_str() ") took %u ms\n", OBJ_ID(cq), cq->ofa_cq.comp_handler, cq->ofa_cq.cq_context, jiffies_to_msecs(handler_jif));
 			WARN_ON_ONCE(SIW_CQ_HANDLER_TIMEOUT_WARN && handler_jif > SIW_CQ_HANDLER_TIMEOUT_WARN);
 		}
 	}
@@ -1551,10 +1544,7 @@ bool siw_schedule_cq_notify_work(struct siw_qp *qp, struct siw_cq *cq)
 		if (atomic_read(&cq->dying))
 			return false;
 		siw_cq_get(cq);
-		if (cq->hdr.sdev && cq->hdr.sdev->num_tx_vector > 0)
-			cpu = cq->hdr.sdev->tx_vector_cpu[cq->comp_vector % cq->hdr.sdev->num_tx_vector];
-		else
-			cpu = cq->comp_vector % num_possible_cpus();
+		cpu = cq->comp_vector % num_possible_cpus();
 		atomic_inc(&cq_notify_sched_cnt[cpu]);
 		if (cpu_online(cpu))
 			queued = queue_work_on(cpu, notify_wq, &cq->notify_work);

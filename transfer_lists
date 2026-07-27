@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
-
 source .config
 
 if [ -z "$toma_mode" ]; then
@@ -22,10 +18,12 @@ base_transfer_list="system.d/nvmeshagent.service \
         config/nvmesh.conf.d/00-readme.conf \
         management_cm \
 		bin/nvmesh_configure_management_server \
-		bin/nvmesh_configure_nics"
+		bin/nvmesh_configure_nics \
+        public"
 
 # Can include both static and compiled files
 base_tools_transfer_list="dist/pytools \
+		tools/humanize_json.py \
         scripts/target/nvme-cli"
 
 # Can include both static and compiled files
@@ -65,14 +63,13 @@ common_transfer_list="common_public/*.ko* \
 			tools/trace_daemon_2.0/run_trace_daemon.sh \
 			tools/pipe_tracer/build/bin/nvmeib_pipe_tracer \
 			dictionaries.tar.gz \
-			perfTest/io_stress/scan_locks/scan_locks_ec "
+			perfTest/io_stress/scan_locks/scan_locks_ec"
 
 optional_common_transfer_list="tools/traces_post_processor/cpager \
 			tools/nvmesh_netlink.py \
 			tools/read_dwarf.py \
 			tools/nvmesh_memmgr_monitor.py \
 			tools/nvmesh_metrics.py \
-			tools/nvmesh_client_upgrade_breakdown.py \
 			tools/infra_shared/infra_shared.so \
 			tools/the-calculator.py"
 
@@ -86,7 +83,6 @@ common_scripts_transfer_list="tools/dictionary.json \
 			scripts/common/nvmesh_ib* \
 			scripts/common/export_vdisk.sh \
 			scripts/common/nvmesh_snapshot_logs.sh \
-			scripts/common/nvmesh_install_ib_core_mod.sh \
 			tools/traces_post_processor/pager-profiler.py \
 			tools/traces_post_processor/formatters/formatters.py"
 
@@ -95,10 +91,6 @@ if [ -n "$NCONFIG_BNXT" ]; then
 	common_transfer_list+=" \
 		common_public/bnxt/*.ko* \
 		common_public/bnxt/*.h"
-fi
-
-if [ -n "$NCONFIG_IB_CORE_MOD_DIR" ]; then
-	common_transfer_list+="ib_core_modules.tar.gz "
 fi
 
 # Only include static files here (not compiled ones).
@@ -114,7 +106,6 @@ target_scripts_transfer_list="init.d/nvmeshtarget \
 			scripts/target/google_uuids.sh \
 			config/target_devices.conf \
 			toma/toma_trace.config \
-			toma/toma.d/default.rpc \
 			toma/toma.d/nvmesh_oci.rpc \
 			toma/toma.d/nvmesh_gcp.rpc	\
 			toma/toma.d/nvmesh_gfn.rpc \
@@ -145,12 +136,14 @@ client_scripts_transfer_list="init.d/nvmeshclient \
 				bin/nvmesh_update \
 				scripts/client/nvmesh_udev_utils.py \
 				scripts/client/nvmesh_spdk_wrapper.py \
-				scripts/client/nvmesh_client_upgrade.py \
 				config/nvmesh.conf \
 				config/nvmesh.conf.d/00-readme.conf \
 				management_cm \
 				upgrade_scripts/nvmesh-client \
+				mlnx_fw/Excelero_mlxconfig.db \
+				mlnx_fw/patch_mlxconfig.db.sql \
 				rules.d/60-nvmesh.rules \
+				public \
 				clnt/block/datapath_utils_generic/profiling/nvmesh_profiling.py"
 
 toma_symbols="toma/bin/*/nvmeibt_toma.with_symbols"

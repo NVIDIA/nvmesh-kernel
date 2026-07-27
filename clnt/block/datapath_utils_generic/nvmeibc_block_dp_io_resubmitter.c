@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_io_resubmitter.h"
 #include "../datapath_utils_generic/nvmeibc_block_dp_dbg_tools.h"
 #include "../nvmeibc_block_common.h"
@@ -29,12 +24,8 @@ static void __repeat_op_execution(struct operation* o, bool by_resubmitter)
 		WARN_ON(!nvmeib_stop_watch_is_start(&o->time.exec));
 	#endif
 
-	if (!by_resubmitter || !NVMEIB_CPU_MASK_INFO_IS_EMPTY(o->cpu_mask_info)) {
-		WQ_INIT_WORK(&o->work_resubmitted, __execute_resubmitted_on_wq);
-		dp_block_schedule_operation_work(o, &o->work_resubmitted);
-	} else {
-		nvmeibc_operation_execute(o, false);
-	}
+	WQ_INIT_WORK(&o->work_resubmitted, __execute_resubmitted_on_wq);
+	dp_block_schedule_operation_work(o, &o->work_resubmitted);
 }
 
 int nvmeibc_io_resubmitter_retry_op(struct operation *o)
@@ -168,11 +159,11 @@ static int __resubmitter_should_launch_syncs_or_free_resources(struct nvmeibc_bl
 
 ulong nvmeibc_resub_awake_throttle_threshold_ms = DEFAULT_RESUB_AWAKE_THROTTLE_THRESHOLD_MS;
 module_param_named(resub_awake_throttle_threshold_ms, nvmeibc_resub_awake_throttle_threshold_ms, ulong, 0644);
-MODULE_PARM_DESC(resub_awake_throttle_threshold_ms, "Resubmit thread's threshold for throttling, in milliseconds. The thread will yield after running for this amount of time.");
+MODULE_PARM_DESC(resub_awake_throttle_threshold_ms, "Resubmit thread awake throttle threshold [millis]. 0 - throttle disabled.");
 
 ulong nvmeibc_resub_awake_throttle_sleep_ms = DEFAULT_RESUB_AWAKE_THROTTLE_SLEEP_MS;
 module_param_named(resub_awake_throttle_sleep_ms, nvmeibc_resub_awake_throttle_sleep_ms, ulong, 0644);
-MODULE_PARM_DESC(resub_awake_throttle_sleep_ms, "Resubmit thread's sleep time for throttling, in milliseconds. Should be in the order of scheduler process switching.");
+MODULE_PARM_DESC(resub_awake_throttle_sleep_ms, "Resubmit thread awake throttle sleep time [millis].");
 
 static int __resubmitter_has_paused_ops(struct nvmeibc_block_device *nd)
 {

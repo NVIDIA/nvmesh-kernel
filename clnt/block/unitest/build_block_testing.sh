@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 set -x
 clear
 echo "----------------- Block Unitest ------------------------"
@@ -70,32 +66,6 @@ MAKE_CMD=make
 clean () {
 	echo "-->Cleaning... "
 	(cd $TEST_SUB_DIR && $MAKE_CMD clean)
-}
-
-supports_scl() {
-    # Must have rpm ecosystem
-    command -v rpm >/dev/null 2>&1 || return 1
-
-    # If scl-utils installed, good sign
-    if rpm -q scl-utils >/dev/null 2>&1; then
-        return 0
-    fi
-
-    # Check for known SCL repos
-    if command -v dnf >/dev/null 2>&1; then
-        dnf repolist all 2>/dev/null | grep -Eiq 'scl|rhscl|sclo' && return 0
-    elif command -v yum >/dev/null 2>&1; then
-        yum repolist all 2>/dev/null | grep -Eiq 'scl|rhscl|sclo' && return 0
-    fi
-
-    # Check whether scl-utils is at least available from repos
-    if command -v dnf >/dev/null 2>&1; then
-        dnf -q list available scl-utils >/dev/null 2>&1 && return 0
-    elif command -v yum >/dev/null 2>&1; then
-        yum -q list available scl-utils >/dev/null 2>&1 && return 0
-    fi
-
-    return 1
 }
 
 write_mutiple () {
@@ -215,12 +185,7 @@ case "$1" in
 	"ci")
 		# ---------- For continous integration: generate logs and coredump location, might not die with ctrl+c
 		shift
-
-                if supports_scl; then
-                        MAKE_CMD="scl enable devtoolset-8 -- make"
-                else
-                        MAKE_CMD="make"
-                fi
+		MAKE_CMD="scl enable devtoolset-8 -- make"
 		#if [ ! -z "$1" ]; then
 		#	REPEAT=$1
 		#	shift

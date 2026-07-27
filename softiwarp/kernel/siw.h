@@ -106,28 +106,6 @@ enum siw_if_type {
 #define SIW_MAX_SRQ_WR		(SIW_MAX_QP_WR * 10)
 #define SIW_MAX_CONTEXT		SIW_MAX_PD
 
-/*
- * Smallest MR page size SIW knows how to drive. Used both to size the
- * advertised page_size_cap bitmask and to bound per-PBE iteration in the
- * TX path so it works on kernels with PAGE_SIZE > SIW_MR_MIN_PAGE_SIZE.
- */
-#define SIW_MR_MIN_PAGE_SIZE	4096
-
-/*
- * Upper bound on the number of fragments siw_tx_hdt() may build for one
- * FPDU: up to one slot per SIW_MR_MIN_PAGE_SIZE-sized chunk of the
- * 64 KiB max payload, plus room for SGE-boundary unsharing and the
- * iWARP header / trailer. Used to size both the per-iteration counter
- * (MAX_ARRAY in siw_qp_tx.c) and the per-QP scratch arrays in
- * struct siw_iwarp_tx (iov_scratch[], page_array_scratch[], etc.).
- *
- * Sizing uses SIW_MR_MIN_PAGE_SIZE rather than PAGE_SIZE so an MR
- * registered with sub-PAGE_SIZE pages (see mr_min_page_4k) on a
- * large-page kernel still fits.
- */
-#define SIW_TX_HDT_MAX_FRAGS	((0xffff / SIW_MR_MIN_PAGE_SIZE) + 1 + \
-				 (2 * (SIW_MAX_SGE - 1) + 2))
-
 #define SENDPAGE_THRESH		PAGE_SIZE /* min bytes for using sendpage() */
 #define SQ_USER_MAXBURST	100 //was 10
 
@@ -173,9 +151,7 @@ enum siw_if_type {
 /* If there are SQEs or RQEs waiting to be flushed because the QP is locked,
  * or the CQ is full. Then schedule (or reschedule) the work with this delay (100ms)
  */
-//#define SIW_FLUSH_XQES_WORK_DELAY	(HZ / 10)
-/* Update. Delay does not seem to be needed, the rescheduling seems to be enough. */
-#define SIW_FLUSH_XQES_WORK_DELAY	(0)
+#define SIW_FLUSH_XQES_WORK_DELAY	(HZ / 10)
 
 /* Log CEP activity in a ring buffer inside the CEP */
 #define SIW_CEP_LOG_RING_BUF_SIZE	8192
@@ -249,7 +225,6 @@ struct siw_devinfo {
 	enum siw_if_type	iftype;
 };
 
-#define USE_SQ_KTHREAD
 
 struct siw_dev {
 	struct ib_device	ofa_dev;
@@ -281,12 +256,6 @@ struct siw_dev {
 	atomic_t		num_ctx;
 
 	struct dentry		*debugfs;
-
-#ifdef USE_SQ_KTHREAD
-	/* NUMA-local TX vector CPUs for this device (when tx_cpus=2); NULL otherwise */
-	int			*tx_vector_cpu;
-	int			num_tx_vector;
-#endif
 };
 
 struct siw_objhdr {
@@ -718,9 +687,8 @@ struct siw_iwarp_rx {
 	union {
 		u32		locked_flags;
 		struct {
-		u32 	rx_suspend:1,	   /* stop rcv DDP segs. */
-			rx_in_progress:1,
-			locked_bits:29;
+			u32 	rx_suspend:1,	   /* stop rcv DDP segs. */
+				locked_bits:30;
 		};
 	};
 
@@ -825,65 +793,6 @@ enum siw_iwarp_tx_in_use_flags {
 	SIW_IWARP_TX_REQ_RESCHED = (1 << 1),
 };
 
-/*
- * Per-QP debug ring buffer that records the state of every siw_tx_hdt()
- * inner-loop iteration. We use it to triage zero-copy TX bugs where
- * page_array[]/page_len[] disagree with what siw_tcp_sendpages() expects
- * (e.g. NULL page_array[i] entries, page_len[i] > PAGE_SIZE, etc.).
- *
- * The trace is inspected post-mortem from a crash dump -- walk back from
- * tx_ctx.hdt_trace_head to see the last SIW_TX_HDT_TRACE_ENTRIES iterations,
- * then cross-check page_array[]/page_len[] on the stack of siw_tx_hdt /
- * siw_tcp_sendpages.
- *
- * Costs ~SIW_TX_HDT_TRACE_ENTRIES * sizeof(siw_tx_hdt_dbg_entry) bytes per
- * QP, so it's compile-time gated by SIW_TX_HDT_TRACE -- comment out the
- * #define below to disable.
- */
-#define SIW_TX_HDT_TRACE 1
-
-#ifdef SIW_TX_HDT_TRACE
-
-#define SIW_TX_HDT_TRACE_ENTRIES 64u
-
-#define SIW_TX_HDT_TRACE_FL_MERGED		(1u << 0)
-#define SIW_TX_HDT_TRACE_FL_IS_KVA		(1u << 1)
-#define SIW_TX_HDT_TRACE_FL_IS_KVA_VM		(1u << 2)
-#define SIW_TX_HDT_TRACE_FL_IS_PBL		(1u << 3)
-#define SIW_TX_HDT_TRACE_FL_USE_SENDPAGE	(1u << 4)
-#define SIW_TX_HDT_TRACE_FL_INTRA_OFF_OK	(1u << 5)  /* intra_off == prev_page_off + decode(prev page_len) */
-#define SIW_TX_HDT_TRACE_FL_SAME_PAGE		(1u << 6)  /* p == page_array[seg-1] */
-
-struct siw_tx_hdt_dbg_entry {
-	u64	sge_laddr;	/* sge->laddr for this iter's SGE */
-	u64	p;		/* struct page * returned by lookup (cast) */
-	u64	prev_page;	/* page_array[seg-1] at decision time, 0 if N/A */
-
-	u32	sge_off;	/* sge_off BEFORE this iter consumed plen */
-	u32	sge_len;	/* sge_len BEFORE this iter consumed plen */
-	u32	bytes_unsent;	/* c_tx->bytes_unsent at iter start */
-	u32	data_len;	/* siw_tx_hdt's data_len at iter start */
-
-	u32	jif;		/* (u32)jiffies, for timestamp */
-	u32	pbl_idx;	/* PBL index hint after siw_pbl_get_paddr() */
-	u32	pbe_remaining;	/* bytes remaining in current PBE */
-
-	u16	intra_off;	/* paddr & ~PAGE_MASK for PBL, virt for kva/umem */
-	u16	plen;		/* bytes this iter contributes */
-	u16	seg_before;	/* page_array[] index BEFORE the merge/new action */
-	u16	seg_at_sge_start; /* seg captured at the start of this SGE */
-	u16	prev_page_len;	/* page_len[seg-1] BEFORE the action (raw u16) */
-	u16	page_len_after;	/* page_len[updated_idx] AFTER the action (raw u16) */
-	u16	prev_page_off;	/* page_off[seg-1] BEFORE the action (raw u16) */
-	u16	page_off_after;	/* page_off[updated_idx] AFTER the action (raw u16) */
-
-	u8	sge_idx;	/* SGE index within the WQE */
-	u8	flags;		/* SIW_TX_HDT_TRACE_FL_* */
-	u8	pad[2];
-};
-
-#endif /* SIW_TX_HDT_TRACE */
-
 struct siw_iwarp_tx {
 	union {
 		union iwarp_hdrs		hdr;
@@ -985,64 +894,14 @@ struct siw_iwarp_tx {
 	union siw_iwarp_tx_sent_fpdu_notify sent_fpdu_notify;
 	atomic_t n_completed_fpdus;
 	int n_completed_fpdus_in_list;
-	/* Set when the previous FPDU finished and we committed to building
-	 * the next one, but siw_prepare_fpdu() hasn't completed yet (e.g.
-	 * Site B kzalloc returned NULL). Resume guard before next_segment
-	 * in siw_qp_sq_proc_tx() retries the prep until it succeeds.
-	 * See NVMESH-8981.
-	 */
-	bool fpdu_needs_prepare;
-#endif
-
-	/*
-	 * Per-FPDU scratch built up by siw_tx_hdt()'s inner loop. Hoisted
-	 * out of the function's stack frame to:
-	 *   (a) keep the frame within the kernel's 1 KiB
-	 *       -Wframe-larger-than budget without #pragma suppression;
-	 *   (b) save ~800 B on top of the deep kernel_sendmsg ->
-	 *       tcp_sendmsg_locked -> ip_xmit call chain;
-	 *   (c) make the *last-written* TX fragment layout inspectable
-	 *       post-mortem from a saved siw_qp even when
-	 *       SIW_TX_HDT_TRACE is compiled out (the trace below
-	 *       records the *history* of mutations -- these fields
-	 *       preserve the most recent value of what was mutated).
-	 *
-	 * Producer-only: valid only while tx_ctx.in_use != 0 (gated by
-	 * the atomic_cmpxchg in siw_qp_sq_process()). The local `seg`
-	 * counter on the siw_tx_hdt() stack bounds the live region:
-	 * entries [0, seg) reflect the FPDU currently being assembled;
-	 * entries [seg, SIW_TX_HDT_MAX_FRAGS) are stale leftovers from a
-	 * previous call. siw_tx_hdt() always writes a slot before it
-	 * reads it within the loop, so no zero-init is needed.
-	 *
-	 * page_off / page_len use the u16 PAGE_SIZE-as-0 sentinel
-	 * encoding (see siw_encode_page_len()) so 64 KiB-page kernels
-	 * still fit; page_off is in [0, PAGE_SIZE) and fits u16
-	 * directly.
-	 */
-	struct kvec	iov_scratch[SIW_TX_HDT_MAX_FRAGS];
-	struct page	*page_array_scratch[SIW_TX_HDT_MAX_FRAGS];
-	u16		page_off_scratch[SIW_TX_HDT_MAX_FRAGS];
-	u16		page_len_scratch[SIW_TX_HDT_MAX_FRAGS];
-
-#ifdef SIW_TX_HDT_TRACE
-	/*
-	 * Circular log of siw_tx_hdt() inner-loop iterations, see the
-	 * struct siw_tx_hdt_dbg_entry comment above for details.
-	 *
-	 * Producer-only (the TX path holds the qp tx-in-use flag), so no
-	 * locking needed. Readers (i.e. someone poking around in a crash
-	 * dump) should treat hdt_trace_head as the *next* slot to write,
-	 * i.e. the most recent entry is hdt_trace[(head-1) & (N-1)].
-	 */
-	struct siw_tx_hdt_dbg_entry	hdt_trace[SIW_TX_HDT_TRACE_ENTRIES];
-	u32				hdt_trace_head;
 #endif
 };
 
 #if defined(SIW_DEBUG_TX_CRC) && !defined(SIW_TX_COMP_WAIT_ACK)
 #error "SIW_DEBUG_TX_CRC requires SIW_TX_COMP_WAIT_ACK"
 #endif
+
+#define USE_SQ_KTHREAD
 
 struct siw_qp {
 	struct ib_qp		ofa_qp;
@@ -1502,7 +1361,6 @@ static inline int siw_irq_empty(struct siw_qp *qp)
 	return qp->irq[qp->irq_get % qp->attrs.irq_size].flags == 0;
 }
 
-#if KS_HAS_SKB_CHECKSUM_OPS
 static inline __wsum siw_csum_update(const void *buff, int len, __wsum sum)
 {
 	return (__force __wsum)crc32c((__force __u32)sum, buff, len);
@@ -1527,24 +1385,6 @@ static inline void siw_crc_skb(struct siw_iwarp_rx *rctx, unsigned int len)
 						 &siw_cs_ops);
 	*(u32 *)shash_desc_ctx(rctx->mpa_crc_hd) = crc;
 }
-#else
-static inline void siw_crc_skb(struct siw_iwarp_rx *rctx, unsigned int len)
-{
-	u32 crc = *(u32 *)shash_desc_ctx(rctx->mpa_crc_hd);
-	unsigned int done = 0;
-
-	while (done < len) {
-		u8 buf[256];
-		unsigned int chunk = min_t(unsigned int, len - done, sizeof(buf));
-
-		if (skb_copy_bits(rctx->skb, rctx->skb_offset + done, buf, chunk))
-			break;
-		crc = crc32c(crc, buf, chunk);
-		done += chunk;
-	}
-	*(u32 *)shash_desc_ctx(rctx->mpa_crc_hd) = crc;
-}
-#endif
 
 #define tx_more_wqe(qp, curr_wqe)	(!siw_sq_empty(qp) || (tx_flags(curr_wqe) & SIW_WQE_MORE_WQES) || !siw_irq_empty(qp))
 
@@ -1577,23 +1417,6 @@ static inline struct siw_mr *siw_mem2mr(struct siw_mem *m)
 #define SIW_WARN_KNOWN_EC_ONCE(cond, bug_num) SIW_WARN_KNOWN_COMMON(WARN_ONCE, cond, EC_BUG_PREFIX_FMT, bug_num)
 #define SIW_WARN_KNOWN(cond, bug_num) SIW_WARN_KNOWN_COMMON(WARN, cond, NVMESH_BUG_PREFIX_FMT, bug_num)
 #define SIW_WARN_KNOWN_ONCE(cond, bug_num) SIW_WARN_KNOWN_COMMON(WARN_ONCE, cond, NVMESH_BUG_PREFIX_FMT, bug_num)
-
-#if defined(NVMESH_IS_PRODUCTION_COMPILATION) && (NVMESH_IS_PRODUCTION_COMPILATION==1)
-	#define SIW_BUG_NON_PRODUCTION(bug_num) WARN(1, NVMESH_BUG_PREFIX_FMT, bug_num)
-	#define SIW_BUG_ON_NON_PRODUCTION(cond, bug_num) WARN(cond, NVMESH_BUG_PREFIX_FMT, bug_num)
-#else
-	#define SIW_BUG_NON_PRODUCTION(bug_num) do { \
-		pr_err("KERNEL WARNING TRIGGERED AT %s:%d - Bug Number: %d, BUG_ON for debug", __FILE__, __LINE__, bug_num); \
-		BUG();\
-	} while (0)
-
-	#define SIW_BUG_ON_NON_PRODUCTION(cond, bug_num) do { \
-		if (cond) { \
-			pr_err("KERNEL WARNING TRIGGERED AT %s:%d - Bug Number: %d, BUG_ON for debug", __FILE__, __LINE__, bug_num); \
-			BUG(); \
-		} \
-	} while (0)
-#endif
 
 #include "../../common/compat/kr_incs_types.h"
 

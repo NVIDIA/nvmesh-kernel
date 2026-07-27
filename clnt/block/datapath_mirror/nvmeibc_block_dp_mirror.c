@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_mirror.h"
 #include "../nvmeibc_block_common.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
@@ -135,9 +130,7 @@ void dp_mirror_calc_should_abandon(struct nvmeibc_block_command *cmds, int olsi)
 	__calc_should_abandon_set_unlock_value(lo, &aban);
 }
 
-/* RDDA transport error codes - kept for compatibility */
-#define NVMEIBC_IB_OVEREAGER 0xdeaddead
-#define NVMEIBC_IB_OVEREAGER_MAX_REACHED (NVMEIBC_IB_OVEREAGER + 1)
+#include "nvmeibc_ib_net_io.h"
 #define dp_cmds_rv_failed_transport(rv) \
 	(((rv)==NVMEIBC_IB_OVEREAGER)||((rv)==NVMEIBC_IB_OVEREAGER_MAX_REACHED))
 

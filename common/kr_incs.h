@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #if defined(__KERNEL__)
 	// See the rest of the file below
 #elif defined(TOMA)
@@ -97,7 +92,6 @@
 #include <linux/rwlock.h>
 #include <linux/seqlock.h>
 #include <linux/bitmap.h>
-#include <linux/sched/clock.h>
 #if KS_HAS_GENHD_H
 	#include <linux/genhd.h>
 #else
@@ -171,14 +165,6 @@ enum {
 #include <linux/kthread.h>
 #include <linux/pci.h>
 
-#ifndef in_hardirq
-#define in_hardirq() in_irq()
-#endif
-
-#ifndef in_serving_softirq
-#define in_serving_softirq() in_softirq()
-#endif
-
 #define NVMEIB_WORKQ
 #ifdef NVMEIB_WORKQ
 #	include "nvmeib_q.h"
@@ -193,7 +179,7 @@ enum {
 #endif
 
 #if KS_BIO_BI_STATUS
-#	define bio_error(bio) blk_status_to_errno(bio->bi_status)
+#	define bio_error(bio) nvmeib_blk_status_to_errno(bio->bi_status)
 #else
 #	define bio_error(bio) (bio->bi_error)
 #endif
@@ -266,7 +252,7 @@ static inline void nvmeib_bio_copy_data_with_offsets(struct bio *dst, unsigned d
 #if KS_BIO_BI_STATUS
 	#define bio_endio(bio, errno) 			\
 	do {					\
-		bio->bi_status = errno_to_blk_status(errno);	\
+		bio->bi_status = nvmeib_errno_to_blk_status(errno);	\
 		bio_endio(bio);			\
 	} while (0)
 #else

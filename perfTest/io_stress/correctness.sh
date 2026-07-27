@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # Written by Daniel, version 0.02
 
 VOLUME=$1
@@ -143,7 +139,7 @@ measure_performance() {
     echo "Unmounting and deleting $MOUNT_DIR"
     umount $MOUNT_DIR
     rm -rf $MOUNT_DIR
-    chown daniel: pt_*.*
+    chown daniel:excelero pt_*.*
 }
 
 measure_performance_multi_slice_ec() {

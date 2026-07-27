@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "common/kr_incs.h"
 #include "nvmeibc_ib_nordda_channel.h"
 #include "nvmeibc_locks_channel.h"
@@ -15,7 +10,6 @@
 #include "core/nvmeibc_core_common.h"
 #include "nvmeibc_memmgr_metrics.h"
 #include "nvmeib_completion_noise.h"
-#include "nvmeib_public.h"
 /* All the code in this file does not compile in simulator,
    except some explicitly marked chunks that are shared. */
 
@@ -31,56 +25,7 @@ extern bool nr_shared_cq_tcp;
 extern bool nr_use_srq;
 extern bool nr_use_srq_tcp;
 
-bool nr_defer_recv_comps_use_kwq = false;
-module_param(nr_defer_recv_comps_use_kwq, bool, 0644);
-MODULE_PARM_DESC(nr_defer_recv_comps_use_kwq, "Determines whether to use a kernel workqueue for deferred receive completions on nordda channels.");
-
-bool nvmeibc_nordda_wq_unbound = false;
-module_param_named(nordda_wq_unbound, nvmeibc_nordda_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nordda_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibc_nordda (true) or a bound one (false). Relevant only if nr_defer_recv_comps_use_kwq is set to true");
-
-uint nvmeibc_nr_max_wrs_per_req = 0;
-module_param_named(nr_max_wrs_per_req, nvmeibc_nr_max_wrs_per_req, uint, 0644);
-MODULE_PARM_DESC(nr_max_wrs_per_req, "The maximum number of WRs (RDMA work requests) per IO channel request, used for a write operation. For 0, use system's default.");
-
 NVMEIBC_MEMMGR_METRIC(c_nordda_srq_info, "component=client.nordda.srq_info");
-
-/* Kernel workqueue for nordda channel operations */
-static struct workqueue_struct *nvmeibc_nordda_wq;
-
-int nvmeibc_nordda_channel_wq_init(void)
-{
-	unsigned int flags = WQ_MEM_RECLAIM | WQ_SYSFS;
-	NFIN;
-	if (nvmeibc_nordda_wq_unbound)
-		flags |= WQ_UNBOUND;
-	nvmeibc_nordda_wq = alloc_workqueue("nvmeibc_nordda", flags, 0);
-	if (!nvmeibc_nordda_wq) {
-		_NE(error_nvmeibc_nordda_channel_wq_init, "Failed to allocate nordda channel workqueue");
-		NFOUT;
-		return -ENOMEM;
-	}
-	_NT(trace_nvmeibc_nordda_channel_wq_init, "Created nordda channel workqueue @PTR", nvmeibc_nordda_wq);
-	NFOUT;
-	return 0;
-}
-
-void nvmeibc_nordda_channel_wq_destroy(void)
-{
-	NFIN;
-	if (nvmeibc_nordda_wq) {
-		_ND(trace_nvmeibc_nordda_channel_wq_destroy, "Destroying nordda channel workqueue @PTR", nvmeibc_nordda_wq);
-		destroy_workqueue(nvmeibc_nordda_wq);
-		nvmeibc_nordda_wq = NULL;
-	}
-	NFOUT;
-}
-
-struct workqueue_struct *nvmeibc_nordda_channel_get_wq(void)
-{
-	return nvmeibc_nordda_wq;
-}
-EXPORT_SYMBOL(nvmeibc_nordda_channel_get_wq);
 
 static int nordda_pending_io(struct nvmeibc_disk *disk,
 	struct nvmeibc_channel *ch, void *context, bool sp_locked, u64 version);
@@ -341,11 +286,13 @@ static inline const char *nr_wd_type_to_str(int t)
 
 ulong nvmeibc_nr_wd_long_timeout = 0;
 module_param_named(nr_wd_long_timeout, nvmeibc_nr_wd_long_timeout, ulong, 0644);
-MODULE_PARM_DESC(nr_wd_long_timeout, "IO watchdog timeout in jiffies.");
+MODULE_PARM_DESC(nr_wd_long_timeout, "No-RDDA channel's watchdog long timeout (considers last-received) in jiffies");
 
 ulong nvmeibc_nr_wd_rescue_timeout = 0; //(NVMEIBC_MIN_IO_TIMEOUT * HZ) / 2;
 module_param_named(nr_wd_rescue_timeout, nvmeibc_nr_wd_rescue_timeout, ulong, 0644);
-MODULE_PARM_DESC(nr_wd_rescue_timeout, "IO watchdog rescue timeout in jiffies. An IO watchdog rescue is an attempt to handle any missed receive interrupts even though there was no interrupt. This functionality was an escape and is considered unnecessary. A value under 1 second disables this functionality.");
+MODULE_PARM_DESC(nr_wd_rescue_timeout, "No-RDDA channel's watchdog rescue timeout in jiffies - "
+									   "Enable this to detect missing events/switch2polling "
+									   "(0:  Disable, > IO-Timeout: Effectively disabled)");
 
 static int handle_watchdog_event_nordda(void *cntx, unsigned long time_passed)
 {
@@ -607,8 +554,8 @@ struct nvmeibc_ib_nordda_channel *nvmeibc_ib_nordda_channel_create(
 	INIT_WORK(&ch->pcpu_connect_work, nvmeibc_disk_connect_nrch_pcpu_work);
 	init_completion(&ch->pcpu_connect_comp);
 
-	ch->wait_release_zero_before_cb = (P2NV(lionic->port)->dev_type != DT_siw && nvmeibc_iommu_enabled) ||
-		(P2NV(lionic->port)->dev_type == DT_siw && NVMEIB_SIW_NRCH_WAIT_RLS_ZERO_BEFORE_CB);
+	ch->wait_release_zero_before_cb = nvmeibc_iommu_enabled ||
+		(NVMEIB_SIW_NRCH_WAIT_RLS_ZERO_BEFORE_CB && P2NV(lionic->port)->dev_type == DT_siw);
 
 	_ND(trace_1_ib_nordda_channel_nvmeibc_ib_nordda_channel_create, "Created nrch @BASE_NAME (@CH_PTR), qp @INDEX", ch->base.name, ch, get_ch_ind(ch));
 	rv = 0;
@@ -750,7 +697,7 @@ out:
 
 unsigned nr_max_used_reqs_per_channel = 64;
 module_param(nr_max_used_reqs_per_channel, uint, 0644);
-MODULE_PARM_DESC(nr_max_used_reqs_per_channel, "Maximum number of requests issued simultaneously on a channel.");
+MODULE_PARM_DESC(nr_max_used_reqs_per_channel, "Maximum used reqs per no-rdda channel");
 
 static struct nvmeibc_volume_req_info *get_req_info(
 	struct nvmeibc_ib_nordda_channel *ch)
@@ -842,17 +789,15 @@ static void nordda_channel_free_volume_reqs(
 					time_passed, time_passed/HZ, n_events);
 				if (ch->reqs[i].req.dcmd->cmd_type == NVMEIBC_DISK_CMD_IO) {
 					struct nvmeibc_disk_io_command *bcmd = ch->reqs[i].req.bcmd;
-					bool was_reuse;
 					dcmd = &bcmd->disk_cmd;
 					/* Restore put-aside SG and nmdesc if in the middle of reuse-BB */
 					if (ch->reqs[i].reuse_orig.sgcount) {
 						REUSE_SG_RESTORE(&(ch->reqs[i]));
 						REUSE_FR_RESTORE(&(ch->reqs[i]));
 					}
-					was_reuse = del_reuse_request((&ch->reqs[i].req), ch->base.disk);
 					nvmeibc_ib_net_unmap_data(&ch->net.base, &ch->reqs[i].req);
-					nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(
-						&ch->net.base, &ch->reqs[i].req, -EIO, ch->reqs[i].req.sgcount, was_reuse);
+					nvmeibc_ib_net_unmap_and_unlink_iocmd(
+						&ch->net.base, &ch->reqs[i].req, -EIO);
 				} else if (ch->reqs[i].req.dcmd->cmd_type == NVMEIBC_DISK_CMD_GEN) {
 					struct nvmeibc_disk_gen_cmd *gcmd = disk_to_gen(ch->reqs[i].req.dcmd);
 					dcmd = &gcmd->disk_cmd;
@@ -957,21 +902,17 @@ static int calc_nr_sq_size(struct nvmeibc_ib_nordda_channel *ch, int n_sges)
 	int max_wr_io = NVMEIBC_NR_CH_N_WR_CTRL + NVMEIBC_NR_CH_RDMA_WRITE_JMDC_PB;
 	int rv;
 
-	if (use_fr_fmr && !nvmeibc_nr_max_wrs_per_req) {
+	if (use_fr_fmr) {
 		max_wr_io += NVMEIBC_NR_CH_N_WR_FR + /* The SG list for IO is collapsed into an FR */
 		!!(disk->md_size > 0); /* And one for the sep MD (if present) */
 	}
-	else if (!nvmeibc_nr_max_wrs_per_req) {
+	else {
 		/* We cannot use an FR - Either the NIC doesn't support it or the disk has inline MD */
 		/* So we need (max sectors x (1 for no MD, 2 for MD) / n_sges) WRs */
 		max_wr_io += DIV_ROUND_UP(
 			(disk->max_request_size_bytes >> NVMEIBC_SECTOR_SHIFT) *
 			(1 + !!(disk->md_size > 0)), n_sges);
-	} else {
-		max_wr_io += nvmeibc_nr_max_wrs_per_req + !!(disk->md_size > 0);
 	}
-	_NT(trace_ib_nordda_channel_calc_nr_sq_size, "nrch @BASE_NAME (@CH_PTR), n_sges=@INT, max_wr_io=@INT",
-		ch->base.name, ch, n_sges, max_wr_io);
 	rv = max_wr_io * ch->base.disk->nrch_ioreq_num + NVMEIBC_NR_CH_N_WR_IO_KA;
 	return rv;
 }
@@ -1027,53 +968,19 @@ int nvmeibc_ib_nordda_channel_connect(struct nvmeibc_ib_nordda_channel *ch)
 	_ND(trace_1_ib_nordda_channel_nvmeibc_ib_nordda_channel_connect, "Use (lionic=@LIONIC) path @DGID->@LIONIC_IPV6",
 	   &ch->lionic->path.sgid, &ch->lionic->path.dgid, ch->lionic);
 
-		ch->net.base.service_id = NVMEIB_SERVICE_ID;
+		ch->net.base.service_id = NVMEIB_EXCELERO_SERVICE_ID;
 		ch->net.base.service_port = 0;
 		ch->net.base.cm_rdma_type = _rdma_ib;
 	}
 	else if (ch->lionic->rdma_type == _rdma_roce) {
 		ch->net.base.service_id = 0;
-		ch->net.base.service_port = NVMEIB_PORT_ID;
+		ch->net.base.service_port = NVMEIB_EXCELERO_PORT_ID;
 		ch->net.base.cm_rdma_type = _rdma_roce;
 	}
 	else if (ch->lionic->rdma_type == _rdma_iwarp) {
-		uint total_offset = 0;
-
-		/* We want to stagger the destination port to ensure a good spread amongst all RX queues for all disks.
-		So we need to offset the port by the total offset so far plus the offset for this rionic plus the offset for this channel.
-		The assumption is that each disk has the same number of paths and the same number of NRCHs per lionic.
-
-		So for example with 2 lionics, 2 rionics and 4 NRCHs per lionic.
-		Disk 0 lionic 0 NRCHs connected to the first rionic will have destination ports 7915 - 7919
-		Disk 0 lionic 0 NRCHS connected to the second rionic will have destination ports 7920 - 7923
-		Disk 1 lionic 0 NRCHs connected to the first rionic will have destination ports 7924 - 7927
-		Disk 1 lionic 0 NRCHs connected to the second rionic will have destination ports 7927 - 7930
-		*/
-
-		if (ch->base.disk->create_id) {
-			struct nvmeibc_io_rnic *rionic = NULL;
-			struct nvmeibc_io_lnic *lionic = NULL;
-			uint total_lionic_nr_qps = 0;
-			/* Sum n_nr_qps only for (rionic, lionic) paths that contain this lionic */
-			list_for_each_entry(rionic, &ch->base.disk->nr_rionics, disk_nrlink) {
-				list_for_each_entry(lionic, &rionic->nr_lionics, rionic_nrlink) {
-					if (lionic != ch->lionic)
-						continue;
-					total_lionic_nr_qps += lionic->n_nr_qps;
-				}
-			}
-			/* +8 per disk for this lionic's paths (e.g. 2 rionics * 4 per path) */
-			total_offset += total_lionic_nr_qps * ch->base.disk->create_id;
-		}
-
-		/* Offset by the number of lionic NRCH QPs for this rionic*/
-		total_offset += (ch->lionic->rionic->nr_idx * ch->lionic->n_nr_qps);
-		/* Offset by the channel index*/
-		total_offset += get_ch_ind(ch);
-
-		/* Add the base port and modulo by the number of TCP ports*/
 		ch->net.base.service_id = 0;
-		ch->net.base.service_port = ch->lionic->rionic->tcp_base_port + total_offset % ch->lionic->rionic->tcp_num_ports;
+		ch->net.base.service_port = ch->lionic->rionic->tcp_base_port +
+			(get_ch_ind(ch) % ch->lionic->rionic->tcp_num_ports);
 		ch->net.base.cm_rdma_type = _rdma_iwarp;
 	}
 
@@ -1108,49 +1015,34 @@ int nvmeibc_ib_nordda_channel_connect(struct nvmeibc_ib_nordda_channel *ch)
 	params->on_free = NULL;
 	params->ch_index = get_ch_ind(ch);
 	params->comp_cpu = pcpu_nrch_cpu_get(ch);
-	params->vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_NORDDA;
 
 	if (!nvmeibc_use_pcpu_cq) {
 		params->nr_defer_recv_comps = P2NV(ch->lionic->port)->dev_type == DT_siw ? nr_defer_recv_comps_tcp : nr_defer_recv_comps; //get this from c-disk ?!
 		if (params->nr_defer_recv_comps) {
+			proc_name_t pname;
 			params->rcq_offload_enb = false;
-			if (nr_defer_recv_comps_use_kwq) {
-				/* Use kernel workqueue */
-				params->defer_recv_intr_kwq = nvmeibc_nordda_channel_get_wq();
-				params->defer_recv_intr_wq = NULL;
-				if (!params->defer_recv_intr_kwq) {
-					_NE(nvmeibc_ib_nordda_channel_connect_e101,
-						"Kernel workqueue not available for nordda channel");
-					rv = -ENOMEM;
-					goto out;
-				}
-			} else {
-				/* Use custom workqueue */
-				proc_name_t pname;
-				if (params->comp_cpu >= 0)
-					clnt_proc_name_format_extd(pname, 'C', "WQ", "NRpc",
-								   nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&ch->base)),
-								   params->comp_cpu);
-				else
-					clnt_proc_name_format(pname, 'C', "WQ", "nr_rc", nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&ch->base)));
-				ch->rc_wq = params->comp_cpu >= 0 ? wq_create_on(pname, params->comp_cpu) : wq_create(pname);
-				if (!ch->rc_wq) {
-					_NE(nvmeibc_ib_nordda_channel_connect_e100,
-						"Failed to create recv comps WQ");
-					rv = -ENOMEM;
-					goto out;
-				}
-				_NT(nvmeibc_ib_nordda_channel_connect_rc_wq_pid,
-					"NRCH @IOCH_NAME (@CH_PTR) - created c_nr_rc_wq with pid @K_PID",
-					ch->base.name, ch, wq_pid(ch->rc_wq));
-				params->defer_recv_intr_wq = ch->rc_wq;
-				params->defer_recv_intr_kwq = NULL;
+			/* create recv completion handler WQ */
+			if (params->comp_cpu >= 0)
+				clnt_proc_name_format_extd(pname, 'C', "WQ", "NRpc",
+							   nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&ch->base)),
+							   params->comp_cpu);
+			else
+				clnt_proc_name_format(pname, 'C', "WQ", "nr_rc", nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&ch->base)));
+			ch->rc_wq = params->comp_cpu >= 0 ? wq_create_on(pname, params->comp_cpu) : wq_create(pname);
+			if (!ch->rc_wq) {
+				_NE(nvmeibc_ib_nordda_channel_connect_e100,
+					"Failed to create recv comps WQ");
+				rv = -ENOMEM;
+				goto out;
 			}
+			_NT(nvmeibc_ib_nordda_channel_connect_rc_wq_pid,
+				"NRCH @IOCH_NAME (@CH_PTR) - created c_nr_rc_wq with pid @K_PID",
+				ch->base.name, ch, wq_pid(ch->rc_wq));
+			params->defer_recv_intr_wq = ch->rc_wq;
 		} else {
 			params->rcq_offload_enb = true;
 			params->rcq_offload_cpu = is_pcpu_nrch(ch) ? pcpu_nrch_cpu_get(ch) : WORK_CPU_UNBOUND;
 			params->defer_recv_intr_wq = NULL;
-			params->defer_recv_intr_kwq = NULL;
 		}
 		params->scq_offload_enb = false;
 		params->shared_cq = P2NV(ch->lionic->port)->dev_type == DT_siw ? nr_shared_cq_tcp : nr_shared_cq;
@@ -1394,7 +1286,7 @@ static int nordda_pending_io(struct nvmeibc_disk *disk,
 		    "wrong CPU (not @INT) for pcpu nrch (@PTR) @BASE_NAME. Scheduling on correct CPU",
 		    pcpu_nrch_cpu_get(nrch), nrch, nrch->base.name);
 		/* Safe because the request has not yet been returned to the pool by put_req_info */
-		if (smp_call_function_single_async(
+		if (nvmeib_public_smp_call_function_single_async(
 			pcpu_nrch_cpu_get(nrch), &info->pcpu_pending_io_smp_call.call_data) < 0) {
 			_NE(err_ib_nordda_channel_nordda_pending_io_pcpu_cpu,
 			    "Failed to reschedule req (@REQ) for pcpu nrch (@PTR) @BASE_NAME on cpu @CPU",
@@ -1827,8 +1719,6 @@ static int process_io_rsp(struct nvmeibc_ib_nordda_channel *ch,
 	/* If we are completing only on recv completion (wait_release_zero_before_cb = false) */
 	if (!ch->wait_release_zero_before_cb)
 	{
-		bool was_reuse;
-		int orig_sgcount;
 		/* check for reuse mode */
 		if (req->comp_code == 0 && do_reuse_request(&req->req)) {
 			/* increase version and therefore disable any action on the
@@ -1876,13 +1766,13 @@ static int process_io_rsp(struct nvmeibc_ib_nordda_channel *ch,
 			*/
 
 			/* Attempt #1: move fr_desc to req->reuse_orig_fr_desc */
-			orig_sgcount = REUSE_SG_FR_STORE(req);
+			REUSE_SG_FR_STORE(req);
 
 			nvmeibc_ib_net_free_req(&ch->net.base, &req->req);
 			nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
 			
 			bcmd->disk_cmd.stats_done.type = STATS_DONE_LLP_COMPLETE_IO_RESPONSE_BUF_SAVE;
-			nvmeibc_ib_net_complete_iocmd_reuse(&ch->net.base, &req->req, req->comp_code, orig_sgcount, false);
+			nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, req->comp_code);
 			goto out;
 		}
 		if (req->req.reused_bb) {
@@ -1891,10 +1781,10 @@ static int process_io_rsp(struct nvmeibc_ib_nordda_channel *ch,
 				REUSE_SG_RESTORE(req);
 			}
 		}
-		was_reuse = del_reuse_request(&req->req, ch->base.disk);
+		del_reuse_request(&req->req, ch->base.disk);
 		nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
 		bcmd->disk_cmd.stats_done.type = STATS_DONE_LLP_COMPLETE_IO_RESPONSE_WAIT_RECV_COMP;
-		nvmeibc_ib_net_complete_iocmd_reuse(&ch->net.base, &req->req, req->comp_code, req->req.sgcount, was_reuse);
+		nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, req->comp_code);
 	}
 
 	/* Dont do this before send-comp of the fast-reg (of this IO) arrives.
@@ -1942,7 +1832,7 @@ static int process_gen_rsp(struct nvmeibc_ib_nordda_channel *ch,
 	struct nvmeibc_disk_gen_cmd *g = disk_to_gen(req->req.dcmd);
 	NFIN;
 
-	g->recv_comp_time = ktime_get();
+	g->recv_comp_time = nvmeib_public_ktime_get();
 	g->recv_sz = wc->byte_len;
 	if (rsp->opcode != NVMEIBS_RSP_GEN_OPCODE_OK)
 		_NT(error_ib_nordda_channel_process_gen_rsp, "ch @BASE_NAME: GEN request returned error: request @TAG code=@CODE, OPCODE=@OPCODE",
@@ -1974,7 +1864,7 @@ static inline void process_rsp_finalize(struct nvmeibc_ib_nordda_channel *ch,
 										struct nvmeibc_volume_req_info *req)
 {
 	struct nvmeibc_disk_command *dcmd = req->req.dcmd;
-	bool is_reuse = false, was_reuse = false;
+	bool is_reuse = false;
 	NFIN;
 
 	/* checks */
@@ -1994,12 +1884,11 @@ static inline void process_rsp_finalize(struct nvmeibc_ib_nordda_channel *ch,
 								   ch->base.disk);
 				is_reuse = true;
 			} else {
-				was_reuse = del_reuse_request(&req->req, ch->base.disk);
+				del_reuse_request(&req->req, ch->base.disk);
 			}
 			nvmeibc_nr_lat_meas_recv_comp_process(&req->lat_meas);
 			req->req.dcmd->stats_done.type = STATS_DONE_LLP_COMPLETE_IO_RESPONSE_FINALIZE;
-			nvmeibc_ib_net_complete_iocmd_reuse(&ch->net.base, &req->req, 
-				req->comp_code, req->req.sgcount, was_reuse);
+			nvmeibc_ib_net_complete_iocmd(&ch->net.base, &req->req, req->comp_code);
 
 			break;
 

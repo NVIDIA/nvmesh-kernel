@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
 	echo "USAGE:"
 	echo "./create_dummy_rpm <version> <release>        (if not passed the version and release will be taken from 'git-describe')"
@@ -13,8 +10,8 @@ fi
 
 VERSION="$1"
 RELEASE="$2"
-OLD_NVMESH_PREFIX="NVMesh-"
-NVMESH_PREFIX="nvmesh-"
+OLD_EXCELERO_PREFIX="NVMesh-"
+EXCELERO_PREFIX="nvmesh-"
 ARCH=`uname -m`
 script_path=`readlink -f $0`
 script_dir=`dirname $script_path`
@@ -111,9 +108,9 @@ rm -rf $rpm_build_dir/BUILDROOT/*
 rm -rf $rpm_build_dir/SOURCES/*
 
 kind="core"
-rpm_name=${NVMESH_PREFIX}${kind}
+rpm_name=${EXCELERO_PREFIX}${kind}
 rpm_source_path="$rpm_build_dir/SOURCES/$rpm_name"
-spec_file="${OLD_NVMESH_PREFIX}${kind}.spec"
+spec_file="${OLD_EXCELERO_PREFIX}${kind}.spec"
 
 mkdir $rpm_source_path
 
@@ -139,7 +136,7 @@ echo Removing old RPM if exists
 rm -f $target_dir/$rpm_name-$VERSION-$RELEASE.$ARCH.rpm
 
 echo Bringing the RPM...
-cp $rpm_build_dir/RPMS/${ARCH}/${NVMESH_PREFIX}${kind}* .
+cp $rpm_build_dir/RPMS/${ARCH}/${EXCELERO_PREFIX}${kind}* .
 
 if [ "$rpm_creation_retval" -eq "0" ] && [ "$SIGN_RPM" == true ]; then
 	new_rpm="$target_dir/$rpm_name*$VERSION-$RELEASE*.rpm"

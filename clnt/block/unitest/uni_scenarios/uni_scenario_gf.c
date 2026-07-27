@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include <stdlib.h>
 #include "uni_scenario_gf.h"
 #include "../datapath_ec/nvmeibc_block_dp_ec_gf.h"

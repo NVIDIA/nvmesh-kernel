@@ -1,8 +1,4 @@
 # Set the SHELL variable to bash (fix ubuntu issues)
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 SHELL:=/bin/bash
 
 # Uncomment the lines below to debug the grep utility functions below
@@ -120,11 +116,9 @@ grep_ksrc_func_rv = $(call grep_func_rv,$(1),$(2),$(3),$(4),$(KSRC1))
 ifneq ($(OFED_SRC_DIR),)
   INC_RDMA=$(OFED_SRC_DIR)
   INC_RDMA_DRV=$(OFED_SRC_DIR)
-  RDMA_SYMVERS=$(OFED_SYMVERS)
 else
   INC_RDMA=$(KSRC1)
   INC_RDMA_DRV=$(KERN_FILES_PATH)
-  RDMA_SYMVERS=$(KERN_SYMVERS)
 endif
 
 # As above, but look in RDMA path $5 = $(OFA_KERNEL) for OFED or $(KSRC1) for INBOX
@@ -144,22 +138,6 @@ grep_rdma_drv_func_ptr_var = $(call grep_func_ptr_var,$(1),$(2),$(3),$(4),$(INC_
 grep_rdma_drv_func_ptr_rv = $(call grep_func_ptr_rv,$(1),$(2),$(3),$(4),$(INC_RDMA_DRV))
 grep_rdma_drv_macro_param = $(call grep_macro_param,$(1),$(2),$(3),$(4),$(INC_RDMA_DRV),$(5),$(6))
 grep_rdma_drv_typedef = $(call grep_typedef,$(1),$(2),$(3),$(INC_RDMA_DRV),$(4),$(5))
-
-# Check if a symbol is exported in a Module.symvers file
-# $1 - Define
-# $2 - Symbol name
-# $3 - Path to Module.symvers
-# $4 - Found define value - default 1
-# $5 - Not-found define value - default 0
-define grep_symvers =
--D$(strip $(1))=$(shell $(if $(filter 1,$(GREP_DEBUG)), echo $(strip $(1)) >> $(GREP_DEBUG_LOGFILE); exec 19>>$(GREP_DEBUG_LOGFILE); BASH_XTRACEFD=19; set -x; ,) grep -qw "$(strip $(2))" "$(strip $(3))" 2>/dev/null && echo -n $(if $(4),$(4),1) || echo -n $(if $(5),$(5),0))
-endef
-
-# grep_kern_symvers: Check if a symbol is exported by the kernel Module.symvers
-grep_kern_symvers = $(call grep_symvers,$(1),$(2),$(KERN_SYMVERS),$(3),$(4))
-
-# grep_rdma_symvers: Check if a symbol is exported by the kernel Module.symvers (INBOX) or the OFED Module.symvers
-grep_rdma_symvers = $(call grep_symvers,$(1),$(2),$(RDMA_SYMVERS),$(3),$(4))
 
 ARCH := $(shell uname -m | sed -e s/i.86/x86/ \
                                   -e s/x86_64/x86/ \
@@ -1208,12 +1186,6 @@ cflags += $(call grep_ksrc_func_var, \
 		, \
 		include/net/tcp.h)
 
-cflags += $(call grep_ksrc_func_var, \
-		KS_HAS_SENDPAGE_OK, \
-		sendpage_ok, \
-		, \
-		include/linux/net.h)
-
 cflags += $(call grep_ksrc_func_var, KS_HAS_RDMA_FOR_EACH_PORT, rdma_for_each_port, , include/rdma/ib_verbs.h)
 # ---------------------------------------------------------------------------- #
 # Kernel 6.9
@@ -1300,57 +1272,3 @@ cflags += $(call grep_rdma_func_var, \
 		 , \
 		 include/rdma/ib_verbs.h)
  
-# ---------------------------------------------------------------------------- #
-# Kernel 6.17
-# ---------------------------------------------------------------------------- #
-cflags += $(call grep_ksrc_func_var, \
-		KS_HAS_DEL_TIMER_SYNC, \
-		del_timer_sync, \
-		, \
-		include/linux/timer.h)
-
-cflags += $(call grep_ksrc_func_var, \
-		KS_HAS___INIT_TIMER, \
-		__init_timer, \
-		, \
-		include/linux/timer.h)
-
-cflags += $(call grep_ksrc_func_var, \
-		KS_CRC32C_USES_SIZE_T, \
-		crc32c, \
-		size_t, \
-		include/linux/crc32.h)
-
-cflags += $(call grep_ksrc_struct_member, \
-		KS_HAS_SKB_CHECKSUM_OPS, \
-		struct skb_checksum_ops, \
-		, \
-		include/linux/skbuff.h include/net/checksum.h)
-
-cflags += $(call grep_ksrc_func_var, \
-		KS_HAS___CRC32C_LE_COMBINE, \
-		__crc32c_le_combine, \
-		, \
-		include/linux/crc32.h)
-
-cflags += $(call grep_ksrc_func_var, \
-		KS_HAS_HRTIMER_INIT, \
-		hrtimer_init, \
-		, \
-		include/linux/hrtimer.h)
-
-cflags += $(call grep_rdma_func_ptr_var, \
-		KS_IB_REG_USER_MR_HAS_DMAH, \
-		reg_user_mr, \
-		ib_dmah, \
-		include/rdma/ib_verbs.h)
-
-cflags += $(call grep_rdma_func_var, \
-		KS_HAS_MLX5_GET_UARS_PAGE, \
-		mlx5_get_uars_page, \
-		, \
-		include/linux/mlx5/driver.h)
-
-cflags += $(call grep_kern_symvers, \
-		KS_TCP_SETSOCKOPT_EXPORTED, \
-		tcp_setsockopt)

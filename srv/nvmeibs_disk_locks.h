@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 /**
  * manages disk locks fuctionality
  *
@@ -66,8 +61,6 @@ struct nvmeibs_disk_private_data {
 		struct nvmeib_public_procfs_ent *iostats;
 		/* proc file disk's nvme_qp stats */
 		struct nvmeib_public_procfs_ent *nvme_qp_stats;
-		/* proc file disk's qp_stats.json */
-		struct nvmeib_public_procfs_ent *qp_stats_json;
 	} procfs;
 
 	/* proc file for mmap lock tables of disk to user */

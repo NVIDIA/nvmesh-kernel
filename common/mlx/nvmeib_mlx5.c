@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -16,7 +11,6 @@
 #	include <net/devlink.h>
 #endif
 #include <linux/netdevice.h>
-#include "nvmeib_mlx.h"
 #include "nvmeib_ib_driver.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_public.h"
@@ -32,8 +26,10 @@
 #ifdef CONFIG_INFINIBAND_ON_DEMAND_PAGING
 # undef CONFIG_INFINIBAND_ON_DEMAND_PAGING
 #endif
+#include "nvmeib_mlx5_imp.c"
 
 const unsigned long nvmeib_mlx5_dev_caps =
+	NVMEIB_DEVCAP_RDDA |
 	NVMEIB_DEVCAP_SRQ |
 	NVMEIB_DEVCAP_SRQ_LAST_WQE |
 	NVMEIB_DEVCAP_ATOMICS_REQ |
@@ -43,23 +39,163 @@ const unsigned long nvmeib_mlx5_dev_caps =
 	NVMEIB_DEVCAP_RD_ATOM_16 |
 	NVMEIB_DEVCAP_RD_ATOM_8;
 
+#define MLX5_MAX_RDDA_BLACKLIST 32
+static char *mlx5_rdda_blacklist[MLX5_MAX_RDDA_BLACKLIST] = {
+	[0] = "16.30.1004",
+	[1] = "16.29.2002",
+	[2] = "16.29.1016",
+	[3 ... 31] = "",
+};
+module_param_array(mlx5_rdda_blacklist, charp, NULL, 0444);
+MODULE_PARM_DESC(mlx5_rdda_blacklist, "Mellanox 5 Firmware Blacklist for RDDA");
+
 /**
  * Copied from Mellanox mlx5
  *
  */
 
+static int nvmeib_mlx5_get_qp_sqr(struct ib_device *ib_dev, struct ib_qp *ib_qp,
+	struct nvmeib_sq_rsc *sqr)
+{
+	return _nvmeib_mlx5_get_qp_sqr(ib_dev, ib_qp, sqr);
+}
+
+static int nvmeib_mlx5_get_qp_cqr(struct ib_device *ib_dev, struct ib_cq *ib_cq,
+	struct nvmeib_cq_rsc *cqr)
+{
+	return _nvmeib_mlx5_get_qp_cqr(ib_dev, ib_cq, cqr);
+}
+
+static int nvmeib_mlx5_init_qp(struct ib_device *ib_dev, struct ib_qp *ib_qp,
+	u64 wr_id, u32 *opcode, struct nvmeib_sq_rsc *sqr)
+{
+	return _nvmeib_mlx5_init_qp(ib_dev, ib_qp, wr_id, opcode, sqr);
+}
+
 /* client side */
+static int nvmeib_mlx5_init_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
+	void **priv)
+{
+	return _nvmeib_mlx5_init_remote_qp_shadow(rnet, priv);
+}
+
+static int nvmeib_mlx5_clear_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
+	void *priv)
+{
+	return 0;
+}
+
+static int nvmeib_mlx5_send_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
+	void *priv, struct nvmeib_send_wr *wr)
+{
+	return _nvmeib_mlx5_send_remote_qp_shadow(rnet, priv, wr);
+}
+
+static int nvmeib_mlx5_free_remote_qp_shadow(struct nvmeibc_remote_net *rnet,
+	void *priv)
+{
+	return _nvmeib_mlx5_free_remote_qp_shadow(rnet, priv);
+}
+
+static ssize_t nvmeib_mlx5_get_qp_usage(struct ib_device *ib_dev, struct ib_qp *ib_qp,
+	enum nvmeib_cnt_mem_type mem_type)
+{
+	return _nvmeib_mlx5_get_qp_usage(ib_dev, ib_qp, mem_type);
+}
+
+static ssize_t nvmeib_mlx5_get_srq_usage(struct ib_device *ib_dev, struct ib_srq *ib_srq,
+	enum nvmeib_cnt_mem_type mem_type)
+{
+	return _nvmeib_mlx5_get_srq_usage(ib_dev, ib_srq, mem_type);
+}
+
+static ssize_t nvmeib_mlx5_get_cq_usage(struct ib_device *ib_dev, struct ib_cq *ib_cq,
+	enum nvmeib_cnt_mem_type mem_type)
+{
+	return _nvmeib_mlx5_get_cq_usage(ib_dev, ib_cq, mem_type);
+}
+
+static ssize_t nvmeib_mlx5_get_mr_usage(struct ib_device *ib_dev, struct ib_mr *ib_mr,
+	enum nvmeib_cnt_mem_type mem_type)
+{
+	return _nvmeib_mlx5_get_mr_usage(ib_dev, ib_mr, mem_type);
+}
+
+int nvmeib_mlx5_check_rdda_fw(struct ib_device *ib_dev);
+int nvmeib_mlx5_check_rdda_fw(struct ib_device *ib_dev)
+{
+	struct ib_device_attr attrs;
+	int rv;
+	struct {
+		u16 subminor;
+		u16 minor;
+		u16 major;
+		u16 reserved;
+	} __attribute__((packed)) *ptr_fw_fields = (void *)&attrs.fw_ver;
+	int i;
+	
+	if ((rv = nvmeib_query_device(ib_dev, &attrs)) < 0) {
+		_NE(err_nvmeib_mlx5_fw_supports_rdda, 
+		    "nvmeib_query_device failed (@RV) for @IB_DEVICE",
+		    rv, ib_dev->name);
+		goto out;
+	}
+	for (i = 0; i < MLX5_MAX_RDDA_BLACKLIST; i++) {
+		int major, minor, subminor;
+		if (!strlen(mlx5_rdda_blacklist[i]))
+			continue;
+		if (sscanf(mlx5_rdda_blacklist[i], "%d.%d.%d",
+			&major, &minor, &subminor) != 3) {
+			_NI(trace_3_nvmeib_mlx5_fw_supports_rdda,
+			    "Blacklist FW string @STR has unexpected format",
+				mlx5_rdda_blacklist[i]);
+			continue;
+		}
+		if (major == ptr_fw_fields->major &&
+			minor == ptr_fw_fields->minor &&
+			subminor == ptr_fw_fields->subminor) {
+			_NI(trace_nvmeib_mlx5_fw_supports_rdda,
+				"Device: @IB_DEVICE has blacklisted RDDA FW @MAJOR.@MINOR.@SUBMINOR", 
+				ib_dev->name, ptr_fw_fields->major, ptr_fw_fields->minor, ptr_fw_fields->subminor);
+			rv = -ENOTSUPP;
+			goto out;
+		}
+	}
+	_NI(trace_2_nvmeib_mlx5_fw_supports_rdda,
+	    "Device: @IB_DEVICE has compatible RDDA FW @MAJOR.@MINOR.@SUBMINOR", 
+		ib_dev->name, ptr_fw_fields->major, ptr_fw_fields->minor, ptr_fw_fields->subminor);
+	rv = 0;
+
+out:
+	return rv;
+}
+EXPORT_SYMBOL(nvmeib_mlx5_check_rdda_fw);
 
 #endif //#if !IB_MLX5
 
 static struct nvmeib_device_ops mlx5 = {
 	.module = THIS_MODULE,
+	.get_qp_sqr = nvmeib_mlx5_get_qp_sqr,
+	.get_qp_cqr = nvmeib_mlx5_get_qp_cqr,
+	.init_qp = nvmeib_mlx5_init_qp,
+	.init_remote_qp_shadow = nvmeib_mlx5_init_remote_qp_shadow,
+	.clear_remote_qp_shadow = nvmeib_mlx5_clear_remote_qp_shadow,
+	.send_remote_qp_shadow = nvmeib_mlx5_send_remote_qp_shadow,
+	.free_remote_qp_shadow = nvmeib_mlx5_free_remote_qp_shadow,
+	.get_qp_usage = nvmeib_mlx5_get_qp_usage,
+	.get_srq_usage = nvmeib_mlx5_get_srq_usage,
+	.get_cq_usage = nvmeib_mlx5_get_cq_usage,
+	.get_mr_usage = nvmeib_mlx5_get_mr_usage,
+	.check_rdda_fw = nvmeib_mlx5_check_rdda_fw,
 };
+
+extern struct nvmeib_device_ops mlx5_odp;
 
 int nvmeib_mlx5_init(bool paging_enabled)
 {
 	return nvmeib_ibdr_hwdev_register(DT_mlx5, "mlx5",
-					&mlx5,
+					  paging_enabled ?
+					  &mlx5_odp : &mlx5,
 					nvmeib_mlx5_dev_caps,
 					INT_MAX);
 }

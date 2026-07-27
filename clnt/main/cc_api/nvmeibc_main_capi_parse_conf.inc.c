@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 /* Doronl See change-ID Icbdbe7f6e069acc6d1754a8ba0530f13af49d56e for removed
    legacy MCS to configfs functions */
 

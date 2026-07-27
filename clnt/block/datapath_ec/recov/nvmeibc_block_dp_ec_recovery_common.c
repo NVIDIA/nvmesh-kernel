@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_ec_recovery_common.h"
 #include "nvmeibc_block_dp_ec_recov_maintenance.h"
 #include "nvmeibc_block_dp_ec_recov_hot.h"
@@ -543,14 +538,14 @@ u32 dp_sync_gen_read_fail_bit_mask(struct recovery_sync_op *so)
 	//TODO(EC-2518): the function name is misleading; I propose to split it to two with and without side effect , Daniel: Or unite it with function below to form executino plan
 	//               also it looks like this function should be virtual
 	struct nvmeibc_block_command *cmds = so->cmds;
-	int c;
-	u32 bit_mask = 0, bit;
+	int c, n_reads = n_read_cmds(so);
+	u32 bit_mask = 0;
 	if (__is_raid1_mirror(so)) { //TODO Follow integration in EC-2518
 		__find_valid_source_for_r1(so);
 	}
-	for (c = so->last_cmd + 1 - so->n_cmds, bit = 1; c <= so->last_cmd; c++, bit <<= 1) { // Search for read fail seg
+	for (c = 0; c < n_reads; c++) { // Search for read fail seg
 		if (!is_transient_disk_error(cmds[c].o_rv)) { // Found one bad sector
-			bit_mask |= bit;
+			bit_mask |= (1 << c);
 		} else if (unlikely(cmds[c].o_rv == -ENXIO) && cmds[c].do_not_send) { // Do Not Send
 			continue;
 		} else if (unlikely(cmds[c].o_rv)) { // Some other error
@@ -1363,9 +1358,7 @@ static void __prep_write_perm_read_fail(struct recovery_sync_op *so)
 
 	for (i = n_read_cmds(so), src_bit = 1; i < n_total; i++, src_bit <<= 1) {
 		struct nvmeibc_block_command *cmd = &so->cmds[i];
-		if (!(src_bit & (so->nwhole_exec_plan.first_write_bmp | so->nwhole_exec_plan.second_write_bmp)))
-			continue;
-		if (src_bit & so->nwhole_exec_plan.invalid_sources) { // Daniel: I added the required optimization from below (we only destroy the invalid sources) the tests pass so it's a win win, but we should test that if a DEAD segment returns we CAN fix the slice
+		if (!cmd->do_not_send && (so->nwhole_exec_plan.invalid_sources & src_bit)) { // Daniel: I added the required optimization from below (we only destroy the invalid sources) the tests pass so it's a win win, but we should test that if a DEAD segment returns we CAN fix the slice
 			nbdpec_md_mark_data_invalid_for_read(cmd->iocmd->reqs1.md, cmd->is_parity, max_txid_in_slice);
 			dp_dbgdi_do_add_restore_info(cmd, true);	// The failed read blocks are already marked as such since we set poison into the writer magic before submitting, but the degraded (W) ones have not been sent to read and if we destroy them we must invalidate first (when restoring them we do mark it in reed solomon)
 		}

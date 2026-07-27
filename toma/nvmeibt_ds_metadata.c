@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_bm.h"
 #include "nvmeibt_ds_metadata.h"
 #include "nvmeibt_disk_metadata.h"

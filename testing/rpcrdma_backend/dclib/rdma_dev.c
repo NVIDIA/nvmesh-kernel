@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "xkr_incs.h"
 #include "xkr_version.h"
 #include "xib_incs.h"
@@ -2171,9 +2166,9 @@ static int find_gid(
 				ib_dev->name, ib_port->port);
 			pib = (struct sockaddr_ib *)&ib_port->bind_sin;
 			pib->sib_family = AF_IB;
-			pib->sib_sid = cpu_to_be64(NVMESH_SERVICE_ID);
-			pib->sib_sid_mask = cpu_to_be64(NVMESH_SERVICE_ID_MASK);
-			pib->sib_pkey = cpu_to_be16(NVMESH_PKEY);
+			pib->sib_sid = cpu_to_be64(EXCELERO_SERVICE_ID);
+			pib->sib_sid_mask = cpu_to_be64(EXCELERO_SERVICE_ID_MASK);
+			pib->sib_pkey = cpu_to_be16(EXCELERO_PKEY);
 			rv = query_gid(ib_dev, ib_port->port, 0, ib_port, false);
 			xdtrace("Device %s, port %d - is IB %pI6\n",
 				ib_dev->name, ib_port->port, ib_port->gid.raw);
@@ -2213,7 +2208,7 @@ static int find_gid(
 			pip = (struct sockaddr_in *)&ib_port->bind_sin;
 			pip->sin_family = PF_INET;
 			pip->sin_port = htons(
-				NVMESH_SERVICE_ID & NVMESH_SERVICE_ID_MASK);
+				EXCELERO_SERVICE_ID & EXCELERO_SERVICE_ID_MASK);
 			if (a) {
 				rdma_ip2gid((struct sockaddr *)a, &ip_gid);
 				format_gid_raw(ip_gid.raw, gid_str1);

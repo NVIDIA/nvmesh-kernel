@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_LARRAY_H_INCLUDED
 #define NVMEIB_LARRAY_H_INCLUDED
 
@@ -27,7 +22,7 @@
 		memset((_a).a, 0, sizeof((_a).a)); \
 		BUILD_BUG_ON(sizeof((_a).a[0]) < sizeof(int));\
 		for (LACONCAT(i, __LINE__) = 0; \
-				LACONCAT(i, __LINE__) < (int)ARRAY_SIZE((_a).a) - 1; \
+				LACONCAT(i, __LINE__) < ARRAY_SIZE((_a).a) - 1; \
 				++LACONCAT(i, __LINE__)) \
 			*((int *)&((_a).a[LACONCAT(i, __LINE__)])) = \
 				LACONCAT(i, __LINE__) + 1; \

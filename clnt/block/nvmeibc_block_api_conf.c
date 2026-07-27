@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_common.h"
 #include "nvmeibc_volume.h"
 #include "block/controlpath/nvmeibc_b_cp_topo_common.h"
@@ -313,7 +308,7 @@ static void __update_topo_from_volume_hdr(struct nvmeibc_block_device *dev)
 
 bool force_reconf_reboot = true;			// By default, disable hot transition
 module_param(force_reconf_reboot, bool, 0644);
-MODULE_PARM_DESC(force_reconf_reboot, "Force all block device configuration changes to be done via device reboot, i.e. restarting the block device.");
+MODULE_PARM_DESC(force_reconf_reboot, "Force all block device configuration changes to be done via device reboot");
 
 int nvmeibc_block_reconf(struct nvmeibc_volume_conf *conf, struct nvmeibc_volume *volume)
 {

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_memmgr_metrics.h"
 #include "nvmeib_metrics_jdr.h"
 
@@ -102,7 +97,7 @@ static void __memmgr_metrics_json_serialize_cpu(struct jdr *jdr_inst, struct nvm
 						struct nvmesh_memmgr_metrics *start, struct nvmesh_memmgr_metrics *stop)
 {
 	char scope_str[32];
-	snprintf(scope_str, ARRAY_SIZE(scope_str), "metrics.cpu%d", cpu);
+	sprintf(scope_str, "metrics.cpu%d", cpu);
 	{
 		struct nvmesh_memmgr_metrics *curr = NULL;
 		jdr_array_scope((jdr_inst), scope_str);

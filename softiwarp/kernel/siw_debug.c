@@ -60,7 +60,7 @@
 
 int debug_level = 1;
 module_param(debug_level, int, 0644);
-MODULE_PARM_DESC(debug_level, "Enables debug logging (to the system log not NVMesh tracer) if set above 1. Deprecated.");
+MODULE_PARM_DESC(debug_level, "Debug level, 1 for errors & events, 2 for more");
 
 static struct dentry *siw_debugfs = NULL; // MUST !!!
 
@@ -79,13 +79,13 @@ int siw_set_dprint_fn(t_siw_dprint_fn dprint_fn)
 	if (dprint_fn) {
 		for_each_possible_cpu(cpu) {
 			if (siw_dprint_fn[cpu]) {
-				pr_warn("SIW: dprint fn for CPU %d already set to %pF\n", 
+				pr_warn("SIW: dprint fn for CPU %d already set to %pS\n", 
 					cpu, siw_dprint_fn[cpu]);
 				return -EALREADY;
 			}
 		}
 		on_each_cpu(set_cpu_dprint_fn, dprint_fn, 1);
-		dprint(DBG_KEYP, "SIW: debug print function set to %pF\n",
+		dprint(DBG_KEYP, "SIW: debug print function set to %pS\n",
 		       dprint_fn);
 	} else {
 		dprint(DBG_KEYP, "SIW: debug print function reset\n");

@@ -1,8 +1,4 @@
 #!/usr/bin/python3
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """ This is a refactored and improved version of the original gen_trace_probes
 """
 
@@ -20,7 +16,7 @@ FIRST_TRACE_ID = 256
 
 
 def perror(msg):
-    print(msg, file=sys.stderr)
+    print >> sys.stderr, msg
 
 
 class CSourceWriter:

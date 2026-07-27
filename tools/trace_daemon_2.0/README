@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 Trace Daemon Configurations file located under /var/log/nvmesh/trace_daemon and to be named tracedaemon.conf.
 
 TRACE_DAEMON_DBG <\d> - set debug level

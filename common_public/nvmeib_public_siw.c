@@ -1,17 +1,13 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "ib_incs.h"
 #include "nvmeibp_trace.h"
 
 #include "nvmeib_public_siw_imp.c"
+#include "nvmeib_public_siwp.h"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMeIB Public siw");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_LICENSE("Dual BSD/GPL");
 
 #define DEBUG_LEVEL (int)0
 static int (*debug_level_f)(void);
@@ -21,12 +17,30 @@ static __attribute__ ((__unused__)) int nvmeib_public_siw_debug_level(void)
 	return debug_level_f ? debug_level_f() : DEBUG_LEVEL;
 }
 
+static int
+nvmeib_public_siw_alloc_n_map(struct nvmeib_alloc_n_map *mem)
+{
+	return siw_alloc_n_map(mem);
+}
+
+static int
+nvmeib_public_siw_unmapn_n_free(struct nvmeib_alloc_n_map *mem)
+{
+	return siw_unmapn_n_free(mem);
+}
+
+static int
+nvmeib_public_siw_map_mr(struct ib_device *ibdev, struct ib_mr *mr,
+	phys_addr_t *pages, int n_pages)
+{
+	return siw_map_mr(ibdev, mr, pages, n_pages);
+}
 
 static struct nvmeib_device_public_ops siw_ops = {
 	.module = THIS_MODULE,
-	.alloc_n_map = siw_alloc_n_map,
-	.unmapn_n_free = siw_unmapn_n_free,
-	.map_mr = siw_map_mr,
+	.alloc_n_map = nvmeib_public_siw_alloc_n_map,
+	.unmapn_n_free = nvmeib_public_siw_unmapn_n_free,
+	.map_mr = nvmeib_public_siw_map_mr,
 
 	.query_device = ib_query_device,
 	.post_send_atomic = nvmeib_public_generic_post_send_atomic,
@@ -34,9 +48,9 @@ static struct nvmeib_device_public_ops siw_ops = {
 
 static struct nvmeib_device_public_ops siw_odp = {
 	.module = THIS_MODULE,
-	.alloc_n_map = siw_alloc_n_map,
-	.unmapn_n_free = siw_unmapn_n_free,
-	.map_mr = siw_map_mr,
+	.alloc_n_map = nvmeib_public_siwp_alloc_n_map,
+	.unmapn_n_free = nvmeib_public_siwp_unmapn_n_free,
+	.map_mr = nvmeib_public_siwp_map_mr,
 
 	.query_device = ib_query_device,
 	.post_send_atomic = nvmeib_public_generic_post_send_atomic,

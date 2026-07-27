@@ -1,9 +1,4 @@
 /*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
-/*
  * toma_link.c
  *
  * Look for Toma executable and run it, replacement for symbolic-link.

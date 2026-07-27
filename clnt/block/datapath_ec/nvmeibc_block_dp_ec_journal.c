@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_ec.h"
 #include "nvmeibc_block_dp_ec_journal_common.h"
 #include "block/controlpath/nvmeibc_b_cp_lost_srv_resources.h"
@@ -48,7 +43,7 @@ int dp_ec_journal_alloc_all_areas(struct nvmeibc_block_command *rldr)
 	u64 res_jlbas[N_MAX_RAID_SLICE_LEN];
 	u32 n_disks = 0;
 	const bool should_block_on_abandoned = rldr->was_abandoned_jr_recovered;
-	unsigned long deadline_jiffies;
+	unsigned long timeout_jiffies;
 	BUG_ON(mssa->no_jour);
 
 	nvmeibc_profiling_start_take_stats_for_stage(nvmeibc_get_raid_good_path_profile_for_rwt_op(rldr->ds, rldr->o->op), rldr->o, E_CMDS_STAGE_JOURNAL_ALLOC);
@@ -67,12 +62,8 @@ int dp_ec_journal_alloc_all_areas(struct nvmeibc_block_command *rldr)
 	if (!rldr->was_abandoned_jr_recovered)					// +1 ref on jour alloc start, -1 alloc end. This condition tests if +1 was already done, and alloc is retried after jgc completion
 		nvmeibc_atomic_inc(&rldr->n_uncompleted_cmds);		// Support async completion of allocation, dec in completion
 	rldr->jam_alloc_jif = jiffies;
-	deadline_jiffies = nvmeibc_operation_get_expiry_jiffies(rldr->o);
-	rv = nvmeibc_jam_lbas_alloc(n_disks, disks, rldr->rld.pre.bits.txid + 1 /* First TxID */, dlbas, res_jlbas,
-			should_block_on_abandoned, &rldr->o->cpu_mask_info,
-			deadline_jiffies 	/* deadline */,
-			deadline_jiffies	/* priority (prioritize by IO expiry) */,
-			rldr);
+	timeout_jiffies = nvmeibc_operation_get_expiry_jiffies(rldr->o) - rldr->jam_alloc_jif;
+	rv = nvmeibc_jam_lbas_alloc(n_disks, disks, rldr->rld.pre.bits.txid + 1 /*First TxID*/, dlbas, res_jlbas, should_block_on_abandoned, &rldr->o->cpu_mask_info, timeout_jiffies, rldr);
 
 	if (rv != -EINPROGRESS) { // Synchronous answer
 		nvmeibc_block_dp_ec_journal_alloc_cb(rv, res_jlbas, rldr); // Simulate as if it was async

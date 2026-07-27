@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #ifndef CORECOMM_NETLINK_RPC_SRV_H
 #define CORECOMM_NETLINK_RPC_SRV_H
 

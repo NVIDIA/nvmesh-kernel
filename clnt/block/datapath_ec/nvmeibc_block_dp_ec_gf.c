@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "common/kr_incs.h"
 #if defined(__KERNEL__)
 	#include "nvmeib_public.h"		// Daniel: Thats an overkill, include less
@@ -15,15 +10,13 @@
 #include "cpuid.h"
 #include "nvmeibc_block_dp_ec_gf.h"
 #include "nvmeibc_block_dp_ec_gf_arm_um.h"
-#if !defined (__aarch64__)
+#if defined (PARALLELS_COMPILATION_ONLY) && PARALLELS_COMPILATION_ONLY
+	// OferOshri: This is a hack. Please define a proper condition for AVX not enabled
+#elif !defined (__aarch64__)
 	#define USE_GF_AVX2        NVMEIBC_GF_AVX2
 #else
 	int gf_asm_count = -1;
 	EXPORT_SYMBOL(gf_asm_count);
-#endif
-
-#if defined(USE_GF_AVX2)
-#include "nvmeibc_block_dp_ec_gf_avx2.h"
 #endif
 
 #define POLY 0x1d
@@ -43,11 +36,7 @@ typedef void (*ec_decode_data_subfunc_1) (  int, int, int,      u8**, u8**, u32*
 typedef void (*ec_decode_data_subfunc_2) (  int, int, int, int, u8**, u8**, u32*);
 
 #if defined(__KERNEL__) && defined(__aarch64__)
-	#if KS_CRC32C_USES_SIZE_T
-		typedef u32 (*ec_crc_func) (u32 crc, const void *address, size_t length);
-	#else
-		typedef u32 (*ec_crc_func) (u32 crc, const void *address, unsigned int length);
-	#endif
+	typedef u32 (*ec_crc_func) (u32 crc, const void *address, unsigned int length);	// Same as ARM
 	#define CRC32_KERNEL_OR_AVX_FN 			crc32c
 	#define CRC32_KERNEL_OR_UNOPT_FN 		crc32c
 #else
@@ -1085,7 +1074,7 @@ static enum gf_return_val ec_decode_data_1(int len, int k, int rows, unsigned ch
                 are desired. Ptr 0 means we want it. Ptr -1 means we don't.
        Anything else (k > 2) comes later, and probably requires matrix inversion.
     */
-    int i, d_index, p_index, d[2], d_notme;
+    int i, d_index, p_index, d[k], d_notme;
 
     BUG_ON(k > 2); // Not for now
 
@@ -1277,6 +1266,14 @@ gf_functions_t gf_functions_sse2 = {
 #endif
 
 #if defined(USE_GF_AVX2)
+// Functions below are implemented in assembly directly
+extern void ec_encode_data_p_avx2(int len, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc, unsigned char **data_copy);
+extern void ec_encode_data_q_avx2(int len, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc, unsigned char **data_copy);
+extern void ec_encode_data_pq_avx2(int len, int rows, unsigned char ** data, unsigned char ** coding, u32 *crc, unsigned char **data_copy);
+extern enum gf_return_val ec_encode_data_update_avx2(int len, int k, int vec_i, unsigned char ** data,  unsigned char ** coding, u32 *crc, unsigned char *data_copy);
+extern void ec_decode_data_p_avx2(int len, int rows, int d0, unsigned char ** data,  unsigned char ** new_data, u32 *crc);
+extern void ec_decode_data_q_avx2(int len, int rows, int d0, unsigned char ** data,  unsigned char ** new_data, u32 *crc);
+extern void ec_decode_data_pq_avx2_asm(int len, int rows, int d0, int d1, unsigned char ** data,  unsigned char ** new_data, u32 *crc, unsigned char factor);
 static void ec_decode_data_pq_avx2(int len, int rows, int d0, int d1, unsigned char ** data,  unsigned char ** new_data, u32 *crc) {
 	#ifndef __aarch64__
 		const unsigned char denominator = gff_base[d0] ^ gff_base[d1];
@@ -1554,6 +1551,8 @@ int nvmeibc_gf_optimization_from_string(const char *str)
 #if defined(__KERNEL__) && defined(__x86_64__)	// User spaces preemption already saves registers, !x64 doe snot have those registers
 unsigned long nvmeibc_fpu_flags[NR_CPUS];		// To reduce arr size can use: CONFIG_NR_CPUS, nr_cpu_ids
 void *nvmeibc_fpu_regs[NR_CPUS] ____cacheline_aligned;
+extern void nvmeib_save_avx256(   void  *area);		// In assembly code
+extern void nvmeib_restore_avx256(void  *area);		// In assembly code
 
 static unsigned int nvmeib_get_xsave_size(void) {
 	unsigned int eax, ebx, ecx, edx;
@@ -1578,11 +1577,6 @@ void nvmeib_fpu_begin(void)
 	nvmeib_save_avx256(nvmeibc_fpu_regs[cpu]);
 }
 
-static inline void sfence(void)
-{
-	asm volatile("sfence" ::: "memory");
-}
-
 int nvmeib_fpu_end(void)
 {
 	int cpu = smp_processor_id();
@@ -1590,7 +1584,6 @@ int nvmeib_fpu_end(void)
 	unsigned long flags = *pf;
 
 	BUG_ON(!flags);
-	sfence();
 	nvmeib_restore_avx256(nvmeibc_fpu_regs[cpu]);
 	*pf = 0;
 	local_irq_restore(flags);

@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 default_core_file='core'
 read -p "core file name? (Default ${default_core_file})? " core_file
 if [ "_${core_file}" == "_" ]; then

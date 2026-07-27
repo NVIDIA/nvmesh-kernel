@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 ########################################################
 # Builds NVMesh in a docker container on local machine
 ########################################################
@@ -13,8 +10,7 @@
 #	- Support different distros
 #	- Custom workdir
 
-set -e #exit on first error
-source build_common.sh
+
 print_help() {
 cat << EOF
 usage:
@@ -41,7 +37,6 @@ usage:
 
         --build-dir         build directory inside container
 
-        --podman            use Podman container engine instead of Docker
 EOF
 }
 
@@ -50,8 +45,6 @@ RSYNC_OPTS="--delete --compress --cvs-exclude --include=core --exclude=autogen/c
 MAKE_OPTIONS="-j IM_BOTH=yes MK_RPM=yes"
 
 LEAVE_RUNNING="false"
-
-CONTAINER_TOOL="docker"
 
 while [[ $# -gt 0 ]]
 do
@@ -101,9 +94,6 @@ case $key in
     BUILD_DIR="$2"
     shift
     ;;
-    --podman)
-    CONTAINER_TOOL="podman"
-    ;;
     *)
     # unknown option
     echo "Unknown option $key"
@@ -114,37 +104,12 @@ esac
 shift # past argument or value
 done
 
-# Setup /dev/net/tun if missing.
-function setup_tun_device() {
-    case "$(uname -s)" in
-        Linux) ;;
-        *) return 0 ;;
-    esac
-
-    [ -e /dev/net/tun ] && return 0
-
-    echo "Note: /dev/net/tun not found"
-
-    if [ ! -d /dev/net ]; then
-        sudo mkdir -p /dev/net 2>/dev/null
-    fi
-
-    if sudo modprobe tun 2>/dev/null; then
-        echo "Successfully loaded tun kernel module"
-        return 0
-    fi
-
-    echo "Warning: Could not load tun module"
-    echo "If the build fails, run: sudo modprobe tun"
-    return 0
-}
-
 if [ -z $DISTRO ]; then
         DISTRO=rhel7
 fi
 
 if [ -z $GIT_COMMIT_ID ] ; then
-        GIT_COMMIT_ID=$(git_commit_id)
+        GIT_COMMIT_ID=$(git log -n1 --format=%h)
 fi
 
 if [ -z $GIT_CHANGE_ID ] ; then
@@ -169,40 +134,38 @@ fi
 
 IFS='-' read -ra GIT_DESCRIBE <<< "$GIT_DESCRIBE"
 
-setup_tun_device
-
 # Build docker container
 echo "Building nvmesh-build-$DISTRO image from docker/"
-$CONTAINER_TOOL build -t nvmesh-build-$DISTRO -f docker/Dockerfile_$DISTRO docker/
+docker build -t nvmesh-build-$DISTRO -f docker/Dockerfile_$DISTRO docker/
 # Start docker container
 echo "Starting container using nvmesh-build-$DISTRO image"
-CONT_UUID=`$CONTAINER_TOOL run -dit nvmesh-build-$DISTRO bash`
+CONT_UUID=`docker run -dit nvmesh-build-$DISTRO bash`
 echo "UUID: $CONT_UUID"
 # Get kernel version
-KERN_VER=`$CONTAINER_TOOL exec $CONT_UUID bash -c "ls /lib/modules | head -1" | tr -d '\r\n'`
+KERN_VER=`docker exec $CONT_UUID bash -c "ls /lib/modules" | tr -d '\r\n'`
 # Make the build dir
-$CONTAINER_TOOL exec $CONT_UUID bash -c "mkdir -p $BUILD_DIR"
+docker exec $CONT_UUID bash -c "mkdir -p $BUILD_DIR"
 # Rsync into docker container
 echo "Rsync into container $CONT_UUID:/$BUILD_DIR"
-rsync -e "$CONTAINER_TOOL exec -i" $RSYNC_OPTS . $CONT_UUID:/$BUILD_DIR
+rsync -e 'docker exec -i' $RSYNC_OPTS . $CONT_UUID:/$BUILD_DIR
 # Run make
 MAKE_OPTIONS="$MAKE_OPTIONS COMMIT_ID=$GIT_COMMIT_ID BRANCH_NAME=$GIT_BRANCH VERSION=${GIT_DESCRIBE[0]} RELEASE=${GIT_DESCRIBE[1]} KERN_VER=$KERN_VER MODVERSIONS=0"
 echo "Running Make - $MAKE_OPTIONS"
-$CONTAINER_TOOL exec -t $CONT_UUID bash -c "cd $BUILD_DIR; make $MAKE_OPTIONS"
+docker exec -t $CONT_UUID bash -c "cd $BUILD_DIR; make $MAKE_OPTIONS"
 # Fetch RPM
-NVMESH_RPMS=$($CONTAINER_TOOL exec $CONT_UUID bash -c "find /$BUILD_DIR -type f -maxdepth 1 -name '*.rpm' -o -name '*.deb' | xargs")
+NVMESH_RPMS=$(docker exec $CONT_UUID bash -c "find /$BUILD_DIR -type f -maxdepth 1 -name '*.rpm' -o -name '*.deb' | xargs")
 echo "Fetching RPM(s) $NVMESH_RPMS to $RPM_PATH"
 for i in $NVMESH_RPMS; do
-	$CONTAINER_TOOL cp $CONT_UUID:$i $RPM_PATH
+	docker cp $CONT_UUID:$i $RPM_PATH
 done
 if [ "$LEAVE_RUNNING" = "true" ]; then
 	echo "Leaving Container $CONT_UUID Running"
 else
 	# Stopping Container
         echo "Stopping Container $CONT_UUID"
-	$CONTAINER_TOOL container stop -t 0 $CONT_UUID
+	docker container stop -t 0 $CONT_UUID
 	echo "Removing Container $CONT_UUID"
 	# Removing Container
-	$CONTAINER_TOOL container rm $CONT_UUID
+	docker container rm $CONT_UUID
 fi
 echo "Done!"

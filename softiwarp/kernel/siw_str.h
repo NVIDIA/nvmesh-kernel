@@ -15,14 +15,7 @@ static inline size_t siw_strlcpy(char *dst, const char *src, size_t max_len_unsi
 {
 	int max_len = (int)max_len_unsigned;
 
-	size_t src_len;
-
-	if (!dst || !src) {
-		return 0; 
-	}
-
-	src_len = strlen(src);
-	
+	size_t src_len = src ? strlen(src) : 0;
 	if (max_len < 0) {
 		// Do nothing
 	} else if ((int)src_len + 1 <= max_len) {

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib.h"
 #include "nvmeibs_defs.h"
 #include "nvmeibs_ib_port.h"
@@ -20,15 +15,15 @@
 
 static unsigned int nvmeibs_tcp_port_prio = NVMEIB_TCP_PORT_PRIORITY;
 module_param_named(tcp_port_prio, nvmeibs_tcp_port_prio, uint, 0644);
-MODULE_PARM_DESC(tcp_port_prio, "Defines the priority of SIW. Enables overriding the form of network transportation to prefer. See ib_port_prio and roce_port_prio also.");
+MODULE_PARM_DESC(tcp_port_prio, "TCP Port Priority");
 
 static unsigned int nvmeibs_roce_port_prio = NVMEIB_ROCE_PORT_PRIORITY;
 module_param_named(roce_port_prio, nvmeibs_roce_port_prio, uint, 0644);
-MODULE_PARM_DESC(roce_port_prio, "Defines the priority of ROCE. Enables overriding the form of network transportation to prefer. See ib_port_prio and tcp_port_prio also.");
+MODULE_PARM_DESC(roce_port_prio, "RoCE Port Priority");
 
 static unsigned int nvmeibs_ib_port_prio = NVMEIB_IB_PORT_PRIORITY;
 module_param_named(ib_port_prio, nvmeibs_ib_port_prio, uint, 0644);
-MODULE_PARM_DESC(ib_port_prio, "Defines the priority of Infiniband. Enables overriding the form of network transportation to prefer. See roce_port_prio and tcp_port_prio also.");
+MODULE_PARM_DESC(ib_port_prio, "IB Port Priority");
 
 /**
  * nvmeibs_mad_send_handler() - Post MAD-send callback function.
@@ -807,7 +802,8 @@ static int validate_login_request(struct nvmeibs_ib_port *ib_port,
 	}
 
 	if (NVMEIB_UPDATE_NW_PATHS &&
-		opcode != NVMEIBC_NORDDA_CHANNEL) {
+		opcode != NVMEIBC_NORDDA_CHANNEL &&
+		opcode != NVMEIBC_IO_CHANNEL) {
 		sgid.global.subnet_prefix = ib_port->gid.gid.global.subnet_prefix;
 		sgid.global.interface_id = ib_port->gid.gid.global.interface_id;
 	}
@@ -836,7 +832,12 @@ static int validate_login_request(struct nvmeibs_ib_port *ib_port,
 			_NT(trace_5_ib_port_validate_login_request, "Rejected NVMEIBS_LOGIN_REJ_LOCK_2ND_INVALID_GID because "
 				"GID is invalid: req @DGID vs. mine @SGID", dgid, &sgid);
 		}
-		/* NVMEIBC_IO_CHANNEL removed */
+		else if (opcode == NVMEIBC_IO_CHANNEL) {
+			rej->reason = __constant_cpu_to_be32(
+				NVMEIBS_LOGIN_REJ_RDDA_INVALID_GID);
+			_NT(trace_6_ib_port_validate_login_request, "Rejected NVMEIBS_LOGIN_REJ_RDDA_INVALID_GID because "
+				"GID is invalid: req @DGID vs. mine @SGID", dgid, &sgid);
+		}
 		else {
 			rej->reason = __constant_cpu_to_be32(
 				NVMEIBS_LOGIN_REJ_NRDDA_INVALID_GID);
@@ -887,7 +888,9 @@ static int validate_login_request(struct nvmeibs_ib_port *ib_port,
 				return -EXDEV;
 			}
 		}
-		/* NVMEIBC_IO_CHANNEL removed */
+		else if (opcode == NVMEIBC_IO_CHANNEL) {
+			/* no specific checks */
+		}
 		else if (opcode == NVMEIBC_NORDDA_CHANNEL) {
 			/* no specific checks */
 		}
@@ -1250,7 +1253,8 @@ static void new_connection_work(struct workqe_struct *work)
 		_NT(trace_2_ib_port_new_connection_work, "Received LOCK-CH login from client to port @PORT on gid @GID_IPV6 (@DGID)",
 			ib_port->port, &ib_port->gid.gid, &dgid);
 	}
-	else if (opcode == NVMEIBC_NORDDA_CHANNEL) {
+	else if (opcode == NVMEIBC_IO_CHANNEL ||
+			 opcode == NVMEIBC_NORDDA_CHANNEL) {
 		u16 qp_num;
 		nvmeibc_login_req_get_ioch(req,
 					&sgid.global.subnet_prefix, &sgid.global.interface_id,
@@ -1258,7 +1262,7 @@ static void new_connection_work(struct workqe_struct *work)
 					&qp_num, NULL);
 		_NT(trace_3_ib_port_new_connection_work, "Received @TYPE_STR-CH login from client path: @SGID->@DGID, "
 		   "cid @CID_LLONG, on port @PORT (@GID_IPV6) and qpn @QPN",
-			"NORDDA",
+			(opcode == NVMEIBC_IO_CHANNEL) ? "IO" : "NORDDA",
 			&sgid, &dgid, cid, ib_port->port, &ib_port->gid.gid,
 			(int)qp_num);
 	}
@@ -1315,7 +1319,7 @@ static void new_connection_work(struct workqe_struct *work)
 			if (opcode == NVMEIBC_LOCK_CHANNEL)
 				rv = nvmeibs_client_connect_lock_channel(
 					ib_port, cm_id, cl, req, rej);
-			else if (0) /* NVMEIBC_IO_CHANNEL removed */
+			else if (opcode == NVMEIBC_IO_CHANNEL)
 				rv = nvmeibs_client_connect_io_channel(
 					ib_port, cm_id, cl, req, rej);
 			else if (opcode == NVMEIBC_NORDDA_CHANNEL)

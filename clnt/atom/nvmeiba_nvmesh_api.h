@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBA_API_H
 #define NVMEIBA_API_H
 
@@ -10,9 +5,6 @@
 
 /* Must not include anything from the NVMesh nor ATOM codebase!
    nvmeiba API towards rest of NVMesh (mainly client) */
-
-/* Used for NVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING, to be removed eventually */
-#define NVMEIBA_HACK_DETACHING_DYNAMIC_EXPORT 1
 
 /* Status of nvmeiba_atom which acts as bitfield:
    bit 0(1) - is initialized,      bit 1(2) - is used by kernel (open/close/io),
@@ -34,9 +26,6 @@ struct nvmeiba_atom_os_api {
 		struct gendisk *disk;   			// This is kernel's representation of our block device as disk device
 		spinlock_t disk_lock;				// For exclusive access to gendisk. Daniel: Todo copy some used fields from gen_disk to atom and then can get rid of this lock
 		atomic_t gendisk_status;			// Values: 1 = Gendisk was not added yet, 2 = adding, 3 = added (io possibly running)
-		// If NVMEIBA_HACK_DETACHING_DYNAMIC_EXPORT is defined, this is interpreted like:
-		// int (*set_detaching_fn)(struct nvmeiba_atom_os_api *atom); // nvmeiba_os_api_set_detaching
-		// When this workaround is no longer needed, the field can become reserved (unused) once again
 		u64 reserved[1];
 	//} io_resources;
 	ulong attach_jiff;						// When this atom was first created (units of jiffies)
@@ -105,7 +94,6 @@ void nvmeiba_os_api_destructor(struct nvmeiba_atom_os_api *atom);
            For multi-instance dir/name is required */
 int  nvmeiba_os_api_orphan_abandon(struct nvmeiba_atom_os_api *atom);
 bool nvmeiba_os_api_is_queue_orphan(const struct nvmeiba_atom_os_api *atom);
-int  nvmeiba_os_api_set_detaching(struct nvmeiba_atom_os_api *atom);
 void nvmeiba_os_api_exec_for_each_atom(const char* dev_dir, void (*fn)(const struct nvmeiba_atom_os_api *atom, void *ctx), void* ctx);
 struct nvmeiba_atom_os_api *nvmeiba_os_api_orphan_adopt(const char* dev_dir, const char *dev_name);
 
@@ -127,7 +115,6 @@ u64 nvmeiba_os_apis_get_version(void);
 int nvmeiba_os_apis_get_num(unsigned char req_type);
 
 #define NVMEIBA_2_C_PROTO_VERSION_V_2_0				(2)
-#define NVMEIBA_2_C_PROTO_VERSION_V_2_1				(3)
 struct nvmeiba_to_c_handover {						// Upon connection, handover of nvmeiba to nvmeibc
 	const struct block_device_operations *fops;		// To be overwritten by nvmeibc
 	u32 n_orphan_osapi;								// Amount of orphan atoms that must be taken over by nvmeibc

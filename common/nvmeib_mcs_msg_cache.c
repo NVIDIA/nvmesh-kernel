@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "common_public/nvmeib_uuid_be.h"
 #ifndef USER_SPACE
@@ -380,11 +375,8 @@ int nvmeib_mcs_msg_cache_foreach(struct nvmeib_mcs_msg_cache *cache,
 			node, struct nvmeib_mcs_msg_cache_entry, token_node);
 		ret = cb(ent->data, magic);
 		if (ret)
-			goto out;
+			break;
 	}
-	ret = 0;
-
-out:
 	NFOUT;
 	return ret;
 }

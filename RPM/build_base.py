@@ -1,8 +1,4 @@
 #!/usr/bin/python2
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import sys, subprocess, errno, getopt, json, os.path, os, time
 
 global image_description_dic

@@ -1,15 +1,10 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_DP_OPERATION_THROTTLING_H
 #define NVMEIBC_DP_OPERATION_THROTTLING_H
 
 /**************************** IO throttleing **********************************/
 unsigned max_ios_per_cpu = 64;
 module_param(max_ios_per_cpu, uint, 0644);
-MODULE_PARM_DESC(max_ios_per_cpu, "Maximum number of concurrent IO operations handled per core. Can be used to prevent IO flooding. In other words, the upper limit on the number of outstanding IOs to issue via the block driver per CPU core. Some file systems and applications queue or perform read-ahead very aggressively, likely to overcome problems with legacy storage solutions. With NVMesh, large numbers of outstanding read requests may lead to network congestion especially when target bandwidth exceeds client bandwidth. Throttling the number of outstanding requests using this parameter can reduce this congestion and improve overall quality of service. Limiting this value often ends up improving performance for the Client and others on the network. If in doubt, start with a value of 8. This setting can be applied dynamically to the kernel module without restarting services.");
+MODULE_PARM_DESC(max_ios_per_cpu, "Max inflight requests per device per cpu");
 
 static void __execute_chain_noplug(struct operation *o);
 static void wq_execute_throttled_operation_chain(struct workqe_struct *work)

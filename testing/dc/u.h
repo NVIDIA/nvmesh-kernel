@@ -1,14 +1,9 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #ifndef U_H_INCLUDED
 #define U_H_INCLUDED
 
 #include "kr_incs.h"
 
-#define trace(fmt, ...) pr_err("nvmesh:(%d)[%s:%s:%d]: " fmt, current->pid, __FILE__, __FUNCTION__, __LINE__, ## __VA_ARGS__)
+#define trace(fmt, ...) pr_err("excelero:(%d)[%s:%s:%d]: " fmt, current->pid, __FILE__, __FUNCTION__, __LINE__, ## __VA_ARGS__)
 #define FIN trace("-->\n")
 #define FOUT trace("<--\n")
 #define LINE trace("---\n")

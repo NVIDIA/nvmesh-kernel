@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "../common/compat/kr_incs_malloc.inc.c"
 #include "block/datapath_ec/nvmeibc_block_dp_ec_gf.h"

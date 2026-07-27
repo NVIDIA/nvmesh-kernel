@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_rdma.h"
 #include "nvmeib.h"
 #include "nvmeib_utils.h"
@@ -277,6 +272,7 @@ struct rdma_connection {
 	struct rdma_listener *listener;
 	/* the qp */
 	struct ib_qp *qp;
+	bool rdda_qp;
 	enum nvmeib_rdma_expect_last_wqe expect_last_wqe;
 	/* the connection event handler */
 	int (*event_handler)(void *context, struct nvmeib_rdma_event *event);
@@ -1403,54 +1399,6 @@ static void iw_event_2_nvmeib_event(struct iw_cm_event *event,
 	NFOUT;
 }
 
-/* Prepare close event structure */
-static void iw_prepare_event(struct nvmeib_rdma_event *rdma_event,
-				    enum nvmeib_rdma_event_type event_type,
-				    int status, void *private_data, u8 private_data_len)
-{
-	rdma_event->event = event_type;
-	rdma_event->status = status;
-	rdma_event->private_data = private_data;
-	rdma_event->private_data_len = private_data_len;
-}
-
-static void iw_send_close_events_with_handler(int (*event_handler)(void *context, struct nvmeib_rdma_event *event),
-					       void *context, int status)
-{
-	struct nvmeib_rdma_event rdma_event = {0};
-
-	NFIN;
-	iw_prepare_event(&rdma_event, NVMEIB_DREQ_RECEIVED, status, NULL, 0);
-	_ND(trace_iw_send_close_events_dreq, "Sending nvmeib_rdma event @EVENT for IW_CM_EVENT_CLOSE",
-		rdma_event.event);
-	event_handler(context, &rdma_event);
-
-	iw_prepare_event(&rdma_event, NVMEIB_DREP_RECEIVED, status, NULL, 0);
-	_ND(trace_iw_send_close_events_drep, "Sending nvmeib_rdma event @EVENT for IW_CM_EVENT_CLOSE",
-		rdma_event.event);
-	event_handler(context, &rdma_event);
-	NFOUT;
-}
-
-static void iw_send_close_events_with_peer_event(int (*on_peer_event)(struct nvmeib_rdma_cm *cm, struct nvmeib_rdma_event *p),
-						   struct nvmeib_rdma_cm *cm, int status)
-{
-	struct nvmeib_rdma_event rdma_event = {0};
-
-	NFIN;
-
-	iw_prepare_event(&rdma_event, NVMEIB_DREQ_RECEIVED, status, NULL, 0);
-	_ND(trace_iw_send_close_events_dreqx, "Sending nvmeib_rdma event @EVENT for IW_CM_EVENT_CLOSE",
-		rdma_event.event);
-	on_peer_event(cm, &rdma_event);
-
-	iw_prepare_event(&rdma_event, NVMEIB_DREP_RECEIVED, status, NULL, 0);
-	_ND(trace_iw_send_close_events_drepx, "Sending nvmeib_rdma event @EVENT for IW_CM_EVENT_CLOSE",
-		rdma_event.event);
-	on_peer_event(cm, &rdma_event);
-	NFOUT;
-}
-
 /* iwarp handler, called when an iwarp event occurs */
 static int iwarp_cm_handler_impl(struct iw_cm_id *cm_id,
 	struct iw_cm_event *event)
@@ -1505,6 +1453,7 @@ static int iwarp_cm_handler_impl(struct iw_cm_id *cm_id,
 			rv = -ENOMEM;
 	}
 	else {
+		iw_event_2_nvmeib_event(event, &rdma_event);
 		/*
 		   this is not a new connection so probably the new event is due to
 		   a change in a client qp.
@@ -1512,16 +1461,7 @@ static int iwarp_cm_handler_impl(struct iw_cm_id *cm_id,
 		if (cm_id != roce->iw_cm_id) {
 			if ((conn = roce_find_rdma_cm(&roce->listener, cm_id))) {
 				roce_conn = conn_2_roce(conn);
-				/* For IW_CM_EVENT_CLOSE, send both DREQ and DREP events as when 
-				   IWCM doesn't pass disconnect event to the cm handler */
-				if (event->event == IW_CM_EVENT_CLOSE) {
-					iw_send_close_events_with_peer_event(roce->listener.on_peer_event,
-									      &roce_conn->conn.cm,
-									      event->status);
-				} else {
-					iw_event_2_nvmeib_event(event, &rdma_event);
-					roce->listener.on_peer_event(&roce_conn->conn.cm, &rdma_event);
-				}
+				roce->listener.on_peer_event(&roce_conn->conn.cm, &rdma_event);
 			}
 			else
 				_NE(error_1_nvmeib_rdma_iwarp_cm_handler_impl, "Received CM event @EVENT but connection is not ours",
@@ -1792,7 +1732,7 @@ static int iwarp_find_path_sock_send_resp(struct find_path_sock_cep *cep)
 			iw_dev->name);
 	} else {
 		memcpy(resp.netdev_name, iw_ndev->name, IFNAMSIZ);
-		dev_put(iw_ndev);
+		nvmeib_public_dev_put(iw_ndev);
 	}
 
 	memcpy(resp.key, find_path_prot_key, sizeof(resp.key));
@@ -2470,7 +2410,7 @@ dec_ref:
 
 out:
 	if (iw_ndev)
-		dev_put(iw_ndev);
+		nvmeib_public_dev_put(iw_ndev);
 	NFOUT;
 	return rv;
 }
@@ -3348,7 +3288,7 @@ bool nvmeib_rdma_try_inv_cm(struct nvmeib_rdma_cm *cm)
 				spin_unlock_irqrestore(&roce_conn->conn.lock, flags);
 				/* Move the QP to error state to cancel the in-progress CM operation */
 				ib_set_qp_err(roce_conn->conn.qp);
-				roce_conn->iw_cm_inv_stats.start_wait = ktime_get();
+				roce_conn->iw_cm_inv_stats.start_wait = nvmeib_public_ktime_get();
 				/* Wait for event */
 				if ((rv_w = wait_for_completion_interruptible_timeout(&done, wait_cm_inv_timeout)) <= 0) {
 					spin_lock_irqsave(&roce_conn->conn.lock, flags);
@@ -3360,7 +3300,7 @@ bool nvmeib_rdma_try_inv_cm(struct nvmeib_rdma_cm *cm)
 					BUG_ON(1);
 					goto out;
 				}
-				roce_conn->iw_cm_inv_stats.end_wait = ktime_get();
+				roce_conn->iw_cm_inv_stats.end_wait = nvmeib_public_ktime_get();
 				if (roce_conn->conn.dev->iw_cm_id_inv_stats_priv) {
 					/* Update stats for iw_cm invalidate */
 					struct iw_cm_inv_stats *stats = roce_conn->conn.dev->iw_cm_id_inv_stats_priv;
@@ -3851,16 +3791,10 @@ static int iw_conn_cm_handler(struct iw_cm_id *cm_id,
 			}
 		}
 		spin_unlock_irqrestore(&conn->conn.lock, flags);
-		/* For IW_CM_EVENT_CLOSE, send both DREQ and DREP events as when 
-		   IWCM doesn't pass disconnect event to the cm handler */
-		iw_send_close_events_with_handler(conn->conn.event_handler,
-						  conn->conn.context,
-						  event->status);
-		goto unlock;
+		break;
 	default:
 		_NE(t_01_iw_conn_cm_handler_got_inv_close_evt, "invalid iwarp event @INT\n", event->event);
 	}
-
 	iw_event_2_nvmeib_event(event, &rdma_event);
 	rdma_event.private_data = &iw_pd->user_pd;
 	rdma_event.private_data_len = user_pd_len;
@@ -4296,12 +4230,65 @@ struct ib_qp* nvmeib_rdma_create_qp(struct nvmeib_rdma_cm *cm_id,
 	}
 
 	conn->qp = qp;
+	conn->rdda_qp = false;
 
 out:
 	NFOUT;
 	return qp;
 }
 EXPORT_SYMBOL(nvmeib_rdma_create_qp);
+
+struct ib_qp* nvmeib_rdma_create_rdda_qp(struct nvmeib_rdma_cm *cm_id,
+	struct ib_pd *pd, struct ib_qp_init_attr *qp_init, int port, u16 pkey,
+	int qp_access)
+{
+	struct ib_qp *qp = NULL;
+	struct rdma_connection *conn;
+	struct nvmeib_device_public_ops *pops = nvmeib_ibdr_hwdev_pops_get(pd->device);
+	int rv;
+
+	NFIN;
+	if (!pops) {
+		_NE(error_nvmeib_rdma_nvmeib_rdma_create_rdda_qp, "Could not get access to public ops for device @DEVICE_NAME", pd->device->name);
+		goto out;
+	}
+
+	if (cm_id->cm_type != _cm_connection ||
+		cm_id->rdma_type == _rdma_lb ||
+		cm_id->rdma_type == _rdma_lb_accept) {
+		_NE(error_1_nvmeib_rdma_nvmeib_rdma_create_rdda_qp, "Invalid cm_id @CM_ID (type @CM_TYPE, rdma_type @RDMA_TYPE) for RDDA",
+		   cm_id, cm_id->cm_type, cm_id->rdma_type);
+		goto out;
+	}
+	else
+		conn = cm_2_c(cm_id);
+
+	if (IS_ERR_OR_NULL(qp = (*pops->create_rdda_qp)(pd, qp_init))) {
+		_NE(error_2_nvmeib_rdma_nvmeib_rdma_create_rdda_qp, "create_rdda_qp failed (@PTR_ERR) for device @DEVICE_NAME", PTR_ERR(qp), pd->device->name);
+		qp = NULL;
+		goto out;
+	}
+
+	if (cm_id->rdma_type != _rdma_roce) {
+		if ((rv = ib_init_qp(conn, pd, qp, port, pkey, qp_access))) {
+			_NE(error_3_nvmeib_rdma_nvmeib_rdma_create_rdda_qp, "ib_init_qp failed (@RV)", rv);
+			_ib_destroy_qp(qp);
+			qp = NULL;
+			goto out;
+		}
+	}
+
+	conn->qp = qp;
+	conn->rdda_qp = true;
+
+out:
+	if (pops)
+		nvmeib_ibdr_hwdev_pops_put(pops);
+
+	NFOUT;
+	return qp;
+}
+EXPORT_SYMBOL(nvmeib_rdma_create_rdda_qp);
 
 static struct ib_qp *get_cm_qp(struct nvmeib_rdma_cm *cm_id)
 {
@@ -4311,6 +4298,28 @@ static struct ib_qp *get_cm_qp(struct nvmeib_rdma_cm *cm_id)
 		qp = conn->qp;
 
 	return qp;
+}
+
+static void destroy_rdda_qp(struct ib_qp *qp)
+{
+	struct nvmeib_device_public_ops *pops = nvmeib_ibdr_hwdev_pops_get(qp->device);
+	int rv;
+
+	NFIN;
+	if (!pops) {
+		_NE(error_nvmeib_rdma_destroy_rdda_qp, "Could not get access to public ops for device @DEVICE_NAME", qp->device->name);
+		goto out;
+	}
+
+	if ((rv = (*pops->destroy_rdda_qp)(qp))) {
+		_NE(error_1_nvmeib_rdma_destroy_rdda_qp, "destroy_rdda_qp failed (@RV) for qpn: @QP_NUM device @DEVICE_NAME",
+		   rv, qp->qp_num, qp->device->name);
+	}
+out:
+	if (pops)
+		nvmeib_ibdr_hwdev_pops_put(pops);
+
+	NFOUT;
 }
 
 /**
@@ -4332,7 +4341,11 @@ void nvmeib_rdma_destroy_qp(struct nvmeib_rdma_cm *cm_id,
 			switch (cm_id->rdma_type) {
 			case _rdma_ib:
 			{
-				_ib_destroy_qp(qp);
+				struct ib_rdma_connection *ib_conn = cm_2_ibc(cm_id);
+				if (ib_conn && ib_conn->conn.rdda_qp)
+					destroy_rdda_qp(qp);
+				else
+					_ib_destroy_qp(qp);
 				break;
 			}
 			case _rdma_lb:
@@ -4348,6 +4361,8 @@ void nvmeib_rdma_destroy_qp(struct nvmeib_rdma_cm *cm_id,
 						rdma_destroy_qp(roce_conn->cm_id);
 						roce_conn->cma_internal_qp = false;
 					}
+					else if (roce_conn->conn.rdda_qp)
+						destroy_rdda_qp(qp);
 					else
 						_ib_destroy_qp(qp);
 					roce_conn->conn.qp = NULL;
@@ -4361,7 +4376,10 @@ void nvmeib_rdma_destroy_qp(struct nvmeib_rdma_cm *cm_id,
 			{
 				struct roce_rdma_connection *roce_conn = cm_2_rocec(cm_id);
 				if (roce_conn) {
-					_ib_destroy_qp(qp);
+					if (roce_conn->conn.rdda_qp)
+						destroy_rdda_qp(qp);
+					else
+						_ib_destroy_qp(qp);
 				}
 			}
 			break;
@@ -5663,7 +5681,7 @@ int nvmeib_rdma_find_path(struct nvmeib_rdma_path_info *info)
 	}
 
 	link_layer = rdma_port_get_link_layer(info->dev->ib_dev, info->src_port);
-	is_roce = info->service_port == NVMEIB_PORT_ID;
+	is_roce = info->service_port == NVMEIB_EXCELERO_PORT_ID;
 	if ((is_roce && link_layer != IB_LINK_LAYER_ETHERNET) ||
 		(!is_roce && link_layer != IB_LINK_LAYER_INFINIBAND)) {
 		_NT(trace_2_nvmeib_rdma_nvmeib_rdma_find_path, "No match between link layer (@LINK_LAYER) and destination address (@IS_ROCE) "
@@ -7087,7 +7105,7 @@ static int fill_rdma_port_gid(struct ib_device *ib_device, u8 port,
 		else
 			port_gid->vlan_id = 0;
 		if (do_ndev_put) /* ndev is from get_netdev -> put */
-			dev_put(ndev);
+			nvmeib_public_dev_put(ndev);
 	}
 	else {
 		port_gid->ndev_name[0] = 0;
@@ -7571,7 +7589,7 @@ next_gid:
 			rdma_put_gid_attr((const struct ib_gid_attr *)gid_attr_ptr);
 #elif IB_QUERY_ROCE_GID_DOES_DEV_HOLD
 		if (gid_attr_ptr && gid_attr.ndev)
-			dev_put(gid_attr.ndev);
+			nvmeib_public_dev_put(gid_attr.ndev);
 #endif
 		if (rdma_port_gid->valid)
 			break;
@@ -7798,7 +7816,7 @@ static int internal_netdev_event(struct notifier_block *nb, unsigned long event,
 			port = i;
 			if (event == NETDEV_UNREGISTER) {
 #if IB_QUERY_ROCE_GID_DOES_DEV_HOLD
-				dev_put(port_data[port].ndev);
+				nvmeib_public_dev_put(port_data[port].ndev);
 #endif
 				port_data[port].ndev = NULL;
 				handler_private->n_ndev_ports--;
@@ -7935,7 +7953,7 @@ EXPORT_SYMBOL(nvmeib_rdma_register_net_notifiers);
 
 void nvmeib_rdma_unregister_net_notifiers(void)
 {
-	return;
+	return 0;
 }
 EXPORT_SYMBOL(nvmeib_rdma_unregister_net_notifiers);
 
@@ -8033,7 +8051,7 @@ int nvmeib_rdma_unregister_event_handler(struct nvmeib_rdma_event_handler *handl
 		for (i = 1; i <= ib_dev->phys_port_cnt; i++, port_data++) {
 			if (port_data->ndev) {
 #if IB_QUERY_ROCE_GID_DOES_DEV_HOLD
-				dev_put(port_data->ndev);
+				nvmeib_public_dev_put(port_data->ndev);
 #endif
 				port_data->ndev = NULL;
 			}

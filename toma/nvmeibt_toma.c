@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_debug.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -432,6 +427,7 @@ static struct nvmeibt_wq *leader_wq;
 static struct nvmeibt_wq *stat_wq;
 static struct nvmeibt_wq *recoveries_progress_wq;
 static struct nvmeibt_wq *read_disk_from_smart_wq;
+static struct nvmeibt_wq *local_disk_format_wq;
 
 static pthread_t toma_main_thread;
 //static char executables_dir[PATH_MAX];
@@ -702,6 +698,10 @@ static void terminate_toma(int rv)
 	nvmeibt_wq_drain(toma_persistency_wq);
 	nvmeibt_wq_destroy(toma_persistency_wq);
 	toma_persistency_wq = NULL;
+
+	nvmeibt_wq_drain(local_disk_format_wq);
+	nvmeibt_wq_destroy(local_disk_format_wq);
+	local_disk_format_wq = NULL;
 
 	nvmeibt_wq_drain(recoveries_progress_wq);
 	nvmeibt_wq_destroy(recoveries_progress_wq);
@@ -1047,12 +1047,11 @@ static bool toma_wakeup_test_and_set(enum NVMEIBT_TOMA_WAKEUP_TYPE type, bool va
 	return ret;
 }
 
-struct __attribute__((aligned(16))) toma_wakeup_args {
+struct toma_wakeup_args {
 	void	*ptr;
 	int		type;
 	int32_t	filler_to_16_bytes_align;
 };
-_Static_assert(sizeof(struct toma_wakeup_args) == 16, "sizeof(struct toma_wakeup_args) != 16, Not sure this is mandatory");
 
 /* request wakeup of TOMA main thread */
 int nvmeibt_toma_trigger_wakeup(enum NVMEIBT_TOMA_WAKEUP_TYPE type, void *ptr)
@@ -1219,6 +1218,21 @@ int nvmeibt_toma_persistency_add_work(struct nvmeibt_wq_entry *e)
 	NFIN;
 	if (toma_persistency_wq) {
 		nvmeibt_wq_addw(toma_persistency_wq, e);
+		rv = 0;
+	}
+	else
+		rv = -1;
+	NFOUT;
+	return rv;
+}
+
+int nvmeibt_local_disk_format_add_work(struct nvmeibt_wq_entry *e)
+{
+	int rv;
+
+	NFIN;
+	if (local_disk_format_wq) {
+		nvmeibt_wq_addw(local_disk_format_wq, e);
 		rv = 0;
 	}
 	else
@@ -1855,17 +1869,20 @@ static volatile sig_atomic_t got_sigusr2 = 0;		// Non critical signal
 static volatile int received_sig_no;				// Critical shutting down signal
 static void sig_handler(int32_t n, uint64_t addr)
 {
-	if (n == SIGCHLD)
-		return; /* do nothing, no logs, got_sigchld = 1;*/
-	N_IMf(ttsgh1, "got signal=@INT addr=@LX", n, addr);
-	if (n == SIGUSR1) {
+	fprintf(stderr, "%s[%d]:%s(): n=%d   addr=0x%lx\n",__FILE__, __LINE__,
+			__FUNCTION__,  n, addr);
+	if (n == SIGCHLD) {
+		/* got_sigchld = 1;*/
+	} else if (n == SIGUSR1) {
 		got_sigusr1 = 1; /* SIGUSR1 is used for dumping status */
 	} else if (n == SIGUSR2) {
 		got_sigusr2 = 1; /* SIGUSR2 is used to start/stop logging */
 	} else if (n == SIGHUP) {
 		nvmeibt_global_mark_is_reread_nvmesh_conf_required();
 	} else {
-		received_sig_no = n;	// Unknown signal, will cause shutdown.
+		N_IMf(trace_toma_sig_handler, "got signal=@SIGNAL", n);
+		fprintf(stderr, "%s[%d]:%s(): signal=%d\n",__FILE__, __LINE__, __FUNCTION__,  n);
+		received_sig_no = n;
 	}
 }
 /******************************************************************************/
@@ -2085,13 +2102,12 @@ int print_status_time(int (*printf_fn)(void *ctx, const char *fmt, ...), void *p
 	struct tm	tmp_tm;
 
 	if (timespec_eq(ts, TIMESPEC_ZERO)) {
-		(*printf_fn)(printf_ctx, "Not Set      ");
-	} else {
 		localtime_r(&ts.tv_sec, &tmp_tm);
 		strf_len = strftime(time_str, sizeof(time_str), "%H:%M:%S", &tmp_tm);
 		sprintf(time_str + strf_len, ".%03lld", NSEC_TO_MSEC(ts.tv_nsec));
 		(*printf_fn)(printf_ctx, "%s", time_str);
-	}
+	} else
+		(*printf_fn)(printf_ctx, "Not Set      ");
 	return 0;
 }
 
@@ -2201,7 +2217,7 @@ static void write_stat_freer(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
+static void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn)(void *ctx, const char *fmt, ...), void *printf_ctx)
 {
 	struct timespec				now;
 	struct tm					timeinfo;
@@ -2259,13 +2275,10 @@ void print_status_str(enum nvmeibs_toma_status_type status_type, int (*printf_fn
 		nvmeibt_print_alloc_free_summary_table(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_ZEROING)
 		nvmeibt_block_device_print_zeroing_status(printf_fn, printf_ctx);
-	if (status_type == NVMEIBS_TOMA_STATUS_ALL_JSON) {
-		(*printf_fn)(printf_ctx, "{");
+	if (status_type == NVMEIBS_TOMA_STATUS_ALL_JSON)
 		nvmeibt_raft_print_status_json(printf_fn, printf_ctx);
-		(*printf_fn)(printf_ctx, ",\"num_clients\" : %d}\n", XHASHTABLE_N_ELEMENTS(&nvmeibt_global_get_global()->clients_hash));
-	}
 	if (status_type == NVMEIBS_TOMA_STATUS_ALL || status_type == NVMEIBS_TOMA_STATUS_KAFKA_INFO)
-		nvmeibt_kafka_print_status(printf_fn, printf_ctx);
+		nvmeibt_raft_print_kafka_status(printf_fn, printf_ctx);
 	if (status_type == NVMEIBS_TOMA_STATUS_NM_JSON)
 		nvmeibt_nm_print_status_json(nw_node, printf_fn, printf_ctx);
 
@@ -2796,7 +2809,7 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	/* start our logger */
 	time(&cur_time_t);
 	nvmeibt_strlcpy(cur_time_t_str_no_newline, ctime(&cur_time_t), 25);
-	N_IMf(trace_toma_nvmeibt_toma_init, // Do not change this trace id!!! it is used when filtering toma restarts, change will require to filter by both old and new id
+	N_IMf(trace_toma_nvmeibt_toma_init,
 		  "now='@STR' Starting TOMA (@STR), compiled @STR, @STR",
 		  cur_time_t_str_no_newline, MOD_STR, __DATE__, __TIME__);
 	N_IMf(trace_1_toma_nvmeibt_toma_init,
@@ -2864,6 +2877,11 @@ static int nvmeibt_toma_init(int argc, char *argv[])
 	toma_persistency_wq = nvmeibt_wq_create("Toma_Persistency_offload");
 	if (!toma_persistency_wq) {
 		N_Ef(fkitu66, "Failed to create wq persistency-offload");
+		goto out;
+	}
+	local_disk_format_wq = nvmeibt_wq_create("Local_Disk_Format");
+	if (!local_disk_format_wq) {
+		N_Ef(dloi795, "Failed to create wq local_disk_format offload");
 		goto out;
 	}
 	recoveries_progress_wq = nvmeibt_wq_create("Toma_recoveries_offload");
@@ -2978,6 +2996,9 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 	int 							read_cmdl_rv;
 	struct nvmeibt_toma_fd_in_use	*trigger_fd;
 	//
+	struct nvmeibt_Str				*out_str;
+	int								output_file_fd;
+	int								n_written = 0;
 
 	/* read command line */
 	read_cmdl_rv = read_cmdl(argc, argv, 0);
@@ -3002,14 +3023,10 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 		goto exit;
 	}
 	if (nvmeibt_toma_is_running_as_a_utility()) {
-		int n_written = 0;
-		int	output_file_fd;
-		const bool has_in_out_files = (nvmeibt_toma_cmdline_arg_input_file_name[0] && nvmeibt_toma_cmdline_arg_output_file_name[0]);
-		if (!has_in_out_files) {
-			N_Ef(macvgh3, "Missing files '@STR' '@STR'", nvmeibt_toma_cmdline_arg_input_file_name, nvmeibt_toma_cmdline_arg_output_file_name);
-		} else if (nvmeibt_is_converting_json_to_persistence) {
+		if (nvmeibt_is_converting_json_to_persistence) {
+			if (nvmeibt_toma_cmdline_arg_input_file_name[0] && nvmeibt_toma_cmdline_arg_output_file_name[0]) {
 				struct nvmeibt_persist_and_wire_buf		*out_persist_and_wire_buf;
-				rv = nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(nvmeibt_toma_cmdline_arg_input_file_name);	// Not Important, Scripts never call this directly, It is used manually
+				nvmeibt_mm_json_read_JSON_and_generate_persist_and_wire(nvmeibt_toma_cmdline_arg_input_file_name);
 				out_persist_and_wire_buf = nvmeibt_raft_get_my_raft()->leader_to_commit_persist_and_wire_buf_full;
 				output_file_fd = NNVMEIBT_OPEN(wmtuc7d, nvmeibt_toma_cmdline_arg_output_file_name, O_CREAT | O_WRONLY | O_TRUNC, 0755);
 				if (output_file_fd >= 0) {
@@ -3017,23 +3034,29 @@ static int __attribute__ ((used)) run(int argc, char *argv[])
 												persist_and_wire_buf_get_total_len(out_persist_and_wire_buf), 0, 0);
 					NNVMEIBT_CLOSE(x82oq0p, output_file_fd);
 				}
+			} else {
+				N_Ef(va6734as9i234j, "");
+			}
 		} else if (nvmeibt_is_converting_persistence_to_json) {
-				struct nvmeibt_Str *out_str = NNVMEIBT_STR_ALLOC(vgsywje);
+			if (nvmeibt_toma_cmdline_arg_input_file_name[0] && nvmeibt_toma_cmdline_arg_output_file_name[0]) {
+				out_str = NNVMEIBT_STR_ALLOC(vgsywje);
 				nvmeibt_Str_sprintf(out_str, "{\n");
-				(void)nvmeibt_raft_read_persistence_and_upd_committed(nvmeibt_toma_cmdline_arg_input_file_name, out_str); // Cannot trust this rv
+				nvmeibt_raft_read_persistence_and_upd_committed(nvmeibt_toma_cmdline_arg_input_file_name, out_str);
 				nvmeibt_Str_sprintf(out_str, "\n}\n");
 				output_file_fd = NNVMEIBT_OPEN(hd82k49, nvmeibt_toma_cmdline_arg_output_file_name, O_CREAT | O_WRONLY | O_TRUNC, 0755);
 				if (output_file_fd >= 0) {
 					n_written = NNVMEIBT_PWRITE(cbu9o2p, output_file_fd, nvmeibt_Str_str(out_str), nvmeibt_Str_strlen(out_str), 0, 0);
 					NNVMEIBT_CLOSE(bhsykro, output_file_fd);
 				}
-				NNVMEIBT_STR_FREE(bhsykro1, out_str);
+			} else {
+				N_Ef(macvgh3, "Missing files '@STR' '@STR'", nvmeibt_toma_cmdline_arg_input_file_name, nvmeibt_toma_cmdline_arg_output_file_name);
+			}
 		} else {
 			N_Ef(r0wlsl8, "OOPS! Unexpected state");
 		}
 		N_IMf(v2d7ai3, "n_written=@INT input_file='@STR' output_file='@STR'", n_written, nvmeibt_toma_cmdline_arg_input_file_name, nvmeibt_toma_cmdline_arg_output_file_name);
-		nvmeibt_topology_free_resources();
-		rv = (n_written > 8) ? 0 : -1;		// Important, logs collector script uses this 'rv'. Empty json is failure ("{}\n") or empty bin topology
+	}
+	if (nvmeibt_toma_is_running_as_a_utility()) {
 		goto out;
 	}
 	/* let's go to work... */

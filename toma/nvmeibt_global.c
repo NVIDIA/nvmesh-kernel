@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include <sys/stat.h>
 #include "nvmeibt_node.h"
 #include "nvmeibt_disk_segment.h"
@@ -89,6 +84,7 @@ void nvmeibt_global_init(void)
 		"	N_CHUNKS="MACRO_DEF_TO_STR(NVMEIBT_MAX_N_CHUNKS)"\n"
 		"	N_CSV_LINES="MACRO_DEF_TO_STR(NVMEIBT_MAX_N_CSV_LINES)"\n"
 		"	N_CLIENTS_PER_NODE="MACRO_DEF_TO_STR(NVMEIBT_MAX_N_CLIENTS_PER_NODE)"\n"
+		"	N_CHUNKS="MACRO_DEF_TO_STR(NVMEIBT_MAX_N_CHUNKS)"\n"
 		"	N_PRAIDS="MACRO_DEF_TO_STR(NVMEIBT_MAX_N_PRAIDS)"\n"
 		"	N_SEGMENTS_IN_PRAID="MACRO_DEF_TO_STR(NVMEIBT_MAX_N_SEGMENTS_IN_PRAID)"\n"
 		"	N_PORTS_PER_NIC="MACRO_DEF_TO_STR(NVMEIBT_MAX_N_PORTS_PER_NIC)"\n"
@@ -222,10 +218,11 @@ void nvmeibt_global_issue_leader_report_praids_status_to_mgmt(void)
 
 send_json_payload:
 	{
-		//char 									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
-		//nvmeibt_strlcpy(unique_key, "praid_status", sizeof(unique_key) - strlen(unique_key));	TODO(Beware, if the report is partial it might delete older reports);
+		char 									unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
+
+		nvmeibt_strlcpy(unique_key, "praid_status", sizeof(unique_key) - strlen(unique_key));	TODO(Beware, if the report is partial it might delete older reports);
 		// nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_praid_id_str(praid), sizeof(unique_key) - strlen(unique_key));
-		nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*unique_key*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+		nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 		n_segs_in_report_to_mgmt_total = 0;	// Signify that no need to resend it
 		nvmeibt_global_set_last_global_report_to_mgmt_timespec(nvmeibt_global_get_cur_event_start_time());
 	}
@@ -308,7 +305,7 @@ static void write_gpt_entries_json(struct nvmeibt_local_disk *cur_local_disk, st
 	struct nvmeibt_disk_gpt_partition_entry			*cur_gpt_entry;
 	union nvmeib_uuid								mgmt_db_uuid;
 	BOOL											is_seg_found;
-	BOOL											is_nvmesh_data_partition;
+	BOOL											is_excelero_data_partition;
 	struct nvmeibt_seg_active						*seg_active;
 
 	NFIN;
@@ -318,7 +315,7 @@ static void write_gpt_entries_json(struct nvmeibt_local_disk *cur_local_disk, st
 		cur_gpt_entry = &cur_local_disk->main_gpt.entries[part_idx];
 		mgmt_db_uuid = nvmeib_uuid_null_val;
 		is_seg_found = false;
-		is_nvmesh_data_partition = false;
+		is_excelero_data_partition = false;
 
 		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(cur_gpt_entry)) {
 			continue;
@@ -341,31 +338,31 @@ static void write_gpt_entries_json(struct nvmeibt_local_disk *cur_local_disk, st
 		} else {
 			mgmt_db_uuid = nvmeib_uuid_null_val;
 		}
-		if (	ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_METADATA_PARTITION_TYPE_GUID) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_METADATA_PARTITION_TYPE_GUID_OLD) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_DATA_PARTITION_TYPE_GUID_DATA_OLD) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_SERJIO_DB_PARTITION_TYPE_GUID)) {
+		if (	ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_METADATA_PARTITION_TYPE_GUID) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_METADATA_PARTITION_TYPE_GUID_OLD) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_DATA_PARTITION_TYPE_GUID_DATA_OLD) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID)) {
 			sprintf(owner, "nvmesh");
-			is_nvmesh_data_partition = true;
+			is_excelero_data_partition = true;
 		} else {
 			sprintf(owner, "system");
 		}
 #if NO_USE_FOR_THIS_INFO
-		if (	ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_METADATA_PARTITION_TYPE_GUID) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_METADATA_PARTITION_TYPE_GUID_OLD) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID) ||
-				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &NVMESH_SERJIO_DB_PARTITION_TYPE_GUID)) {
-			is_nvmesh_md_partition = true;
+		if (	ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_METADATA_PARTITION_TYPE_GUID) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_METADATA_PARTITION_TYPE_GUID_OLD) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID) ||
+				ARE_UUID_EQ(&cur_gpt_entry->partition_type_guid,  &EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID)) {
+			is_excelero_md_partition = true;
 		}
 #endif	// #if NO_USE_FOR_THIS_INFO
 		char16_str_to_str(cur_gpt_entry->partition_name, GPT_MAX_PARTITION_NAME_LENGTH + 1, part_name);
 		mgmt_db_uuid_to_report = nvmeibt_union_uuid_to_urn_uuid(&mgmt_db_uuid);
 		partition_uuid = nvmeibt_union_uuid_to_urn_uuid(&cur_gpt_entry->partition_guid);
 		// If there is no segment but there is a gpt entry, we mark it as zeroed, this shouldn't happen generally so we issue an error but try to survive.
-		if (!is_seg_found && !is_nvmesh_data_partition) {
+		if (!is_seg_found && !is_excelero_data_partition) {
 			N_Wf(vxime6a, "gpt entry=@ENTRY_STR no seg found, assuming finished zeroing but not yet deleted..", partition_uuid.str);
 		}
 		nvmeibt_Str_sprintf(report_target,
@@ -639,6 +636,7 @@ static void send_report_target_if_needed(void)
 	struct timespec				diff_timeout;
 	struct nvmeibt_local_disk	*local_disk;
 	static struct nvmeibt_Str	*json_payload = NULL;
+	char 						unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
 
 	NFIN;
 	if (!nvmeibt_kafka_is_mgmt_zone_specified()) {
@@ -692,10 +690,9 @@ static void send_report_target_if_needed(void)
 	max_report_target_len = max(max_report_target_len, nvmeibt_Str_strlen(report_target) + 10);
 	nvmeibt_Str_sprintf(report_target, "}}}");
 
-	//char unique_key[NVMEIBT_KAFKA_MAX_UNIQUE_KEY_LEN];
-	//nvmeibt_strlcpy(unique_key, "report_target", sizeof(unique_key));
-	//nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_get_my_hostname(), sizeof(unique_key) - strlen(unique_key));
-	nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*unique_key*/, nvmeibt_Str_str(report_target), nvmeibt_Str_strlen(report_target) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
+	nvmeibt_strlcpy(unique_key, "report_target", sizeof(unique_key));
+	nvmeibt_strlcpy(unique_key + strlen(unique_key), nvmeibt_get_my_hostname(), sizeof(unique_key) - strlen(unique_key));
+	nvmeibt_kafka_outgoing_msgs_queue_add(unique_key, nvmeibt_Str_str(report_target), nvmeibt_Str_strlen(report_target) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_HIGH);
 	global_ctx.last_local_report_target_to_mgmt_time = now;
 	NVMEIBT_GLOBAL_CLEAR_REPORT_TARGET_HAS_NEW_DATA(iwkmzb2);
 out:
@@ -903,11 +900,8 @@ out:
 
 void nvmeibt_global_idle_time_activities(void)
 {
-	static int64_t				n_calls = 0;
-	const int64_t				n_calls_at_artificial_full_log = 10;
-	static int					last_kafka_idle_print_time_sec = 0;
-	const int					kafka_idle_time_sec = nvmeibt_global_get_cur_event_start_time().tv_sec - nvmeibt_global_get_global()->kafka_last_activity_time.tv_sec;
-
+	static int64_t		n_calls = 0;
+	const int64_t		n_calls_at_artificial_full_log = 10;
 	NFIN;
 	if (n_calls >= n_calls_at_artificial_full_log) {
 		if (n_calls == n_calls_at_artificial_full_log) {
@@ -916,16 +910,6 @@ void nvmeibt_global_idle_time_activities(void)
 		update_traces();
 	}
 	n_calls++;
-
-	if (kafka_idle_time_sec > 60) { // kafka was idle more than 1 min
-		struct timespec now;
-		getnstimeofday(&now);
-		if (now.tv_sec - last_kafka_idle_print_time_sec > 30) { // print the error every 30 sec
-			N_ETf(i990kss, "Kafka client deadlock detected (for @INT[sec])! Consider manual restart...", kafka_idle_time_sec);
-			last_kafka_idle_print_time_sec = now.tv_sec;
-		}
-	}
-
 	read_rpc_config_from_persist(false);
 	nvmeibt_global_reread_nvmesh_conf_as_needed();
 	//
@@ -1027,18 +1011,16 @@ static bool is_core_file_new(void)
 	struct dirent		*entry;
 	char				core_full_path[256];
 	uint32_t			newest_core_timestamp_sec = 0;
-	const char			systemd_coredump_dir[] = TOMA_ROOT_DIR "var/lib/systemd/coredump/";
-	const char			ubuntu_coredump_dir[] =  TOMA_ROOT_DIR "var/lib/apport/coredump/";
+	const char			systemd_coredump_dir[] = "/var/lib/systemd/coredump/";
+	const char			ubuntu_coredump_dir[] = "/var/lib/apport/coredump/";
 	size_t				dir_name_len;
 	struct stat			st;
-	const char			leader_file_name[] = TOMA_LOG_DIR "/toma_leader_name";
+	const char			leader_file_name[] = TOMA_LOG_DIR"/toma_leader_name";
 	time_t				leader_file_timestamp_sec = 0;
 	bool				is_new = 0;
 	int					rc;
-	struct timespec		now;
 
 	NFIN;
-	getnstimeofday(&now);
 	// Get the newest_core_timestamp_sec
 	// Unfortunatelly, there is no simple generic method to locate the coredump directory
 	d = opendir(systemd_coredump_dir);
@@ -1077,8 +1059,8 @@ static bool is_core_file_new(void)
 		goto out;
 	}
 	// Now that we have the core's date, decide whether is_new
-	if (now.tv_sec - newest_core_timestamp_sec < (2 * 24 * 3600)) {
-		N_Tf(2okex6z, "core=@STR is_new @LLD sec old", core_full_path, now.tv_sec - newest_core_timestamp_sec);
+	if (nvmeibt_global_get_cur_event_start_time().tv_sec - newest_core_timestamp_sec < (2 * 24 * 3600)) {
+		N_Tf(2okex6z, "core=@STR is_new @LLD sec old", core_full_path, nvmeibt_global_get_cur_event_start_time().tv_sec - newest_core_timestamp_sec);
 		is_new = 1;
 	}
 	// Try to detect whether the last TOMA run ended-up with a core dump
@@ -1108,14 +1090,14 @@ static int n_toma_restarts_in_the_last_5_days(void)
 {
 	char		cmd[256];
 	char		n_restarts_file_name[64];
-	char		n_as_str[10] = {0};
+	char		n_as_str[10];
 	int			fd = 0;
 	int			rv = 0;
 	int			n_bytes_read;
 	int			system_status;
-	snprintf(n_restarts_file_name, sizeof(n_restarts_file_name), TOMA_ROOT_DIR "tmp/jctl_%d", getpid());
-	snprintf(cmd, sizeof(cmd), TOMA_BINLOG_DIR "/pager " TOMA_BINLOG_DIR " -l toma.eter.binlog -t now-120h --nogreet -f 'trace=trace_toma_nvmeibt_toma_init' | wc -l > %s", n_restarts_file_name);
-	// Todo: Consider using faster code instead: snprintf(cmd, sizeof(cmd), "find " TOMA_ROOT_DIR " -name toma.binlog_marker* -mmin -7200 | wc -l > %s", n_restarts_file_name);
+
+	snprintf(n_restarts_file_name, sizeof(n_restarts_file_name), "/tmp/jctl_%d", getpid());
+	snprintf(cmd, sizeof(cmd), "journalctl -u nvmeshtoma --since='-5days' --grep='Starting NVMesh Toma' | grep nvmeshtarget | wc -l > %s", n_restarts_file_name);
 	N_Tf(0kkdoks, "@STR", cmd);
 	system_status = system(cmd);
 	if (!WIFEXITED(system_status) || WEXITSTATUS(system_status)) {
@@ -1141,7 +1123,7 @@ out:
 
 /************************  logs_snapshotting_WQ  ******************************/
 
-static bool is_logs_snapshotting_slowpath_wq_in_the_air = 0;	// Not atomic becuases accesses only from Toma main thread
+static bool is_logs_snapshotting_slowpath_wq_in_the_air = 0;
 struct logs_snapshotting_slowpath_wq_entry {
 	struct nvmeibt_wq_entry 		wq_entry;
 	bool							is_first_run_after_boot;
@@ -1311,13 +1293,9 @@ out:
 
 void nvmeibt_log_snapshotting_shutdown(void)
 {
-	int i;
-	for (i = 0; (i < 20) && is_logs_snapshotting_slowpath_wq_in_the_air; i++) {
+	while (is_logs_snapshotting_slowpath_wq_in_the_air) {
 		N_Tf(rftsikl, "Awaiting for the running task to end");
 		nanosleep(&(struct timespec){0, MSEC_TO_NSEC(100)}, NULL); // 100ms
-	}
-	if (is_logs_snapshotting_slowpath_wq_in_the_air) {
-		N_Ef(rftsikk, "Work still running, not waiting anymore, application may crash...");
 	}
 }
 

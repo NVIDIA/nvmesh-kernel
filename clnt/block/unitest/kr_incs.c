@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 // For documentation, see Header in H file
 /*****************************************************************************/
 // Includes
@@ -402,11 +397,6 @@ out:
 	return ptr;
 }
 
-void __percpu *__alloc_percpu_gfp(size_t size, size_t align, gfp_t gfp) {
-	(void)gfp;
-	return __alloc_percpu(size, align);
-}
-
 void free_percpu(void __percpu *ptr) {
 	void *real_ptr;
 	if (ptr) {
@@ -426,7 +416,7 @@ void *per_cpu_kalloc_ptr(void __percpu *ptr, int cpu) {
 	void *real_ptr;
 	size_t allocated_size;
 	BUG_ON(!ptr);
-	BUG_ON(cpu < 0 || cpu >= (int)nr_cpu_ids);
+	BUG_ON(cpu < 0 || cpu >= nr_cpu_ids);
 	BUG_ON(!((uintptr_t)ptr & PER_CPU_DYN_MEM));	// Must be 1 aligned
 	real_ptr = (void *)((uintptr_t)ptr & ~PER_CPU_DYN_MEM);
 	BUG_ON(!real_ptr);
@@ -1439,7 +1429,7 @@ long __wait_event_interruptible_timeout(wait_queue_head_t *q, unsigned long jiff
 // 2) assigning a "cpu" to a kthread upon creation.
 // 3) creating a lock per cpu & having the lock acquired/release upon get/put cpu, to allow only one kthread to execute the critical section of percpu on the cpu it is executing.
 // in the future, we can change the assignment of task_struct to cpu, when the state indicate that the getcpu() critical section hasnt been taken.
-unsigned nr_cpu_ids = CONFIG_NR_CPUS;
+int nr_cpu_ids = CONFIG_NR_CPUS;
 
 
 
@@ -3047,13 +3037,6 @@ void seq_printf(struct seq_file *m, const char *fmt, ...)
 	(void)fmt;
 }
 
-void seq_vprintf(struct seq_file *m, const char *fmt, va_list args)
-{
-	(void)m;
-	(void)fmt;
-	(void)args;
-}
-
 int seq_open(struct file *file, const struct seq_operations *ops)
 {
 	(void)file;
@@ -3082,21 +3065,6 @@ loff_t seq_lseek(struct file *file, loff_t offset, int whence)
 	(void)file;
 	(void)offset;
 	(void)whence;
-	return 0;
-}
-
-int single_open(struct file *file, int (*show)(struct seq_file *, void *), void *data)
-{
-	(void)file;
-	(void)show;
-	(void)data;
-	return 0;
-}
-
-int single_release(struct inode *inode, struct file *file)
-{
-	(void)inode;
-	(void)file;
 	return 0;
 }
 
@@ -3348,6 +3316,8 @@ struct blk_plug_cb *blk_check_plugged(blk_plug_cb_fn unplug, void *data, int siz
 	return cb;
 }
 #define __nouse__ __attribute__((__unused__))
+int nvmeib_public_profile_event_register(  __nouse__ enum profile_type type, __nouse__ struct notifier_block *n){return 0;}
+int nvmeib_public_profile_event_unregister(__nouse__ enum profile_type type, __nouse__ struct notifier_block *n){return 0;}
 int local_nic_prio_cmp_fn(__nouse__ void *priv, __nouse__ struct list_head *a, __nouse__ struct list_head *b) { return 0;}
 int nvmeibc_disk_prefix_priority_masks_validate_module_params(void) { return 0; }
 
@@ -3359,23 +3329,6 @@ void nvmeib_completion_noise_end(enum nvmeib_noise_type type, const unsigned lon
 {
 	(void)type; (void)cpu_mask_bitmap; (void)bitmap_size; (void)ctr;
 }
-
-//struct workqueue_struct *
-struct workqueue_struct *alloc_workqueue(const char *name, unsigned int flags, int max_active) {
-	(void)name;
-	(void)flags;
-	(void)max_active;
-	return NULL;
-}
-
-int profile_event_register(enum profile_type type, struct notifier_block *n){(void)type; (void)n; return 0;}
-int profile_event_unregister(enum profile_type type, struct notifier_block *n){(void)type; (void)n; return 0;}
-
-int nvmeibc_nordda_channel_wq_init(void) { return 0; }
-void nvmeibc_nordda_channel_wq_destroy(void) { }
-
-int nvmeibc_locks_channel_wq_init(void) { return 0; }
-void nvmeibc_locks_channel_wq_destroy(void) { }
 
 /*****************************************************************************/
 // EOF.

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include <kr_incs.h>
 #include <linux/semaphore.h>
 #include <linux/jiffies.h>
@@ -16,6 +11,7 @@
 #include "nvmeibc_defs.h"
 #include "core/nvmeibc_core_common.h"
 #include "nvmeibc_main.h"
+#include "nvmeibc_ib_io_channel.h"
 #include "nvmeibc_ib_nordda_channel.h"
 #include "nvmeibc_msgs_shared.h"
 #include "nvmeibs_msgs_shared.h"
@@ -37,7 +33,7 @@
 #include "nvmeibc_nr_lat_meas.h"
 #include "nvmeibc_disk_local_dma_pools.h"
 
-// EC-2944 - this file should NOT include and parse disk io cmd to get to block command
+// https://excelero.atlassian.net/browse/EC-2944 - this file should NOT include and parse disk io cmd to get to block command
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_generic_stages.h"
 #include "block/datapath_utils_generic/nvmeibc_block_dp_io_generic_cmds.h"
 
@@ -97,7 +93,7 @@
 #define RESTART_IO_TIMEOUT_SEC 	(30)
 uint nvmeibc_restart_io_timeout_secs = RESTART_IO_TIMEOUT_SEC;
 module_param_named(restart_io_timeout_secs, nvmeibc_restart_io_timeout_secs, uint, 0644);
-MODULE_PARM_DESC(restart_io_timeout_secs, "Time in seconds to wait between full cycles of IO channels reconnection. Upon a disconnection, reconnection attempts will be more often and exponentially backoff as needed up to this value.");
+MODULE_PARM_DESC(restart_io_timeout_secs, "Time to wait between full cycles of io channels reconnection");
 
 #define CHECK_PATH_KA_INTERVAL 	(2 * NVMEIB_WAIT_FOR_CM_REP_TIMEOUT)
 
@@ -107,7 +103,7 @@ MODULE_PARM_DESC(restart_io_timeout_secs, "Time in seconds to wait between full 
 
 int nvmeibc_max_ioch_path_fails = MAX_LIONIC_START_IOCH_PATH_FAIL_CYCLE;
 module_param_named(max_ioch_path_fail, nvmeibc_max_ioch_path_fails, int, 0644);
-MODULE_PARM_DESC(max_ioch_path_fail, "Number of failures allowed per path in a connection cycle.");
+MODULE_PARM_DESC(max_ioch_path_fail, "How many failures allow per path in a connection cycle");
 
 u64 max_ioch_start_route = MAX_LIONIC_START_IOCH_ATTEMPTS_CYCLE;
 
@@ -148,52 +144,60 @@ extern bool nr_defer_recv_comps;
 
 unsigned nr_max_channels_per_disk = NVMEIB_MAX_NR_CHANNELS_PER_DISK;
 module_param(nr_max_channels_per_disk, uint, 0644);
-MODULE_PARM_DESC(nr_max_channels_per_disk, "Maximum number of RDMA IO channels per disk.");
+MODULE_PARM_DESC(nr_max_channels_per_disk, "Maximum No-RDDA channels per disk; Min of 4 channels for MD enabled disk is forced");
 
 bool nvmeibc_use_local_bypass = true;
 module_param_named(use_local_bypass, nvmeibc_use_local_bypass, bool, 0644);
-MODULE_PARM_DESC(use_local_bypass, "Access local drives directly and not via a NIC, i.e. over the network. Setting to false is mainly used for debugging local disk access.");
+MODULE_PARM_DESC(use_local_bypass, "Access local drives directly and not via a NIC");
 
 bool nvmeibc_use_norrda_for_io = true;
 module_param_named(use_norrda_for_io, nvmeibc_use_norrda_for_io, bool, 0644);
-MODULE_PARM_DESC(use_norrda_for_io, "Allow using non-RDDA operations for IO. As RDDA is deprecated, this should always be true.");
+MODULE_PARM_DESC(use_norrda_for_io, "Allow using No-RDDA channels for io");
 
 uint nvmeibc_skip_disk_iocmds_flags = 0;
 module_param_named(skip_disk_iocmds_flags, nvmeibc_skip_disk_iocmds_flags, uint, 0644);
-MODULE_PARM_DESC(skip_disk_iocmds_flags, "This is an unsafe debug mode. Skip disk access (remote and local): "
-									"0 = Disabled, "
-									"1 = Skip read operations, "
-									"2 = Skip write operations, "
-									"3 = Skip read & write operations, "
-									"4 = Skip journal write operations or any combination using this operation, "
-									"5 = Skip all IO operations including those not mentioned above. Used for performance tuning and debugging.");
+MODULE_PARM_DESC(skip_disk_iocmds_flags, "Unsafe debug mode, skip disk access (remote and local): \n" \
+									"\t\t =0 : Disabled\n" \
+								    "\t\t b0 : Skip Read\n" \
+								    "\t\t b1 : Skip Write\n" \
+									"\t\t b2 : Skip Jour-Writes\n" \
+									"\t\t b3 : Skip All io-cmds, including the above");
 
 bool nvmeibc_use_only_norrda_for_io = false;
 module_param_named(use_only_norrda_for_io, nvmeibc_use_only_norrda_for_io, bool, 0644);
-MODULE_PARM_DESC(use_only_norrda_for_io, "Use only non-RDDA operations for IO. As RDDA is deprecated, this is meaningless.");
+MODULE_PARM_DESC(use_only_norrda_for_io, "Allow using only No-RDDA channels for io");
 
 unsigned nvmeibc_nr_pcpu_channels_per_disk = 0;
 module_param_named(nr_pcpu_channels_per_disk, nvmeibc_nr_pcpu_channels_per_disk, uint , 0644);
-MODULE_PARM_DESC(nr_pcpu_channels_per_disk,
-				 "Connect per-cpu RDMA IO channels (up to 128) in addition to the nr_max_channels_per_disk any-cpu channels. "
-				 "The total number of channels between a client and a target's disk is limited by the lower of nr_max_channels_per_path on the Client and the Target. "
-				 "Typically set to true for kernel-based DPU usage.");
+MODULE_PARM_DESC(nr_pcpu_channels_per_disk ,
+				 "Enable/Disable or Set maximum number of percpu nordda channels on top of the standard any-cpu channels; "
+				 "The total number of nordda channels is limited by nr_max_channels_per_path of both client and target. "
+				 "Offline CPUs witnin this configured cpus-range are not compensated for. "
+				 "Possible values:  "
+				 "0 - Disabled, "
+				 "1 - Use max possible channels (min(num-cpus, 128)), "
+				 "Other value: "
+				 "	- nr_pcpu_ch_lockless=Y - cpu [0, i) uses per-cpu-channel (0, i). Other cpus share nr_max_channels_per_disk "
+				 "	- nr_pcpu_ch_lockless=N - cpu i uses per-cpu-channel (i % (@this -1)) "
+		 );
 
 bool nvmeibc_nr_pcpu_ch_lockless = false;
 module_param_named(nr_pcpu_ch_lockless, nvmeibc_nr_pcpu_ch_lockless, bool, 0644);
-MODULE_PARM_DESC(nr_pcpu_ch_lockless, "Per-cpu RDMA IO channels are lockless. This reduces contention and increases performance, but requires a lot more channels typically.");
+MODULE_PARM_DESC(nr_pcpu_ch_lockless, "Per-CPU NoRDDA channels are lockless. This reduces contention and increases performance."
+					"NOTE: There must be a pcpu channel for all submission cores or it will fallback to the shared channels with locking");
 
 static char *nvmeibc_nr_pcpu_ch_ll_cpus = NULL;
 module_param_named(nr_pcpu_ch_ll_cpus, nvmeibc_nr_pcpu_ch_ll_cpus, charp, 0644);
-MODULE_PARM_DESC(nr_pcpu_ch_ll_cpus, "A list of CPU cores for lockless per-cpu IO RDMA channels. The format is as a hex-mask list of cores, where each entry is 32-bits.");
+MODULE_PARM_DESC(nr_pcpu_ch_ll_cpus, "CPUs for Lockless Per-CPU Channels as hex-mask list where each entry is 32-bits"
+					"(e.g. 1f,ff for CPUS 0-7, 32-36). NOTE: If empty, use all cpus.");
 
 bool nvmeibc_ioch_ka_only_no_rdda = NVMEIB_IOCH_KA_ONLY_NO_RDDA;
 module_param_named(ioch_ka_only_no_rdda, nvmeibc_ioch_ka_only_no_rdda, bool, 0644);
-MODULE_PARM_DESC(ioch_ka_only_no_rdda, "Use only IO channels for IO keep alive messages, requires disk discovery to take effect.");
+MODULE_PARM_DESC(ioch_ka_only_no_rdda, "Use only No-RDDA channnels for io ka, requires disk-discover to take effect");
 
 bool nvmeibc_disk_prio_pending = true;
 module_param_named(disk_prio_pending, nvmeibc_disk_prio_pending, bool, 0644);
-MODULE_PARM_DESC(disk_prio_pending, "Defines whether to prioritize IO in the pending IO queue, which hold both locks and journal entries. This was added to improve the performance of EC rebuilds.");
+MODULE_PARM_DESC(disk_prio_pending, "Priorize IO in Pending IO Queue");
 
 /*
 This mainly used for ARM when we have using kernel EC calculation which need to be in enable interrupts ctx
@@ -201,45 +205,45 @@ Consider enable it only on ARM
 */
 bool nvmeibc_disk_nrch_defer_block_cb = false;
 module_param_named(disk_nrch_defer_block_cb, nvmeibc_disk_nrch_defer_block_cb, bool, 0644);
-MODULE_PARM_DESC(disk_nrch_defer_block_cb, "Defines whether to defer the IO callbacks until after reenabling interrupts.");
+MODULE_PARM_DESC(disk_nrch_defer_block_cb, "Defer nrch block cb after enable back the interrupts");
 
 bool nvmeibc_disk_local_defer_block_cb = false;
 module_param_named(disk_local_defer_block_cb, nvmeibc_disk_local_defer_block_cb, bool, 0644);
-MODULE_PARM_DESC(disk_local_defer_block_cb, "Determines whether to defer local IO block cb to non-interrupt context.");
+MODULE_PARM_DESC(disk_local_defer_block_cb, "Defer local IO block cb to non-interrupt context");
 
 bool nvmeibc_disk_pcpu_nrch_poll_proc = false;
 module_param_named(disk_pcpu_nrch_poll_proc, nvmeibc_disk_pcpu_nrch_poll_proc, bool, 0444);
-MODULE_PARM_DESC(disk_pcpu_nrch_poll_proc, "Allow polling of per-cpu IO channels through a proc file, which is useful for running kernel IO from SPDK. Useful for initial SNAP versions that did some IO from the kernel.");
+MODULE_PARM_DESC(disk_pcpu_nrch_poll_proc, "Allow polling of per-cpu No-RDDA channels through a proc file (SPDK)");
 
 bool nvmeibc_disk_pause_at_first_discover = true;
 module_param_named(disk_pause_at_first_discover, nvmeibc_disk_pause_at_first_discover, bool, 0644);
-MODULE_PARM_DESC(disk_pause_at_first_discover, "Defines whether to set the disk as paused for the first discovery to make attach operations faster. False simulates pre-2.6 behavior.");
+MODULE_PARM_DESC(disk_pause_at_first_discover, "Make disk paused at the first discover attempt");
 
 bool nvmeibc_disk_use_async_subscribe = true;
 module_param_named(use_async_subscribe, nvmeibc_disk_use_async_subscribe, bool, 0644);
-MODULE_PARM_DESC(use_async_subscribe, "Determines whether to run \"subscribe\" operations asynchronously. Subscribe operations are used for clients to subscribe to TOMA for instructions regarding a volume's disk segment.");
+MODULE_PARM_DESC(use_async_subscribe, "Run subscribes as async");
 
 
 bool nvmeibc_disk_local_io_use_prpl = true;
 module_param_named(local_io_use_prpl, nvmeibc_disk_local_io_use_prpl, bool, 0644);
-MODULE_PARM_DESC(local_io_use_prpl, "Determines whether local IO requests use PRPLs instead of SGLs (see the NVMe standard for more information). PRPLs are needed for environments with the IOMMU enabled.");
+MODULE_PARM_DESC(local_io_use_prpl, "Local IO uses PRPL instead of SGL (Needed for IOMMU)");
 
 bool nvmeibc_disk_local_io_use_rd_md_pool = true;
 module_param_named(local_io_use_rd_md_pool, nvmeibc_disk_local_io_use_rd_md_pool, bool, 0644);
-MODULE_PARM_DESC(local_io_use_rd_md_pool, "Determines whether to use a preallocated pool or to dynamically allocate memory for metadata read operations, as the NVMe standard forces reading the block data with the metadata.");
+MODULE_PARM_DESC(local_io_use_rd_md_pool, "Local IO uses pool of preallocated pages for read metadata operations.");
 
 bool nvmeibc_disk_local_io_use_md_dma_pool = true;
 module_param_named(local_io_use_md_dma_pool, nvmeibc_disk_local_io_use_md_dma_pool, bool, 0644);
-MODULE_PARM_DESC(local_io_use_md_dma_pool, "When a local IO request is made without providing space for the metadata buffer and the drive has metadata enabled, then this determines whether to use a preallocated pool of memory or to dynamically allocate memory per IO.");
+MODULE_PARM_DESC(local_io_use_md_dma_pool, "When metadata is not provided from the ULP, local IO uses pool of preallocated DMA memory.");
 
 /* [NVMESH-3287]: Params for throttling target-nics query to management */
 uint nvmeibc_disk_tgt_nics_query_min_secs = 2;
 module_param_named(tgt_nics_query_min_secs, nvmeibc_disk_tgt_nics_query_min_secs, uint, 0644);
-MODULE_PARM_DESC(tgt_nics_query_min_secs, "The minimum amount of time allowed between Target NICs query to management.");
+MODULE_PARM_DESC(tgt_nics_query_min_secs, "Minimum amount of time allowed between Target NICs query to management");
 
 uint nvmeibc_disk_tgt_nics_query_min_n_fail = UINT_MAX;
 module_param_named(tgt_nics_query_min_n_fail, nvmeibc_disk_tgt_nics_query_min_n_fail, uint, 0644);
-MODULE_PARM_DESC(tgt_nics_query_min_n_fail, "The minimum number of discovery failures before sending a Target NICs query to management.");
+MODULE_PARM_DESC(tgt_nics_query_min_n_fail, "Minimum number of discovery failures before sending a Target NICs query to management");
 
 uint nvmeibc_disk_tgt_nics_query_min_fail_secs = 10;
 module_param_named(tgt_nics_query_min_fail_secs, nvmeibc_disk_tgt_nics_query_min_fail_secs, uint, 0644);
@@ -255,34 +259,30 @@ unsigned int nvmeibc_disk_prefix_priority_masks[16]; // Define an array of unsig
 int nvmeibc_disk_prefix_priority_masks_len = 0;          // Variable to hold the size of the array
 
 module_param_array_named(prefix_priority_masks, nvmeibc_disk_prefix_priority_masks, uint, &nvmeibc_disk_prefix_priority_masks_len, 0444); // Register as module parameter
-MODULE_PARM_DESC(prefix_priority_masks, "A comma separated list of prefixes length for paths with priority.");
+MODULE_PARM_DESC(prefix_priority_masks, "comma separated list of prefixes length for prioritise paths");
 
 bool nvmeibc_disk_prefix_priority_masks_rediscover_on_new = false;
 module_param_named(prefix_priority_masks_rediscover_on_new, nvmeibc_disk_prefix_priority_masks_rediscover_on_new, bool, 0644);
-MODULE_PARM_DESC(prefix_priority_masks_rediscover_on_new, "Determines whether to rediscover when a new common prefix priority is found.");
+MODULE_PARM_DESC(prefix_priority_masks_rediscover_on_new, "Rediscover on new common prefix priority found");
 
 NVMEIBC_MEMMGR_METRIC(dirty_bits_mem, "component=client.disk.dirty_bits_mem");
 
 
 bool nvmeibc_disk_coremask_support = 0;
 module_param_named(disk_coremask_support, nvmeibc_disk_coremask_support, bool, 0644);
-MODULE_PARM_DESC(disk_coremask_support, "Set to true to enable disk coremask support. Creates \"disk_max_coremask_nrch\" NRCHs per coremask added via block CLI. Updated on rediscover");
+MODULE_PARM_DESC(disk_coremask_support, "Set to true to enable disk coremask support. Creates \"disk_max_coremask_nrch\" NRCHs per coremask added (via block CLI). Updated on rediscover");
 
 uint nvmeibc_disk_max_coremask_nrch = 2;
 module_param_named(disk_max_coremask_nrch, nvmeibc_disk_max_coremask_nrch, uint, 0644);
-MODULE_PARM_DESC(disk_max_coremask_nrch, "Determines the maximum number of channels per coremask. Updated on rediscover.");
+MODULE_PARM_DESC(disk_max_coremask_nrch, "Max nrchs per coremask. Updated on rediscover");
 
 bool nvmeibc_disk_use_coremask_pending = true;
 module_param_named(disk_use_coremask_pending, nvmeibc_disk_use_coremask_pending, bool, 0644);
-MODULE_PARM_DESC(disk_use_coremask_pending, "Determines whether to maintain a pending command list for the coremask. If false, any IOs that cannot be immediately processed by the coremask will be submitted to the any-core channels.");
+MODULE_PARM_DESC(disk_use_coremask_pending, "Have a pending command list for the coremask. If false, any IOs that cannot be immediately processed by the coremask will be submitted to the any-core channels.");
 
 bool nvmeibc_disk_local_use_system_pcpu_wq = false;
 module_param_named(disk_local_use_system_pcpu_wq, nvmeibc_disk_local_use_system_pcpu_wq, bool, 0644);
-MODULE_PARM_DESC(disk_local_use_system_pcpu_wq, "Determines whether local IO uses the system per-cpu workqueue for requests.");
-
-uint nvmeibc_disk_ioch_drained_timeout_sec = 10;
-module_param_named(ioch_drained_timeout_sec, nvmeibc_disk_ioch_drained_timeout_sec, uint, 0644);
-MODULE_PARM_DESC(ioch_drained_timeout_sec, "The timeout in seconds for the IOCH drained event before disconnecting disk");
+MODULE_PARM_DESC(disk_local_use_system_pcpu_wq, "Local IO uses system pcpu wq for requests");
 
 struct nvmeib_cpu_mask_info_node {
 	struct nvmeib_cpu_mask_info mask_info;
@@ -900,6 +900,7 @@ static void chstats_fill_buf_work(struct workqe_struct *work)
 	struct nvmeibc_io_rnic *rionic;
 	struct list_head *lionics;
 	struct nvmeibc_io_lnic *lionic;
+	struct nvmeibc_ib_io_channel *ioch;
 	struct nvmeibc_ib_nordda_channel *nrch;
 	unsigned long flags;
 	int i;
@@ -922,6 +923,18 @@ static void chstats_fill_buf_work(struct workqe_struct *work)
 		//Admin ch
 		ach = ac_to_iac(arnic->channel);
 		nvmeibc_ib_net_stats_fill_buf(&ach->net.base, 0, buf, len, &count);
+		//RDDA channels
+		spin_lock_irqsave(&disk->spinlock, flags);
+		rionics = &disk->rionics;
+		list_for_each_entry(rionic, rionics, disk_link) {
+			lionics = &rionic->lionics;
+			list_for_each_entry(lionic, lionics, rionic_link) {
+				for (i = 0; i < lionic->n_qps; ++i) {
+					ioch = lionic->io_channels + i;
+					nvmeibc_ib_net_stats_fill_buf(&ioch->net.base, i+1, buf, len, &count);
+				}
+			}
+		}
 		//No-RDDA channels
 		rionics = &disk->nr_rionics;
 		list_for_each_entry(rionic, rionics, disk_nrlink) {
@@ -1117,8 +1130,8 @@ static void net_status_fill_buf(struct nvmeibc_ib_net *net, struct write_status_
 				struct sock *sk = socket->sk;
 				if (sk) {
 					struct tcp_sock *tp = tcp_sk(sk);
-				BUF_ADD("%s%pI4n:%u -> %pI4n:%u\n",
-					prefix, &sk->sk_rcv_saddr, sk->sk_num, &sk->sk_daddr, ntohs(sk->sk_dport));
+					BUF_ADD("%pI4n:%u -> %pI4n:%u\n",
+						&sk->sk_daddr, sk->sk_dport, &sk->sk_rcv_saddr, sk->sk_num);
 #if KS_HAS_SO_INCOMING_CPU
 					BUF_ADD("%sSIW LLP\t socket: %px sk: %px incoming_cpu: %d napi_id: %d mss_cache: %d\n",
 						prefix, socket, sk, READ_ONCE(sk->sk_incoming_cpu), READ_ONCE(sk->sk_napi_id),
@@ -1301,7 +1314,7 @@ static inline void lionic_status_fill_line(struct nvmeibc_io_lnic *lionic, struc
 	BUF_ADD("\t\t LIONIC (%px) HW-GID: %pI6 acc: %d last-(ka, tx, rx) ms: (%llu, %llu, %llu) Num QPs: %d Device: %s Port: %d Link-Layer: %s Transport: %s\n",
 			lionic, &lionic->port->gid.hw_gid, lionic->may_access,
 			last_max_jif_to_ms_int(lionic->last_io_ka_jif), last_max_jif_to_ms_int(lionic->last_send_success_jif),
-	   last_max_jif_to_ms_int(lionic->last_recv_success_jif), lionic->n_nr_qps,
+			last_max_jif_to_ms_int(lionic->last_recv_success_jif), is_rdda ? lionic->n_qps : lionic->n_nr_qps,
 			PORT_TO_DEV_NAME(lionic->port), PORT_TO_PORT_NUM(lionic->port), PORT_TO_LINK_LAYER(lionic->port), PORT_TO_TRANSPORT_TYPE(lionic->port));
 	BUF_ADD("\t\t        path sgid: %pI6 dgid: %pI6\n",
 			&lionic->path.sgid, &lionic->path.dgid);
@@ -1311,9 +1324,25 @@ static int rionic_status_fill_buf(struct nvmeibc_io_rnic *rionic, void *args)
 {
 #define BUF_ADD(...)	*data->count += scnprintf(data->buf+*data->count, data->len-*data->count, __VA_ARGS__)
 	struct write_status_buf_data *data = args;
-	int rv = 0;
+	struct nvmeibc_io_lnic *lionic;
+	int rv = 0, i;
 
 	rionic_status_fill_line(rionic, data);
+	list_for_each_entry(lionic, &rionic->lionics, rionic_link) {
+		if (!atomic_read(&lionic->dying)) {
+			lionic_status_fill_line(lionic, data, true);
+
+			for (i = 0; i < lionic->n_qps; i++) {
+				struct nvmeibc_ib_io_channel *io_ch = lionic->io_channels + i;
+				if (io_ch) {
+					BUF_ADD("\t\t\t- IO CHANNEL %d (%px) - %s Index: %d State: %s\n", i, io_ch,
+							io_ch->base.name, io_ch->base.index, nvmeibc_ib_io_channel_state_str(io_ch->state));
+					net_status_fill_buf(&io_ch->net.base, data, "\t\t\t\t- ");
+				} else
+					BUF_ADD("\t\t\t- IO CHANNEL %d - NULL\n", i);
+			}
+		}
+	}
 	return rv;
 #undef BUF_ADD
 }
@@ -1630,9 +1659,9 @@ static void write_status_buf(struct write_status_buf_data *data)
 		BUF_ADD("\t - None\n");
 	BUF_ADD("LOCAL SERVER (%px)\n", disk->local_server);
 	if (disk->local_server) {
-		BUF_ADD("\t- is_local: %pF, cl-reg: %pF, cl-unreg: %pF, "
-				"cl-alloc-locks: %pF, cl-alloc-jrnl-rng: %pF,  "
-				"local-cmd: %pF, dma-device: %pF, gen-cmd: %pF\n",
+		BUF_ADD("\t- is_local: %pS, cl-reg: %pS, cl-unreg: %pS, "
+				"cl-alloc-locks: %pS, cl-alloc-jrnl-rng: %pS,  "
+				"local-cmd: %pS, dma-device: %pS, gen-cmd: %pS\n",
 			disk->local_server->is_local_disk,
 			disk->local_server->cl_register,
 			disk->local_server->cl_unregister,
@@ -2189,7 +2218,7 @@ static void free_dirty_bits_mem(struct nvmeibc_disk *disk)
 	unmap_disk_ec_dirty_bits(disk);
 
 	if (disk->db.virt) {
-		vunmap(disk->db.virt);
+		nvmeib_public_vunmap(disk->db.virt);
 		disk->db.virt = NULL;
 	}
 	sg_free_table(&disk->db.dirty_bits_mem.sgt);
@@ -2367,7 +2396,7 @@ int nvmeibc_disk_create_remote(struct nvmeibc_ib_admin_channel *ach,
 		info = kzalloc(sizeof(*info), GFP_KERNEL);
 		hcaa = kzalloc(sizeof(*hcaa) * p, GFP_KERNEL);
 		rscs = n ? kzalloc(sizeof(*rscs) * n, GFP_KERNEL) : NULL;
-		pcpu_wq = disk->pcpu_nrchs_ll ? alloc_workqueue("pcpu_wq", 0, 0) : NULL;
+		pcpu_wq = disk->pcpu_nrchs_ll ? nvmeib_public_alloc_workqueue("pcpu_wq", 0, 0) : NULL;
 		cinfo = disk->coremask_support ? alloc_coremask_info(disk) : NULL;
 		if (!(info && hcaa && (!n || rscs) && (!disk->pcpu_nrchs_ll || pcpu_wq) && (!disk->coremask_support || cinfo))) {
 			_NE(error_disk_nvmeibc_disk_create_remote, "Failed to allocate disk info");
@@ -2435,7 +2464,7 @@ int nvmeibc_disk_create_remote(struct nvmeibc_ib_admin_channel *ach,
 no_mem:
 	kfree(cinfo);
 	if (pcpu_wq)
-		destroy_workqueue(pcpu_wq);
+		nvmeib_public_destroy_workqueue(pcpu_wq);
 	if (rscs)
 		kfree(rscs);
 	if (hcaa) {
@@ -3076,6 +3105,105 @@ static bool use_lionic_path_for_ioch(struct nvmeibc_io_lnic *lionic)
 	return ret;
 }
 
+static struct nvmeibc_ib_io_channel *get_io_channel(struct nvmeibc_disk *disk)
+{
+	struct list_head *rionics = &disk->rionics;
+	struct nvmeibc_io_rnic *rionic;
+	struct list_head *lionics = NULL;
+	struct nvmeibc_io_lnic *lionic = NULL;
+	struct nvmeibc_ib_io_channel *ch = NULL;
+	unsigned long flags;
+	int i;
+	bool found = false;
+	bool not_used, pending;
+	int dying;
+
+	__NFIND;
+	/* scan the local rionic that can access the disk
+	   and try to grab an io channel
+	*/
+	list_for_each_entry(rionic, rionics, disk_link) {
+		if (NVMEIB_UPDATE_NW_PATHS && unlikely(!rionic->may_access)) {
+			_ND(trace_disk_get_io_channel, "No path, skip");
+			continue;
+		}
+		lionics = &rionic->lionics;
+		list_for_each_entry(lionic, lionics, rionic_link) {
+			if (NVMEIB_UPDATE_NW_PATHS && unlikely(!lionic->may_access)) {
+				_ND(trace_1_disk_get_io_channel, "No path, skip");
+				continue;
+			}
+			if (!use_lionic_path_for_ioch(lionic))
+				continue;
+			/* only ports that were 'used' during discovery have QPs */
+			for (i = 0; i < lionic->n_qps && !found; ++i) {
+				ch = lionic->io_channels + i;
+				not_used = nvmeibc_ib_io_channel_not_used(ch);
+				dying = atomic_read(&ch->base.dying);
+				pending = nvmeibc_disk_ioch_drained_is_pending(&ch->base);
+				_ND(trace_2_disk_get_io_channel, "name = @BASE_NAME not used = @NOT_USED dying = @DYING, pending=@BOOL", ch->base.name,
+					not_used, dying, pending);
+				if (not_used && !dying && !pending)
+					found = true;
+			}
+			if (found)
+				break;
+		}
+		if (found) {
+			/* rotate lionic for load balancing */
+			spin_lock_irqsave(&disk->spinlock, flags);
+			list_del(&lionic->rionic_link);
+			list_add_tail(&lionic->rionic_link, lionics);
+			spin_unlock_irqrestore(&disk->spinlock, flags);
+			break;
+		}
+	}
+	if (found) {
+		_NT(trace_3_disk_get_io_channel, "Calling nvmeibc_ib_io_channel-clear_rq on @BASE_NAME (@CH_PTR) disk @DISK_NAME",
+			ch->base.name, ch, ch->base.disk->name);
+		nvmeibc_ib_io_channel_clear_rq(ch, true);
+		/* rotate rionic for load balancing */
+		spin_lock_irqsave(&disk->spinlock, flags);
+		list_del(&rionic->disk_link);
+		list_add_tail(&rionic->disk_link, rionics);
+		spin_unlock_irqrestore(&disk->spinlock, flags);
+		ch->state = IO_CHANNEL_ALLOCATED;
+		INIT_LIST_HEAD(&ch->base.link);
+	}
+	else {
+		ch = NULL;
+		_ND(trace_4_disk_get_io_channel, "No free I/O channel to use a disk resource");
+	}
+	__NFOUTD;
+	return ch;
+}
+
+static void free_io_ch_release_q(struct nvmeibc_disk *disk)
+{
+	struct list_head *rionics = &disk->rionics;
+	struct nvmeibc_io_rnic *rionic;
+	struct list_head *lionics = NULL;
+	struct nvmeibc_io_lnic *lionic = NULL;
+	struct nvmeibc_ib_io_channel *ch = NULL;
+	int i;
+
+	__NFIND;
+	/* scan the local rionic that can access the disk
+	   and try to grab an io channel
+	*/
+	list_for_each_entry(rionic, rionics, disk_link) {
+		lionics = &rionic->lionics;
+		list_for_each_entry(lionic, lionics, rionic_link) {
+			for (i = 0; i < lionic->n_qps; ++i) {
+				ch = lionic->io_channels + i;
+				if (nvmeibc_ib_io_channel_not_used(ch))
+					nvmeibc_ib_io_channel_clear_rq(ch, true);
+			}
+		}
+	}
+	__NFOUTD;
+}
+
 static void nvmeibc_dma_unmap(struct nvmeibc_disk_channel_rsc *r)
 {
 	struct ib_device *ib;
@@ -3105,7 +3233,7 @@ static void nvmeibc_dma_unmap(struct nvmeibc_disk_channel_rsc *r)
 	r->nv = NULL;
 }
 
-static int __attribute__((unused)) set_local_keys(struct nvmeibc_disk_channel_rsc *r,
+static int set_local_keys(struct nvmeibc_disk_channel_rsc *r,
 	struct nvmeib_dev *nv)
 {
 	struct ib_device *ib;
@@ -3204,6 +3332,45 @@ out:
 	return ret;
 }
 
+/* Find  a disk resource that matches the destination io nic */
+static struct nvmeibc_disk_channel_rsc *get_ch_rsc(
+	struct nvmeibc_disk_info *info, struct nvmeibc_ib_io_channel *ch, int id)
+{
+	struct nvmeibc_disk_channel_rsc *r = NULL;
+	int i, j;
+
+	__NFINI;
+	for (i = 0; i < info->n_rscs_sets; ++i) {
+		/* Either the server version supports passing node_guid or they are both zero */
+		if (info->hcaa[i].node_guid != ch->lionic->rionic->node_guid) {
+			_NT(trace_get_ch_rsrc_node_guid,
+			    "Skipping HCA @INDEX - Node GUID mismatch (HCA @NODE_GUID, rionic @NODE_GUID)",
+			    i, be64_to_cpu(info->hcaa[i].node_guid), be64_to_cpu(ch->lionic->rionic->node_guid));
+			continue;
+		}
+		for (j = 0; j < info->hcaa[i].n_ports; ++j) {
+			if (!memcmp(info->hcaa[i].ports[j].raw,
+				ch->lionic->rionic->ib_gid.raw,
+				sizeof(info->hcaa[i].ports[j].raw))) {
+				r = &info->hcaa[i].channel_rscs[id];
+				goto out;
+			}
+		}
+	}
+
+out:
+	if (r) {
+		int rc = set_local_keys(r, P2NV(ch->lionic->port));
+		if (rc) {
+			_NE(error_disk_get_ch_rsc, "Failed setting local keys");
+			r = NULL;
+		}
+	}
+
+	__NFOUTI;
+	return r;
+}
+
 static void add_resource(struct nvmeibc_disk *disk, struct rsc_info *rsc)
 {
 	__NFIND;
@@ -3228,7 +3395,28 @@ static int _remove_resource(struct nvmeibc_disk *disk)
 	return rsc ? rsc->id : -1;
 }
 
+static void put_resource(struct nvmeibc_disk *disk, struct rsc_info *rsc)
+{
+	__NFIND;
+	BUG_ON(!list_empty(&rsc->link));
+	list_add_tail(&rsc->link, &disk->info->my_rscs);
+	--disk->info->used;
+	__NFOUTD;
+}
 
+static struct rsc_info *get_resource(struct nvmeibc_disk *disk)
+{
+	struct rsc_info *rsc;
+
+	__NFIND;
+	rsc = list_first_entry_or_null(&disk->info->my_rscs, struct rsc_info, link);
+	if (rsc) {
+		list_del_init(&rsc->link);
+		++disk->info->used;
+	}
+	__NFOUTD;
+	return rsc;
+}
 
 static int locate_resource_(struct nvmeibc_disk *disk, u64 id)
 {
@@ -3259,6 +3447,43 @@ int nvmeibc_disk_locate_resource(struct nvmeibc_disk *disk, u64 id)
 	spin_unlock_irqrestore(&disk->spinlock, flags);
 	__NFOUTD;
 	return rv;
+}
+
+static void kill_channel_(struct nvmeibc_disk *disk,
+	struct nvmeibc_ib_io_channel *ch)
+{
+	struct nvmeibc_disk_info *info = disk->info;
+	struct nvmeibc_disk_channel_rsc *r;
+
+	__NFIND;
+	r = ch->rsc;
+	_NT(trace_disk_kill_channel, "Disk @DISK_NAME killing channel @INDEX, rsc @ID_LLONG",
+		disk->name, ch->base.index, r ? r->id : -1);
+	ch->rsc = NULL;
+	if (r) {
+		r->ch = NULL;
+		put_resource(disk, &info->rscs[get_r_index(info, r)]);
+		/* remove from the available_channels list */
+		if (!list_empty(&ch->base.link)) {
+			list_del_init(&ch->base.link);
+		}
+	}
+	_NT(trace_1_disk_kill_channel, "Kill channel done for @DONE", ch->done);
+	if (ch->done)
+		complete(ch->done);
+	__NFOUTD;
+}
+
+static void kill_channel(struct nvmeibc_disk *disk,
+	struct nvmeibc_ib_io_channel *ch)
+{
+	unsigned long flags;
+
+	__NFIND;
+	spin_lock_irqsave(&disk->spinlock, flags);
+	kill_channel_(disk, ch);
+	spin_unlock_irqrestore(&disk->spinlock, flags);
+	__NFOUTD;
 }
 
 static int 
@@ -3475,6 +3700,158 @@ static bool start_ioch_path_error(int err)
 	default:
 		return false;
 	}
+}
+
+static void nvmeibc_disk_start_io_rdda_channels_(struct nvmeibc_disk *disk)
+{
+	struct nvmeibc_ib_admin_channel *ach;
+	struct nvmeibc_ib_io_channel *ioch, *first_ioch = NULL;
+	struct rsc_info *rsc;
+	struct nvmeibc_disk_channel_rsc *r;
+	unsigned long flags;
+	int rv;
+
+	__NFIND;
+
+	/* safety */
+	if (!(ach = get_alive_admin_ch(disk))) {
+		_NT(trace_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME, no main admin-ch ...", disk->name);
+		goto out;
+	}
+
+	if (!on_wq(ach->base.remove_wq)) {
+		_NW(warn_disk_nvmeibc_disk_start_io_rdda_channels, "Oops, main admin-ch work scheduled not on its wq (@PID vs. @PID)",
+			current->pid, wq_pid(ach->base.remove_wq));
+		goto out;
+	}
+
+new_resource:
+		if (atomic_read(&disk->dying) ||
+			atomic_read(&disk->shut_down_triggered)) {
+			_NT(trace_1_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME is dying", disk->name);
+			goto out;
+		}
+		spin_lock_irqsave(&disk->spinlock, flags);
+		rsc = get_resource(disk);
+		spin_unlock_irqrestore(&disk->spinlock, flags);
+		if (!rsc) {
+			_NT(trace_2_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME - no free resources to use", disk->name);
+			goto out;
+		}
+reset_first_ch:
+		first_ioch = NULL;
+new_channel:
+		if (atomic_read(&disk->shut_down_triggered)) {
+			_NT(trace_3_disk_nvmeibc_disk_start_io_rdda_channels, "Shutdown triggered, start io channel for disk @DISK_NAME aborted",
+				disk->name);
+			goto put_rsc;
+		}
+		if (atomic_read(&ach->base.wq_high_pri_cnt) > 0) {
+			_NT(trace_4_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME admin_ch @BASE_NAME (@ACH) - ending loop for high-priority work",
+			   disk->name, ach->base.base.name, ach);
+			disk->start_io_work_preempted_seqcnt++;
+			goto put_rsc;
+		}
+		if (!(ioch = get_io_channel(disk))) {
+			_NT(trace_5_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME - no free io channel", disk->name);
+			goto put_rsc;
+		}
+		else if (first_ioch == NULL) {
+			first_ioch = ioch;
+		}
+		else if (first_ioch == ioch) {
+			_NT(trace_6_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME - finish looping on all available io channel "
+			   "with no luck", disk->name);
+			/* since we took the channel we need to restore its state */
+			nvmeibc_ib_io_channel_init(ioch);
+			goto put_rsc;
+		}
+
+		_NT(trace_7_disk_nvmeibc_disk_start_io_rdda_channels, "found io channel @IOCH (first_ioch = @FIRST_IOCH)", ioch, first_ioch);
+		ioch->lionic->start_ioch_attempt_ctr++;
+		nvmeibc_disk_channel_version_update(&ioch->base);
+		if ((rv = nvmeibc_ib_admin_channel_connect_io_channel(
+			ac_to_iac(ioch->lionic->rionic->ch), ioch)) < 0) {
+			_NT(trace_8_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME - failed (@RV) to connect I/O channel", disk->name, rv);
+			if (start_ioch_path_error(rv)) {
+				ioch->lionic->start_ioch_path_fail_ctr++;
+				_NT(trace_18_disk_nvmeibc_disk_start_io_rdda_channels,
+					"io-path @SGID -> @SGID: connect failure inc to #@INT",
+				   &ioch->lionic->path.sgid, &ioch->lionic->path.dgid,
+				   ioch->lionic->start_ioch_path_fail_ctr);
+			}
+			goto disconnect;
+		}
+		if (!(r = get_ch_rsc(disk->info, ioch, rsc->id))) {
+			_NT(trace_9_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME - resource @ID_INT was not available",
+				disk->name, (unsigned)rsc->id);
+			goto disconnect;
+		}
+		/* reset the disk resource on the server side */
+		if (nvmeibc_ib_admin_channel_init_io_channel(
+            ac_to_iac(ioch->lionic->rionic->ch), ioch, r->id,
+            r->msix_riu.raddr,
+			ioch->net.rnet.sq_doorbell_raddr,
+			/* From srv: prepare_io_channel <-- nvmeib_ibdr_get_qp_sqr <-- ioch->qp_rsc.sq.doorbell_payload <-- cpu_to_be32(size | (qpn << 8)); */
+			ioch->net.rnet.sq_doorbell_payload) < 0) {
+			_ND(trace_10_disk_nvmeibc_disk_start_io_rdda_channels,
+				"Disk @DISK_NAME: failed to init the disk resources", disk->name);
+			goto disconnect;
+		}
+		/* this is where we bind between the channel and the resource */
+		if (nvmeibc_ib_io_channel_lock_disk_rsc(ioch, r) < 0) {
+			_NE(error_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME: failed to lock the disk msi - "
+				"net is probably in panic mode", disk->name);
+			goto disconnect;
+		}
+		else {
+			/* we habe a new working channel so either try
+			   to execute pending io or add it to tha avaliable channels
+			   so it can be used for next io op
+			*/
+			_NT(trace_11_disk_nvmeibc_disk_start_io_rdda_channels, "Added ioch @BASE_NAME for disk @DISK_NAME with QPn: @QP_NUM Remote QPn: @REMOTE_QPN",
+			   ioch->base.name, disk->name, ioch->net.base.qp->qp_num, ioch->net.base.remote_qpn);
+			ioch->comp_code = 0;
+			nvmeibc_disk_inc_io_chan(disk);
+			if (nvmeibc_channel_try_use_req_info(&ioch->base)) {
+				ioch->state = IO_CHANNEL_IN_USE;
+				/* rdda_pending_io */
+				ioch->base.execute_pending_io(
+					disk, &ioch->base, NULL, false, 0);
+				_ND(trace_12_disk_nvmeibc_disk_start_io_rdda_channels, "succefull... trying a additional one");
+			}
+			else
+				_NE(error_1_disk_nvmeibc_disk_start_io_rdda_channels, "FATAL - allocated a channel but cannot use it...");
+			goto new_resource;
+		}
+
+disconnect:
+	/* if we managed to bring the channel net into a live state than we will
+	   need full disconnect otherwise we just need
+	   to kill the allocated channel
+	*/
+	if (!nvmeibc_ib_io_channel_try_disconnect(ioch)) {
+		_NT(trace_14_disk_nvmeibc_disk_start_io_rdda_channels,
+			"ioch @BASE_NAME, net was not connnected (LIVE), mark unused",
+			ioch->base.name);
+		nvmeibc_disk_channel_version_invalidate(&ioch->base);
+		kill_channel(disk, ioch);
+		nvmeibc_ib_io_channel_init(ioch);
+		goto new_channel;
+	}
+	else
+		goto reset_first_ch;
+
+put_rsc:
+	spin_lock_irqsave(&disk->spinlock, flags);
+	put_resource(disk, rsc);
+	spin_unlock_irqrestore(&disk->spinlock, flags);
+
+out:
+	free_io_ch_release_q(disk);
+	_ND(trace_13_disk_nvmeibc_disk_start_io_rdda_channels, "Disk @DISK_NAME - mine @MINE, used @USED",
+		disk->name, disk->info->mine, disk->info->used);
+	__NFOUTD;
 }
 
 inline static void update_avail_nordda_for_cpu_locked(struct nvmeibc_disk *disk)
@@ -4452,7 +4829,7 @@ static void disk_start_io_channels_(struct nvmeibc_disk *disk)
 		disk_check_coremask_update(disk);
 
 	nvmeibc_disk_start_io_nordda_channels_(disk);
-	/* RDDA removed */
+	nvmeibc_disk_start_io_rdda_channels_(disk);
 	if (disk->start_io_work_preempted_seqcnt == prev_preempted_seqcnt) {
 		disk->start_io_work_preempted_seqcnt = 0;
 		_NT(trace_non_preempted, "Full round done, reset start_io_work_preempted_seqcnt to 0");
@@ -4570,6 +4947,7 @@ static void disk_send_io_path_ka_work(struct workqe_struct *work)
 	struct nvmeibc_io_rnic *rionic;
 	struct nvmeibc_io_lnic *lionic;
 	struct nvmeibc_ib_nordda_channel *nrch;
+	struct nvmeibc_ib_io_channel *ioch;
 	struct nvmeibc_channel *ch;
 	int i, rv, n_io_ka_chs;
 	u64 max_last_io_ka_jif;
@@ -4611,6 +4989,8 @@ static void disk_send_io_path_ka_work(struct workqe_struct *work)
 
 			/* Send Keep-alive on the path*/
 			n_io_ka_chs = lionic->n_nr_qps;
+			if (!disk->io_ka_only_no_rdda)
+				n_io_ka_chs += lionic->n_qps;
 			for (i = 0; i < n_io_ka_chs; i++) {
 				int ch_idx = (lionic->last_ka_ch_idx + i + 1) % n_io_ka_chs;
 				_ND(disk_send_io_path_ka_work_d5,
@@ -4632,7 +5012,11 @@ static void disk_send_io_path_ka_work(struct workqe_struct *work)
 					}
 					ch = &nrch->base;
 				} else {
-					continue; /* RDDA removed */
+					BUG_ON(disk->io_ka_only_no_rdda);
+					ioch = &lionic->io_channels[ch_idx - lionic->n_nr_qps];
+					if (!nvmeibc_ib_io_channel_alive(ioch))
+						continue;
+					ch = &ioch->base;
 				}
 				_NT(disk_send_io_path_ka_work_d69,
 				   "Attempting to send keep-alive on channel @STR on path "
@@ -4786,6 +5170,8 @@ static int handle_get(struct nvmeibc_disk *disk,
 {
 	struct nvmeibc_disk_info *info = disk->info;
 	struct volume_client_get_rsp *g = &rsp->g_rsp;
+	struct nvmeibc_channel *ch;
+	struct nvmeibc_ib_io_channel *ioch;
 	int rsc_num, rv = 0;
 	u64 an = 0, n = be64_to_cpu(req->g_req.n);
 	DECLARE_COMPLETION_ONSTACK(get_done);
@@ -4827,6 +5213,16 @@ static int handle_get(struct nvmeibc_disk *disk,
 try_again:
 	BUG_ON(disk->access_local); //local client does not need resources
 	_NT(trace_3_disk_handle_get, "Locked");
+	/* firstly free all channels in the to_be_killed list */
+	while ((ch = list_first_entry_or_null(&disk->ioch_kill_list,
+		struct nvmeibc_channel, link))) {
+		ioch = c_to_iic(ch);
+		_NT(trace_31_disk_handle_get, "done");
+		kill_channel_(disk, ioch);
+		_NT(trace_30_disk_handle_get, "Killed");
+		nvmeibc_ib_io_channel_try_disconnect(ioch);
+		_NT(trace_33_disk_handle_get, "Disconnecting ioch");
+	}
 	/* first try to get from the free list - probably nothing from here */
 	while ((rsc_num = _remove_resource(disk)) != -1) {
 		_NT(trace_4_disk_handle_get, "Giving rsc @RSC_NUM_INT", rsc_num);
@@ -4843,6 +5239,21 @@ try_again:
 		nvmeib_reinit_completion(&get_done);
 		/* set the amount of resources we are still waiting for */
 		info->waiting_for = n - an;
+		/* try to get resources from the available io channels */
+		while (!list_empty(&info->available_channels) &&
+			   info->waiting_for) {
+			ch = list_first_entry(&info->available_channels,
+				struct nvmeibc_channel, link);
+			ioch = c_to_iic(ch);
+			BUG_ON(!ioch->rsc);
+			_NT(trace_6_disk_handle_get, "Disconnecting ioch #2");
+			kill_channel_(disk, ioch);
+			_NT(trace_7_disk_handle_get, "Killed @WAITING_FOR",info->waiting_for);
+			nvmeibc_ib_io_channel_try_disconnect(ioch);
+			_NT(trace_8_disk_handle_get, "Killing #2");
+			--info->waiting_for;
+			complete(info->waiting_for_comp);
+		}
 	}
 	else {
 		info->waiting_for_comp = NULL;
@@ -4912,6 +5323,32 @@ int nvmeibc_disk_handle_controller_req(struct nvmeibc_disk *disk,
 	return rv;
 }
 
+int nvmeibc_disk_kill_channel(struct nvmeibc_disk *disk,
+	struct nvmeibc_ib_io_channel *ch, struct list_head *bailed_cmds)
+{
+	unsigned long flags = 0;
+	int rv = 0;
+
+	__NFIND;
+	/* if channel is in use we mark it as error and wait channel to be killed */
+	nvmeibc_channel_spin_lock_irqsave(&ch->base, &flags);
+	if (ch->state == IO_CHANNEL_IN_USE) {
+		/* first release the waiting block request */
+		if (ch->net.req.bcmd) {
+			_ND(trace_disk_nvmeibc_disk_kill_channel, "Releasing waiting block requests");
+			nvmeibc_ib_net_io_handle_io_done(&ch->net, ch, 1, -ENETDOWN, false, bailed_cmds);
+			WARN_ON(list_empty(bailed_cmds));
+		}
+	}
+	else
+		_NT(trace_1_disk_nvmeibc_disk_kill_channel, "ch->state=@STATE_STR", nvmeibc_ib_io_channel_state_str(ch->state));
+	nvmeibc_channel_spin_unlock_irqrestore(&ch->base, flags);
+
+	kill_channel(disk, ch);
+
+	__NFOUTD;
+	return rv;
+}
 
 static struct nvmeibc_channel *check_reuse(struct nvmeibc_disk *disk,
 	struct nvmeibc_disk_command *disk_cmd, void **context)
@@ -4940,7 +5377,9 @@ static struct nvmeibc_channel *check_reuse(struct nvmeibc_disk *disk,
 		ch = rc->channel;
 		channel_ver_valid = nvmeibc_channel_version_get_tracked(ch, &channel_ver, &chan_ver_chng_cookie);
 		if (channel_ver_valid && channel_ver == rc->channel_ver && ch->comp_cpu == rc->comp_cpu) {
-		req = &(c_to_inrc(ch)->reqs + rc->req_id)->req;
+			req = ch->ct == ct_rdda ?
+				&c_to_iic(ch)->net.req :
+				&(c_to_inrc(ch)->reqs + rc->req_id)->req;
 			if (req->reused_bb && nvmeibc_channel_try_use_req_info(ch)) {
 				/* Check the version hasn't changed while we were taking the reference */
 				if (nvmeibc_channel_version_tracked_changed(ch, chan_ver_chng_cookie)) {
@@ -4998,6 +5437,8 @@ static bool is_reused(struct nvmeibc_disk *disk, struct nvmeibc_channel *ch,
 		rc = get_rcookie_ptr(block_cmd);
 		if (rc->action == nvmeib_data_reuse_buf_SEND_REL) {
 			reused =
+				((ch->ct == ct_rdda) &&
+				 nvmeibc_ib_io_channel_check_reused(c_to_iic(ch))) ||
 				((ch->ct == ct_n_rdda) &&
 				 nvmeibc_ib_nordda_channel_check_reused(
 					 c_to_inrc(ch), context));
@@ -5013,9 +5454,9 @@ MODULE_PARM_DESC(nr_get_least_used, "Get least used nrch (preceded by nr_get_by_
 
 uint nvmeibc_nr_get_by_cpu_index = 0;
 module_param_named(nr_get_by_cpu_index, nvmeibc_nr_get_by_cpu_index, uint, 0644);
-MODULE_PARM_DESC(nr_get_by_cpu_index, "Get nrch based on CPU-index: 0 - False, 1 - True, Other (>=2) - True and allow fallback to other select schemes");
+MODULE_PARM_DESC(nr_get_by_cpu_index_tcp, "Get nrch based on CPU-index: 0 - False, 1 - True, Other (>=2) - True and allow fallback to other select schemes");
 
-uint nvmeibc_nr_get_by_cpu_index_tcp = 0;
+uint nvmeibc_nr_get_by_cpu_index_tcp = 1;
 module_param_named(nr_get_by_cpu_index_tcp, nvmeibc_nr_get_by_cpu_index_tcp, uint, 0644);
 MODULE_PARM_DESC(nr_get_by_cpu_index_tcp, "Get nrch based on CPU-index (for TCP): 0 - False, 1 - True, Other (>=2) - True and allow fallback to other select schemes");
 
@@ -5024,6 +5465,7 @@ static struct nvmeibc_channel *nvmeibc_disk_get_channel(struct nvmeibc_disk *dis
 {
 	struct nvmeibc_disk_info *info = disk->info;
 	struct nvmeibc_channel *ch;
+	struct nvmeibc_ib_io_channel *ioch;
 	struct nvmeibc_ib_nordda_channel *nrch;
 
 	__NFIND;
@@ -5032,9 +5474,30 @@ static struct nvmeibc_channel *nvmeibc_disk_get_channel(struct nvmeibc_disk *dis
 		goto out;
 	*/
 
+retry:
 	ch = NULL;
 	/* check that we have free io channel to use for the command */
-	if (USE_ONLY_NORDDA_FOR_IO ||
+	if (!USE_ONLY_NORDDA_FOR_IO && !list_empty(&info->available_channels) &&
+		!use_nrch_only) {
+		ch = list_first_entry(&info->available_channels,
+			struct nvmeibc_channel, link);
+		list_del_init(&ch->link);
+		ioch = c_to_iic(ch);
+		req_reused_bb_lru_is_timeout_stats(&ioch->base);
+		if (nvmeibc_ib_io_channel_alive(ioch)) {
+			ioch->state = IO_CHANNEL_IN_USE;
+			*context = NULL;
+			if (!nvmeibc_channel_try_use_req_info(ch)) {
+				_ND(trace_disk_nvmeibc_disk_get_channel, "rch @CH_NAME, no usable reqs", ch->name);
+				ch = NULL; /* remove-work in progress, not putting back */
+			}
+		}
+		else {
+			nvmeibc_ib_io_channel_try_disconnect(ioch);
+			goto retry;
+		}
+	}
+	else if (USE_ONLY_NORDDA_FOR_IO ||
 			 (USE_NORDDA_FOR_IO && info->mine <= NVMEIBC_WATERMARK_GOTO_NORDDA) ||
 			 use_nrch_only) {
 		*context = NULL;
@@ -5201,11 +5664,99 @@ unlock:
 struct nvmeibc_disk_io_command * nvmeibc_disk_get_block_cmd_rdda(
 	struct nvmeibc_disk *disk, struct nvmeibc_channel *ch, u32 version)
 {
+	struct nvmeibc_disk_info *info = disk->info;
+	struct nvmeibc_ib_io_channel *ioch = c_to_iic(ch);
+	struct nvmeibc_disk_command *disk_cmd;
 	struct nvmeibc_disk_io_command *block_cmd;
+	u64 ch_version;
 
 	__NFIND;
-	/* RDDA removed - function stubbed out */
+	//assumed -> spin_is_locked(&disk->spinlock))
 	block_cmd = NULL;
+	/* in the case we are called after reuse the save channel maybe stale */
+	if (version && (!nvmeibc_channel_version_get(ch, &ch_version) || ch_version != version)) {
+		_NE(trace_0_disk_nvmeibc_disk_get_block_cmd_rdda,
+			"ch=@PTR stale version: curr=@LLU vs. @INT",
+			ch, ch_version, (int)version);
+		goto out;
+	}
+	/* check if we are history */
+	if (atomic_read(&disk->dying) ||
+		atomic_read(&ioch->net.base.dying) ||
+		ioch->comp_code ||
+		ioch->state == IO_CHANNEL_ERROR ||
+		info->waiting_for) {
+		if (info->waiting_for) {
+			list_add_tail(&ioch->base.link, &disk->ioch_kill_list);
+			--info->waiting_for;
+			complete(info->waiting_for_comp);
+		}
+		else
+			/* free the resource and wakeup the waiting thread */
+			nvmeibc_ib_io_channel_try_disconnect(ioch);
+	}
+	else if (nvmeibc_ib_io_channel_alive(ioch)) {
+		/* check if we have pending IO commands */
+		if (likely(info->tot_io_pending)) {
+			if (likely(disk->prio_pending)) {
+				int i;
+				for (i = DISK_PEND_PRIO_IO_START; i < DISK_PEND_PRIO_MAX; i++) {
+					if ((disk_cmd = list_first_entry_or_null(&info->pending_disk_cmds[i],
+						struct nvmeibc_disk_command, dcmd_link))) {
+						BUG_ON(disk_cmd->server_side_only);
+						block_cmd = disk_to_block(disk_cmd);
+						list_del_init(&disk_cmd->dcmd_link);
+						info->tot_pending--;
+						info->tot_io_pending--;
+						break;
+					}
+				}
+			} else {
+				list_for_each_entry(disk_cmd, &info->pending_disk_cmds[0], dcmd_link) {
+					if (disk_cmd->cmd_type == NVMEIBC_DISK_CMD_IO &&
+						!disk_cmd->server_side_only) {
+						block_cmd = disk_to_block(disk_cmd);
+						list_del_init(&disk_cmd->dcmd_link);
+						info->tot_pending--;
+						info->tot_io_pending--;
+						break;
+					}
+				}
+			}
+			/* We've already checked tot_io_pending > 0 so assert if we didn't get a block_cmd */
+			BUG_ON(!block_cmd);
+		}
+
+		if (!block_cmd) {
+			/* remember to change channel state - this is important when
+			   we kill the channel.
+			*/
+			if (!disk->prio_pending) {
+				if (info->tot_pending != info->n_use_nrch_only) {
+					_NE(error_disk_nvmeibc_disk_get_block_cmd_rdda, "Gen-cmds count skew (@COUNT vs. @N_USE_NRCH_ONLY)",
+							info->tot_pending, info->n_use_nrch_only);
+					WARN_ON_ONCE(1);
+				}
+			}
+
+			_ND(trace_disk_nvmeibc_disk_get_block_cmd_rdda, "ioch->state from @IB_IO_CHANNEL_STATE_STR to @IB_IO_CHANNEL_STATE_STR",
+			   nvmeibc_ib_io_channel_state_str(ioch->state),
+			   nvmeibc_ib_io_channel_state_str(IO_CHANNEL_ALLOCATED));
+			ioch->state = IO_CHANNEL_ALLOCATED;
+			if (unlikely(ioch->base.cnt_io_ok == 0)) {
+				/* Channel has not done any IO yet, add to tail of available channels */
+				list_add_tail(&ioch->base.link, &info->available_channels);
+			}
+			else {
+				/* Channel has just finished IO successfully, add to head to perform next IO */
+				list_add(&ioch->base.link, &info->available_channels);
+			}
+		}
+	}
+	else
+		nvmeibc_ib_io_channel_try_disconnect(ioch);
+
+out:
 	__NFOUTD;
 	return block_cmd;
 }
@@ -5301,7 +5852,7 @@ static int on_md_rd_mod_wr_comp(struct nvmeibc_disk_io_command *block_cmd,
 			req->req.disk_block = req->disk_address;
 			req->req.data_len = req->ndb->length;
 
-			if (dp_dbgdi_should_add_info_core(block_cmd)) {
+			if (dp_dbgdi_should_add_info_core(block_cmd))
 				dp_dbgdi_do_add_info_core_pre(
 				    req,
 				    &NVMEIBC_CORE_DBGDI_PARAM(
@@ -5310,7 +5861,6 @@ static int on_md_rd_mod_wr_comp(struct nvmeibc_disk_io_command *block_cmd,
 						.io_id = 0, .ch_ptr = 0, /* local io, TODO: add special handling */
 				        .lock_pgbk = &((struct t_core_dbgdi_lock_piggyback){
 				            .valid = false})));
-			}
 
 			NVMEIB_LOG_GOODPATH_CORE_POST(trace_on_md_rd_mod_wr_comp,
 										  disk, block_cmd,
@@ -5373,7 +5923,7 @@ static void execute_io_local_cb(void *arg, int status, u32 result)
 	bool in_interrupt = in_interrupt();
 	const struct nvmeib_cpu_mask cpus = block_cmd->reqs[0].cpu_mask_info->mask;
 	int comp_code;
-	ktime_t end_ts = ktime_get();
+	ktime_t end_ts = nvmeib_public_ktime_get();
 #if defined(TAKE_STATS)
 	unsigned long flags;
 #endif
@@ -5918,7 +6468,7 @@ void nvmeibc_disk_cmd_piggyback_lock_read_poison_verify(
 		if (nvmeibc_disk_cmd_piggyback_lock_read_poison_is_val_posioned(c->val[0]) ||
 			(c->lock_cnsts->w_blkset_info &&
 			 nvmeibc_disk_cmd_piggyback_lock_read_poison_is_val_posioned(c->val[1]))) {
-			_NE_to_user(t_00_iicgdcc, DMESG_PD_PREFIX("@DISK_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption. Error code: 1017. Internal info {@LLX, @LLX}.",
+			_NE_to_user(t_00_iicgdcc, DMESG_PD_PREFIX("@DISK_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption, contact Excelero support. Error code: 1017. Internal info {@LLX, @LLX}.",
 				bcmd->disk->name, c->val[0], c->val[1]);
 			BUG();
 		}
@@ -6231,7 +6781,7 @@ static inline int execute_io_local_cmd_io(struct nvmeibc_disk *disk,
 		}
 	}
 
-	if (dp_dbgdi_should_add_info_core(block_cmd)) {
+	if (dp_dbgdi_should_add_info_core(block_cmd))
 		dp_dbgdi_do_add_info_core_pre(
 		    req,
 		    &NVMEIBC_CORE_DBGDI_PARAM(
@@ -6240,7 +6790,6 @@ static inline int execute_io_local_cmd_io(struct nvmeibc_disk *disk,
 				.io_id = 0, .ch_ptr = 0, /* local io, TODO: add special handling */
 		        .lock_pgbk =
 		            &((struct t_core_dbgdi_lock_piggyback){.valid = false})));
-	}
 
 	NVMEIB_LOG_GOODPATH_CORE_POST(trace_execute_io_local_cmd_io,
 								  disk, block_cmd,
@@ -6469,10 +7018,14 @@ static struct nvmeibc_channel *execute_io_remote_check_reuse(struct nvmeibc_disk
 
 		/* Copied from nvmeibc_disk_reused_bb_release */
 		if (nvmeibc_channel_try_use_req_info(ch)) {
-			void *pend_ctx = NULL;
+			void *pend_ctx;
 			bool do_pending = false;
 
-			if (ch->ct == ct_n_rdda) {
+			if (ch->ct == ct_rdda) {
+				nvmeibc_ib_io_channel_reused_context(c_to_iic(ch), &rc_stack, &pend_ctx);
+				do_pending = true;
+			}
+			else if (ch->ct == ct_n_rdda) {
 				nvmeibc_ib_nordda_channel_reused_context(c_to_inrc(ch), &rc_stack, &pend_ctx);
 				do_pending = !!pend_ctx;
 				/* if !@pend_ctx, nvmeibc_channel-end_use_req_info was called */
@@ -6519,7 +7072,6 @@ static int execute_io_remote(struct nvmeibc_disk *disk,
 		_NT(trace_disk_execute_io_remote, "Disk is dying - leave");
 		nvmeibc_disk_cmds_stats_direct_exec_err(disk, disk_cmd, rv);
 		nvmeibc_disk_cmd_status_debug(disk_cmd, NVMEIBC_DISK_CMD_DISK_DYING);
-		goto out;
 	}
 
 	/* [NVMESH-6887]: check reuse before splitting to per-cpu, coremask, any-core flow 
@@ -6733,7 +7285,7 @@ static inline int execute_io(struct nvmeibc_disk *disk,
 		}
 	}
 
-	block_cmd->disk_cmd.start_ts = ktime_get();
+	block_cmd->disk_cmd.start_ts = nvmeib_public_ktime_get();
 	block_cmd->disk = disk;					// Todo, functions which accept 'cmd' dont need 'disk' param
 
 	disk_cmd_link_init(&block_cmd->disk_cmd);
@@ -6787,10 +7339,14 @@ static void ch_reused_bb_release_smp_fn(void *arg)
 	struct nvmeibc_channel *ch = params->ch;
 	struct nvmeib_data_reuse_buf_params *r = params->r;
 	void *context;
-	bool do_pending = false;
+	bool do_pending;
 
 	if (nvmeibc_channel_try_use_req_info(ch)) {
-		if (ch->ct == ct_n_rdda) {
+		if (ch->ct == ct_rdda) {
+			nvmeibc_ib_io_channel_reused_context(c_to_iic(ch), r, &context);
+			do_pending = true;
+		}
+		else if (ch->ct == ct_n_rdda) {
 			nvmeibc_ib_nordda_channel_reused_context(c_to_inrc(ch), r, &context);
 			do_pending = !!context;
 			/* if !@context, nvmeibc_channel-end_use_req_info was called */
@@ -6883,7 +7439,11 @@ void nvmeibc_disk_reused_bb_release(struct nvmeibc_disk *disk,
 
 	/* try using the channel for pending cmds */
 	if (nvmeibc_channel_try_use_req_info(ch)) {
-		if (ch->ct == ct_n_rdda) {
+		if (ch->ct == ct_rdda) {
+			nvmeibc_ib_io_channel_reused_context(c_to_iic(ch), &r, &context);
+			do_pending = true;
+		}
+		else if (ch->ct == ct_n_rdda) {
 			nvmeibc_ib_nordda_channel_reused_context(c_to_inrc(ch), &r, &context);
 			do_pending = !!context;
 			/* if !@context, nvmeibc_channel-end_use_req_info was called */
@@ -7031,12 +7591,17 @@ bool nvmeibc_disk_gen_cmd_is_timed_out(
 void nvmeibc_disk_init_stats(struct nvmeibc_disk *disk)
 {
 	struct nvmeibc_disk_info *info = disk->info;
+	struct nvmeibc_disk_channel_rsc *r;
 	unsigned long flags;
 
 	__NFIND;
 	/* we must check for info because local disk does not have one */
 	if (info) {
-		/* RDDA stats removed */
+		spin_lock_irqsave(&disk->spinlock, flags);
+		list_for_each_entry(r, &info->my_rscs, link)
+			if (r->ch)
+				nvmeibc_ib_net_io_init_stats(&r->ch->net);
+		spin_unlock_irqrestore(&disk->spinlock, flags);
 	}
 	else {
 		spin_lock_irqsave(&disk->stats_spinlock, flags);
@@ -7054,15 +7619,38 @@ bool nvmeibc_disk_do_512b_sub_block_x_supported(const struct nvmeibc_disk* disk)
 
 void nvmeibc_disk_print_stats(struct nvmeibc_disk *disk, const char *str)
 {
-	struct nvmeibc_disk_info *info __attribute__((unused)) = disk->info;
-	u64 avg = 0;
+	struct nvmeibc_disk_info *info = disk->info;
+	struct nvmeibc_disk_channel_rsc *r;
+	struct nvmeib_stats *st;
+	u64 avg, ib_overeager_tot = 0;
+	int printed = 0;
 	unsigned long flags;
 
 	__NFIND;
 	/* we must check for info because local disk does not have one */
 	if (info) {
-		/* RDDA print stats removed */
-		_NT(trace_4_disk_nvmeibc_disk_print_stats, "No statistics");
+		spin_lock_irqsave(&disk->spinlock, flags);
+		list_for_each_entry(r, &info->my_rscs, link)
+			if (r->ch) {
+				st = &r->ch->net.send.common;
+				if (st->counts) {
+					printed = 1;
+					avg = DIV_ROUND_CLOSEST(nvmeib_stats_sum_dt_ns(st), st->counts);
+					_NT(trace_disk_nvmeibc_disk_print_stats, "!!!!! @INDEX@@DISK_NAME-@STR: send n=@COUNTS, io_avg=@IO_AVG",
+						r->ch->base.index, info->disk->name,
+						str, st->counts, avg);
+				}
+				ib_overeager_tot += r->ch->net.ib_overeager;
+				_NT(trace_1_disk_nvmeibc_disk_print_stats, "!!!!! @INDEX@@DISK_NAME-@STR: ib_overeager=@IB_OVEREAGER",r->ch->base.index,
+					info->disk->name, str, r->ch->net.ib_overeager);
+			}
+		spin_unlock_irqrestore(&disk->spinlock, flags);
+		_NT(trace_2_disk_nvmeibc_disk_print_stats, "@DISK_NAME-@STR: ib_overeager=@IB_OVEREAGER", info->disk->name, str, ib_overeager_tot);
+		_NT(trace_3_disk_nvmeibc_disk_print_stats, "@DISK_NAME-@STR: ops=@OPS",
+			info->disk->name, str, /*(u64)atomic64_read(&info->ops)*/0LL);
+		if (!printed) {
+			_NT(trace_4_disk_nvmeibc_disk_print_stats, "No statistics");
+		}
 	}
 	else {
 		spin_lock_irqsave(&disk->stats_spinlock, flags);
@@ -8924,12 +9512,11 @@ static bool ioch_drained_on_timer_(struct nvmeibc_disk *disk)
 {
 	struct ioch_bailed_cmds *b;
 	struct nvmeibc_channel *ch;
-	uint ioch_drained_timeout_jif = READ_ONCE(nvmeibc_disk_ioch_drained_timeout_sec) * HZ;
 	NFIN;
 
 	if ((b = list_first_entry_or_null(&disk->ioch_drained_pending_list,
 									  struct ioch_bailed_cmds, link)) &&
-		 time_after(jiffies, b->arm_jif + ioch_drained_timeout_jif)) {
+		 time_after(jiffies, b->arm_jif + MAX_WAIT_IOCH_DRAINED)) {
 		ch = container_of(b, struct nvmeibc_channel, bailed_cmds);
 		_NTch(trace_0_ioch_drained_on_timer_, ch, "timeout");
 		return true;
@@ -9056,6 +9643,7 @@ static struct nvmeibc_channel *ioch_drained_lookup_ch(struct nvmeibc_disk *disk,
 	u16 ch_num = be16_to_cpu(i_req->ch_num);
 	struct nvmeibc_io_rnic *rionic;
 	struct nvmeibc_io_lnic *lionic;
+	struct nvmeibc_ib_io_channel *ioch;
 	struct nvmeibc_ib_nordda_channel *nrch;
 	struct nvmeibc_channel *ch = NULL;
 	NFIN;
@@ -9065,7 +9653,23 @@ static struct nvmeibc_channel *ioch_drained_lookup_ch(struct nvmeibc_disk *disk,
 		disk->name, disk, lgid, rgid, ch_num, i_req->is_rdda);
 
 	if (i_req->is_rdda) {
-		/* RDDA removed */
+		list_for_each_entry(rionic, &disk->rionics, disk_link) {
+			if (memcmp(rgid, &rionic->hw_gid, sizeof(*rgid)) != 0)
+				continue;
+			list_for_each_entry(lionic, &rionic->lionics, rionic_link) {
+				if (memcmp(lgid, &lionic->port->gid.hw_gid, sizeof(*lgid)) != 0)
+					continue;
+				if (ch_num < lionic->n_qps) {
+					ioch = lionic->io_channels + ch_num;
+					ch = &ioch->base;
+				}
+				else {
+					_NE(trace_1_ioch_drained_lookup_ch,
+						"OOPS, @INT vs. n=@INT", ch_num, lionic->n_qps);
+					goto out;
+				}
+			}
+		}
 	}
 	else {
 		list_for_each_entry(rionic, &disk->nr_rionics, disk_nrlink) {
@@ -9650,7 +10254,7 @@ static void free_disk_rsc(struct nvmeibc_disk *disk)
 		}
 		up_write(&info->ch->segments_locks_remote.guard);
 		if (info->pcpu_wq)
-			destroy_workqueue(info->pcpu_wq);
+			nvmeib_public_destroy_workqueue(info->pcpu_wq);
 		free_coremask_info(info->coremask_info);
 		kfree(info);
 	}
@@ -12169,11 +12773,20 @@ static int qps_nr_rionic_stats_common(struct nvmeibc_io_rnic *rionic, void *args
 
 static int qps_io_rionic_stats_common(struct nvmeibc_io_rnic *rionic, void *args)
 {
-	int rv = 0;
+	struct nvmeibc_io_lnic *lionic;
+	int rv = 0, i;
+	struct arg_qp_pcpu_cb *qp_cb = (struct arg_qp_pcpu_cb *)args;
 
-	/* RDDA removed */
-	(void)rionic;
-	(void)args;
+	list_for_each_entry(lionic, &rionic->lionics, rionic_link) {
+		if (!atomic_read(&lionic->dying)) {
+			for (i = 0; i < lionic->n_qps; i++) {
+				struct nvmeibc_ib_io_channel *io_ch = (struct nvmeibc_ib_io_channel *)lionic->io_channels + i;
+				if (io_ch) {
+					qp_cb->cb(io_ch->net.base.qp_stats, &io_ch->net.base, qp_cb->arg);
+				}
+			}
+		}
+	}
 
 	return rv;
 }
@@ -12513,7 +13126,7 @@ ssize_t nvmeibc_disk_print_info(struct nvmeibc_disk *disk, char *buffer,
 				count += scnprintf(buffer + count, len - count,
 				"{\"gid\":\"%s\",\n",lgid_buf);
 				count += scnprintf(buffer + count, len - count,
-		     "\"n_qps\":%d,\n", 0); /* RDDA removed */
+					"\"n_qps\":%d,\n", lionic->n_qps);
 				count += scnprintf(buffer + count, len - count,
 					"\"n_nr_qps\":%d\n}\n", lionic->n_nr_qps);
 				tot_nr_qps += lionic->n_nr_qps;
@@ -12822,9 +13435,19 @@ out:
 
 static int disconnect_lionic_all_rdda_channels(struct nvmeibc_io_lnic *lionic)
 {
+	struct nvmeibc_ib_io_channel *ioch;
 	int n = 0;
+	int i;
 	NFIN;
-	/* RDDA removed */
+
+	for (i = 0; i < lionic->n_qps; ++i) {
+		ioch = lionic->io_channels + i;
+		if (ioch->state == IO_CHANNEL_ALLOCATED || ioch->state == IO_CHANNEL_IN_USE) {
+			if (nvmeibc_ib_io_channel_try_disconnect(ioch))
+				n++;
+		}
+	}
+
 	NFOUT;
 	return n;
 }
@@ -12897,7 +13520,7 @@ int nvmeibc_disk_lionic_rionic_find_path(struct nvmeibc_io_lnic *lionic)
 	path->sgid = lionic->ib_gid;
 	path->dgid = rionic->ib_gid;
 	path->service_id = (layer == IB_LINK_LAYER_INFINIBAND) ?
-		cpu_to_be64(NVMEIB_SERVICE_ID) : 0;
+		cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID) : 0;
 	/* use stuff from port we assume never changes */
 	path->pkey = cpu_to_be16(port->pkey);
 	info.dev = P2NV(port);
@@ -12905,14 +13528,14 @@ int nvmeibc_disk_lionic_rionic_find_path(struct nvmeibc_io_lnic *lionic)
 	info.path = path;
 	info.src_port = port->port;
 	if (layer == IB_LINK_LAYER_INFINIBAND) {
-		info.service_id = NVMEIB_SERVICE_ID;
+		info.service_id = NVMEIB_EXCELERO_SERVICE_ID;
 		info.pkey = port->pkey;
 		info.service_port = 0;
 	}
 	else {
 		info.service_id = 0;
 		info.pkey = 0;
-		info.service_port = transport_type == RDMA_TRANSPORT_IWARP ? nvmeib_get_tcp_base_port_id() : NVMEIB_PORT_ID;
+		info.service_port = transport_type == RDMA_TRANSPORT_IWARP ? nvmeib_get_tcp_base_port_id() : NVMEIB_EXCELERO_PORT_ID;
 	}
 	rv = nvmeibc_disk_find_path(rionic->disk, &info);
 	_NT(trace_3_disk_nvmeibc_disk_lionic_rionic_find_path, "@TRUE_FALSE_STR path @SGID->@DGID",
@@ -14461,13 +15084,11 @@ static void disk_coremask_update_admin_work(struct workqe_struct *work)
 		count += (*jops->fn)(buf + count, len - count, name, val, is_last, indent);\
 	} while(0)
 	
-#undef CALL_JSON_START_OBJ
 #define CALL_JSON_START_OBJ(name, indent)\
 	do {\
 		count += (*jops->start_obj)(buf + count, len - count, name, indent);\
 	} while(0)
 	
-#undef CALL_JSON_END_OBJ
 #define CALL_JSON_END_OBJ(is_last, indent)\
 	do {\
 		count += (*jops->end_obj)(buf + count, len - count, is_last, indent);\
@@ -14536,13 +15157,11 @@ do {\
 	*data->count += (*jops->end_obj)(data->buf + *data->count, data->len - *data->count, is_last, --data->ntabs);\
 } while(0)
 
-#undef CALL_JSON_START_ARRAY
 #define CALL_JSON_START_ARRAY(data, name)\
 do {\
 	*data->count += (*jops->start_array)(data->buf + *data->count, data->len - *data->count, name, data->ntabs++);\
 } while(0)
 
-#undef CALL_JSON_END_ARRAY
 #define CALL_JSON_END_ARRAY(data, is_last)\
 do {\
 	*data->count += (*jops->end_array)(data->buf + *data->count, data->len - *data->count, is_last, --data->ntabs);\
@@ -14650,8 +15269,7 @@ out:
 #undef CALL_JSON_FN
 #undef CALL_JSON_START_OBJ
 #undef CALL_JSON_END_OBJ
-#undef CALL_JSON_START_ARRAY
-#undef CALL_JSON_END_ARRAY
+#undef CALL_JSON_FN_NAME
 #undef CALL_JSON_DATA_SPRINTF
 
 #define CALL_JSON_FN(fn, name, val, is_last, indent)\

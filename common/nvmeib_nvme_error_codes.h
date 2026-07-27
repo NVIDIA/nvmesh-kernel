@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_NVME_ERROR_CODES_H
 #define NVMEIB_NVME_ERROR_CODES_H
 #include "nvmeib_nvme.h"

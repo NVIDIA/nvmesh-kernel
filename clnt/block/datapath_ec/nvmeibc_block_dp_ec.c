@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_ec.h"
 #include "nvmeib_error_report.h"
 #include "nvmeibc_block_dp_ec_journal_common.h"
@@ -20,7 +15,7 @@
 
 bool qa_ec_stress_debug = false;		 // LKJ: EC-1480 Only for stress testing, remove in product
 module_param(qa_ec_stress_debug, bool, 0644);
-MODULE_PARM_DESC(qa_ec_stress_debug, "For QA only! Stresses the EC datapath.");
+MODULE_PARM_DESC(qa_ec_stress_debug, "For QA only! Over stress EC datapath");
 
 /*
 	TODO: Review documentation and update if required
@@ -974,7 +969,7 @@ _enomem:
 
 bool nvmeibc_copy_bio_buffers = true;
 module_param(nvmeibc_copy_bio_buffers, bool, 0644);
-MODULE_PARM_DESC(nvmeibc_copy_bio_buffers, "Copy bio buffers in writes. Should be on except for specific file systems that never write into a buffer during IO.");
+MODULE_PARM_DESC(nvmeibc_copy_bio_buffers, "Copy bio buffers in writes. Set to True when using page cache");
 
 static int __append_bio_block_to_cmd(int _i, struct scatterlist **sg, struct nvmeibc_block_command *cmds, struct operation *o, union vv_bio_inter *vbi, const int mi, const bool is_read)
 {

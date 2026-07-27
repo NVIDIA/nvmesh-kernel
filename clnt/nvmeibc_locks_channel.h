@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_LOCKS_CHANNEL_H
 #define NVMEIBC_LOCKS_CHANNEL_H
 
@@ -461,10 +456,6 @@ void nvmeibc_locks_channel_disconnect_coremask_chs(struct nvmeibc_locks_channel 
 struct nvmeibc_channel *nvmeibc_locks_channel_get_coremash_ch_for_cpu(struct nvmeibc_locks_channel *ch, 
 								      void *coremask_cookie, int cpu,
 								      struct nvmeib_cpu_mask *ch_cpumask);
-
-int nvmeibc_locks_channel_wq_init(void);
-void nvmeibc_locks_channel_wq_destroy(void);
-struct workqueue_struct *nvmeibc_locks_channel_get_wq(void);
 
 #endif //NVMEIBC_LOCKS_CHANNEL_H
 

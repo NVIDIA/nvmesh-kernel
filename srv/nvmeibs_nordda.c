@@ -1,15 +1,10 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #define  S_NORDDA_C
 
 #include "common/kr_incs.h"
 
 #if !defined(BLKDEV_SIMULATOR)
 /* Strictly non simulator includes */
-#include "nvmeibs_nordda.h"	
+#include "nvmeibs_nordda.h"
 #include "nvmeibs_toma.h"
 #include "nvmeib.h"
 #include "nvmeibs_defs.h"
@@ -97,7 +92,7 @@ do {	\
 static void nvmeibs_nr_lat_meas_record_io_cmd_cb(struct nvmeibs_nr_channel *nrch, struct nvmeibs_nr_cmd *cmd) {
 	u64 lat_us;
 	/* Update stats */
-	cmd->lat_meas.comp_time = ktime_get();
+	cmd->lat_meas.comp_time = nvmeib_public_ktime_get();
 	lat_us = ktime_to_us(ktime_sub(cmd->lat_meas.comp_time, cmd->lat_meas.submit_time));
 	NRCH_PCPU_STAT_INC(nrch, n_iops_comp);
 	NRCH_PCPU_STAT_ADD(nrch, tot_lat_us, lat_us);
@@ -108,20 +103,20 @@ static void nvmeibs_nr_lat_meas_record_io_cmd_cb(struct nvmeibs_nr_channel *nrch
 static void nvmeibs_nr_lat_meas_record_io_submit(struct nvmeibs_nr_channel *nrch, struct nvmeibs_nr_cmd *cmd)
 {
 	NRCH_PCPU_STAT_INC(nrch, n_iops_submit);
-	cmd->lat_meas.submit_time = ktime_get();
+	cmd->lat_meas.submit_time = nvmeib_public_ktime_get();
 }
 
 static void nvmeibs_nr_lat_meas_record_send_rsp(struct nvmeibs_nr_channel *nrch, struct nvmeibs_nr_cmd *cmd)
 {
 	(void)nrch;
-	cmd->lat_meas.post_send_time = ktime_get();
+	cmd->lat_meas.post_send_time = nvmeib_public_ktime_get();
 }
 
 static void nvmeibs_nr_lat_meas_record_rx_md(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioctx)
 {
 	if (recv_ioctx->rx_md.valid) {
 		u64 recv_poll_lat_us = ktime_to_us(ktime_sub(recv_ioctx->rx_md.poll_time, recv_ioctx->rx_md.recv_time));
-		u64 recv_submit_lat_us = ktime_to_us(ktime_sub(ktime_get(), recv_ioctx->rx_md.recv_time));
+		u64 recv_submit_lat_us = ktime_to_us(ktime_sub(nvmeib_public_ktime_get(), recv_ioctx->rx_md.recv_time));
 		NRCH_PCPU_STAT_ADD(nrch, tot_recv_poll_lat_us, recv_poll_lat_us);
 		NRCH_PCPU_STAT_MIN_UPDATE(nrch, min_recv_poll_lat_us, recv_poll_lat_us);
 		NRCH_PCPU_STAT_MAX_UPDATE(nrch, max_recv_poll_lat_us, recv_poll_lat_us);
@@ -145,8 +140,8 @@ static void nvmeibs_nr_lat_meas_fill_rx_md(const struct ib_wc *recv_wc, struct n
 		&recv_ioctx->rx_md.queue,
 		&recv_ioctx->rx_md.skb_hash))) {
 		/* Did not get MD from SIW MD, fill it as best we can */
-		recv_ioctx->rx_md.recv_time = ktime_get();
-		recv_ioctx->rx_md.poll_time = ktime_get();
+		recv_ioctx->rx_md.recv_time = nvmeib_public_ktime_get();
+		recv_ioctx->rx_md.poll_time = nvmeib_public_ktime_get();
 		recv_ioctx->rx_md.cpu = smp_processor_id();
 		recv_ioctx->rx_md.valid = true;
 	}
@@ -163,7 +158,7 @@ static void nvmeibs_nr_lat_meas_record_send_comp(const struct ib_wc *wc_send, st
 	ktime_t post_send_time;
 	ktime_t sent_time;
 	ktime_t ack_time;
-	ktime_t send_comp_time = ktime_get();
+	ktime_t send_comp_time = nvmeib_public_ktime_get();
 	u64 send2comp_us;
 	u16 tx_cpu;
 
@@ -485,19 +480,19 @@ static void nordda_recv_comp_h(void *ctx, struct ib_wc *wcs);
 
 bool nvmeibs_nr_post_recv_on_send_comp = false;
 module_param_named(nr_post_recv_on_send_comp, nvmeibs_nr_post_recv_on_send_comp, bool, 0444);
-MODULE_PARM_DESC(nr_post_recv_on_send_comp, "In per-cpu CQ and SRQ mode, post a receive buffer on send completion of an IO response.");
+MODULE_PARM_DESC(nr_post_recv_on_send_comp, "In percpu CQ and SRQ mode, post recv buff on send comp of io-rsp");
 
 bool nvmeibs_nr_skip_disk_access = false;
 module_param_named(nr_skip_disk_access, nvmeibs_nr_skip_disk_access, bool, 0644);
-MODULE_PARM_DESC(nr_skip_disk_access, "Unsafe debug mode. Skip local disk access, i.e., complete disk operations immediately instead of performing them for remote IO operations. Used for debugging and performance optimization.");
+MODULE_PARM_DESC(nr_skip_disk_access, "Unsafe debug mode: No-rdda skip disk access");
 
 bool nvmeibs_nr_skip_rdma_write_back = false;
 module_param_named(nr_skip_rdma_write_back, nvmeibs_nr_skip_rdma_write_back, bool, 0644);
-MODULE_PARM_DESC(nr_skip_rdma_write_back, "Unsafe debug mode. Skip performing the RDMA write-back usually done for disk read operations for remote IO operations. Used for debugging and performance optimization.");
+MODULE_PARM_DESC(nr_skip_rdma_write_back, "Unsafe debug mode: No-rdda skip rdma write-back in read operation");
 
 bool nvmeibs_nr_wq_set_cpu_affinity = false;
 module_param_named(nr_wq_set_cpu_affinity, nvmeibs_nr_wq_set_cpu_affinity, bool, 0644);
-MODULE_PARM_DESC(nr_wq_set_cpu_affinity, "Set CPU affinity of IO communication work queues, based on channel index.");
+MODULE_PARM_DESC(nr_wq_set_cpu_affinity, "Set CPU affinity of NR WQ (based on channel index)");
 
 void nrch_send_rsp_and_post_recv(struct nvmeibs_nr_channel *nrch,
 	u8 opcode, u64 tag, u16 version_tag, struct nvmeib_iu *send_ioctx, void *p, int len,
@@ -538,26 +533,18 @@ enum can_handle_res {
 	NORDDA_DEFER,
 };
 
+struct nordda_io_cmd_work {
+	struct workqe_struct work;
+	struct nvmeibs_nr_channel *nrch;
+	struct nvmeib_iu *send_ioctx;
+	struct nvmeib_iu *recv_ioctx;
+};
+
 int nvmeibs_nordda_add_work(struct nvmeibs_nr_channel *nrch,
 	struct workqe_struct *work)
 {
 	return wq_add_work(nrch->wq, work) ? 0 : -1;
 }
-
-#define nrch_lock_irqsave(nrch, flags) do {\
-	spin_lock_irqsave(&nrch->spinlock, flags);\
-	nrch->locking_cpu = smp_processor_id();\
-} while(0)
-
-#define nrch_unlock_irqrestore(nrch, flags) do {\
-	nrch->locking_cpu = -1;\
-	spin_unlock_irqrestore(&nrch->spinlock, flags);\
-} while(0)
-
-#define nrch_already_locked(nrch) ({\
-	bool already_locked = irqs_disabled() && nrch->locking_cpu == smp_processor_id();\
-	already_locked;\
-})
 
 static inline bool new_cmd_underway(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioctx)
 {
@@ -576,21 +563,16 @@ static inline bool new_cmd_underway(struct nvmeibs_nr_channel *nrch, struct nvme
 		u16 version = nordda_tag_decode_version(req_tag);
 		u32 ch_version = nordda_tag_decode_ch_version(req_tag);
 		unsigned long flags;
-		bool already_locked = nrch_already_locked(nrch);
 
 		BUG_ON(index >= cl->nrch_ioreq_num);
-		if (!already_locked) {
-			nrch_lock_irqsave(nrch, flags);
-		}
+		spin_lock_irqsave(&nrch->spinlock, flags);
 		if (test_and_set_bit(index, nrch->underway_cmds_bmp)) {
-				_NE(error_s_nordda_new_cmd_underway_already,
-					"nrch @NRCH_NAME (@NRCH), idx @INDEX, already underway. req version @VERSION req channel version @VERSION",
-					nrch->name, nrch, index, version, ch_version);
+			_NE(error_s_nordda_new_cmd_underway_already,
+				"nrch @NRCH_NAME (@NRCH), idx @INDEX, already underway. req version @VERSION req channel version @VERSION",
+				nrch->name, nrch, index, version, ch_version);
 			BUG_ON(1);
 		}
-		if (!already_locked) {
-			nrch_unlock_irqrestore(nrch, flags);
-		}
+		spin_unlock_irqrestore(&nrch->spinlock, flags);
 	}
 #else
 	(void)recv_ioctx;
@@ -608,22 +590,17 @@ static inline void cmd_ended(struct nvmeibs_nr_channel *nrch, __be64 req_hdr_tag
 		struct nvmeibs_client *cl = NR2C(nrch);
 		u64 req_tag = be64_to_cpu(req_hdr_tag);
 		u16 index = nordda_tag_decode_index(req_tag);
-	if (index < cl->nrch_ioreq_num) {
-		bool already_locked = nrch_already_locked(nrch);
-		unsigned long flags;
-		if (!already_locked) {
-			nrch_lock_irqsave(nrch, flags);
-		}
-		if (unlikely(!test_and_clear_bit(index, nrch->underway_cmds_bmp))) {
-			_NE(error_s_nordda_cmd_ended_not_underway,
-				"nrch @NRCH_NAME (@NRCH), idx @INDEX, not underway",
-				nrch->name, nrch, (int)index);
-			BUG_ON(1);
-		}
-		if (!already_locked) {
-			nrch_unlock_irqrestore(nrch, flags);
-		}
-	} else {
+		if (index < cl->nrch_ioreq_num) {
+			unsigned long flags;
+			spin_lock_irqsave(&nrch->spinlock, flags);
+			if (unlikely(!test_and_clear_bit(index, nrch->underway_cmds_bmp))) {
+				_NE(error_s_nordda_cmd_ended_not_underway,
+					"nrch @NRCH_NAME (@NRCH), idx @INDEX, not underway",
+					nrch->name, nrch, (int)index);
+				BUG_ON(1);
+			}
+			spin_unlock_irqrestore(&nrch->spinlock, flags);
+		} else {
 			_NE(error_cmd_ended_catch_underway_inv_index,
 			    "NRCH @NRCH - Invalid request index @IDX_LLONG (max supported index is @NRCH_IOREQ_NUM)",
 			    nrch, index, cl->nrch_ioreq_num);
@@ -1343,7 +1320,7 @@ static inline void cmd_stats_md_on_send_rsp(struct nvmeibs_nr_cmd *cmd)
 	struct nvmeibs_nr_cmd_stats_md *stats_md_head = &CMD_STATS_MD_HEAD(cmd);
 
 	__NFIN;
-	stats_md_head->send_rsp_time = ktime_get();
+	stats_md_head->send_rsp_time = nvmeib_public_ktime_get();
 	
 	/* Set to valid and increment the producer */
 	stats_md_head->valid = true;
@@ -2928,78 +2905,69 @@ static void attempt_handle_pending_recv(struct nvmeibs_nr_channel *nrch)
 	unsigned long flags;
 	__NFIN;
 
-	nrch_lock_irqsave(nrch, flags);
+	spin_lock_irqsave(&nrch->spinlock, flags);
 	while (unlikely(
 			!list_empty(&nrch->net->pending_received_msgs) &&
 			nrch->net->state == QP_LIVE)) {
 		if ((recv_ioctx = list_first_entry_or_null(
 			&nrch->net->pending_received_msgs, struct nvmeib_iu, free_tx_n))) {
 			list_del_init(&recv_ioctx->free_tx_n);
+			spin_unlock_irqrestore(&nrch->spinlock, flags);
 			handle_io_cmd_underway(nrch, recv_ioctx);
+			spin_lock_irqsave(&nrch->spinlock, flags);
 		}
 		else BUG();
 	}
-	nrch_unlock_irqrestore(nrch, flags);
+	spin_unlock_irqrestore(&nrch->spinlock, flags);
 
 	__NFOUT;
 }
 
-/* Common handler for deferred IO command processing */
-static void io_cmd_deferred_process(struct nvmeib_iu *recv_ioctx)
+static void io_cmd_process_work(struct workqe_struct *work)
 {
-	struct nvmeibs_net *net = recv_ioctx->owner_ptr;
-	struct nvmeibs_nr_channel *nrch = net->params.nrch;
+	struct nordda_io_cmd_work *w =
+		container_of(work, struct nordda_io_cmd_work, work);
+	struct nvmeibs_nr_channel *nrch = w->nrch;
+	struct nvmeib_iu *recv_ioctx = w->recv_ioctx;
 	struct volume_client_req *req = recv_ioctx->buf;
 	NFIN;
 
 	if (nvmeibs_net_get_qp_state(nrch->net) == QP_LIVE) {
 		io_cmd_process(nrch, recv_ioctx);
 	} else {
-		_NT(trace_nordda_io_cmd_deferred_process, "nrch @NRCH_NAME, not processing deferred cmd, net not LIVE", nrch->name);
+		_NT(trace_nordda_io_cmd_process_work, "nrch @NRCH_NAME, not processing deferred cmd, net not LIVE", nrch->name);
 		cmd_ended(nrch, req->hdr.tag);
 		post_recv_iu(nrch, recv_ioctx);
 	}
 
+	kfree(w);
 	NFOUT;
-}
-
-/* Custom nvmeib_q callback wrapper */
-static void io_cmd_process_work(struct workqe_struct *work)
-{
-	struct nvmeib_iu *recv_ioctx = container_of(work, struct nvmeib_iu, work);
-	io_cmd_deferred_process(recv_ioctx);
-}
-
-/* Kernel workqueue callback wrapper */
-static void io_cmd_defer_kwork(struct work_struct *kwork)
-{
-	struct nvmeib_iu *recv_ioctx = container_of(kwork, struct nvmeib_iu, kwork);
-	io_cmd_deferred_process(recv_ioctx);
 }
 
 static inline void io_cmd_defer(struct nvmeibs_nr_channel *nrch,
 	struct nvmeib_iu *recv_ioctx)
 {
+	struct nordda_io_cmd_work *w = NULL;
 	NFIN;
 
-	if (nvmeibs_nordda_kwq) {
-		/* Use global kernel workqueue for lower IRQ latency */
-		INIT_WORK(&recv_ioctx->kwork, io_cmd_defer_kwork);
-		if (!queue_work(nvmeibs_nordda_kwq, &recv_ioctx->kwork)) {
-			_NE(error_nordda_io_cmd_defer_kwork, "Fail to queue kwork");
-			goto err;
-		}
-	} else {
-		/* Fall back to custom nvmeib_q workqueue */
-		WQ_INIT_WORK(&recv_ioctx->work, io_cmd_process_work);
-		if (nvmeibs_nordda_add_work(nrch, &recv_ioctx->work) < 0) {
-			_NE(error_1_nordda_io_cmd_defer, "Fail to add work");
-			goto err;
-		}
+	w = kzalloc(sizeof(*w), GFP_ATOMIC);
+	if (!w) {
+		_NE(error_nordda_io_cmd_defer, "Memory Allocation Failure");
+		goto err;
+	}
+
+	WQ_INIT_WORK(&w->work, io_cmd_process_work);
+	w->nrch = nrch;
+	w->recv_ioctx = recv_ioctx;
+	if (nvmeibs_nordda_add_work(nrch, &w->work) < 0) {
+		_NE(error_1_nordda_io_cmd_defer, "Fail to add work");
+		goto err;
 	}
 	goto out;
 
 err:
+	if (w)
+		kfree(w);
 
 	post_recv_iu(nrch, recv_ioctx);
 
@@ -3007,13 +2975,14 @@ out:
 	NFOUT;
 }
 
-
-// should be called with nrch->spinlock held
 static inline void io_cmd_pending(struct nvmeibs_nr_channel *nrch,
 	struct nvmeib_iu *recv_ioctx)
 {
-	BUG_ON(!nrch_already_locked(nrch));
+	unsigned long flags;
+
+	spin_lock_irqsave(&nrch->spinlock, flags);
 	list_add_tail(&recv_ioctx->free_tx_n, &nrch->net->pending_received_msgs);
+	spin_unlock_irqrestore(&nrch->spinlock, flags);
 }
 
 static enum can_handle_res can_handle_io_cmd(
@@ -3151,111 +3120,65 @@ out:
 	return rv;
 }
 
-static void nordda_process_recv_wc(struct nvmeibs_nr_channel *nrch,
-	struct ib_wc *wc)
-{
-	struct nvmeibs_client *cl = NR2C(nrch);
-	int rv;
-
-	if (nvmeib_opcode_from_wc(wc) == NVMEIB_DRAIN_QUEUE) {
-		nvmeibs_rq_drain_comp(nrch->net, wc);
-	} else if (!cl->dismissed) {
-		if ((rv = process_recv_completion(nrch, wc, false))) {
-			_ND(trace_nordda_nordda_recv_completion, "process_recv_completion failed (@RV)", rv);
-		}
-	} else {
-		u32 index = nvmeib_idx_from_wc(wc);
-		struct nvmeib_iu *recv_ioctx = get_recv_iu(nrch, index);
-		if (recv_ioctx)
-			post_recv_iu(nrch, recv_ioctx);
-		else
-			_NE(error_nordda_nordda_recv_completion, "Got null recv_ioctx");
-	}
-}
-
-static int nordda_poll_recv_cq_with_budget(struct ib_cq *cq,
-	struct nvmeibs_nr_channel *nrch, int budget)
-{
-	struct ib_wc *wcs = nrch->rcq_wcs;
-	struct nvmeibs_net *net = nrch->net;
-	int i, n = 0, total = 0;
-	int poll_size;
-
-	while (budget > 0) {
-		poll_size = min(budget, NVMEIBS_POLL_SIZE);
-		n = ib_poll_cq(cq, poll_size, wcs);
-		if (n <= 0) {
-			if (n == 0)
-				nvmeib_qp_stats_on_poll_cq_empty(net->qp_stats);
-			break;
-		}
-
-		nvmeib_qp_stats_on_poll_cq(net->qp_stats, n, recv);
-		nvmeibs_net_dec_recv(net, n);
-		for (i = 0; i < n; ++i) {
-			nordda_process_recv_wc(nrch, &wcs[i]);
-		}
-		if (nvmeibs_defer_recv_comps_enabled(P2NV(NR2P(nrch))->dev_type)) {
-			nvmeib_intr_shaper_intr_polled(s_intr_shaper, n);
-		}
-		total += n;
-		budget -= n;
-	}
-
-	if (n < 0)
-		return n;
-
-	return total;
-}
-
-/* returns true if cq is not empty for sure */
-static bool __nordda_recv_completion(struct ib_cq *cq,
+static void __nordda_recv_completion(struct ib_cq *cq,
 	struct nvmeibs_nr_channel *nrch)
 {
 	struct nvmeibs_client *cl = NR2C(nrch);
-	int _rv, n_processed;
-	unsigned long flags;
-	bool rv = false;
+	struct ib_wc *wcs = nrch->rcq_wcs;
+	struct nvmeibs_net *net = nrch->net;
+	int i, n, rv;
+	bool defer;
+	cycles_t start_tsc = nvmeib_public_get_cycles();
+	__NFIN;
 
-	nrch_lock_irqsave(nrch, flags);
-	n_processed = nordda_poll_recv_cq_with_budget(cq, nrch, NVMEIBS_POLL_SIZE);
-	if (n_processed < 0) {
-		_NT(trace_1_nordda_nordda_recv_completion, "cl @CL_NAME, poll-recv-cq err (@ERR)", cl->name, n_processed);
+	BUG_ON(nvmeibs_use_pcpu_cq);
+
+	while ((n = ib_poll_cq(cq, NVMEIBS_POLL_SIZE, wcs)) > 0) {
+		nvmeib_qp_stats_on_poll_cq(net->qp_stats, n, recv);
+		nvmeibs_net_dec_recv(net, n);
+		for (i = 0; i < n; ++i) {
+			if (nvmeib_opcode_from_wc(&wcs[i]) == NVMEIB_DRAIN_QUEUE)
+				nvmeibs_rq_drain_comp(net, &wcs[i]);
+			else if (!cl->dismissed) {
+				defer = !nvmeibs_defer_recv_comps ? false :
+					nvmeib_intr_shaper_calc_percpu(s_intr_shaper, n, nvmeib_public_get_cycles() - start_tsc);
+				if ((rv = process_recv_completion(nrch, &wcs[i], defer))) {
+					_ND(trace_nordda_nordda_recv_completion, "process_recv_completion failed (@RV)", rv);
+				}
+			}
+			else {
+				u32 index = nvmeib_idx_from_wc(&wcs[i]);
+				struct nvmeib_iu *recv_ioctx = get_recv_iu(nrch, index);
+				if (recv_ioctx)
+					post_recv_iu(nrch, recv_ioctx);
+				else
+					_NE(error_nordda_nordda_recv_completion, "Got null recv_ioctx");
+			}
+		}
+		if ((rv = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS)) <= 0) {
+			if (rv < 0)
+				_NE(error_1_nordda_nordda_recv_completion, "ib_req_notify_cq failed (@RV) for nrch @NRCH", rv, nrch);
+			break;
+		}
+	}
+	if (n < 0) {
+		_NT(trace_1_nordda_nordda_recv_completion, "cl @CL_NAME, poll-recv-cq err (@ERR)", cl->name, n);
 		nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_NR_CH_RCV_COMPLETION_FAILED);
-		goto out;
+	} else {
+		nvmeib_qp_stats_on_poll_cq_empty(net->qp_stats);
 	}
-
-	if (n_processed == NVMEIBS_POLL_SIZE) {
-		/* we processed all the CQEs, so we need to poll again */
-		rv = true;
-		goto out;
-	}
-
-	/* we procced less than NVMEIBS_POLL_SIZE, so we need to try rearm the CQ */
-	_rv = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS);
-	if (_rv < 0) {
-		_NE(error_1_nordda_nordda_recv_completion, "ib_req_notify_cq failed (@RV) for nrch @NRCH", rv, nrch);
-		nvmeibs_net_release(nrch->net, NVMEIBS_LOGOUT_REASON_NR_CH_RCV_COMPLETION_FAILED);
-		goto out;
-	}
-	rv = _rv > 0; // ib_req_notify_cq returns rv>0 when IB_CQ_REPORT_MISSED_EVENTS
-
-out:
-	nrch_unlock_irqrestore(nrch, flags);
-	return rv;
+	__NFOUT;
 }
 
 static void __nordda_send_completion(struct ib_cq *cq,
 	struct nvmeibs_nr_channel *nrch, bool from_recv);
-
-/* Poll recv CQ and handle send completions, returns true if need to poll again */
-static bool nordda_recv_completion_poll(struct ib_cq *cq,
-	struct nvmeibs_nr_channel *nrch)
+static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
 {
-	bool poll_again;
+	struct nvmeibs_nr_channel *nrch = ctx;
+	__NFIN;
 
-	poll_again = __nordda_recv_completion(cq, nrch);
-
+	nvmeib_qp_stats_on_interrupt(nrch->net->qp_stats);
+	__nordda_recv_completion(cq, nrch);
 	if (nrch->net && nrch->net->scq)
 		__nordda_send_completion(nrch->net->scq, nrch, true);
 	else {
@@ -3263,81 +3186,6 @@ static bool nordda_recv_completion_poll(struct ib_cq *cq,
 		WARN_ON(true);
 	}
 
-	return poll_again;
-}
-
-static void nordda_recv_completion_work(struct work_struct *work)
-{
-	struct nvmeibs_nr_channel *nrch = container_of(work,
-		struct nvmeibs_nr_channel, recv_comp_work);
-	
-	__NFIN;
-
-	atomic_dec(&nrch->recv_comp_work_ctr);
-
-	if (atomic_read(&nrch->net->dying))
-		goto out;
-
-	if (nordda_recv_completion_poll(nrch->net->rcq, nrch) && atomic_inc_not_zero(&nrch->recv_comp_work_ctr)) {
-		if (!queue_work(nvmeibs_nordda_kwq, &nrch->recv_comp_work)) {
-			atomic_dec(&nrch->recv_comp_work_ctr);
-		}
-	}
-
-out:
-	__NFOUT;
-}
-
-static void nordda_recv_completion(struct ib_cq *cq, void *ctx)
-{
-	struct nvmeibs_nr_channel *nrch = ctx;
-	__NFIN;
-
-	BUG_ON(nvmeibs_use_pcpu_cq);
-
-	nvmeib_qp_stats_on_interrupt(nrch->net->qp_stats);
-
-	do {
-		if (nvmeibs_defer_recv_comps_enabled(P2NV(NR2P(nrch))->dev_type) && nvmeibs_nordda_kwq &&
-		    nvmeib_intr_shaper_intr_should_wake_up(s_intr_shaper) &&
-			atomic_inc_not_zero(&nrch->recv_comp_work_ctr)) 
-		{
-			if (!queue_work(nvmeibs_nordda_kwq, &nrch->recv_comp_work)) {
-				atomic_dec(&nrch->recv_comp_work_ctr);
-			}
-			goto out;
-		}
-		if (nordda_recv_completion_poll(cq, nrch)) {
-			if (!(in_hardirq() || in_serving_softirq())) {
-				cond_resched();
-			}
-			continue;
-		}
-	} while(0);
-
-out:
-	__NFOUT;
-}
-
-static void nordda_wait_recv_completion_work(struct nvmeibs_nr_channel *nrch)
-{
-	int ctr_val;
-
-	__NFIN;
-	/* Stop allowing new work on the nordda kernel-wq to be scheduled */
-	ctr_val = atomic_dec_return(&nrch->recv_comp_work_ctr);
-	/* Always wait for work to finish (or cancel if pending); otherwise the work
-	 * can run after nrch is freed when it had already decremented the ctr. */
-	if (cancel_work_sync(&nrch->recv_comp_work)) {
-		/* Work was cancelled (never ran), do the decrement for the queued reference */
-		ctr_val = atomic_dec_return(&nrch->recv_comp_work_ctr);
-	} else {
-		ctr_val = atomic_read(&nrch->recv_comp_work_ctr);
-	}
-	if (ctr_val > 0) {
-		_NW(warn_nordda_wait_recv_completion_work, "Work was cancelled, but ctr_val is non-zero: @INT", ctr_val);
-		BUG_NON_PRODUCTION(7739);
-	}
 	__NFOUT;
 }
 
@@ -3358,7 +3206,7 @@ static void nordda_record_io_stats(struct nvmeibs_nr_cmd *cmd, u16 version)
 			/* Found it */
 			if (stats_md->stat_verb < N_IO_STAT_VERBS) {
 				ktime_t start_time = stats_md->send_rsp_time;
-				ktime_t end_time = ktime_get();
+				ktime_t end_time = nvmeib_public_ktime_get();
 				u64 lat = ktime_after(end_time, start_time) ? ktime_to_ns(ktime_sub(end_time, start_time)) : 0;
 				u64 size = stats_md->stat_verb == IO_STAT_VERB_GEN_TX ? stats_md->send_rsp_len : stats_md->io_xfer_size;
 
@@ -3376,7 +3224,7 @@ static void nordda_record_gen_no_rdma_stats(struct nvmeibs_nr_channel *nrch, str
 {
 	struct nvmeib_io_stats *stats = nrch->rionic->lionic->port->nis_dev->stats;
 	ktime_t start_time = send_ioctx->send_time;
-	ktime_t end_time = ktime_get();
+	ktime_t end_time = nvmeib_public_ktime_get();
 	u64 lat = ktime_after(end_time, start_time) ? ktime_to_ns(ktime_sub(end_time, start_time)) : 0;
 
 	nvmeib_io_stats_adjust_and_update(stats, NULL, IO_STAT_VERB_GEN_TX, send_ioctx->send_size, lat, false);
@@ -3559,7 +3407,7 @@ static void __nordda_send_completion(
 
 	BUG_ON(nvmeibs_use_pcpu_cq);
 
-	nrch_lock_irqsave(nrch, flags);
+	spin_lock_irqsave(&nrch->spinlock, flags);
 
 again:
 	n = ib_poll_cq(cq, NVMEIBS_POLL_SIZE, wcs);
@@ -3583,7 +3431,7 @@ again:
 		goto again;
 
 unlock:
-	nrch_unlock_irqrestore(nrch, flags);
+	spin_unlock_irqrestore(&nrch->spinlock, flags);
 
 	if (do_pending_recv)
 		attempt_handle_pending_recv(nrch);
@@ -3610,7 +3458,6 @@ static int nrch_rscs_alloc(struct nvmeibs_nr_channel *nrch, struct nvmeib_dev *d
 		_NE(error_nordda_nrch_rscs_alloc, "invalid nrch @NRCH", nrch);
 		goto out;
 	}
-	/* Always create custom nvmeib_q workqueue (used by other flows and as fallback) */
 	srv_proc_name_format(pname, 'S', "WQ", "nr", qp_num);
 	nrch->wq = nvmeibs_nr_wq_set_cpu_affinity ? wq_create_on(pname, qp_num) : wq_create(pname);
 	if (!nrch->wq) {
@@ -3637,11 +3484,6 @@ static void nrch_rscs_free(struct nvmeibs_nr_channel *nrch)
 	NFIN;
 
 	if (nrch) {
-		/* Flush global kernel workqueue to ensure all pending work for this channel completes */
-		if (nvmeibs_nordda_kwq) {
-			//nvmeibs_nordda_kwq_flush();
-			/* should we really wait here? maybe we can only wait for all recv-iu to be processed? */
-		}
 		if (nrch->wq) {
 			wq_drain(nrch->wq);
 			wq_destroy(nrch->wq);
@@ -3777,8 +3619,6 @@ static void connect_nordda_channel_work(struct workqe_struct *work)
 	nrch->n_rxiu = 0;
 	nrch->n_rxiu_tot = 0;
 	nrch->rxiu_dying = 0;
-	INIT_WORK(&nrch->recv_comp_work, nordda_recv_completion_work);
-	atomic_set(&nrch->recv_comp_work_ctr, 1);
 
 	rsp = kzalloc(sizeof(*rsp), GFP_KERNEL);
 	params = kzalloc(sizeof(*params), GFP_KERNEL);
@@ -4461,8 +4301,6 @@ static void nordda_bn_handler(void *context)
 	_NT(trace_nordda_nordda_bn_handler, "nrch @NRCH_NAME (@NRCH)", nrch->name, nrch);
 	BUG_ON(nrch->net->state != QP_RELEASING);
 
-	nordda_wait_recv_completion_work(nrch);
-
 	nvmeibs_client_rionic_disconnect_ioch(nrch->rionic, true);
 
 	/* This can be called at this point because no new incoming requests can be
@@ -4589,16 +4427,11 @@ struct nvmeib_iu *rxiu_pop(struct nvmeibs_nr_channel *nrch)
 {
 	struct nvmeib_iu *recv_ioctx = NULL;
 	unsigned long flags;
-	bool already_locked = nrch_already_locked(nrch);
 	__NFIN;
 
-	if (!already_locked) {
-		nrch_lock_irqsave(nrch, flags);
-	}
+	spin_lock_irqsave(&nrch->spinlock, flags);
 	recv_ioctx = rxiu_pop_(nrch);
-	if (!already_locked) {
-		nrch_unlock_irqrestore(nrch, flags);
-	}
+	spin_unlock_irqrestore(&nrch->spinlock, flags);
 
 	__NFOUT;
 	return recv_ioctx;
@@ -4613,7 +4446,7 @@ void rxiu_drain(struct nvmeibs_nr_channel *nrch)
 	__NFIN;
 
 	/* expecting empty list as we process send-comp even when nrch is dying */
-	nrch_lock_irqsave(nrch, flags);
+	spin_lock_irqsave(&nrch->spinlock, flags);
 	nrch->rxiu_dying = 1;
 	if (!list_empty(&nrch->rxiu_list)) {
 		_NW(rxiu_drain_w1, "Unexpected, found @INT stashed rxiu "
@@ -4636,7 +4469,7 @@ void rxiu_drain(struct nvmeibs_nr_channel *nrch)
 			WARN_ON(1);
 		}
 	}
-	nrch_unlock_irqrestore(nrch, flags);
+	spin_unlock_irqrestore(&nrch->spinlock, flags);
 
 	__NFOUT;
 }
@@ -4647,7 +4480,6 @@ static int rxiu_push(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioc
 {
 	unsigned long flags;
 	int rv = -1;
-	bool already_locked = nrch_already_locked(nrch);
 	__NFIN;
 
 	if (recv_ioctx->defer) {
@@ -4655,36 +4487,27 @@ static int rxiu_push(struct nvmeibs_nr_channel *nrch, struct nvmeib_iu *recv_ioc
 		goto out;
 	}
 
-	if (!already_locked) {
-		nrch_lock_irqsave(nrch, flags);
-	}
-
+	spin_lock_irqsave(&nrch->spinlock, flags);
 	if (nrch->rxiu_dying) {
 		_NE(rxiu_push_e2, "nrch @PTR, rxiu already dying", nrch);
-		goto unlock;
 	}
-	if (!list_empty(&recv_ioctx->free_tx_n)) {
+	else if (!list_empty(&recv_ioctx->free_tx_n)) {
 		_NE(rxiu_push_e3, "nrch @PTR, recv_ioctx=@PTR, already linked", nrch, recv_ioctx);
-		goto unlock;
 	}
 	/* after sending io-rsp[i], client may issue another io-req[i] which
 	   its recv-comp may arrive before the send-comp of prev io-rsp[i] */
-#if 0
-	if (nrch->n_rxiu == NR2C(nrch)->nrch_ioreq_num) {
+	#if 0
+	else if (nrch->n_rxiu == NR2C(nrch)->nrch_ioreq_num) {
 		_NE(rxiu_push_e4, "nrch @PTR, rxiu overflow @UINT", nrch, nrch->n_rxiu);
-		goto unlock;
 	}
-#endif
-
-	list_add_tail(&recv_ioctx->free_tx_n, &nrch->rxiu_list);
-	nrch->n_rxiu++;
-	nrch->n_rxiu_tot++;
-	rv = 0;
-
-unlock:
-	if (!already_locked) {
-		nrch_unlock_irqrestore(nrch, flags);
+	#endif
+	else {
+		list_add_tail(&recv_ioctx->free_tx_n, &nrch->rxiu_list);
+		nrch->n_rxiu++;
+		nrch->n_rxiu_tot++;
+		rv = 0;
 	}
+	spin_unlock_irqrestore(&nrch->spinlock, flags);
 
 out:
 	__NFOUT;
@@ -4764,12 +4587,9 @@ static void nordda_recv_comp_h(void *ctx, struct ib_wc *wcs)
 	if (nvmeib_opcode_from_wc(wcs) == NVMEIB_DRAIN_QUEUE) //TODO: Remove this
 		nvmeibs_rq_drain_comp(net, wcs);
 	else if (!cl->dismissed) {
-		unsigned long flags;
-		nrch_lock_irqsave(nrch, flags);
 		if ((rv = process_recv_completion(nrch, wcs, false))) {
 			_ND(trace_nordda_nordda_recv_comp_h, "process_recv_completion failed (@RV)", rv);
 		}
-		nrch_unlock_irqrestore(nrch, flags);
 	}
 	else {
 		u32 index = nvmeib_idx_from_wc(wcs);
@@ -4890,63 +4710,3 @@ out:
 	return rv;
 }
 
-/* Global kernel workqueue for nordda deferred IO commands */
-bool nvmeibs_nordda_use_kernel_wq = true;
-module_param_named(nordda_use_kernel_wq, nvmeibs_nordda_use_kernel_wq, bool, 0444);
-MODULE_PARM_DESC(nordda_use_kernel_wq, "Determines whether to use a kernel workqueue for nordda deferred IO commands (reduces IRQ latency).");
-
-bool nvmeibs_nordda_kernel_wq_unbound = false;
-module_param_named(nordda_kernel_wq_unbound, nvmeibs_nordda_kernel_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(nordda_kernel_wq_unbound, "Determines whether to use an unbound kernel workqueue (true) or a bound one (false).");
-
-struct workqueue_struct *nvmeibs_nordda_kwq;
-
-void nvmeibs_nordda_kwq_flush(void)
-{
-	if (nvmeibs_nordda_kwq)
-		flush_workqueue(nvmeibs_nordda_kwq);
-}
-EXPORT_SYMBOL(nvmeibs_nordda_kwq_flush);
-
-int nvmeibs_nordda_kwq_init(void)
-{
-	int rv;
-
-	if (!nvmeibs_nordda_use_kernel_wq) {
-		nvmeibs_nordda_kwq = NULL;
-		rv = 0;
-		goto out;
-	}
-
-	if (nvmeibs_nordda_kernel_wq_unbound) {
-		nvmeibs_nordda_kwq = alloc_workqueue("nvmeibs_nordda",
-			WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_SYSFS,
-			WQ_UNBOUND_MAX_ACTIVE);
-	} else {
-		nvmeibs_nordda_kwq = alloc_workqueue("nvmeibs_nordda", WQ_MEM_RECLAIM | WQ_SYSFS, 0);
-	}
-
-	if (!nvmeibs_nordda_kwq) {
-		_NE(error_main_nordda_kwq_init, "Failed to allocate nordda kernel workqueue");
-		rv = -ENOMEM;
-		goto out;
-	}
-
-	rv = 0;
-	_NT(trace_main_nordda_kwq_init, "Created nordda kernel workqueue (unbound=@BOOL)", nvmeibs_nordda_kernel_wq_unbound);
-
-out:
-	return rv;
-}
-EXPORT_SYMBOL(nvmeibs_nordda_kwq_init);
-
-void nvmeibs_nordda_kwq_exit(void)
-{
-	if (nvmeibs_nordda_kwq) {
-		flush_workqueue(nvmeibs_nordda_kwq);
-		destroy_workqueue(nvmeibs_nordda_kwq);
-		nvmeibs_nordda_kwq = NULL;
-		_NT(trace_main_nordda_kwq_exit, "Destroyed nordda kernel workqueue");
-	}
-}
-EXPORT_SYMBOL(nvmeibs_nordda_kwq_exit);

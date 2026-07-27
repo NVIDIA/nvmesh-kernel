@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeib_msgloop.h"
 #include "nvmeib_event.h"
 #include "module/nvmeibc_module_proc_files.inc.c"
@@ -72,7 +67,7 @@ void nvmeibc_state_promote(enum nvmeibc_mod_state st)
 	if (st > prev_state)
 		atomic_set(&mod_globals.nvmeibc_state, st);
 	WARN(rv, "nvmeibc bug, module wrong flow: state=%d->state=%d, rv=%d", prev_state, st, rv);
-	_NI(t_01_mod_state_set, "@EVENT_TAG @NDU module @CURR_STATE->@STATE", EV_MODULE_STATE_CHANGE(), 0, prev_state, st);
+	_NI(t_01_mod_state_set, "@EVENT_TAG module @STATE->@STATE", EV_MODULE_STATE_CHANGE(), prev_state, st);
 }
 
 void *nvmeibc_get_md_read_dummy_area(int *n_pages)

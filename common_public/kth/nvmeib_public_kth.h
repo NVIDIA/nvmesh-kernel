@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_PUBLIC_KTH_H
 #define NVMEIB_PUBLIC_KTH_H
 
@@ -412,7 +407,7 @@ static inline void nvmeib_public_kth_sleep_ctxt_check(const char *f, int l, cons
 }
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
-#define _mutex_lock(_l) mutex_lock_nested(_l, 0)
+#define _mutex_lock(_l) nvmeib_public_mutex_lock_nested(_l, 0)
 #else
 #define _mutex_lock(_l) mutex_lock_nested(_l, 0)
 #endif

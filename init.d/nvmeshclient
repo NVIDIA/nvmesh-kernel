@@ -1,11 +1,7 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 #
 # nvmeshclient	This shell script takes care of starting and stopping
-#		the NVMesh(r) client
+#		the Excelero NVMesh(r) client
 #
 # chkconfig: 345 20 80
 # description: NVMesh client
@@ -87,54 +83,6 @@ MCS_SCRIPT_PATH="$MDIR/bin/managementCM"
 
 read_version_info_file
 
-# global variable to track upgrade state, default to false, set just below
-# the marker file is created by interopDB directive to the upgrade-agent or by user
-UPGRADE_FILE_MARKER="$runDir/$prog/upgrade"
-RESTART_FOR_UPGRADE=false
-
-create_upgrade_marker() {
-    # ensure the parent directory exists (safeguard)
-    local dir_path
-    dir_path=$(dirname "$UPGRADE_FILE_MARKER")
-
-    if [ ! -d "$dir_path" ]; then
-        mkdir -p "$dir_path"
-    fi
-
-    # create the file using touch
-    if touch "$UPGRADE_FILE_MARKER"; then
-        echo "Upgrade marker created successfully"
-        return 0
-    else
-        echo "Error: Failed to create upgrade marker at $UPGRADE_FILE_MARKER"
-        return 1
-    fi
-}
-
-read_upgrade_marker() {
-    if [ -f "$UPGRADE_FILE_MARKER" ]; then
-        echo "upgrade marker file found"
-        RESTART_FOR_UPGRADE=true
-    else
-        RESTART_FOR_UPGRADE=false
-    fi
-}
-
-cleanup_upgrade_marker() {
-    if [ "$RESTART_FOR_UPGRADE" = true ]; then
-        echo "upgrade start successful, removing upgrade marker"
-        rm -f "$UPGRADE_FILE_MARKER"
-    fi
-}
-
-# echo a message ONLY if an upgrade is in progress
-echo_if_upgrade() {
-    if [ "$RESTART_FOR_UPGRADE" = true ]; then
-        # The "$@" preserves all arguments passed to the function
-        echo "NDU: $@"
-    fi
-}
-
 find_and_alert_on_stuck_detaching() {
 	n_stuck=`cat /proc/nvmeiba/status.json | grep gendisk | grep \"null\" |wc -l`;
 	[ ! "$n_stuck" -eq 0 ] && echo "${n_stuck} Nvmesh volumes cannot detach (still used).";
@@ -159,12 +107,13 @@ check_if_nvmibc_can_abandon_nvmeiba() {
 detach_volumes() {
 	ret=0
 	# Step 1: Find out if we are force detaching or doing hot upgrade.
-	# set shut_down_args
-	if [ "$RESTART_FOR_UPGRADE" = true ]; then
+	read_conf_file_raw;
+	# echo "DEBUG: value of hot-upgrade default=|${CLIENT_RESTART_ALWAYS_HOT_UPGRADE}|";
+	if [[ ${CLIENT_RESTART_ALWAYS_HOT_UPGRADE:0:1} =~ [Yy] ]]; then	 # "Yes", "yes"
 		echo "Initiating client hot upgrade procedure";
-		shut_down_args="--upgrade";
+		shut_down_args="--upgrade --json";	# json is for readability
 	else
-		# echo "DEBUG: Not a hot upgrade."
+		# echo "DEBUG: upgrade configuration instruction does NOT exist."
 		shut_down_args=""; # can use --json
 	fi
 
@@ -172,13 +121,11 @@ detach_volumes() {
 	module_state=$(head /proc/nvmeibc/status -n 1 | cut -d = -f 2)
 	if [ "$module_state" != "3 Zombie, ready to removal" ]; then
 		#echo "DEBUG: calling|${shut_down_args}|"
-		echo_if_upgrade "client shutdown script invoked"
 		/opt/nvmesh/bin/nvmesh_clnt_shutdown ${shut_down_args};
 		RETVAL=$?
 		if [ ! "$RETVAL" -eq 0 ] ; then
 			ret=1
 		fi
-		echo_if_upgrade "client shutdown script done"
 		echo "Detached all volumes"
 	else
 		echo "Skipping volumes detach, module is ready for removal"
@@ -244,9 +191,6 @@ verify_mcs_scheme_version() {
 start() {
 	wait_for_config_profile
 
-	# check for upgrade marker and potentially set a global variable
-	read_upgrade_marker
-
 	# too expensive (~130ms) - avoid it
 	# verify_mcs_scheme_version
 
@@ -306,7 +250,6 @@ start() {
 
 	ftrace_init
 
-	echo_if_upgrade "Starting to load modules"
 	load_module nvmeib_common_public
 	should_load_mlx mlx4 && load_module nvmeib_common_mlx4_public
 	should_load_mlx mlx5 && load_module nvmeib_common_mlx5_public
@@ -365,7 +308,6 @@ start() {
 		    echo "Setting $tcp_find_path_sock_modparam"
 		    common_module_params="$common_module_params $tcp_find_path_sock_modparam"
 	    fi
-		common_module_params="$common_module_params tcp_mode=1"
 	fi
 
 	if is_iommu_enabled; then
@@ -391,13 +333,6 @@ start() {
 	if [ "$RETVAL" -ne 0 ]; then
 		echo "Failed to load client (nvmeibc) module, exiting.."
 		exit 1
-	fi
-
-	echo_if_upgrade "Done loading modules"
-
-	if [ "$RETVAL" -eq 0 ]; then
-		# cleanup upgrade marker if exists
-		cleanup_upgrade_marker
 	fi
 
 	record_current_module_params on_startup_module_params.client
@@ -455,15 +390,11 @@ force_stop() {
 	echo "Stopping NVMesh Client: "
 	check_root
 
-	# check for upgrade marker and potentially set a global variable
-	read_upgrade_marker
-
 	if detach_volumes; then
 		rmdir /sys/kernel/config/nvmeibc/*/* > /dev/null 2>&1
 		if ! $sysv_triggered; then
 			signal_monitor_process SIGUSR1 #suppress monitor failure
 		fi
-		echo_if_upgrade "Starting to unload modules"
 		unload_module nvmeibc
 		RETVAL=$?
 		if [ "$RETVAL" -eq 0 ]; then
@@ -483,12 +414,14 @@ force_stop() {
 					stop_management_CM_and_Agent
 				fi
 			fi
-			if [ "$RESTART_FOR_UPGRADE" = true ]; then
-				echo "nvmeiba remained for upgrade of nvmeibc"
+			unload_module nvmeiba
+			ATOM_RV=$?
+			if [ "$ATOM_RV" -eq 0 ]; then
+				:
+				#echo "nvmeiba removed with nvmeibc"
 			else
-				unload_module nvmeiba
+				echo "nvmeiba remained for upgrade of nvmeibc"
 			fi
-			echo_if_upgrade "Done unloading modules"
 		else
 			echo "Failed to unload client (nvmeibc) module"
 			echo "See journalctl -u nvmeshclient for the error"
@@ -599,14 +532,6 @@ case "$1" in
 	;;
   force_stop)
 	force_stop
-	RETVAL=$?
-	;;
-  create_upgrade_marker)
-	create_upgrade_marker
-	RETVAL=$?
-	;;
-  check_modules)
-	check_modules common client
 	RETVAL=$?
 	;;
   check_if_busy)

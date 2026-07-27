@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 PROJ="../../..";
 function __run_cmd() {	cmd=("$@"); echo -e "\e[1;33m************************ ${cmd}\e[0;39m"; eval ${cmd}; }
 function echo_error { echo -e "\e[0;31m$*\e[0m"; }
@@ -228,12 +224,13 @@ function run_all_tests() {
 	cd ${current_dir};
 	if [ ! -z ${ERROR} ]; then echo_error "${EXE} could not be build, abort, rv ${ERROR}!"; return ${ERROR}; fi
 
-	EXE="toma_rpc";
+	EXE="toma_rpc/link/read_conf";
 	echo -e "\e[1;32m******************************* ${EXE} *******************************\e[0;39m";
 	current_dir=$(pwd)
 	cd ${PROJ}/tools/toma_rpc;
 	make clean all;
 	cmd="./toma_rpc";         echo $cmd; eval $cmd;
+	EXE="./toma_link";
 	[ ! -f ${EXE} ] && ERROR="-5";
 	cd ${current_dir};
 	if [ ! -z ${ERROR} ]; then echo_error "${EXE} could not be build, abort, rv ${ERROR}!"; return ${ERROR}; fi

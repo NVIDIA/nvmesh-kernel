@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #define C_IB_NET_NR_C
 
 #include "kr_incs.h"
@@ -20,11 +15,13 @@
 
 bool nvmeibc_nr_skip_rdma_write = false;
 module_param_named(nr_skip_rdma_write, nvmeibc_nr_skip_rdma_write, bool, 0644);
-MODULE_PARM_DESC(nr_skip_rdma_write, "This is an unsafe debug mode. RDMA IOs skip the RDMA write for write operations. This will always work on Legacy volumes and on EC when CRC check is off and block size is equal to the slice length of the volumes, but it will not store the right data! Used for performance testing only.");
+MODULE_PARM_DESC(nr_skip_rdma_write, "Unsafe debug mode: No-rdda skip rdma write in write operation. " \
+									  "Will always work on Legacy volumes and on EC " \
+  									  "when CRC check is off and bs=slice_length_of_volumes");
 
 bool nvmeibc_nr_store_fr = true;
 module_param_named(nr_store_fr, nvmeibc_nr_store_fr, bool, 0644);
-MODULE_PARM_DESC(nr_store_fr, "Enables a workaround for RDMA resource usage to avoid rare RDMA protection errors in EC writes where target-side buffers from journal writes are reused for data writes.");
+MODULE_PARM_DESC(nr_store_fr, "Store fr to work around loc_prot");
 
 #define __FIN FINS(net->base.ioch->name)
 #define __FOUT FOUTS(net->base.ioch->name)
@@ -73,18 +70,17 @@ static inline int nvmeibc_post_io(struct nvmeibc_ib_net_nordda *net,
 		struct volume_client_io_req_base *io_req = &creq->io_req.base;
 		struct nvmeibc_disk_io_command *bcmd = info->req.bcmd;
 
-		if (dp_dbgdi_should_add_info_core(bcmd)) {
+		if (dp_dbgdi_should_add_info_core(bcmd))
 			dp_dbgdi_do_add_info_core_pre(
-				&bcmd->reqs[0],
-				&NVMEIBC_CORE_DBGDI_PARAM(
-					pre, net->nrch->base.disk->name, ct_n_rdda,
-					.io_id  = ++net->nrch->base.dbg_di.io_id,
-					.ch_ptr = (u64)&net->nrch->base,
+			    &bcmd->reqs[0],
+			    &NVMEIBC_CORE_DBGDI_PARAM(
+			        pre, net->nrch->base.disk->name, ct_n_rdda,
+			        .io_id  = ++net->nrch->base.dbg_di.io_id,
+			        .ch_ptr = (u64)&net->nrch->base,
 					.reuse_bb = info->req.reused_bb,
-					.lock_pgbk  = &info->req.lock_pgbk,
-					.start_dlba = bcmd->reqs[0].disk_address,
+			        .lock_pgbk  = &info->req.lock_pgbk,
+			        .start_dlba = bcmd->reqs[0].disk_address,
 					.magic_data = &net->nrch->base.dbg_di.magic_data));
-		}
 
 		NVMEIB_LOG_GOODPATH_CORE_POST(trace_nvmeibc_post_io,
 									  net->nrch->base.disk, bcmd,
@@ -367,7 +363,7 @@ static int execute_io_read(struct nvmeibc_ib_net_nordda *net,
 
 	/* send the message */
 	memset(&wr, 0, sizeof(wr));
-	if ((rv = nvmeibc_post_io(net, &wr, &wr, iu, info, wire_len)) < 0) {
+	if ((rv = nvmeibc_post_io(net, &wr, &wr, iu, info, wire_len) < 0)) {
 		info->release_counter = 0;
 		goto out;
 	}
@@ -1047,7 +1043,7 @@ static int execute_gen_send_request_signaled(struct nvmeibc_ib_net_nordda *net,
 	nvmeibc_ib_nordda_channel_req_start_wd(info);
 	if (!net->base.dev_cq)
 		nvmeibc_ib_net_req_notify_send_cq(&net->base);
-	gen_cmd->send_time = ktime_get();
+	gen_cmd->send_time = nvmeib_public_ktime_get();
 	if ((rv = nvmeibc_ib_post_send(&net->base,
 			nvmeib_send_wr_to_ib_ptr(*first_wr), &bad_wr)) < 0) {
 		_NE(error_3_ib_net_nordda_execute_gen_send_request_signaled, "Fail to send gen command on nordda channel @RV", rv);

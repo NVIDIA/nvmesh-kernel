@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_debug.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -1104,13 +1099,13 @@ struct nvmeibt_disk_gpt_partition_entry *add_disk_metadata_partition_to_mem_meta
 	gpt_entry = nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&cur_local_disk->metadata_gpt,
 																			disk_metadata_size_in_pblks,
 																			nvmeibt_local_disk_pblk_size(cur_local_disk),
-																			&NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
+																			&EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
 																			&random_disk_metadata_guid,
 																			DISK_METADATA_PARTITION_NAME,
 																			strlen(DISK_METADATA_PARTITION_NAME) + 1,
 																			NVMEIBR_PARTITION_ALIGNMENT_4KB);
 	if (!gpt_entry) {
-		N_Ef(rrtt7y3, "Unable to add metadata-GPT entry for nvmesh disk_metadata on dev:@LOCAL_DISK_FILE_NAME",  nvmeibt_local_disk_file_name(cur_local_disk));
+		N_Ef(rrtt7y3, "Unable to add metadata-GPT entry for excelero disk_metadata on dev:@LOCAL_DISK_FILE_NAME",  nvmeibt_local_disk_file_name(cur_local_disk));
 		goto out;
 	}
 	// Mark this disk GPT changed as we just added a metadata partition.
@@ -1141,10 +1136,10 @@ static int setup_journal_partitions(struct nvmeibt_local_disk *cur_local_disk) {
 	if (nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&cur_local_disk->main_gpt,
 																	journal_data_size_in_pblks,
 																	nvmeibt_local_disk_pblk_size(cur_local_disk),
-																	&NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID,
+																	&EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID,
 																	&random_journal_guid,
-																	NVMESH_JOURNAL_PARTITION_NAME,
-																	strlen(NVMESH_JOURNAL_PARTITION_NAME) + 1,
+																	EXCELERO_JOURNAL_PARTITION_NAME,
+																	strlen(EXCELERO_JOURNAL_PARTITION_NAME) + 1,
 																	NVMEIBR_PARTITION_ALIGNMENT_1MB) == NULL)	{
 		N_Ef(oo0oir9, "Unable to allocate journal data partition on disk=@STR", nvmeibt_local_disk_display(cur_local_disk));
 		goto out;
@@ -1154,10 +1149,10 @@ static int setup_journal_partitions(struct nvmeibt_local_disk *cur_local_disk) {
 	if (nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&cur_local_disk->main_gpt,
 																	serjio_db_size_in_pblks,
 																	nvmeibt_local_disk_pblk_size(cur_local_disk),
-																	&NVMESH_SERJIO_DB_PARTITION_TYPE_GUID,
+																	&EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID,
 																	&random_serjio_guid,
-																	NVMESH_SERJIO_DB_PARTITION_NAME,
-																	strlen(NVMESH_SERJIO_DB_PARTITION_NAME) + 1,
+																	EXCELERO_SERJIO_DB_PARTITION_NAME,
+																	strlen(EXCELERO_SERJIO_DB_PARTITION_NAME) + 1,
 																	NVMEIBR_PARTITION_ALIGNMENT_1MB) == NULL)	{
 		N_Ef(bb889es, "Unable to allocate serjio_db partition on disk=@STR", nvmeibt_local_disk_display(cur_local_disk));
 		goto out;
@@ -1189,10 +1184,10 @@ static int setup_metadata_gpt(struct nvmeibt_local_disk *cur_local_disk, const u
 	metadata_gpt_entry = nvmeibt_disk_metadata_allocate_partition_and_add_to_mem_gpt(&cur_local_disk->main_gpt,
 																metadata_partition_size_in_pblks,
 																nvmeibt_local_disk_pblk_size(cur_local_disk),
-																&NVMESH_METADATA_PARTITION_TYPE_GUID,
+																&EXCELERO_METADATA_PARTITION_TYPE_GUID,
 																disk_obj_uuid,
-																NVMESH_METADATA_PARTITION_NAME,
-																strlen(NVMESH_METADATA_PARTITION_NAME) + 1,
+																EXCELERO_METADATA_PARTITION_NAME,
+																strlen(EXCELERO_METADATA_PARTITION_NAME) + 1,
 																NVMEIBR_PARTITION_ALIGNMENT_1MB);
 	if (!metadata_gpt_entry) {
 		N_Ef(riikg90, "Unable to allocate metadata partition on disk=@STR", nvmeibt_local_disk_display(cur_local_disk));
@@ -1422,7 +1417,7 @@ static void local_disk_zero_freer(struct nvmeibt_wq_entry *wq_entry)
 	NFOUT;
 }
 
-BOOL create_disk_mem_mbr_gpts_and_nvmesh_partitions(struct nvmeibt_local_disk *local_disk, struct nvmeibt_disk_format_data *format_data)
+BOOL create_disk_mem_mbr_gpts_and_excelero_partitions(struct nvmeibt_local_disk *local_disk, struct nvmeibt_disk_format_data *format_data)
 {
 	union nvmeib_uuid disk_obj_uuid;
 	BOOL rv = false;
@@ -1597,7 +1592,7 @@ static void local_disk_zero_iter_finalize(struct nvmeibt_wq_entry *wq_entry)
 				entry->zero_write_counter, last_pba_zeroed + 1, disk_obj_urn_uuid.str,
 				nvmeibt_get_my_hostname());
 		N_Tf(5bsd3uf, "@STR", nvmeibt_Str_str(json_payload));
-		nvmeibt_kafka_outgoing_msgs_queue_add(NULL /*disk_obj_urn_uuid.str*/, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW);
+		nvmeibt_kafka_outgoing_msgs_queue_add(disk_obj_urn_uuid.str, nvmeibt_Str_str(json_payload), nvmeibt_Str_strlen(json_payload) + 1, NVMEIBT_KAFKA_OUTGOING_MSGS_PRIORITY_LOW);
 		local_disk->last_zeroing_update_time = nvmeibt_global_get_cur_event_start_time();
 	}
 
@@ -1738,9 +1733,7 @@ static int read_disk_metadata_from_a_newly_discovered_local_disk(struct restore_
 	struct nvmeibt_restored_seg_metadata_container	*seg_metadata_container;
 	union nvmeib_uuid								seg_uuid;
 	int												validate_rv;
-	const int										n_entries = MAX_NUM_GPT_ENTRIES;
-	struct nvmeibt_disk_metadata					aligned_disk_metadata __attribute__((aligned(PAGE_SIZE)));
-
+	const int n_entries = MAX_NUM_GPT_ENTRIES;
 	NFIN;
 	// Go over all the segments we have in the metadata GPT and read the configuration that is stored inside them.
 	N_Tf(wreqygs, "Looping over #@INT and not @INT", n_entries, entry->metadata_gpt.header.n_partition_entries);
@@ -1749,19 +1742,18 @@ static int read_disk_metadata_from_a_newly_discovered_local_disk(struct restore_
 		if (!nvmeibt_disk_metadata_is_gpt_entry_in_use(gpt_entry)) {
 			N_Tf(wreqygq, "Unused entry #@INT", i);
 			continue;
-		} else if (ARE_UUID_EQ(&gpt_entry->partition_type_guid, &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID)) {
+		} else if (ARE_UUID_EQ(&gpt_entry->partition_type_guid, &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID)) {
 			if (nvmeibt_disk_metadata_read_disk_metadata(entry->nl_ctx, entry->fd,
 														 entry->from_config.pblk_size,
 														 gpt_entry->pba_s * entry->from_config.pblk_size,
-														 &aligned_disk_metadata) < 0) {
+														 &entry->from_config.disk_metadata) < 0) {
 				N_Ef(h218dos, "Unable to read disk metadata from disk=@STR, partition is corrupt", nvmeibt_local_disk_config_display(&(entry->from_config)));
 				goto out;
 			}
-			entry->from_config.disk_metadata = aligned_disk_metadata;
 			nvmeibt_local_disk_recover_missing_ldisk_id_in_upgraded_disk_metadata(&(entry->from_config));
 			N_Tf(chiled8, "Successfully read disk_metadata from disk=@STR ec_supported=@EC_SUPPORTED",
 				 nvmeibt_local_disk_config_display(&(entry->from_config)), entry->from_config.disk_metadata.is_md_supported);
-		} else if (ARE_UUID_EQ(&gpt_entry->partition_type_guid, &NVMESH_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
+		} else if (ARE_UUID_EQ(&gpt_entry->partition_type_guid, &EXCELERO_SEGMENT_METADATA_PARTITION_TYPE_GUID)) {
 			char16_str_to_union_nvmeib_uuid(gpt_entry->partition_name, &seg_uuid);
 			seg_metadata_pbyte_s = gpt_entry->pba_s * entry->from_config.pblk_size;
 			N_Tf(5h38sjo, "Restoring seg=@UUID_8 metadata from entry#@INT", nvmeib_uuid_first_4_bytes(&seg_uuid), i);
@@ -1863,7 +1855,7 @@ static void restore_disk_structures_wrapper(struct nvmeibt_wq_entry *wq_entry)
 		goto out;
 	}
 	if (!nvmeibt_disk_metadata_is_mbr_any_mbr(&entry->mbr)) {
-		// No valid MBR found - init new GPT on disk with PMBR and all NVMesh metadata's
+		// No valid MBR found - init new GPT on disk with PMBR and all Excelero metadata's
 		char read_mbr_copy[sizeof(struct nvmeibt_disk_mbr)];
 
 		N_Tf(xhd7b5n, "No valid mbr found on disk=@STR checking disk format", nvmeibt_local_disk_config_display(&(entry->from_config)));
@@ -2042,7 +2034,7 @@ static void restore_disk_structures_finalize(struct nvmeibt_wq_entry *wq_entry) 
 		}
 
 		// entry->format_data.disk_uuid was parsed from the disk
-		create_disk_mem_mbr_gpts_and_nvmesh_partitions(local_disk, &entry->format_data);
+		create_disk_mem_mbr_gpts_and_excelero_partitions(local_disk, &entry->format_data);
 		nvmeibt_disk_metadata_init_disk_metadata_struct(local_disk, &entry->format_data);
 		local_disk->from_config.disk_metadata.last_pba_zeroed = 1;
 		// Must mark the drive as formatting in TOMA, since it is NOT yet in initializing state, which can be set only AFTER,
@@ -2060,7 +2052,7 @@ static void restore_disk_structures_finalize(struct nvmeibt_wq_entry *wq_entry) 
 
 		local_disk->is_being_formatted = true;
 
-		// Prepare to write nvmesh disk's gpt, partitions, ...
+		// Prepare to write the excelero disk's gpt, partitions, ...
 		NNVMEIBT_LOCAL_DISK_INC_GPT_CHANGE_NO(6cfgr3m, local_disk);
 		NNVMEIBT_LOCAL_DISK_SET_GPT_SUBMITTED_CHANGE_NO(eitf5ux, local_disk, local_disk->gpt_change_no);
 

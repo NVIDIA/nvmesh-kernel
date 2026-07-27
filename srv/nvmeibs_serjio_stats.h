@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBS_SERJIO_STATS_H
 #define NVMEIBS_SERJIO_STATS_H
 
@@ -147,8 +142,7 @@ void nvmeibs_serjio_stats_init(struct nvmeibs_serjio_stats *serjio_stats);
 void nvmeibs_serjio_work_type_submit_io_success(struct nvmeibs_serjio_stats *serjio_stats, enum nvmeibs_serjio_work_type work_type, enum nvme_opcode op_code, u64 submitted_bytes, u64 block_size);
 void nvmeibs_serjio_work_type_submit_io_fail(struct nvmeibs_serjio_stats *serjio_stats, enum nvmeibs_serjio_work_type work_type, enum nvme_opcode op_code);
 
-struct seq_file;
-int nvmeibs_serjio_show_stats_json(struct nvmeibs_serjio_stats *serjio_stats, struct seq_file *m);
+ssize_t nvmeibs_serjio_fill_serjio_stats_json(struct nvmeibs_serjio_stats *serjio_stats, char *buffer, size_t len);
 ssize_t nvmeibs_serjio_fill_serjio_stats_readable(struct nvmeibs_serjio_stats *serjio_stats, char *buffer, size_t len);
 void nvmeibs_serjio_stats_clear(struct nvmeibs_serjio_stats *serjio_stats);
 void nvmeibs_serjio_update_io_stats_on_rsrc_completion(struct nvmeibs_serjio_stats *serjio_stats, enum nvmeibs_serjio_work_type work_type,

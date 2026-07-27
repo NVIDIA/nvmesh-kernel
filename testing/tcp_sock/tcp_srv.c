@@ -1,9 +1,4 @@
 /*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
-/*
  *  TCP server
  */
 #include <linux/module.h>
@@ -12,9 +7,9 @@
 #include "common.h"
 #include "common.c"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("TCP Server Test");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_LICENSE("Dual BSD/GPL");
 
 
 /* depth of pending connections requests queue */
@@ -253,7 +248,7 @@ static void listen_stop(void)
 	   by unregistering listener sk's callbacks */
 	sk = listen_sock->sk;
 	write_lock_bh(&sk->sk_callback_lock);
-	_I("Unregister data-ready: '%pf'(%p) to '%pf'(%p)\n",
+	_I("Unregister data-ready: '%ps'(%p) to '%ps'(%p)\n",
 		sk->sk_data_ready, sk->sk_data_ready,
 		sk->sk_user_data, sk->sk_user_data);
 	sk->sk_data_ready = sk->sk_user_data;
@@ -306,7 +301,7 @@ static int listen_sock_open(__be32 addr, __be16 port)
 	sock->sk->sk_allocation = GFP_ATOMIC;
 	/* register (hijack) sk's callbacks */
 	write_lock_bh(&sock->sk->sk_callback_lock);
-	_I("Register data-ready: '%pf'(%p) to '%pf'(%p)\n",
+	_I("Register data-ready: '%ps'(%p) to '%ps'(%p)\n",
 		sock->sk->sk_data_ready, sock->sk->sk_data_ready,
 		listen_data_ready, listen_data_ready);
 	sock->sk->sk_user_data = sock->sk->sk_data_ready;

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibs_net.h"
 #include "nvmeibc_msgs_shared.h"
 #include "nvmeibs_defs.h"
@@ -412,11 +407,7 @@ static void drain_qp(struct nvmeibs_net *net, bool drep_rcvd)
 
 	__NFIN;
 	WARN_ON_ONCE(irqs_disabled());
-	if (drep_rcvd) {
-		_NT(trace_net_drain_qp_drep_rcvd, 
-			"drep_rcvd, removing cm_id net=@NET, cm=@CM_ID", net, &net->cm_id);
-		nvmeibs_remove_cm_id(&net->cm_id);
-	}
+	nvmeibs_remove_cm_id(&net->cm_id);
 	nvmeibs_net_spin_lock_irqsave(net, &flags);
 
 	_NT(trace_0_net_drain_qp,
@@ -856,10 +847,8 @@ static void release_work(struct workqe_struct *w)
 		break;
 	case QP_DRAINING:
 		//wait = true;
-		run_drain_cqs = true;
 		break;
 	case QP_RELEASING:
-		run_drain_cqs = true;
 		break;
 	}
 	if (wait_for_drep && net->drep_comp && !cl->drep_timeout) {
@@ -1072,8 +1061,6 @@ static void cq_event(struct ib_event *event, void *context)
 	__NFOUT;
 }
 
-extern struct nvmeib_intr_shaper *s_intr_shaper;
-
 /**
  * scq_handler() - SCQ event handler
  */
@@ -1082,9 +1069,7 @@ static void s_net_scq_handler(struct ib_cq *cq, void *context)
 	struct nvmeibs_net *net = context;
 	__NFIN;
 	if (nvmeib_ref_get(&net->ib_rsrc_guard)) {
-		nvmeib_intr_shaper_intr_enter(s_intr_shaper, INTR_SHAPER_INTR_TYPE_SERVER_SCQ);
 		net->params.scq_handler(cq, net->params.scq_context);
-		nvmeib_intr_shaper_intr_exit(s_intr_shaper);
 		nvmeib_ref_put(&net->ib_rsrc_guard);
 	}
 	__NFOUT;
@@ -1099,9 +1084,7 @@ static void s_net_rcq_handler(struct ib_cq *cq, void *context)
 	__NFIN;
 	nvmeib_qp_stats_on_interrupt(net->qp_stats);
 	if (nvmeib_ref_get(&net->ib_rsrc_guard)) {
-		nvmeib_intr_shaper_intr_enter(s_intr_shaper, INTR_SHAPER_INTR_TYPE_SERVER_RCQ);
 		net->params.rcq_handler(cq, net->params.rcq_context);
-		nvmeib_intr_shaper_intr_exit(s_intr_shaper);
 		nvmeib_ref_put(&net->ib_rsrc_guard);
 	}
 	__NFOUT;
@@ -1117,7 +1100,6 @@ static int create_ib_private_cq(struct nvmeibs_net *net)
 	int qp_access = IB_ACCESS_LOCAL_WRITE | IB_ACCESS_REMOTE_READ |
 		IB_ACCESS_REMOTE_WRITE;
 	int rv, scq_vect, rcq_vect;
-	enum nvmeib_cq_vector_get_type vector_type;
 
 	__NFIN;
 	BUG_ON(!params->scq_handler);
@@ -1128,24 +1110,7 @@ static int create_ib_private_cq(struct nvmeibs_net *net)
 	qp_init = kzalloc(sizeof(*qp_init), GFP_KERNEL);
 	if (!qp_init)
 		goto out;
-	switch (params->net_type) {
-		case S_NET_ADMIN:
-			vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_ADMIN;
-			break;
-		case S_NET_IO:
-			vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_IO;
-			break;
-		case S_NET_LOCK:
-		case S_NET_LOCK_2ND:
-			vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_LOCK;
-			break;
-		case S_NET_NORDDA:
-			vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_NORDDA;
-			break;
-		default:
-			BUG();
-	}
-	nvmeib_cq_vector_get(C2NV(net), params->name, vector_type, params->ch_index, &scq_vect, params->rcq_size ? &rcq_vect : NULL);
+	nvmeib_cq_vector_get(C2NV(net), params->name, params->ch_index, &scq_vect, params->rcq_size ? &rcq_vect : NULL);
 	net->scq = nvmeib_create_cq(C2IB(net), s_net_scq_handler, cq_event,
 				    net, params->scq_size, scq_vect);
 	if (IS_ERR(net->scq)) {
@@ -1207,9 +1172,15 @@ static int create_ib_private_cq(struct nvmeibs_net *net)
 	if (net->params.use_atomic) {
 		qp_access |= IB_ACCESS_REMOTE_ATOMIC;
 	}
-	net->qp = nvmeib_rdma_create_qp(net->cm_id.cm_id,
-		P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
-		qp_access);
+	if (net->params.rdda_qp ) {
+		net->qp = nvmeib_rdma_create_rdda_qp(net->cm_id.cm_id,
+			P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
+			qp_access);
+	} else {
+		net->qp = nvmeib_rdma_create_qp(net->cm_id.cm_id,
+			P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
+			qp_access);
+	}
 	if (!net->qp) {
 		_NE(error_3_net_create_ib, "failed to create_qp");
 		rv = -1;
@@ -1262,7 +1233,7 @@ err_destroy_scq:
 
 bool nvmeibs_mostly_idle_ch = false;
 module_param_named(mostly_idle_ch, nvmeibs_mostly_idle_ch, bool, 0644);
-MODULE_PARM_DESC(mostly_idle_ch, "Defines whether to use the first shared CQ for \"mostly\" idle channels.");
+MODULE_PARM_DESC(mostly_idle_ch, "Use first shared CQ for mostly idle channels");
 
 
 static void process_per_dev_cq(struct ib_wc *wcs, void *ctx);
@@ -1328,9 +1299,15 @@ static int create_ib_per_dev_cq(struct nvmeibs_net *net)
 	qp_init->recv_cq = nvmeib_cq_get_cq(dev_cq);
 
 	/* Create QP */
-	qp = nvmeib_rdma_create_qp(net->cm_id.cm_id,
-		P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
-		qp_access);
+	if (net->params.rdda_qp) {
+		qp = nvmeib_rdma_create_rdda_qp(net->cm_id.cm_id,
+			P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
+			qp_access);
+	} else {
+		qp = nvmeib_rdma_create_qp(net->cm_id.cm_id,
+			P2NV(net->params.port)->pd, qp_init, net->params.port->port, 0,
+			qp_access);
+	}
 	if (!qp) {
 		_NE(create_ib_per_dev_cq_e4, "Failed to create-qp");
 		rv = -1;

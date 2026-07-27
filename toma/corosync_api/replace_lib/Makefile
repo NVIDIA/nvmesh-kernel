@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # ********** Define Linker flags *********
 LDFLAGS_EXE = -rdynamic -no-pie
 LIB_NAME=libclusterstack

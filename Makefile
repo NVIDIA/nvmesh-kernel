@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 # Parent Makefile
 #
 MAKE_PID := $(shell echo $$PPID)
@@ -45,78 +42,6 @@ endef
 
 define nconfig_unset
 # NCONFIG_$(1) is not set|
-endef
-
-define nconfig_set_val
-NCONFIG_$(1)=$(2)|
-endef
-
-# check_ib_core_symbols: Generate shell commands to check IB core module symbols
-# Args: $(1) = module directory path, $(2) = symvers file path
-define check_ib_core_symbols
-set -e;\
-for file in $(1)/*.ko*; do \
-name=$$(basename $$file); \
-base=$${name%.*}; \
-echo "Checking module $$base symbols..."; scripts/compare_symvers.py --new ./Module.symvers --orig "$(2)" --module $$base; \
-done;
-endef
-
-# archive_ib_core_modules: Archive IB core modules to a tarball
-# Args: $(1) = module directory path, $(2) = symvers file path
-define archive_ib_core_modules
-find $(1) -type f \( -name '*.ko' -o -name '*.ko.*' -o -name '*.h' -o -name '*.c' -not -name '*.mod.c' -not -name '*.ko.cmd' \) \
--exec realpath --relative-to=$(1) {} \; | tar -zcf ib_core_modules.tar.gz -C $(1) -T -
-endef
-
-# setup_kernel_ib_core_modules: Setup Kernel IB core modules for building and checking
-# Args: $(1) = module directory path, $(2) = description (e.g., "OFED 5.4" or "Kernel 6.12"), 
-#       $(3) = symvers file path (optional)
-# Sets: REL_IB_CORE_MOD_DIR, INFO_CORE_MOD, CHECK_IB_CORE_MOD, and updates obj-m and configs
-# Note: Must be called with $(eval $(call setup_kernel_ib_core_modules,...))
-define setup_kernel_ib_core_modules
-REL_IB_CORE_MOD_DIR := $$(shell dirname "$(1)")
-obj-m += $$(REL_IB_CORE_MOD_DIR)/
-INFO_CORE_MOD := Building IB Core Modules for $(2) from $$(REL_IB_CORE_MOD_DIR)
-configs += $$(call nconfig_set_val,IB_CORE_MOD_DIR,$$(REL_IB_CORE_MOD_DIR))
-ARC_IB_CORE_MOD := $$(call archive_ib_core_modules,$$(REL_IB_CORE_MOD_DIR))
-ifneq ($(3),)
-    INFO_CORE_MOD += (Checked against $(3))
-    CHECK_IB_CORE_MOD := $$(call check_ib_core_symbols,$$(REL_IB_CORE_MOD_DIR),$(3))
-else
-    INFO_CORE_MOD += (Not Checked!)
-endif
-endef
-
-# check_ofed_ib_core_modules: Check for OFED modules and setup if found
-# Args: none (uses OFED_FULL_VER, OFED_VER, and OFED_SYMVERS from the calling context)
-# Note: Must be called with $(eval $(call check_ofed_ib_core_modules))
-define check_ofed_ib_core_modules
-$$(info OFED_FULL_VER $(OFED_FULL_VER) OFED_VER $(OFED_VER))
-OFED_MODS_SRC_DIR := $$(firstword $$(wildcard $(NVMESH_SRC_DIR)/ofeds/$(OFED_FULL_VER) $$(wildcard $(NVMESH_SRC_DIR)/ofeds/$(OFED_VER))))
-$$(info PWD $(PWD) OFED_MODS_SRC_DIR $$(OFED_MODS_SRC_DIR))
-ifneq ($$(OFED_MODS_SRC_DIR),)
-    $$(info OFED_MODS_SRC_DIR exists)
-    OFED_MODS_MAKEFILE := $$(wildcard $$(OFED_MODS_SRC_DIR)/drivers/infiniband/core/Makefile)
-    ifneq ($$(OFED_MODS_MAKEFILE),)
-        $$(info OFED_MODS_MAKEFILE $$(OFED_MODS_MAKEFILE) exists)
-        REL_IB_CORE_MOD_DIR := $$(patsubst $(NVMESH_SRC_DIR)/%,%,$$(shell dirname "$$(OFED_MODS_MAKEFILE)"))
-        obj-m += $$(REL_IB_CORE_MOD_DIR)/
-        INFO_CORE_MOD := Building IB Core Modules for OFED $$(OFED_FULL_VER) from $$(REL_IB_CORE_MOD_DIR)
-        configs += $$(call nconfig_set_val,IB_CORE_MOD_DIR,$$(REL_IB_CORE_MOD_DIR))
-        ARC_IB_CORE_MOD := $$(call archive_ib_core_modules,$$(REL_IB_CORE_MOD_DIR))
-        ifneq ($(OFED_SYMVERS),)
-            INFO_CORE_MOD += (Checked against $(OFED_SYMVERS))
-            CHECK_IB_CORE_MOD := $$(call check_ib_core_symbols,$$(REL_IB_CORE_MOD_DIR),$(OFED_SYMVERS))
-        else
-            INFO_CORE_MOD += (Not Checked!)
-        endif
-    else
-        INFO_CORE_MOD := NOT Building IB Core Modules for $$(OFED_FULL_VER) - $$(OFED_MODS_SRC_DIR)/drivers/infiniband/core/Makefile not found
-    endif
-else
-    INFO_CORE_MOD := NOT Building IB Core Modules for $$(OFED_FULL_VER) - ofeds/$$(OFED_FULL_VER) or ofeds/$$(OFED_VER) not found
-endif
 endef
 
 ifeq ($(VERBOSE),false)
@@ -211,8 +136,8 @@ ifndef TCM
 endif
 
 GEN_USED_SYMVERS = ./bin/nvmesh_gen_symvers
-COMPILE_UTILS = cd perfTest/io_stress/di_parser; $(MAKE) CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../scan_locks; $(MAKE) SSDA=$(NVMESH_SRC_DIR); cd ../change_bio_in_air; $(MAKE) all; cd ../cmp_blocks;  $(MAKE) CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../gen_md;  $(MAKE) CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../../..
-CLEAN_UTILS =   cd perfTest/io_stress/di_parser; $(MAKE) SSDA=$(NVMESH_SRC_DIR) clean; cd ../scan_locks; $(MAKE) SSDA=$(NVMESH_SRC_DIR) clean; cd ../change_bio_in_air; $(MAKE) clean; cd ../cmp_blocks; $(MAKE) SSDA=$(NVMESH_SRC_DIR) clean; cd ../gen_md; $(MAKE) SSDA=$(NVMESH_SRC_DIR) clean; cd ../../..
+COMPILE_UTILS = cd perfTest/io_stress/di_parser; make CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../scan_locks; make SSDA=$(NVMESH_SRC_DIR); cd ../change_bio_in_air; make all; cd ../cmp_blocks;  make CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../gen_md;  make CFLAGS="$(UTILSFLAGS)" SSDA=$(NVMESH_SRC_DIR); cd ../../..
+CLEAN_UTILS =   cd perfTest/io_stress/di_parser; make SSDA=$(NVMESH_SRC_DIR) clean; cd ../scan_locks; make SSDA=$(NVMESH_SRC_DIR) clean; cd ../change_bio_in_air; make clean; cd ../cmp_blocks; make SSDA=$(NVMESH_SRC_DIR) clean; cd ../gen_md; make SSDA=$(NVMESH_SRC_DIR) clean; cd ../../..
 COMPRESS_KERNEL_MODULES =
 
 ifeq ($(COMPRESS_KO),yes)
@@ -227,27 +152,25 @@ endif
 
 ifneq ($(COMPILE_SERVER),)
     obj-m += srv/
-    COMPILE_TOOLS= cd utils && $(MAKE) $(JOBS) all
-    CLEAN_TOOLS= cd utils && $(MAKE) clean
 
     ifeq ($(TCM), TCMD)
         INFO_TOMA = Building TOMA in DEBUG mode
-        COMPILE_TOMA = cd toma && $(MAKE) $(JOBS) all $(SECTOR_SHIFT_FLAG)
-        CLEAN_TOMA = cd toma; $(MAKE) clean
+        COMPILE_TOMA = cd toma && make $(JOBS) all $(SECTOR_SHIFT_FLAG)
+        CLEAN_TOMA = cd toma; make clean
     else
         ifeq ($(TCM), TCMR)
             INFO_TOMA = Building TOMA in RELEASE mode
-            COMPILE_TOMA = cd toma && $(MAKE) $(JOBS) all MOD=release $(SECTOR_SHIFT_FLAG)
-            CLEAN_TOMA = cd toma; $(MAKE) clean MOD=release
+            COMPILE_TOMA = cd toma && make $(JOBS) all MOD=release $(SECTOR_SHIFT_FLAG)
+            CLEAN_TOMA = cd toma; make clean MOD=release
         else
             ifeq ($(TCM), TCMDR)
                 INFO_TOMA = Building TOMA in DEBUG RELEASE mode
-                COMPILE_TOMA = cd toma && $(MAKE) $(JOBS) all MOD=release DEBUG=yes $(SECTOR_SHIFT_FLAG)
-                CLEAN_TOMA = cd toma; $(MAKE) clean MOD=release DEBUG=yes
+                COMPILE_TOMA = cd toma && make $(JOBS) all MOD=release DEBUG=yes $(SECTOR_SHIFT_FLAG)
+                CLEAN_TOMA = cd toma; make clean MOD=release DEBUG=yes
             else
                 INFO_TOMA = Building TOMA in IB and UDP-only (release) modes
-                COMPILE_TOMA = cd toma && $(MAKE) $(JOBS) all MOD=release $(SECTOR_SHIFT_FLAG)
-                CLEAN_TOMA = cd toma; $(MAKE) clean; $(MAKE) clean MOD=release; $(MAKE) clean MOD=release DEBUG=yes
+                COMPILE_TOMA = cd toma && make $(JOBS) all MOD=release $(SECTOR_SHIFT_FLAG)
+                CLEAN_TOMA = cd toma; make clean; make clean MOD=release; make clean MOD=release DEBUG=yes
             endif
         endif
     endif
@@ -433,7 +356,7 @@ else
         # four argument hash_for_each_possible
         cflags += -DKS_HASHTABLE=1
     else
-        # five argument hash_for_each_possible - use NVIDIA implementation
+        # five argument hash_for_each_possible - use Excelero implementation
         cflags += -DKS_HASHTABLE=0
     endif
 endif
@@ -662,7 +585,6 @@ else
         endif
     endif
     ifneq ($(OFED_VER_STRING), $(INBOX_OFED_VER_STRING))
-        OFED_FULL_VER := $(shell echo $(OFED_VER_STRING) | grep -Eo "[0-9.]+[0-9.-]+")
         OFED_VER := $(shell echo $(OFED_VER_STRING) | grep -Eo "[0-9.]+" | head -1)
         OFED_VER_MAJ := $(shell echo $(OFED_VER) | cut -d. -f1)
         OFED_VER_MIN := $(shell echo $(OFED_VER) | cut -d. -f2)
@@ -687,30 +609,26 @@ ifeq ($(OFED_WE_R), yes)
     # Mellanox OFED
     ifeq ($(OFED_SRC_DIR),)
         # OFED_SRC_DIR not defined - Check for DKMS
-        OFED_DKMS_VERS := $(shell ofed_info -l | grep mlnx-ofed-kernel-dkms | awk '{print $$3}')
-        OFED_DKMS_VERS += $(shell ls /var/lib/dkms/mlnx-of*kernel/)
-        OFED_DKMS_VER := $(firstword $(OFED_DKMS_VERS))
+        OFED_DKMS_VER := $(shell ofed_info -l | grep mlnx-ofed-kernel-dkms | awk '{print $3;}')
         ifneq ($(OFED_DKMS_VER),)
             OFED_DKMS_VER_MAJ_MIN := $(shell echo $(OFED_DKMS_VER) | cut -d. -f1,2)
             OFED_DKMS_VER_MAJ_MIN_POINT := $(shell echo $(OFED_DKMS_VER) | grep -Eo '[0-9]+.[0-9]+[.-]OFED[.-][0-9;.]+')
             # Check for all possibile dkms source dirs
-            DKMS_SRC_DIRS := $(wildcard /var/lib/dkms/mlnx-of*kernel/$(OFED_DKMS_VER)/source)
-            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_DKMS_VER))
-            DKMS_SRC_DIRS += $(wildcard /var/lib/dkms/mlnx-of*kernel/$(OFED_DKMS_VER_MAJ_MIN_POINT)/source)
-            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_DKMS_VER_MAJ_MIN_POINT))
-            DKMS_SRC_DIRS += $(wildcard /var/lib/dkms/mlnx-of*kernel/$(OFED_DKMS_VER_MAJ_MIN)/source)
-            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_DKMS_VER_MAJ_MIN))
+            DKMS_SRC_DIRS := $(wildcard /var/lib/dkms/mlnx-of*-kernel/$(OFED_DKMS_VER_MAJ_MIN_POINT)/source)
+            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*-kernel-$(OFED_DKMS_VER_MAJ_MIN_POINT))
+            DKMS_SRC_DIRS += $(wildcard /var/lib/dkms/mlnx-of*-kernel/$(OFED_DKMS_VER_MAJ_MIN)/source)
+            DKMS_SRC_DIRS += $(wildcard /usr/src/mlnx-of*-kernel-$(OFED_DKMS_VER_MAJ_MIN))
 
             OFED_SRC_DIR := $(firstword $(DKMS_SRC_DIRS))
         endif
     endif
     ifeq ($(OFED_SRC_DIR),)
         # No DKMS, Check for /usr/src/mlnx-of[ed,a]-kernel-X.X
-        OFED_SRC_DIRS := $(wildcard /usr/src/mlnx-of*kernel-$(OFED_VER))
-        OFED_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_VER_MAJ).$(OFED_VER_MIN))
-        OFED_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_FULL_VER))
-        OFED_SRC_DIRS += $(wildcard /usr/src/mlnx-of*kernel-$(OFED_VER_MAJ).$(OFED_VER_MIN).$(OFED_VER_POINT_MAJ))
-        OFED_SRC_DIR := $(firstword $(OFED_SRC_DIRS))
+        DIR := $(wildcard /usr/src/mlnx-of*kernel-$(OFED_VER))
+        ifneq ($(DIR),)
+            # Exists
+            OFED_SRC_DIR = $(DIR)
+        endif
     endif
     ifeq ($(OFED_SRC_DIR),)
         ifeq ($(COMPILE_COMMON),yes)
@@ -720,11 +638,8 @@ ifeq ($(OFED_WE_R), yes)
     $(info Using OFED_SRC_DIR=$(OFED_SRC_DIR))
     ifeq ($(OFA_KERNEL),)
         # Check for all possible ofa_kernel dirs
-        OFA_KERNEL_DIR := $(wildcard /usr/src/ofa_kernel-dkms/$(KERN_ARCH)/$(KERN_VER))
-        OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel/$(KERN_ARCH)/$(KERN_VER))
-        OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel-dkms/$(KERN_VER))
+        OFA_KERNEL_DIR := $(wildcard /usr/src/ofa_kernel/$(KERN_ARCH)/$(KERN_VER))
         OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel/$(KERN_VER))
-        OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel-dkms/default)
         OFA_KERNEL_DIR += $(wildcard /usr/src/ofa_kernel/default)
         OFA_KERNEL = $(firstword $(OFA_KERNEL_DIR))
     endif
@@ -842,9 +757,6 @@ ifeq ($(OFED_WE_R), yes)
             INC_DIR += -I$(cma_priv_dir)
         endif
     endif
-
-    $(eval $(call check_ofed_ib_core_modules))
-    $(info obj-m $(obj-m))
 else
     ifeq ($(OFED_VER_TYPE), OFED)
         # OFA OFED
@@ -888,9 +800,6 @@ else
         else
             cflags += -DHAS_IB_GET_DMA_MR=0
         endif
-
-        $(eval $(call check_ofed_ib_core_modules))
-        $(info obj-m $(obj-m))
     else
         ifeq ($(OFED_VER_TYPE),none)
             # INBOX Driver - Compile against Kernel Source
@@ -1003,20 +912,6 @@ else
                     cflags += -DIB_HAS_CMA_PRIV_H=1
                 endif
             endif
-
-            ifneq ($(wildcard $(KERN_FILES_PATH)/drivers/infiniband/core/Makefile),)
-                # If kernel symvers can be found, check the patched modules have the same symbols
-                # RHEL kernels store symvers in /boot/symvers-<kernel-version> or /boot/symvers-<kernel-version>.gz
-                # Ubuntu kernels store symvers in /usr/src/linux-headers-<kernel-version>/Module.symvers
-                KERN_SYMVERS = $(firstword \
-                    $(wildcard /boot/symvers-$(KERN_VER_NO_OFED.gz) \
-                    $(wildcard /boot/symvers-$(KERN_VER_NO_OFED) \
-                    $(wildcard /usr/src/linux-headers-$(KERN_VER_NO_OFED)/Module.symvers))))
-
-                $(eval $(call setup_kernel_ib_core_modules,kernels/$(KERN_VER_NO_OFED)/drivers/infiniband/core/Makefile,Kernel $(KERN_VER),$(KERN_SYMVERS)))
-            else
-                INFO_CORE_MOD = NOT Building IB Core Modules for $(KERN_VER)
-            endif
         else
             # Unknown OFED
             $(error Unknown OFED $(OFED_VER_STRING))
@@ -1033,8 +928,22 @@ else
     cflags += -DKS_HAS_CALL_USERMODEHELPER_SETFNS=1
 endif
 
-ifneq ($(wildcard $(OFA_KERNEL)/compat/config.h),)
-    INCLUDES = -include $(OFA_KERNEL)/compat/config.h
+ifneq ($(wildcard $(OFA_KERNEL)/include/linux/compat-2.6.h),)
+    ifeq ($(shell grep -w schedule_delayed_work $(OFA_KERNEL)/include/linux/compat-2.6.h 2> /dev/null),)
+        cflags += -DKS_GPL_SCHEDULE_DELAYED_WORK=1
+    else
+        cflags += -DKS_GPL_SCHEDULE_DELAYED_WORK=0
+    endif
+    INCLUDES = -include linux/compat-2.6.h
+endif
+
+ifneq ($(wildcard $(OFA_KERNEL)/include/linux/compat-2.6.h),)
+        ifeq ($(shell grep -w schedule_delayed_work $(OFA_KERNEL)/include/linux/compat-2.6.h 2> /dev/null),)
+                cflags += -DKS_GPL_SCHEDULE_DELAYED_WORK=1
+        else
+                cflags += -DKS_GPL_SCHEDULE_DELAYED_WORK=0
+        endif
+	INCLUDES = -include linux/compat-2.6.h
 endif
 
 ifneq ($(shell grep -w __tcp_send_ack $(KSRC1)/include/net/tcp.h 2> /dev/null),)
@@ -1098,7 +1007,6 @@ endif
 cflags += -Wall -Wstrict-prototypes
 cflags += -Werror -Wno-error=unused-function -Wno-vla
 
-ifeq ($(LLVM),)
 GCC_VERCODE=$(shell gcc -dumpfullversion -dumpversion | sed -e 's/\.\([0-9][0-9]\)/\1/g' -e 's/\.\([0-9]\)/0\1/g' -e 's/^[0-9]\{3,4\}$$/&00/')
 GCC800_VERCODE=80000
 ifeq ($(shell test $(GCC_VERCODE) -gt $(GCC800_VERCODE); echo $$?),0)
@@ -1110,7 +1018,6 @@ GCC1300_VERCODE=130000
 ifeq ($(shell test $(GCC_VERCODE) -gt $(GCC1300_VERCODE); echo $$?),0)
 	# Disable some GCC 13 and above warnings that cause issues
 	cflags += -Wno-attribute-warning
-endif
 endif
 
 # for KASAN
@@ -1242,9 +1149,6 @@ cflags += -DKERN_VER_STRING=\""$(KERN_VER)\"" -DOFED_VER_STRING=\""$(OFED_VER_ST
 cflags += -DIO_POLL_THREAD=1
 # cflags += -DCQ_DEBUG=1
 
-# Support older nvmeiba (without detaching atoms upgrade support) in nvmeibc
-cflags += -DNVMEIBC_ATOM_MIGHT_NOT_SUPPORT_DETACHING=1
-
 # EC PERFORMANCE (full-slice oriented)
 cflags += -DEC_PERF_CLNT_NORDDA_REDUCE_SEND_COMPS=0
 cflags += -DEC_PERF_CLNT_NORDDA_SHARED_CQ=1
@@ -1324,8 +1228,6 @@ else
 cflags += -DENABLE_SIW=0
 endif
 
-subdir-ccflags-y += $(cflags)
-
 # ofed_symbol_version
 ifneq ($(OFED_SYM_VER),)
     OFED_SYMVERS = $(OFED_SYM_VER)
@@ -1356,7 +1258,7 @@ LINUX_INCLUDE='\
     -I$$(srctree)/arch/$$(SRCARCH)/include \
     -Iarch/$$(SRCARCH)/include/generated \
     -I$(shell pwd) -I$(shell pwd)/common -I$(shell pwd)/common_public -I$(shell pwd)/srv -I$(shell pwd)/clnt -I$(shell pwd)/toma\
-    -I$(shell pwd)/softiwarp -I$(shell pwd)/softiwarp/common -I$(shell pwd)/utils/nvmeib_jdr \
+    -I$(shell pwd)/softiwarp -I$(shell pwd)/softiwarp/common \
     $(AUTOGEN_INCS) \
     $(INC_DIR2)'
 
@@ -1385,7 +1287,6 @@ all:
 	$(info $(INFO_TOMA))
 	$(info $(INFO_RPM))
 	$(info $(INFO_TEST))
-	$(info $(INFO_CORE_MOD))
 	$(info ===================================================)
 	@$(call nconfig_save,$(configs))
 	$(COMPILE_LZ4)
@@ -1414,9 +1315,6 @@ ifeq ($(COMPILE_COMMON),yes)
 	KBUILD_EXTRA_SYMBOLS="$(OFED_SYMVERS) $(BNXT_SYMVERS) $(SIW_SYMVERS)" modules
     endif
 endif
-	+$(VV)$(CHECK_IB_CORE_MOD)
-	+$(VV)$(ARC_IB_CORE_MOD)
-	+$(COMPILE_TOOLS)
 	+$(VV)$(COMPILE_TOMA) $(TOMA_LLVM) $(TOMA_SILENT)
 ifeq ($(BUILD_KERNEL_MODULES),yes)
 ifeq ($(IS_TOMA_FIRST),true)
@@ -1424,7 +1322,7 @@ ifeq ($(IS_TOMA_FIRST),true)
 endif
 endif
 	+$(VV)$(COMPILE_UTILS)
-	$(MAKE) -C $(TOOLS_DIR)/toma_rpc
+	make -C $(TOOLS_DIR)/toma_rpc
 	$(VV)$(COLLECT_DICTIONARIES)
 	$(VV)$(COMPRESS_KERNEL_MODULES)
 	$(info $(PY_TO_EXEC_INFO))
@@ -1438,7 +1336,6 @@ clean:
 	$(MAKE) -C $(KSRC) M=$(PWD) clean
 	+$(CLEAN_DICTIONARIES)
 	+$(CLEAN_TOMA)
-	+$(CLEAN_TOOLS)
 	+$(CLEAN_UTILS)
 	+$(CLEAN_AUTOGEN)
 	+$(CLEAN_LZ4)
@@ -1493,7 +1390,6 @@ install_files:
 	@cp $(NVMESH_SRC_DIR)/tools/nvmesh_netlink.py $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/tools/read_dwarf.py $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/tools/nvmesh_memmgr_monitor.py $(COMMON_REPO_DIR)/tools
-	@cp $(NVMESH_SRC_DIR)/tools/nvmesh_client_upgrade_breakdown.py $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/tools/nvmesh_metrics.py $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/tools/toma_rpc/toma_rpc $(COMMON_REPO_DIR)/tools
 	@cp $(NVMESH_SRC_DIR)/perfTest/io_stress/scan_locks/scan_locks_ec $(COMMON_REPO_DIR)/tools

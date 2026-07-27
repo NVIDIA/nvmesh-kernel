@@ -1,13 +1,8 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef KR_INCS_H
 #define KR_INCS_H
 /*
  * Simulation of linux kernel API by user space library.
- * Intention: Debug NVMesh's linux kernel driver externally (possibly on different OS)
+ * Intention: Debug Excelero linux kernel driver externally (possibly on different OS)
  */
 
 // User space includes
@@ -1840,9 +1835,6 @@ struct proc_dir_entry {					// Single proc file
 struct seq_file {
 	void *private;
 	const struct seq_operations *ops;
-	char *buf;
-	size_t count;
-	size_t size;
 };
 
 struct seq_operations {
@@ -1853,14 +1845,10 @@ struct seq_operations {
 };
 
 void seq_printf(struct seq_file *m, const char *fmt, ...);
-void seq_vprintf(struct seq_file *m, const char *fmt, va_list args);
-static inline bool seq_has_overflowed(struct seq_file *m) { (void)m; return false; }
 int seq_open(struct file *, const struct seq_operations *);
 int seq_release(struct inode* inode, struct file* file);
 ssize_t seq_read(struct file *file, char __user *buf, size_t size, loff_t *ppos);
 loff_t seq_lseek(struct file *file, loff_t offset, int whence);
-int single_open(struct file *file, int (*show)(struct seq_file *, void *), void *data);
-int single_release(struct inode *inode, struct file *file);
 
 struct proc_dir_entry *proc_mkdir(const char *name, struct proc_dir_entry *parent);
 void  remove_proc_entry(const char *name, struct proc_dir_entry *parent);
@@ -2032,15 +2020,6 @@ typedef unsigned long long time64_t;
 
 struct hrtimer {};
 enum hrtimer_mode {NOT_AN_EMPTY_ENUM = 0};
-
-#define WQ_UNBOUND 0
-#define WQ_HIGHPRI 0
-#define WQ_MEM_RECLAIM 0
-#define WQ_SYSFS 0
-#define WQ_UNBOUND_MAX_ACTIVE 0
-
-int profile_event_register(enum profile_type type, struct notifier_block *n);
-int profile_event_unregister(enum profile_type type, struct notifier_block *n);
 
 //#define NVME_IOCTL_ID			(0x4e40)
 #endif // #ifndef KR_INCS_H

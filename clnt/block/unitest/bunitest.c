@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "bunitest.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "common/nvmeib_error_report.h"
@@ -38,7 +33,6 @@
 #include "nvmeibc_error_tags.h"
 #include "memmgr_metrics_tests.h"
 #include "error_tags_tests.h"
-#include "kr_incs_bit_ops_test.h"
 #include <stdint.h>
 
 /******************************************************************************/
@@ -4433,7 +4427,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 	rcvr_args.ext_args.lock_range.count = 2 + 0 * sraid.cpr->length/LOCKSET_SLICES;
 	NVMeshSystem_volume_memset(sys, 0, 0);
 	BUG_ON(!env.dev->dp.enable_edic_check);		// If metadata is not enabled then this test is meaningless
-	nvmeibc_warn_on_edic_verification_failure = false;							// Unitest cases edic failure
+	nvmeibc_warn_on_edic_werification_failure = false;							// Unitest cases edic failure
 	for (rep = 0; rep < 50; rep++) {
 		const u32 n_blksets_in_praid = rcvr_args.ext_args.lock_range.count;
 		const u32 blockset = (rand()%n_blksets_in_praid);
@@ -4644,7 +4638,7 @@ TEST_FUNC int unitest_scrubRecovery_R1(bunitest_s* B) {
 	}
 
 	clientSimulator_wait_for_all_sync_ops(env.client);
-	nvmeibc_warn_on_edic_verification_failure = true;
+	nvmeibc_warn_on_edic_werification_failure = true;
 	NVMeshSystem_serialize(sys);
 	nvmeibc_nowhole_stats_reset();
 	__dd_clean_dlba_pointers(env);				// Clean bad sectors
@@ -7151,7 +7145,6 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 
 	test_memmgr_metrics();
 	test_error_tags();
-	kr_incs_bit_ops_tests();
 
 	if (unlikely(buni->conf->bunitest.nRep == 0))
 		unitest_print("*** Skipping all unitests. Intentional?\n");
@@ -7314,7 +7307,7 @@ static int blk_unit_test(void *param __attribute__((unused))) {
 					sys->tcf.nVolumes = sys->clients[0].nBdevs = 1;
 					if (1) rv |= SIMU_RUN_TEST_ID(unitest_EC_single_slice_async_pause_disks, no_errro, sys, false);
 					if (1) rv |= SIMU_RUN_TEST_ID(unitest_EC_single_slice_async_pause_disks, with_error, sys, true);
-					if (0) rv |= SIMU_RUN_TEST(unitest_EC_async_degraded_mode_rebuild_during_single_slice_io, sys);
+					rv |= SIMU_RUN_TEST(unitest_EC_async_degraded_mode_rebuild_during_single_slice_io, sys);
 					sys->tcf.nVolumes = sys->clients[0].nBdevs = MAX_NORMAL_VOLUMES_IN_NVMESH;
 					send_command_to_vols(sys, -1, volCmds_New, sys->mdb.nVols - 1, &sys->mdb.vols[1]);
 				}

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 // For documentation, see Header in H file
 /******************************************************************************/
 #include "nvmeib_common_all.h"
@@ -86,14 +81,12 @@ int nvmeib_srq_pool_create(struct nvmeib_dev *dev, int pool_size, struct nvmeib_
 	(void)dev; (void)pool_size; (void)prim_q_params; (void)sec_qs_params; (void)memmgr_metrics_ctx; return 0;
 }
 
-static struct nvmeib_intr_shaper intr_shaper;
-
-struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs){
-	(void)frame_size_usecs;
-	return &intr_shaper;
+struct nvmeib_intr_shaper *nvmeib_intr_shaper_create(u64 frame_size_usecs, u64 max_burst_size, int max_percent_cpu){
+	struct nvmeib_intr_shaper *shaper = kzalloc(sizeof(*shaper), GFP_KERNEL);
+	(void)frame_size_usecs; (void)max_burst_size; (void)max_percent_cpu;
+	return shaper;
 }
-struct nvmeib_intr_shaper *nvmeib_get_intr_shaper(void){ return &intr_shaper; }
-void nvmeib_intr_shaper_destroy(struct nvmeib_intr_shaper *shaper){ BUG_ON(shaper != &intr_shaper); }
+void nvmeib_intr_shaper_destroy(struct nvmeib_intr_shaper *shaper){ kfree(shaper); }
 void nvmeib_dump_buf(const void *buf, int len){ (void)buf; (void)len; BUG(); }
 
 /*************************** common/nvmeib_wd.h *******************************/
@@ -166,6 +159,7 @@ void nvmeibc_ib_net_intr_shaper_destroy(void){
 
 /********************* common_public/nvmeib_public.h **************************/
 // Implementation of #include "nvmeib_public.h"
+int nvmeib_public_cache_line_size(void) { return sizeof(unsigned long); }
 
 int nvmeib_public_debug_level(void) {
 	return nvmeib_debug_level(); // Daniel: use the same param of nvmeibc for nvmeib
@@ -194,6 +188,9 @@ void nvmeib_public_user_pages_for_io_unpin(int n_pages, struct page **pages, int
 		put_page(pages[i]);
 }
 
+void __percpu *__nvmeib_public_alloc_percpu(size_t size, size_t align){ return __alloc_percpu(size, align); }
+void __percpu *__nvmeib_public_alloc_percpu_zeroed(size_t size, size_t align) { return __alloc_percpu(size, align); }
+void nvmeib_public_free_percpu(void __percpu *ptr) { return free_percpu(ptr); }
 bool nvmeib_public_serial_console(void){ return false; }
 
 /* Common EC functions to client and server filled as function pointer*/
@@ -537,9 +534,16 @@ out:
 }
 
 unsigned int nvmeib_get_tcp_base_port_id(void) {
-	return NVMEIB_IWARP_PORT_ID;
+	return NVMEIB_EXCELERO_IWARP_PORT_ID;
 }
 
+int nvmeib_public_kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp_ext[])
+{
+	(void) kobj;
+	(void) action;
+	(void) envp_ext;
+	return 0;
+}
 
 int nvmeib_buffer_alloc_sgl_from_pages(struct nvmeib_buffer *buf, struct page **pages,
 				       unsigned int n_pages, unsigned int size, unsigned int offset, gfp_t gfp_mask)
@@ -559,14 +563,6 @@ int nvmeib_buffer_alloc_sgl_from_pages(struct nvmeib_buffer *buf, struct page **
 	buf->offset = offset;
 out:
 	return rv;
-}
-
-int kobject_uevent_env(struct kobject *kobj, enum kobject_action action, char *envp[])
-{
-	(void)kobj;
-	(void)action;
-	(void)envp;
-	return 0;
 }
 
 /*****************************************************************************/

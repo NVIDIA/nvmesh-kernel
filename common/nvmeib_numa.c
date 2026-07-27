@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibm_trace.h"
 #include "nvmeib_utils.h"
 #include "nvmeib_utils_bin_traces.h"
@@ -140,7 +135,7 @@ int nvmeib_socket_from_numa(int dev_node) {
 	int cpu;
 	for_each_online_cpu(cpu) {
 		const int cpu_node = cpu_to_node(cpu);
-		const int cpu_sock = topology_physical_package_id(cpu);
+		const int cpu_sock = nvmeib_public_cpu_to_sock(cpu);
 		if (cpu_node == dev_node) {
 			dev_sock = cpu_sock;
 			break;
@@ -165,7 +160,7 @@ static void nvmeib_numa_iter_init_device_socket(struct nvmeib_numa_iter *iter,
 
 	for_each_online_cpu(cpu) {
 		const int cpu_node = cpu_to_node(cpu);
-		const int cpu_sock = topology_physical_package_id(cpu);
+		const int cpu_sock = nvmeib_public_cpu_to_sock(cpu);
 		if (dev_sock == cpu_sock) {
 			node_set(cpu_node, iter->data.nodemask);
 		}

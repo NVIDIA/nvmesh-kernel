@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # to be invoked just as: ./install.sh
 # ./build_sh_conf should contain all build options
 #
@@ -19,7 +16,7 @@
 #   example: SSH_INVOKE="sshpass -p Pa$$w0rd ssh -l root"
 #            the same as above but with the password supplied in cmd line
 # INSTALL_REMOTE_DIR=<remote-install-dir-name>
-#   example: INSTALL_REMOTE_DIR=nvmesh
+#   example: INSTALL_REMOTE_DIR=excelero
 # REPO_DIR=<local-repo-dir-name>
 #   example: REPO_DIR="~/build_repo"
 # RSYNC_OPTS=<list_of_rsync_args>, to be added to default ones
@@ -130,7 +127,7 @@ source ${CONFIG_FILE}
 
 # set default opts; conf file overrides most of them
 SSH_INVOKE=${SSH_INVOKE:-ssh}
-INSTALL_REMOTE_DIR=${INSTALL_REMOTE_DIR:-"nvmesh"}
+INSTALL_REMOTE_DIR=${INSTALL_REMOTE_DIR:-"excelero"}
 REPO_DIR=${REPO_DIR:-${HOME}/build_repo}
 PARALLEL=${PARALLEL:-false}
 DRY_RUN=${DRY_RUN:-false}

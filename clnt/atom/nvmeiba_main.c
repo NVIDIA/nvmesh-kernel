@@ -1,18 +1,10 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeiba_main.h"
 #include "nvmeiba_nvmesh_api.h"
 #include "common/compat/kr_incs_time.h"
-#include "utils/nvmeib_jdr/nvmeib_jdr.h"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("nvmesh client hot upgrade core");
-MODULE_LICENSE("GPL and additional rights");
-
-#define NVMEIBA_2_C_PROTO_VERSION_CURRENT NVMEIBA_2_C_PROTO_VERSION_V_2_1
+MODULE_LICENSE("Dual BSD/GPL");
 
 /********** List of all active OS/API's, including unsafely detached *********/
 static struct nvmeiba_all_os_apis all;
@@ -20,25 +12,16 @@ static struct nvmeiba_all_os_apis all;
 /******************************* Proc files ***********************************/
 #define PROCFS_ATOM_STR "nvmeiba"
 #define VERSION_PROC_FRMT_VER 1
-#define __char_const(_s) ((char const *)(_s))
-#define __const_stringfy(_s) __char_const(__stringify(_s))
 static ssize_t fill_version_json(void *a, char *buffer, size_t len)
 {
-	struct charvec buf = {.base = buffer, .len = len};
-	struct jdr jdr;
-	struct charvec json;
+	int count = 0;
 	(void)a;
+	count += scnprintf(buffer + count, len - count,
+					   "{\"module\" : \"atom\", \"commit\" : \"%llx\", \"release\" : \"%s\", \"version\" : \"%s\", \"build_number\" : \"%s\", \"distro\" : \"%s\"",
+	(u64)COMMIT_ID, __stringify(NVMESH_RELEASE), __stringify(NVMESH_VERSION), __stringify(BUILD_NUMBER), __stringify(BUILD_DISTRO));
+	count += scnprintf(buffer + count, len - count, "}\n");
 
-	jdr = jdr_make(buf);
-	jdr_write_var(&jdr, module, (char const *)("atom"));
-	jdr.ops.ascii_format(&jdr, "commit", "%llx", (u64)COMMIT_ID);
-	jdr_write_var(&jdr, release, __const_stringfy(NVMESH_RELEASE));
-	jdr_write_var(&jdr, version, __const_stringfy(NVMESH_VERSION));
-	jdr_write_var(&jdr, build_number, __const_stringfy(BUILD_NUMBER));
-	jdr_write_var(&jdr, distro, __const_stringfy(BUILD_DISTRO));
-	json = jdr_finalize(&jdr);
-
-	return json.len;
+	return count;
 }
 
 static ssize_t fill_users(void *a, char *buf, size_t len)
@@ -147,14 +130,14 @@ static void __exit nvmeiba_all_os_apis_exit(void) /* Destructor */
 	if ((n_lives != 0)||(n_nvmeibc != 0)) {
 		const int buf_size = 4*PAGE_SIZE;
 		char *printbuf = kzalloc(buf_size, GFP_KERNEL);	// Take one page
-		WARN(true, A_DMESG_PREFIX "Unexpected internal error, operating system may become unstable.  Error code: 1007. Internal info (%d, %d)", n_lives, n_nvmeibc);
+		WARN(true, A_DMESG_PREFIX "Unexpected internal error, operating system may become unstable. Contact Excelero support. Error code: 1007. Internal info (%d, %d)", n_lives, n_nvmeibc);
 		/* Daniel, kernel should prevent service stop/ yum remove, etc so it is
 		   impossible fo this if to occur. If it occurs on older kernels
 		   disable os_api volume f_ops callbacks, coz nvmeiba code will unload
 		   shortely */
 		if (printbuf) {
 			fill_status_h(A, printbuf, buf_size);
-			_NE_to_user(t_02_atom, "Unexpected internal error,  Error code: 1008. Internal info %s.\n", printbuf);
+			_NE_to_user(t_02_atom, "Unexpected internal error, Contact Excelero support. Error code: 1008. Internal info %s.\n", printbuf);
 			kfree(printbuf);
 		}
 	}
@@ -250,7 +233,7 @@ static int nvmeiba_os_apis_tostring(struct nvmeiba_all_os_apis* A, char *buf, in
 		pos -= 2;					// Remove prev ",\n"
 		BUF_ADD("\n}\n");    	  	// Add atoms file epilog
 	}
-	WARN((pos >= buf_len), A_DMESG_PREFIX "Unexpected internal error, buffer too short. Some volumes may not report attachment correctly.  Error code: 1003.");  // Acts as _NE_to_user()
+	WARN((pos >= buf_len), A_DMESG_PREFIX "Unexpected internal error, buffer too short. Some volumes may not report attachment correctly. Contact Excelero support. Error code: 1003.");  // Acts as _NE_to_user()
 	#undef BUF_ADD
 	return pos;
 }
@@ -346,7 +329,7 @@ void nvmeiba_os_api_exec_for_each_atom(const char* dev_dir, void (*fn)(const str
 	}
 	spin_unlock_irqrestore(&A->lock, flags);
 }
-EXPORT_SYMBOL_GPL(nvmeiba_os_api_exec_for_each_atom);
+EXPORT_SYMBOL(nvmeiba_os_api_exec_for_each_atom);
 
 struct nvmeiba_atom_os_api *nvmeiba_os_apis_adopt_by(const char* dev_dir, const char *dev_name)
 {
@@ -399,17 +382,17 @@ struct nvmeiba_to_c_handover nvmeiba_os_do_on_nvmeibc_up(void)
 	n = A->n;								// Cache on stack to print outside spinlock
 	H.fops = &A->default_fops;				// KERNEL 5.10+ Default fops include NULL submit_bio, nvmeibc will replace it with a functional submit_bio
 	spin_unlock_irqrestore(&A->lock, flags);
-	H.protocol_version = NVMEIBA_2_C_PROTO_VERSION_CURRENT;
+	H.protocol_version = NVMEIBA_2_C_PROTO_VERSION_V_2_0;
 	if (H.n_orphan_osapi)
 		_NI_to_user(t_04_atom, "Successful hot upgrade handshake between modules nvmeiba and nvmeibc. Internal information {%u/%u/%d/%d}", H.n_orphan_osapi, n.osapi, n.sub_osapi, n.nvmeibc);   //. Error code: 0
 	return H;
 }
-EXPORT_SYMBOL_GPL(nvmeiba_os_do_on_nvmeibc_up);
+EXPORT_SYMBOL(nvmeiba_os_do_on_nvmeibc_up);
 
 void nvmeiba_os_do_on_nvmeibc_down(void)
 {
 	struct nvmeiba_all_os_apis* A = &all;
-	const struct nvmeiba_atom_os_api *atom;
+	struct nvmeiba_atom_os_api *atom;
 	unsigned long flags;
 	bool are_all_orphans;
 	spin_lock_irqsave(&A->lock, flags);
@@ -427,10 +410,17 @@ void nvmeiba_os_do_on_nvmeibc_down(void)
 			WARN_INCORRECT_STATUS((atom->status != nvmeiba_status_orphan), atom);
 		}
 	}
+	if (A->n.nvmeibc == 0) {
+		// nvmeibc module is going down, replace nvmeibc reject func with nvmeiba one for all detaching atoms
+		list_for_each_entry(atom, &A->list, list_all_os_apis) {
+			if (atom->status == nvmeiba_status_detaching)
+				nvmeiba_os_api_set_detaching_abandoned(atom);
+		}
+	}
 	spin_unlock_irqrestore(&A->lock, flags);
 	_NI_to_user(t_06_atom, "nvmeibc instance successfully disconnected from nvmeiba module. %d instances remaining\n", A->n.nvmeibc);   //. Error code: 0
 }
-EXPORT_SYMBOL_GPL(nvmeiba_os_do_on_nvmeibc_down);
+EXPORT_SYMBOL(nvmeiba_os_do_on_nvmeibc_down);
 
 void nvmeiba_os_apis_set_default_pops(const struct block_device_operations **fops)
 {

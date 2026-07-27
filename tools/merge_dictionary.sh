@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 function print_usage {
 cat << __USAGE__
 Usage: $0 nvmeib?.traces.json dictionary.json [--simulator]

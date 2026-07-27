@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """ This is THE one and the ONLY TRUE calculator for \X\LBA translations,
     All other calculators are false and unholy.
     May its glory shine forever.

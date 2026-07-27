@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 /**
  * manages disk locks fuctionality
  *
@@ -10,8 +5,6 @@
  */
 
 #include "nvmeibs_serjio.h"
-#include "nvmeib_shared.h"
-#include "nvmeib_trace_warns.h"
 #include "nvmeibs_serjio_deps.h"
 #include "nvmeibs_serjio_gpt.h"
 #include "nvmeibs_nvme.h"
@@ -43,23 +36,26 @@ static bool invalid_jris_exist_on_disk = false;
 
 static bool stamp_jrnl_entries = true;
 module_param_named(stamp_free_jrnl_entries, stamp_jrnl_entries, bool, 0444);
-MODULE_PARM_DESC(stamp_free_jrnl_entries, "Stamp free journal entries for debugging purposes.");
+MODULE_PARM_DESC( stamp_free_jrnl_entries, "Stamp free journal entries");
 
 static unsigned nvmeibs_jrange_num_blocks = (1 << NVMEIB_EC_JOURNAL_MAX_BLKS_PER_RANGE_V1_3_SHIFT);
 module_param_named(nvmeibs_jrange_num_blocks, nvmeibs_jrange_num_blocks, uint, 0444);
-MODULE_PARM_DESC(nvmeibs_jrange_num_blocks, "Total number of journal blocks in journal range, typically allocated to a single client. Should be set to a power of 2, between 64 and 16384.");
+MODULE_PARM_DESC(nvmeibs_jrange_num_blocks, "Total number of journal blocks in journal range. \n"
+					"Combined with \"nvmeibc_jentry_num_blocks\" determines the number of journal entries per client.\n"
+					"Can only be changed when journal is clean.\n"
+					"Must be a power-of-2, min: 512, max: 8192");
 
 static unsigned nvmeibs_serjio_resched_work_wait_max = 10;
 module_param_named(serjio_resched_work_wait_max, nvmeibs_serjio_resched_work_wait_max, uint, 0644);
-MODULE_PARM_DESC(serjio_resched_work_wait_max, "Amount of time in seconds to wait for a rescheduled SERJIO work item to run. SERJIO work items are related to garbage collection and cleaning up of journal entries. Works are rescheduled if SERJIO is in a busy state, e.g., due to a GPT update, and cannot process normal work.");
+MODULE_PARM_DESC(serjio_resched_work_wait_max, "Amount of time (in seconds) to wait for a rescheduled work to run");
 
 static unsigned nvmeibs_serjio_jgc_avail_ent_low_wm_mult = NVMEIB_JGC_AVAIL_ENT_LOW_WM_MULT;
 module_param_named(jgc_avail_ent_low_wm_mult, nvmeibs_serjio_jgc_avail_ent_low_wm_mult, uint, 0644);
-MODULE_PARM_DESC(jgc_avail_ent_low_wm_mult, "Triggers JGC (journal garbage collection) if the available range of entries falls below the low watermark of total-range-entries * mult / div.");
+MODULE_PARM_DESC(jgc_avail_ent_low_wm_mult, "Triggers JGC if available range entries falls below low watermark of total-range-entries * mult / div.");
 
 static unsigned nvmeibs_serjio_jgc_avail_ent_low_wm_div = NVMEIB_JGC_AVAIL_ENT_LOW_WM_DIV;
 module_param_named(jgc_avail_ent_low_wm_div, nvmeibs_serjio_jgc_avail_ent_low_wm_div, uint, 0644);
-MODULE_PARM_DESC(jgc_avail_ent_low_wm_div, "Triggers JGC (journal garbage collection) if the available range of entries falls below the low watermark of total-range-entries * mult / div.");
+MODULE_PARM_DESC(jgc_avail_ent_low_wm_div, "Triggers JGC if available range entries falls below low watermark of total-range-entries * mult / div.");
 
 static unsigned nvmeibs_serjio_init_db_interrupt_range = ~(unsigned)0;
 static bool nvmeibs_serjio_fail_next_gpt_update = false;
@@ -70,23 +66,23 @@ static int next_free_alloc_quarantined_idx = -1;
 #if !defined(NVMESH_IS_PRODUCTION_COMPILATION) || (NVMESH_IS_PRODUCTION_COMPILATION==0)
 
 module_param_named(serjio_init_db_interrupt_range, nvmeibs_serjio_init_db_interrupt_range, uint, 0644);
-MODULE_PARM_DESC(serjio_init_db_interrupt_range, "Interrupt Init DB when it gets to this range. Warning: This is for debug only, used for testing SERJIO init failures.");
+MODULE_PARM_DESC(serjio_init_db_interrupt_range, "Interrupt Init DB when it gets to this range");
 
 module_param_named(serjio_fail_next_gpt_update, nvmeibs_serjio_fail_next_gpt_update, bool, 0644);
-MODULE_PARM_DESC(serjio_fail_next_gpt_update, "SERJIO - Fail the next GPT update (for testing).");
+MODULE_PARM_DESC(serjio_fail_next_gpt_update, "SERJIO - Fail the next GPT update (for testing)");
 
 module_param_named(serjio_fail_next_gpt_init, nvmeibs_serjio_fail_next_gpt_init, bool, 0644);
-MODULE_PARM_DESC(serjio_fail_next_gpt_init, "SERJIO - Fail the next GPT init (for testing).");
+MODULE_PARM_DESC(serjio_fail_next_gpt_init, "SERJIO - Fail the next GPT init (for testing)");
 
 
 module_param_named(serjio_invalid_jris_exist_on_disk, invalid_jris_exist_on_disk, bool, 0444);
-MODULE_PARM_DESC(serjio_invalid_jris_exist_on_disk, "Allocate (but quarantine) invalid JRIs (0,1,2) on disk.");
+MODULE_PARM_DESC(serjio_invalid_jris_exist_on_disk, "Allocate (but quarantine) invalid JRIs (0,1,2) on disk");
 
 module_param_named(serjio_next_free_alloc_quarantined, next_free_alloc_quarantined, bool, 0644);
-MODULE_PARM_DESC(serjio_next_free_alloc_quarantined, "SERJIO - Allocate a quarantined range index for the next allocation (for testing).");
+MODULE_PARM_DESC(serjio_next_free_alloc_quarantined, "SERJIO - Allocate a quarantined range index for the next allocation (for testing)");
 
 module_param_named(serjio_next_free_alloc_quarantined_idx, next_free_alloc_quarantined_idx, int, 0644);
-MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range index for next invalid allocation. Relevant only if next_free_alloc_quarantined is set to true.");
+MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range index for next invalid allocation");
 #endif
 
 #define SERJIO_WQ_PEND_MAX_WAIT (nvmeibs_serjio_resched_work_wait_max * HZ)
@@ -160,10 +156,6 @@ MODULE_PARM_DESC(serjio_next_free_alloc_quarantined_idx, "Quarantined range inde
 
 #define _NEs(name, _pd, fmt, ...) \
 	_NE(name, "SERJIO (@SERJIO_PD): Disk @DISK_ID_STR (@DISK): " fmt, \
-		_pd, nvmeibs_disk_info_get_disk_id(_pd->di), _pd->di, ## __VA_ARGS__)
-	
-#define _NEs_dmesg(name, _pd, fmt, ...) \
-	_NE_dmesg(name, "SERJIO (@SERJIO_PD): Disk @DISK_ID_STR (@DISK): " fmt, \
 		_pd, nvmeibs_disk_info_get_disk_id(_pd->di), _pd->di, ## __VA_ARGS__)
 
 #define _NDs(name, _pd, fmt, ...) \
@@ -903,7 +895,7 @@ static struct jrange_entry* get_jrange_entry_for_uuid(
 
 static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				   nvme_callback_t read_cb, void *cb_param, struct jrange_entry *jrng,
-				   unsigned long read_ent_state_mask, unsigned long *read_ent_bmp,
+				   u8 read_ent_state_mask, unsigned long *read_ent_bmp,
 				   atomic_t *ctr, struct completion *comp);
 
 static void clr_seg_tree_hash(struct nvmeibs_serjio_disk_private_data *serjio_pd);
@@ -1131,28 +1123,28 @@ static inline unsigned get_jentry_in_mask_cnt(struct jrange_entry *rng, unsigned
 /* Compare GPT Entry partition_type_guid with NVMesh GUIDs in nvmeib_shared.h */
 static bool is_gpt_ent_toma_md(const struct gpt_entry *gpt_entry)
 {
-	const union nvmeib_uuid nvmeib_uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid nvmeib_uuid = EXCELERO_METADATA_PARTITION_TYPE_GUID_CONST;
 	return memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0;
 }
 
 static bool is_gpt_ent_jrnl(const struct gpt_entry *gpt_entry)
 {
-	const union nvmeib_uuid nvmeib_uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid nvmeib_uuid = EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST;
 	return memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0;
 }
 
 static bool is_gpt_ent_serjio_db(const struct gpt_entry *gpt_entry)
 {
-	const union nvmeib_uuid nvmeib_uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_CONST;
+	const union nvmeib_uuid nvmeib_uuid = EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID_CONST;
 	return memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0;
 }
 
 static bool is_gpt_ent_seg_jrnl(const struct gpt_entry *gpt_entry, bool *deprecated)
 {
-	const union nvmeib_uuid nvmeib_uuid = NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST;
+	const union nvmeib_uuid nvmeib_uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST;
 	if (memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0) {
 		if (deprecated)
-			*deprecated = (gpt_entry->attributes & NVMESH_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK);
+			*deprecated = (gpt_entry->attributes & EXCELERO_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK);
 		return true;
 	}
 	return false;
@@ -1160,7 +1152,7 @@ static bool is_gpt_ent_seg_jrnl(const struct gpt_entry *gpt_entry, bool *depreca
 
 static bool is_gpt_ent_seg_no_jrnl(const struct gpt_entry *gpt_entry)
 {
-	const union nvmeib_uuid nvmeib_uuid = NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST;
+	const union nvmeib_uuid nvmeib_uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST;
 	return memcmp(&gpt_entry->partition_type_guid, &nvmeib_uuid, sizeof(nvmeib_uuid)) == 0;
 }
 
@@ -1717,11 +1709,11 @@ static ssize_t stats_clear(void *arg, char *buffer, size_t len)
 	return len;
 }
 
-static int show_serjio_stats(struct seq_file *m, void *arg)
+static ssize_t fill_serjio_stats(void *arg, char *buffer, size_t len)
 {
 	struct nvmeibs_serjio_disk_private_data *serjio_pd = arg;
 
-	return nvmeibs_serjio_show_stats_json(&serjio_pd->stats, m);
+	return nvmeibs_serjio_fill_serjio_stats_json(&serjio_pd->stats, buffer, len);
 }
 
 // Human-readable stats printing routine
@@ -2665,8 +2657,8 @@ static int create_disk_proc_files(struct nvmeibs_serjio_disk_private_data *serji
 		goto remove_proc;
 	}
 	if (!(serjio_pd->serjio_stats_proc_file =
-		nvmeib_public_proc_create_oneshot_data("stats.json", serjio_pd->disk_proc_dir,
-				show_serjio_stats, stats_clear, serjio_pd))) {
+		nvmeib_public_proc_create("stats.json", serjio_pd->disk_proc_dir,
+				fill_serjio_stats, stats_clear, serjio_pd))) {
 		_NEs(error_16_serjio_create_disk_proc_files, serjio_pd, "Failed to create /proc file stats.json");
 		rv = -EFAULT;
 		goto remove_proc;
@@ -2986,21 +2978,12 @@ int nvmeibs_serjio_disk_init(struct nvmeibs_disk_info *di)
 		_NE(error_serjio_nvmeibs_serjio_disk_init, "SERJIO FATAL: empty disk info of disk @DISK_ID_STR", nvmeibs_disk_info_get_disk_id(di));
 		goto out;
 	}
-#ifndef BLKDEV_SIMULATOR
-	/* Not relevant for simulator */
 	if (nvmeibs_disk_info_has_mtdt_extd(di)) {
 		_NE(error_serjio_nvmeibs_serjio_disk_init_md_extd, "SERJIO FATAL: disk @DISK_ID_STR has extended MD which is not supported",
 		    nvmeibs_disk_info_get_disk_id(di));
 		ret = -ENOTSUPP;
 		goto out;
 	}
-	if (di->block_size != NVMEIBC_SECTOR_SIZE) {
-		_NE(error_serjio_nvmeibs_serjio_disk_init_block_size, "SERJIO FATAL: disk @DISK_ID_STR has block size @BLOCK_SIZE which is not supported",
-		    nvmeibs_disk_info_get_disk_id(di), di->block_size);
-		ret = -ENOTSUPP;
-		goto out;
-	}
-#endif
 	/* Init serjio private data struct */
 	if (!(serjio_pd = kzalloc(sizeof(*serjio_pd), GFP_KERNEL))) {
 		_NE(error_1_serjio_nvmeibs_serjio_disk_init, "SERJIO FATAL: Memory Allocation Error");
@@ -3310,13 +3293,6 @@ enum nvmeibs_serjio_status nvmeibs_serjio_get_status(struct nvmeibs_disk_info *d
 		rv = NVMEIBS_SERJIO_STATUS_NO_MD;
 		goto out;
 	}
-#ifndef BLKDEV_SIMULATOR
-	/* Not relevant for simulator */
-	if (nvmeibs_disk_info_has_mtdt_extd(di) || di->block_size != NVMEIBC_SECTOR_SIZE) {
-		rv = NVMEIBS_SERJIO_STATUS_NOT_SUPP;
-		goto out;
-	}
-#endif
 
 	if (!serjio_pd) {
 		_NT(trace_serjio_nvmeibs_serjio_get_state, "SERJIO: Disk has NULL serjio_pd");
@@ -3506,7 +3482,7 @@ static int submit_nvme_op_rsrc_to_disk(struct nvme_op_rsrc *op_rsrc, enum nvme_o
 	BUG_ON(op_rsrc->nvme_req.data_len > (unsigned)(op_rsrc->n_data_pgs << PAGE_SHIFT));
 
 	nvme_op_rsrc_chng_state(op_rsrc, exp_op_state, NVME_OP_POSTED);
-	op_rsrc->op_rsrc_stats.t_start = ktime_get();
+	op_rsrc->op_rsrc_stats.t_start = nvmeib_public_ktime_get();
 	if ((rv = nvmeibs_serjio_update_disk(serjio_pd->di, &op_rsrc->nvme_req)) < 0) {
 		nvme_op_rsrc_chng_state(op_rsrc, NVME_OP_POSTED, NVME_OP_ERROR);
 		nvmeibs_serjio_work_type_submit_io_fail(&serjio_pd->stats, serjio_pd->current_work_type, nvme_op);
@@ -4843,28 +4819,6 @@ out:
 	return rv;
 }
 
-static void seg_tree_entry_unlink_clean_list(
-	struct nvmeibs_serjio_disk_private_data *serjio_pd,
-	struct seg_tree_entry *seg_ent)
-{
-	int rv;
-
-	if (list_empty(&seg_ent->cln_link))
-		return;
-
-	list_del_init(&seg_ent->cln_link);
-
-	_NWs(warn_serjio_seg_tree_entry_unlink_clean_list_report_toma, serjio_pd,
-		"Forcing TOMA clean report for segment @SEG_UUID_STR from clean state @CLN_SEG_STATE",
-		seg_ent->seg_uuid_str, seg_ent->cln_state);
-	if ((rv = nvmeibs_toma_report_event_serjio_disk_range_cleaned(
-		serjio_pd->di, seg_ent->seg_uuid_str))) {
-		_NEs(error_serjio_seg_tree_entry_unlink_clean_list_report_toma, serjio_pd,
-			"Failed (@RV) to report clean segment @SEG_UUID_STR to TOMA",
-			rv, seg_ent->seg_uuid_str);
-	}
-}
-
 static void clr_seg_tree_hash(struct nvmeibs_serjio_disk_private_data *serjio_pd)
 {
 	/* Clear the jrnl segment tree and hash tables */
@@ -4876,14 +4830,14 @@ static void clr_seg_tree_hash(struct nvmeibs_serjio_disk_private_data *serjio_pd
 	__hash_for_each_safe__(serjio_pd->jrnl_seg_tbl, i, t_node, h_node, iter, link) {
 		hash_del(&iter->link);
 		seg_tree_remove(iter, &serjio_pd->jrnl_seg_rb_root);
-		seg_tree_entry_unlink_clean_list(serjio_pd, iter);
+		list_del(&iter->cln_link);
 		radix_tree_delete(&serjio_pd->jrnl_seg_radix_root, iter->gpt_idx);
 		kfree(iter);
 	}
 	__hash_for_each_safe__(serjio_pd->del_seg_tbl, i, t_node, h_node, iter, link) {
 		hash_del(&iter->link);
 		seg_tree_remove(iter, &serjio_pd->del_seg_rb_root);
-		seg_tree_entry_unlink_clean_list(serjio_pd, iter);
+		list_del(&iter->cln_link);
 		kfree(iter);
 	}
 #if KS_RB_ROOT_CACHED
@@ -5414,14 +5368,13 @@ static void clear_all_gpt_jrnl_segs(struct nvmeibs_serjio_disk_private_data *ser
 	hash_for_each_safe(serjio_pd->jrnl_seg_tbl, i, tmp, seg_ent_iter, link) {
 		seg_tree_remove(seg_ent_iter, &serjio_pd->jrnl_seg_rb_root);
 		hash_del(&seg_ent_iter->link);
-		seg_tree_entry_unlink_clean_list(serjio_pd, seg_ent_iter);
 		radix_tree_delete(&serjio_pd->jrnl_seg_radix_root, seg_ent_iter->gpt_idx);
 		kfree(seg_ent_iter);
 	}
 	hash_for_each_safe(serjio_pd->del_seg_tbl, i, tmp, seg_ent_iter, link) {
-		seg_tree_remove(seg_ent_iter, &serjio_pd->del_seg_rb_root);
+		seg_tree_remove(seg_ent_iter, &serjio_pd->jrnl_seg_rb_root);
 		hash_del(&seg_ent_iter->link);
-		seg_tree_entry_unlink_clean_list(serjio_pd, seg_ent_iter);
+		radix_tree_delete(&serjio_pd->jrnl_seg_radix_root, seg_ent_iter->gpt_idx);
 		kfree(seg_ent_iter);
 	}
 }
@@ -6170,7 +6123,7 @@ out:
 
 static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				   nvme_callback_t read_cb, void *cb_param, struct jrange_entry *jrng,
-				   unsigned long read_ent_state_mask, unsigned long *read_ent_bmp,
+				   u8 read_ent_state_mask, unsigned long *read_ent_bmp,
 				   atomic_t *ctr, struct completion *comp)
 {
 	enum nvmeibs_serjio_jentry_state cur_jentry_state;
@@ -6180,8 +6133,6 @@ static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 	DECLARE_COMPLETION_ONSTACK(int_comp);
 	unsigned long flags;
 	DECLARE_BITMAP(rd_ents_bmp, NVMEIB_EC_JOURNAL_MAX_ENTRIES_PER_RANGE) = {0};
-	int state;
-	int state_mask_cnt = 0;
 
 	NFIN;
 	if (!comp) {
@@ -6206,33 +6157,9 @@ static int rd_jrange(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 	spin_lock_irqsave(&jrng->lock, flags);
 	for (entry = 0; entry < jrng->n_ents; entry++) {
 		cur_jentry_state = GET_JENTRY_STATE_FROM_BMP(jrng->jentry_state_bmp, entry);
-		if ((test_bit(cur_jentry_state, &read_ent_state_mask)) &&
+		if (((1 << cur_jentry_state) & read_ent_state_mask) &&
 				(!read_ent_bmp || test_bit(entry, read_ent_bmp)))
 			set_bit(entry, rd_ents_bmp);
-	}
-	/* [NVMESH-7216]: Check for mismatch between rd_ents_bmp and state counters */
-	if (!read_ent_bmp) {
-		for_each_set_bit(state, &read_ent_state_mask, MAX_JENTRY_STATE) {
-			state_mask_cnt += jrng->jentry_state_cnt[state];
-		}
-		if (bitmap_empty(rd_ents_bmp, jrng->n_ents) && state_mask_cnt > 0)
-		{
-			_NEs_dmesg(warn_serjio_rd_jrange_empty_bmp_with_unsynced, serjio_pd,
-				"Range @JRNL_RNG_IDX: Empty rd_ents_bmp when it should not be empty- "
-				"mask=@JENTRY_STATE_MASK entries=@JENTRY_STATE_CNT cnt[UNKNOWN]=@JENTRY_STATE_CNT cnt[SYNCED]=@JENTRY_STATE_CNT "
-				"cnt[FREE]=@JENTRY_STATE_CNT cnt[ABND]=@JENTRY_STATE_CNT cnt[TAKEN]=@JENTRY_STATE_CNT "
-				"cnt[WAIT_RET]=@JENTRY_STATE_CNT cnt[IO_ERR]=@JENTRY_STATE_CNT cnt[INVALID]=@JENTRY_STATE_CNT",
-				jrng->range_idx, (unsigned)read_ent_state_mask, jrng->n_ents,
-				jrng->jentry_state_cnt[JENTRY_UNKNOWN],
-				jrng->jentry_state_cnt[JENTRY_SYNCED],
-				jrng->jentry_state_cnt[JENTRY_FREE],
-				jrng->jentry_state_cnt[JENTRY_ABND],
-				jrng->jentry_state_cnt[JENTRY_TAKEN],
-				jrng->jentry_state_cnt[JENTRY_WAIT_RET],
-				jrng->jentry_state_cnt[JENTRY_IO_ERR],
-				jrng->jentry_state_cnt[JENTRY_INVALID]);
-				BUG_NON_PRODUCTION(7216);
-		}
 	}
 	spin_unlock_irqrestore(&jrng->lock, flags);
 	_NTs(trace_serjio_rd_jrange_ents, serjio_pd,
@@ -6256,7 +6183,7 @@ out:
 static int rd_jrnl(struct nvmeibs_serjio_disk_private_data *serjio_pd,
 				   nvme_callback_t read_cb, void *cb_param,
 				   enum nvmeibs_serjio_state check_state, bool read_free_rng,
-				   unsigned long read_ent_state_mask)
+				   u8 read_ent_state_mask)
 {
 	struct jranges_allocation_table *jranges_alloc_tbl = &serjio_pd->jranges_alloc_tbl;
 	int i, rv = 0;
@@ -7328,6 +7255,7 @@ write_db:
 		chk_launch_new_jgc(serjio_pd, false);
 	}
 	nvmeib_ref_init(&ret_entry->alloc_ref);
+	rv = ret_entry->range_idx;
 
 out:
 	if (rv < 0)

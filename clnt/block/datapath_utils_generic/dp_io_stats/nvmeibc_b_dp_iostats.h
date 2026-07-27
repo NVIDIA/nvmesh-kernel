@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_B_DP_IOSTATS_H
 #define NVMEIBC_B_DP_IOSTATS_H
 
@@ -16,7 +11,7 @@
    (Example: bad sector in Raid-0). However, most of user space apps dont handle
    well IO erros (not every fread()/fwrite() is tested for failure in the code).
    In particulary file systems. So returning IO error might be disastrous
-   (corrupting entire file system) even though this is not always NVMesh's fault.
+   (corrupting entire file system) even though this is not always Excelero fault.
    As a precausion upon returning maximum of N errors, block device will suspend
    itself and not return errors enymore. IO's will stuck blocking the userspace
    app but at least preserving the existing data and preventing further

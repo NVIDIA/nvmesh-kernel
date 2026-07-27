@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 stty -g > /tmp/.currentTtySettings.$$
 tty_backup=$(</tmp/.currentTtySettings.$$)
 
@@ -36,7 +33,7 @@ else
 
         echo "commitID: "$commitID;
         echo "short commit id: "$short_ID;
-	cd /tmp; git clone -b $3 git@gitlab.nvidia.com:$5/management.git; cd management;
+	cd /tmp; git clone -b $3 git@gitlab.excelero.com:$5/management.git; cd management;
 	cd /tmp/management;
 	git reset --hard $commitID
 
@@ -47,14 +44,14 @@ else
                 cloneIP=$IP
 
                 echo Copying repo to VM.
-                scp -rq /tmp/management nvmesh@$cloneIP:/tmp;
+                scp -rq /tmp/management excelero@$cloneIP:/tmp;
 
        		if [ "$isUtils" ];then
 			pkg='utils'
-                	ssh -t nvmesh@$cloneIP "ls -l /tmp;  ls -l /tmp/management; cd /tmp/management; cd RPM; ls -l .; ./makeExecutable.sh; exit;";
+                	ssh -t excelero@$cloneIP "ls -l /tmp;  ls -l /tmp/management; cd /tmp/management; cd RPM; ls -l .; ./makeExecutable.sh; exit;";
 		else
 			pkg='mgmt'
-			ssh -t nvmesh@$cloneIP "ls -l /tmp;  ls -l /tmp/management; cd /tmp/management; pwd; sudo npm install -g apidoc;apidoc -i routes -o docs; npm install --production; cd RPM; sudo ./buildrpm -M; exit;";
+			ssh -t excelero@$cloneIP "ls -l /tmp;  ls -l /tmp/management; cd /tmp/management; pwd; sudo npm install -g apidoc;apidoc -i routes -o docs; npm install --production; cd RPM; sudo ./buildrpm -M; exit;";
 		fi
 
                 ret=$?
@@ -72,16 +69,16 @@ else
 
 	       if [ "$isUtils" ];then
 		        echo '----------- making nvmesh-utils packages'
-	                scp -r nvmesh@$cloneIP:/tmp/management/NVMeshCLI/dist /tmp/management/NVMeshCLI;
+	                scp -r excelero@$cloneIP:/tmp/management/NVMeshCLI/dist /tmp/management/NVMeshCLI;
 
 		       	sudo virsh start $ubuntuDomainForPackaging
                         establish_ssh_to_vm $ubuntuDomainForPackaging
 		        ubuntuIP=$IP
 
                         echo 'copying repo to the ubuntu VM'
-	                scp -rq /tmp/management nvmesh@$ubuntuIP:/tmp;
+	                scp -rq /tmp/management excelero@$ubuntuIP:/tmp;
                         echo 'packaging executables on the ubuntu VM'
-	                ssh -t nvmesh@$ubuntuIP "ls -l /tmp;  ls -l /tmp/management; cd /tmp/management; cd RPM; ls -l .; ./buildrpm -e -u; exit;";
+	                ssh -t excelero@$ubuntuIP "ls -l /tmp;  ls -l /tmp/management; cd /tmp/management; cd RPM; ls -l .; ./buildrpm -e -u; exit;";
 
                         ret=$?
                         if [[ $ret != 0 ]]; then
@@ -90,14 +87,14 @@ else
                         fi
 
                         echo 'copying the utils packages from the ubuntu VM'
-                        scp nvmesh@$ubuntuIP:/tmp/management/RPM/*-utils* $srv_path/;
-                        ssh -t nvmesh@$ubuntuIP "sudo rm -rf /tmp/management; exit"
+                        scp excelero@$ubuntuIP:/tmp/management/RPM/*-utils* $srv_path/;
+                        ssh -t excelero@$ubuntuIP "sudo rm -rf /tmp/management; exit"
                         shutdown_clone $ubuntuDomainForPackaging
                 else
-                        scp nvmesh@$cloneIP:/tmp/management/RPM/*-management* $srv_path/;
+                        scp excelero@$cloneIP:/tmp/management/RPM/*-management* $srv_path/;
                 fi
 
-                ssh -t nvmesh@$cloneIP "sudo rm -rf /tmp/management; exit"
+                ssh -t excelero@$cloneIP "sudo rm -rf /tmp/management; exit"
                 shutdown_clone $clone_domain
 	        sudo rm -rf /tmp/management;
 

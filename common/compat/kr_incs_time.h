@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef KR_INCS_TIME_H
 #define KR_INCS_TIME_H
 #ifdef __KERNEL__
@@ -102,7 +97,7 @@
 		return ktime_set(tv.tv_sec, tv.tv_usec * 1000);
 	}
 
-	/* nvmeib_public_ktime_get was removed - use ktime_get() directly */
+	#define nvmeib_public_ktime_get() ktime_get()
 
 	static inline int ktime_compare(const ktime_t cmp1, const ktime_t cmp2)
 	{

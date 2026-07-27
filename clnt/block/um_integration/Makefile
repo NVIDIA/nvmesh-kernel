@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 # ********** Define compiler and compilation flags *********
 BUILD_RELEASE?=1
 UNAME := $(shell uname)# Which operating system we use?
@@ -108,9 +105,7 @@ ifeq ($(USE_ARM), 1)
 	SOURCES += $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_arm_recov_neon.c
 	ASM_SRC  = $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_asm_arm.S_shipped
 else
-	SOURCES += $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.c
-	CFLAGS_nvmeibc_block_dp_ec_gf_avx2.c += -mavx2 -msse4.2
-	ASM_SRC :=
+	ASM_SRC  = $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_asm.S_shipped
 endif
 
 # Kernel sources that are included in good path io library
@@ -299,11 +294,6 @@ $(LIB_NAME_OUT).so: $(OBJECTS)
 $(LIB_NAME_OUT): $(LIB_NAME_OUT).a $(OBJECTS_UNITEST)
 	$(call print_building_target);
 	$(call link_executable)
-
-$(OBJ_DIR)/$(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.o: $(CBDIR)/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.c Makefile
-	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) $(CFLAGS_nvmeibc_block_dp_ec_gf_avx2.c) $(INCLUDES) $(DFLAGS) -o $@ -c $<
-	$(call print_executed_rule)
 
 $(OBJ_DIR)/%.o: %.c Makefile
 	@mkdir -p $(dir $@)

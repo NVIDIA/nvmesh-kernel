@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 1. profiler instances exist per volume in multiple levels
 	1. for each praid - goodpath/sync/preparation
 		1. for each praid segment - locks/disks ops

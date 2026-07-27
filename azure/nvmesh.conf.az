@@ -1,7 +1,5 @@
 # NVMesh configuration file
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# This configuration file is utilized by Excelero NVMesh(r) applications for various options.
 
 # Define the management protocol
 # MANAGEMENT_PROTOCOL="<https/http>"

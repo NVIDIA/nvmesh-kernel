@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_io_generic_cmds.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "nvmeibc_block_dp_io_req_rel_locks.h"
@@ -22,11 +17,11 @@
 /******************************************************************************/
 uint nvmeibc_jentry_num_blocks = 16;						// Todo, rename internally to binje
 module_param(nvmeibc_jentry_num_blocks, uint, 0644);
-MODULE_PARM_DESC(nvmeibc_jentry_num_blocks, "Length of erasure coding journal, in blocks. For erasure coding volumes, increasing this means fewer parallel write IO operations, but more efficient large writes. It is highly recommended to increase for use cases with large writes. Range is 1 to 16.");
+MODULE_PARM_DESC(nvmeibc_jentry_num_blocks, "EC length of journal entry in blocks");
 
 bool nvmeibc_ec_reuse_req = true;
 module_param_named(ec_reuse_req, nvmeibc_ec_reuse_req, bool, 0644);
-MODULE_PARM_DESC(ec_reuse_req, "Enable reusing feature for requests (EC). This parameter was added to facilitate disabling this reuse as a potential optimization for NVMesh in DPU mode.");
+MODULE_PARM_DESC(ec_reuse_req, "Enable reusing feature for requests(EC)");
 
 NVMEIBC_MEMMGR_METRIC(dp_commands, "component=raid.io.commands");
 
@@ -559,7 +554,7 @@ void nvmeibc_operation_put(struct operation *o, int n_refs)
 	WARN((remain_o < 0), "Suspected bug in nvmeibc rem=%d!\n", remain_o);
 	if (nvmeibc_operation_is_bio_copy_needed_for_read(o) && get_tcp_mode_of_operation(o)){
 		WQ_INIT_WORK(&o->work_copy_to_bio, __nvmeibc_operation_wq_copy_and_comp);
-		dp_block_schedule_work(o->cpu_id, &o->work_copy_to_bio);
+		dp_block_schedule_operation_work(o, &o->work_copy_to_bio);
 	} else {
 		vv_bio_inter_copy_private_read_blocks_to_bio_if_needed(o);
 		__nvmeibc_operation_comp(o);
@@ -1035,7 +1030,7 @@ static void __send_all_db_turn_off(struct nvmeibc_block_command *cmds, int li,
 		if (!need_turn_off_db(dc))
 			continue;
 		if (dp_cmds_pigbck_has_any(iocmd)) { /* This dirty-bit action was piggibacked */
-			_NE_to_user(t_01_sadbto, DMESG_PREFIX("@DEV_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption. Error code: 1020.", cmds->o->nd->name);
+			_NE_to_user(t_01_sadbto, DMESG_PREFIX("@DEV_NAME"), "Unexpected internal error, crashing the operating system to prevent data corruption, contact Excelero support. Error code: 1020.", cmds->o->nd->name);
 			BUG();
 		}
 		if (prev_rv == 0) {

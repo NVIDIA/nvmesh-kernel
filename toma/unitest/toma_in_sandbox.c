@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_debug.h"
 #include "nvmeibt_utils.h"
 #include "toma_in_sandbox.h"
@@ -198,8 +193,6 @@ struct t_sandbox_all {
 		rd_kafka_t *obj[10];
 		int n_obj;
 		void (*notify_producer_msg_accepted)(rd_kafka_t *rk,const rd_kafka_message_t *kmsg, void *opaque);
-		// Outgoing mgmt producer message inspection (unit test assertions)
-		char *last_report_target_json;		// owned, NUL-terminated; NULL if not received
 	} kafka_simu;
 	char my_hostname[64];
 } *sys;
@@ -712,37 +705,36 @@ int rsrm_faults_get_fd(void) {
 void rsrm_faults_handle_fifo_comm(void) {}
 
 /************************************* Kafka ********************************/
-struct rd_kafka_topic_conf_s {
+typedef struct rd_kafka_topic_conf_s {
 	int dummy;
-};
+} rd_kafka_topic_conf_t;
 rd_kafka_topic_conf_t* rd_kafka_topic_conf_new(void) {
 	return calloc(1, sizeof(rd_kafka_topic_conf_t));
-}
+};
 void rd_kafka_topic_conf_destroy(rd_kafka_topic_conf_t *conf) { free(conf); }
 
-struct rd_kafka_topic_s {
+typedef struct rd_kafka_topic_s {
 	char *name;
 	rd_kafka_topic_conf_t* conf;
 	int64_t commited_offset, cur_offset, last_offset;
 	// Todo: Linked list of messages for offsets above cur,cur+1,....last_offset
 	int32_t partition;		// Support only 1 partition for now. Store its index
 	bool is_active;
-	char type;				// For fast comparison, maybe use enum?
 	int temp_store_offset;	// Daniel, not sure is needed - just for two stage store and commit.
-};
+} rd_kafka_topic_t;
 
-struct rd_kafka_conf_s {
+typedef struct rd_kafka_conf_s {
 	char *group_id;
 	bool enable_ssl;
-};
+} rd_kafka_conf_t;
 
-struct rd_kafka_s {
+typedef struct rd_kafka_s {
 	char* name;
 	int log_lvl;
 	enum rd_kafka_type_t who;
 	rd_kafka_conf_t* conf;
-	struct rd_kafka_topic_s topic;
-};
+	rd_kafka_topic_t topic;
+} rd_kafka_t;
 
 static inline void __rd_kafka_topic_verify_valid(rd_kafka_topic_t *kt, int32_t partition) {
 	BUG_ON((partition != kt->partition) || (!kt->is_active));
@@ -774,22 +766,11 @@ void rd_kafka_consume_stop(rd_kafka_topic_t *kt, int32_t partition) {
 	kt->is_active = false;
 }
 
-static void __reset_offset(rd_kafka_topic_t *kt, int64_t offset) {
-	BUG_ON(offset <= 0);
-	kt->commited_offset = offset;			// Start from some non zero number
-	kt->last_offset = kt->cur_offset = (kt->commited_offset + 1);
-}
-
 rd_kafka_resp_err_t rd_kafka_consume_start(rd_kafka_topic_t *kt, int32_t partition, int64_t offset) {
 	kt->is_active = true;
 	__rd_kafka_topic_verify_valid(kt, partition);
-	if ((offset == RD_KAFKA_OFFSET_STORED) || (offset == RD_KAFKA_OFFSET_BEGINNING)) {
-		// Tome relies on Kafka simulator
-	} else {
-		BUG_ON(offset < kt->cur_offset);		// Toma should consume messages from the start or from its persistency
-		if (offset > kt->cur_offset)
-			__reset_offset(kt, offset);			// Our kafka simulator does not have persistency over destroy and reinit, so just use what toma said
-	}
+	if (offset != RD_KAFKA_OFFSET_STORED)
+		BUG_ON(offset != kt->cur_offset);		// User should consume messages from the start
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
 }
 
@@ -809,18 +790,12 @@ rd_kafka_resp_err_t rd_kafka_assign(rd_kafka_t *ko, const rd_kafka_topic_partiti
 	}
 }
 
-rd_kafka_resp_err_t rd_kafka_assignment (rd_kafka_t *ko, rd_kafka_topic_partition_list_t **pl) {
-	*pl = NULL;
-	if (!ko->topic.is_active)
-		return RD_KAFKA_RESP_ERR_NO_ERROR;
-	return RD_KAFKA_RESP_ERR__RETRY;		// Not implemented yet
-}
-
 static void __rd_kafka_topic_init(rd_kafka_topic_t *kt, const char* name, rd_kafka_topic_conf_t* conf) {
 	BUG_ON((kt->name != NULL) || (kt->is_active));
 	kt->name = strdup(name);
 	kt->conf = conf;
-	__reset_offset(kt, 6);
+	kt->commited_offset = 6;			// Start from some non zero number
+	kt->last_offset = kt->cur_offset = (kt->commited_offset + 1);
 	kt->partition = 0;
 	kt->is_active = false;
 }
@@ -837,10 +812,10 @@ void                rd_kafka_flush(        rd_kafka_t* me, int x) { (void)me; (v
 rd_kafka_resp_err_t rd_kafka_unsubscribe(  rd_kafka_t* me) { (void)me;return RD_KAFKA_RESP_ERR_NO_ERROR; }
 int                 rd_kafka_poll(         rd_kafka_t* me, bool is_blocking) { (void)me; (void)is_blocking; return 0; }
 rd_kafka_resp_err_t rd_kafka_commit(rd_kafka_t* me, rd_kafka_topic_partition_list_t* pl, int is_async) {
-	const int64_t last_consumed = (pl->elems[0].offset - 1);
+	const int last_consumed = (pl->elems[0].offset - 1);
 	BUG_ON(me != pl->elems[0].k);
-	BUG_ON((last_consumed >= me->topic.cur_offset));		// Todo: Maybe off by 1 here
-	me->topic.commited_offset = max(last_consumed, me->topic.commited_offset);
+	BUG_ON((last_consumed < me->topic.commited_offset) || (last_consumed >= me->topic.cur_offset));		// Todo: Maybe off by 1 here
+	me->topic.commited_offset = last_consumed;
 	//SANDBOX_PRINT_TMP("%s: Commit %lu\n", me->topic.name, me->topic.commited_offset);
 	(void)is_async;
 	return RD_KAFKA_RESP_ERR_NO_ERROR;
@@ -863,7 +838,7 @@ rd_kafka_resp_err_t rd_kafka_purge(rd_kafka_t * rk, int purge_flags) { (void)rk;
 
 void rd_kafka_destroy(rd_kafka_t* k) {
 	struct kafka_simulator_t *ks = &sys->kafka_simu;
-	int i;
+	int i = ks->n_obj;
 	for (i = 0; i < ks->n_obj; i++) {
 		if (ks->obj[i] == k) {
 			free(k->name);
@@ -871,8 +846,6 @@ void rd_kafka_destroy(rd_kafka_t* k) {
 			rd_kafka_topic_destroy(&k->topic);
 			free(k);
 			ks->obj[i] = NULL;
-			while ((ks->n_obj > 0) && (ks->obj[ks->n_obj-1] == NULL))		// Shrink the array
-				ks->n_obj--;
 			return;
 		}
 	}
@@ -885,7 +858,7 @@ static bool is_kafka_cp_used(const rd_kafka_t* o) {
 
 static rd_kafka_t* kafka_simu_find_next_unused(struct kafka_simulator_t *ks) {
 	rd_kafka_t *k;
-	int i;
+	int i = ks->n_obj;
 	for (i = 0; i < ks->n_obj; i++) {		// Reuse deleted
 		if (ks->obj[i] == NULL)
 			ks->obj[i] = calloc(1, sizeof(*k));
@@ -924,6 +897,7 @@ rd_kafka_t* rd_kafka_new(enum rd_kafka_type_t who, rd_kafka_conf_t *cfg, char*er
 	rd_kafka_t *k = kafka_simu_find_next_unused(ks);
 	if (who == RD_KAFKA_CONSUMER) {
 	} else {	// RD_KAFKA_PRODUCER
+
 	}
 	k->conf = cfg;
 	k->name = cfg->group_id;
@@ -936,16 +910,6 @@ rd_kafka_topic_t* rd_kafka_topic_new(rd_kafka_t *k, const char* name, rd_kafka_t
 	BUG_ON(!is_kafka_cp_used(k));
 	__rd_kafka_topic_init(&k->topic, name, conf);
 	k->topic.is_active = true;
-	k->topic.type = '?';
-	if (k->who == RD_KAFKA_PRODUCER) {
-		if (strstr(name, "management.priority."))
-			k->topic.type = 'P';
-		else if (strstr(name, "management.keepalive."))
-			k->topic.type = 'K';
-		else if (strstr(name, "management.low."))
-			k->topic.type = 'L';
-		else BUG_ON(true);				// unknown topic which management simulator will not listen too
-	}
 	return &k->topic;
 }
 
@@ -965,7 +929,7 @@ rd_kafka_topic_partition_t *rd_kafka_topic_partition_list_add(rd_kafka_topic_par
 		BUG_ON(!k || p->k);		// Must add valid pointer and only 1
 		p->k = k;
 	}
-	p->partition = partition;
+	p->parition = partition;
 	p->offset = RD_KAFKA_OFFSET_INVALID;
 	p->topic = name;
 	return p;
@@ -996,47 +960,21 @@ void rd_kafka_conf_set_dr_msg_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk,c
 	(void)kc;
 }
 
-void rd_kafka_conf_set_rebalance_cb(rd_kafka_conf_t* kc, void (*fn)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque)) {
-	(void)kc; (void)fn;
-}
-void rd_kafka_conf_set_offset_commit_cb(rd_kafka_conf_t*kc, void (*fn)(rd_kafka_t *rk, rd_kafka_resp_err_t err, rd_kafka_topic_partition_list_t *pl, void *opaque)) {
-	(void)kc; (void)fn;
-}
-
 int rd_kafka_produce(rd_kafka_topic_t *kt, int32_t partition, int msgflags, void *payload, size_t len, const void *key, size_t keylen, void *msg_opaque) {
 	static int fail_once_every = 0;
 	rd_kafka_t *ko = kafka_simu_find_by_topic(kt);
 	rd_kafka_message_t km;
 	km._private = msg_opaque;
 	km.err = (fail_once_every++ % 3) ? 0 : RD_KAFKA_RESP_ERR__TIMED_OUT;		// Once every few messages fail completion
-	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (len == 0) || ((key == NULL) != (keylen == 0)));
+	BUG_ON((partition != RD_KAFKA_PARTITION_UA) || (key == NULL) || (len == 0) || (keylen == 0));
 	(void)msgflags;
-	if (0) SANDBOX_PRINT("> %d > |%s|  :  |%s|\n", fail_once_every, (const char*)key, (const char*)payload);
-
-	if (kt->type == 'P') {
-		const char *m_type = strstr(payload, "\"messageType\":");
-		const bool is_report_target = !strncmp(m_type, "\"messageType\": \"reportTarget\"", 28);
-		if (is_report_target) {
-			free(sys->kafka_simu.last_report_target_json);
-			sys->kafka_simu.last_report_target_json = strndup(payload, len);		// Capture outgoing mgmt messages. The buffer is NOT guaranteed to be NUL-terminated.
-		}
-	} else if (kt->type == 'K') {
-		// Todo: handle keepalives
-	} else if (kt->type == 'L') {
-		// Todo: handle drive zeroing reports here
-	} else { BUG_ON(true);	}
-
+	if (0) SANDBOX_PRINT("> |%s|  :  |%s|\n", (char*)key, (char*)payload);
+	SANDBOX_PRINT_TMP("---------------------------------------------------- %d\n", fail_once_every);
 	// No, put this on to kt, in a list and then poll_cb will return the callbacks
 	sys->kafka_simu.notify_producer_msg_accepted(ko, &km, NULL);
 	// Todo: Here, submit msg to management simulator
 	errno = 0;
 	return 0;
-}
-
-rd_kafka_resp_err_t rd_kafka_fatal_error(rd_kafka_t *k, char *errstr, size_t errstr_size) {
-	(void)k; (void)errstr_size;
-	errstr[0] = 0;
-	return RD_KAFKA_RESP_ERR_NO_ERROR;	// Or RD_KAFKA_RESP_ERR__FATAL???
 }
 
 rd_kafka_conf_res_t rd_kafka_conf_set(rd_kafka_conf_t *kc, const char *key, const char *val, char* err_str, size_t size_of_err) {

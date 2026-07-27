@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 # Reads/Writes Data MD
 # Usage:
 # rw_dmd.sh <disk_id> <lba> [<jri> <tx_id> [<edic> [<dbits>]]]

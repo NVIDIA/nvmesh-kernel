@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include <linux/bug.h>
 
 #include "nvmeibc_ib_net.h"
@@ -34,55 +29,51 @@
 
 bool nr_defer_recv_comps = true;
 module_param(nr_defer_recv_comps, bool, 0644);
-MODULE_PARM_DESC(nr_defer_recv_comps, "Defer processing of IO completions for RDMA transports.");
+MODULE_PARM_DESC(nr_defer_recv_comps, "Defer processing of nrch recv completions (for RDMA)");
 
 bool nr_defer_recv_comps_tcp = false;
 module_param(nr_defer_recv_comps_tcp, bool, 0644);
-MODULE_PARM_DESC(nr_defer_recv_comps_tcp, "Defer processing of IO completions for SIW transports.");
-
+MODULE_PARM_DESC(nr_defer_recv_comps_tcp, "Defer processing of nrch recv completions (for TCP)");
 
 bool nr_shared_cq = true;
 module_param(nr_shared_cq, bool, 0644);
-MODULE_PARM_DESC(nr_shared_cq, "Use a shared completion queue (SCQ) for RDMA IO.");
+MODULE_PARM_DESC(nr_shared_cq, "nrch uses shared cq (for RDMA)");
 
 bool nr_shared_cq_tcp = false;
 module_param(nr_shared_cq_tcp, bool, 0644);
-MODULE_PARM_DESC(nr_shared_cq_tcp, "Use a shared completion queue (SCQ) for SIW IO.");
+MODULE_PARM_DESC(nr_shared_cq_tcp, "nrch uses shared cq (for TCP)");
 
 bool nr_use_srq = true;
 module_param(nr_use_srq, bool, 0644);
-MODULE_PARM_DESC(nr_use_srq, "Use a shared receive queue (RCQ) for RDMA IO.");
+MODULE_PARM_DESC(nr_use_srq, "nrch uses SRQ (for RDMA)");
 
 bool nr_use_srq_tcp = true;
 module_param(nr_use_srq_tcp, bool, 0644);
-MODULE_PARM_DESC(nr_use_srq_tcp, "Use a shared receive queue (RCQ) for SIW IO.");
+MODULE_PARM_DESC(nr_use_srq_tcp, "nrch uses SRQ (for TCP)");
 
 bool nvmeibc_panic_on_core_dbgdi = false;
 module_param_named(panic_on_core_dbgdi, nvmeibc_panic_on_core_dbgdi, bool, 0644);
-MODULE_PARM_DESC(panic_on_core_dbgdi, "In \"debug di\" mode, panic on detection of an issue, on both client and target. This is an internal debugging facility.");
+MODULE_PARM_DESC(panic_on_core_dbgdi, "On core-dbgdi detection panic both client and target");
 
 bool nvmeibc_map_each_sg_entry = false;
 module_param_named(map_each_sg_entry, nvmeibc_map_each_sg_entry, bool, 0644);
-MODULE_PARM_DESC(map_each_sg_entry, "IB DMA map each SG-entry separately.");
+MODULE_PARM_DESC(map_each_sg_entry, "IB DMA map each sg-entry separately");
 
 uint nvmeibc_map_sg_mode = NVMEIB_DEBUG_RDMA_CORRUPTION ? MAP_SG_MR_REG_WR_ONLY : MAP_SG_MR_COMBINED;
 module_param_named(map_sg_mode, nvmeibc_map_sg_mode, uint, 0644);
-MODULE_PARM_DESC(map_sg_mode, "Defines the mode for mapping data SG lists: "
-							  "0 = Combined, use global key when able to collapse all sg-entries to one, otherwise map-mr (map WR and rdma-write WR). "
-							  "1 = Use only map-mr (IB_WR_REG_MR, IB_WR_FAST_REG_MR). "
-							  "2 = Use only the global dma key, which means that multiple rdma-write WRs from clnt/srv in wr/rd, respectively, may be needed. The target must have enough WRs to write the data back for read operations.");
+MODULE_PARM_DESC(map_sg_mode, "Mapping data SG list modes:\n"
+							  "\t\t 0 : Combined, use global key when able to collapse all sg-entries to one, otherwise map-mr (map WR and rdma-write WR)\n"
+							  "\t\t 1 : Use only map-mr (IB_WR_REG_MR, IB_WR_FAST_REG_MR)\n"
+							  "\t\t 2 : Use only global dma key, may use multiple rdma-write WRs from clnt/srv in wr/rd, respectively. Target must have enough WRs to write back on read-op");
 
 uint nvmeibc_map_sg_result_trace = 0;
 module_param_named(map_sg_result_trace, nvmeibc_map_sg_result_trace, uint, 0644);
-MODULE_PARM_DESC(map_sg_result_trace, "Defines how to trace the result of mapping the data SG list: 0 = Disabled, 1 = One-shot (edge), 2 = Continuous (level)");
+MODULE_PARM_DESC(map_sg_result_trace, "Trace result of map data SG list: "
+									  "0: Disabled, 1: One-shot (edge), 2: Continuous (level)");
 
 bool nvmeibc_ib_net_complete_iocmd_use_pcpu_wq = false;
 module_param_named(ib_net_complete_iocmd_use_pcpu_wq, nvmeibc_ib_net_complete_iocmd_use_pcpu_wq, bool, 0444);
-MODULE_PARM_DESC(ib_net_complete_iocmd_use_pcpu_wq, "Determines whether IB net complete iocmd use per-cpu workqueues for request handling.");
-
-uint nvmeibc_max_notify_cq_iterations = 10;
-module_param_named(max_notify_cq_iterations, nvmeibc_max_notify_cq_iterations, uint, 0644);
-MODULE_PARM_DESC(max_notify_cq_iterations, "Defines the maximum number of iterations to ARM completion queues.");
+MODULE_PARM_DESC(ib_net_complete_iocmd_use_pcpu_wq, "IB net complete iocmd use pcpu wq for requests");
 
 #define __FIN FINS(net ? net->ioch->name : "?")
 #define __FOUT FOUTS(net ? net->ioch->name : "?")
@@ -518,14 +509,9 @@ static void defer_recv_intr_wq_drain(struct nvmeibc_ib_net *net)
 			break;
 		case NVMEIBC_IB_NET_DEFER_RECV_SCHEDULED:
 			if (!(n & 0x1FFFF)) { /* consider udelay -> print every ~1sec */
-				if (net->defer_recv_intr_wq) {
-					_NTn(trace_defer_recv_intr_wq_drain_0, net,
-						 "wait for SCHED->RUN before drain (pid=@K_PID, n=@INT)",
-						 wq_pid(net->defer_recv_intr_wq), n);
-				} else {
-					_NTn(trace_defer_recv_intr_wq_drain_0x, net,
-						 "wait for SCHED->RUN before drain (kwq, n=@INT)", n);
-				}
+				_NTn(trace_defer_recv_intr_wq_drain_0, net,
+					 "wait for SCHED->RUN before drain (pid=@K_PID, n=@INT)",
+					 wq_pid(net->defer_recv_intr_wq), n);
 				/* otherwise we may wq-drain before intr-ctx adds the work */
 			}
 			udelay((1 << 3));
@@ -534,16 +520,9 @@ static void defer_recv_intr_wq_drain(struct nvmeibc_ib_net *net)
 		case NVMEIBC_IB_NET_DEFER_RECV_RUNNING:
 			if (nvmeib_switch_state_guard(&net->defer_recv_state,
 				NVMEIBC_IB_NET_DEFER_RECV_RUNNING, NVMEIBC_IB_NET_DEFER_RECV_TERMINATING)) {
-				if (net->defer_recv_intr_kwq) {
-					/* Cancel kernel workqueue work */
-					_NTn(trace_defer_recv_intr_wq_drain_1, net,
-						 "canceling defer_recv_intr_kwq work");
-					cancel_work_sync(&net->defer_recv_kwork);
-				} else if (net->defer_recv_intr_wq) {
-					_NTn(trace_defer_recv_intr_wq_drain_1x, net,
-						 "draining defer_recv_intr_wq pid @K_PID", wq_pid(net->defer_recv_intr_wq));
-					wq_drain(net->defer_recv_intr_wq);
-				}
+				_NTn(trace_defer_recv_intr_wq_drain_1, net,
+					 "draining defer_recv_intr_wq pid @K_PID", wq_pid(net->defer_recv_intr_wq));
+				wq_drain(net->defer_recv_intr_wq);
 				stopped_defer = true;
 			}
 			break;
@@ -922,7 +901,7 @@ static int process_send_cq(struct nvmeibc_ib_net *net, int n)
 	if (unlikely(n > net->n_wc_s))
 		_NW(warn_ib_net_nvmeibc_ib_net_process_send_cq, "@COUNT exceeds q-size (@N_WC_S)", n, net->n_wc_s);
 	else {
-		if (!(net->scq_kthread || net->scq_kwq) || net->drain_sq_done) {
+		if (!net->scq_kthread || net->drain_sq_done) {
 			rv = process_send_cq_(net, n);
 			net->scq_stats.n_external += (rv > 0) ? rv : 0;
 		}
@@ -1006,109 +985,37 @@ static inline void scq_offload_tarce_print(struct nvmeibc_ib_net *net)
 }
 #endif /* SCQ_OFFLOAD_TRACE */
 
-enum req_notify_state {
-	REQ_NOTIFY_STATE_NONE = 0,
-	REQ_NOTIFY_STATE_CQ_NOT_EMPTY = 1,
-	REQ_NOTIFY_STATE_NOTIFY_FAILED = 2,
-	REQ_NOTIFY_STATE_NOTIFY_OK = 3,
-	REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS = 4,
-};
-
 static int process_send_cq_offload_enb_(struct nvmeibc_ib_net *net, int ne,
-	bool req_notify, bool in_interrupt, enum req_notify_state *req_notify_state);
+	bool req_notify, bool in_interrupt, bool *missed_events);
 
-static int polling_process_send_cq_(struct nvmeibc_ib_net *net, bool req_notify, bool *continue_polling, u64 *poll_time_ns)
+static int polling_process_send_cq_(struct nvmeibc_ib_net *net, bool req_notify)
 {
-       unsigned long flags = 0;
-       int rv;
-       enum req_notify_state req_notify_state;
-	   u64 start_ns, busy_ns;
-
-       __NFIN;
-
-		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
-		start_ns = local_clock();
-		rv = process_send_cq_offload_enb_(net, net->n_wc_s, req_notify, false, &req_notify_state);
-		busy_ns = local_clock() - start_ns;
-		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
-
-		if (continue_polling) {
-			*continue_polling = (req_notify && (
-				req_notify_state == REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS ||
-				req_notify_state == REQ_NOTIFY_STATE_CQ_NOT_EMPTY)
-			);
-		}
-
-		if (poll_time_ns) {
-			*poll_time_ns = busy_ns;
-		}
-
-	   __NFOUT;
-	   return rv;
-}
-
-/* Wrapper for queue_work that checks congestion and uses random CPU if congested */
-static inline void scq_queue_work(struct nvmeibc_ib_net *net)
-{
-	queue_work(net->scq_kwq, &net->scq_kwork);
-}
-
-static void scq_kwork_func(struct work_struct *work)
-{
-	struct nvmeibc_ib_net *net = container_of(work, struct nvmeibc_ib_net, scq_kwork);
-	unsigned long flags;
-	bool continue_polling = false;
-	u64 busy_ns;
-	int n;
+	unsigned long flags = 0;
+	int rv;
+	bool missed_events;
 
 	__NFIN;
 
-	if (!nvmeib_ref_get(&net->ib_rsrc_ref)) {
-		_NTn(scq_kwork_func_t1, net, "failed to get ib_rsrc");
-		goto out;
-	}
-
-	nvmeib_qp_stats_on_offth_iter(net->qp_stats);
-	if (READ_ONCE(net->scq_poll_mode) == NVMEIBC_IB_CQ_INTR) {
-		_NEn(error_ib_net_scq_kwork_func, net, "Oops, intr-polling off");
-		BUG();
-	}
-
-	n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, &busy_ns);
-	continue_polling = continue_polling && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, n, busy_ns);
-
-	if (!continue_polling) {
-		_NDn(trace_2_ib_net_scq_kwork_func, net, "transition back to IRQ");
-
-		/* Step 1: update poll-mode */
+	do {
 		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
-		if (net->scq_poll_mode == NVMEIBC_IB_CQ_POLLING) {
-			scq_offload_trace(net, __LINE__);
-			net->scq_poll_mode = NVMEIBC_IB_CQ_INTR;
-		} else if (net->scq_poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING) {
-			scq_offload_trace(net, __LINE__);
-			net->scq_poll_mode = NVMEIBC_IB_CQ_POLLING;
-			continue_polling = true;
-		} else BUG();
+		rv = process_send_cq_offload_enb_(net, net->n_wc_s, req_notify, false, &missed_events);
 		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
-	}
 
-	if (continue_polling && !atomic_read(&net->dying)) {
-		scq_queue_work(net);
-	}
+		if (missed_events) {
+			cond_resched();
+		}
+	} while (missed_events);
 
-	nvmeib_ref_put(&net->ib_rsrc_ref);
-out:
 	__NFOUT;
+	return rv;
 }
 
 static int scq_kthread_func(void *arg)
 {
 	struct nvmeibc_ib_net *net = arg;
 	unsigned long flags;
-	int tot = 0;
-	u64 busy_ns;
-	bool continue_polling;
+	enum cq_poll_mode new_mode;
+	int n;
 
 	_NTn(trace_ib_net_scq_kthread_func, net, "scq thread ready");
 	set_current_state(TASK_INTERRUPTIBLE);
@@ -1121,33 +1028,30 @@ static int scq_kthread_func(void *arg)
 		goto out;
 	}
 	while (!kthread_should_stop()) {
-		continue_polling = false;
 		nvmeib_qp_stats_on_offth_iter(net->qp_stats);
-		if (READ_ONCE(net->scq_poll_mode) == NVMEIBC_IB_CQ_INTR) {
+		if (net->scq_poll_mode == NVMEIBC_IB_CQ_INTR) {
 			_NEn(error_ib_net_scq_kthread_func, net, "Oops, intr-polling off");
 			BUG();
 		}
 
 		//process_send_cq_offload_enb_
-		polling_process_send_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, &busy_ns);
-		if (continue_polling) {
+		n = polling_process_send_cq_(net, REQ_NOTIFY_FALSE);
+		if (n > 0) {
+			/* prevent soft lockup */
 			cond_resched();
 			continue;
 		}
 
-		_NDn(trace_2_ib_net_scq_kthread_func, net, "transition back to IRQ");
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (!n) {
+			/* re-enable IRQ then poll CEs that were already queued */
+			_NDn(trace_2_ib_net_scq_kthread_func, net, "transition back to IRQ");
 
-		/* The correct sequence to prevent lost-wakeups is: 
-		* 1. Set state for interrupt to see
-		* 2. Set_current_state(TASK_INTERRUPTIBLE);
-		* 3. Write Barrier
-		* 4. Enable interrupts
-		* 5. Read Barrier
-		* 6. Check state if interrupt has changed it to polling mode
-		* 7. Schedule if state has not changed, otherwise continue polling
-		*/
+			//process_send_cq_offload_enb_
+			n = polling_process_send_cq_(net, REQ_NOTIFY_TRUE);
+		}
 
-		/* Step 1: update poll-mode */
+		/* OL: update poll-mode within the if (!n), this also saves lock-unlock */
 		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
 		if (net->scq_poll_mode == NVMEIBC_IB_CQ_POLLING) {
 			scq_offload_trace(net, __LINE__);
@@ -1155,47 +1059,24 @@ static int scq_kthread_func(void *arg)
 		} else if (net->scq_poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING) {
 			scq_offload_trace(net, __LINE__);
 			net->scq_poll_mode = NVMEIBC_IB_CQ_POLLING;
-			continue_polling = true;
 		} else BUG();
+		new_mode = net->scq_poll_mode;
 		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
-
-		if (continue_polling) {
-			_NDn(trace_5_ib_net_scq_kthread_func, net, "intr during transition to intr-mode, keep running");
-			if (kthread_should_stop())
-				goto put_ref;
-			/* prevent soft lockup */
-			cond_resched();
-			continue;
-		}
-
-		/* Step 2: Set task state for interrupt to see */
-		set_current_state(TASK_INTERRUPTIBLE);
-
-		/* Step 3: Write Barrier */
-		smp_mb();
-
-		/* Step 6: Check state if interrupt has changed it to polling mode */
-		if ((READ_ONCE(net->scq_poll_mode) != NVMEIBC_IB_CQ_INTR) &&
-			!atomic_read(&net->dying))
-		{
+		if ((new_mode != NVMEIBC_IB_CQ_INTR) && (n >= 0) &&
+			!atomic_read(&net->dying)) {
 			_NDn(trace_3_ib_net_scq_kthread_func, net, "intr during transition to intr-mode, keep running");
 			set_current_state(TASK_RUNNING);
 			cond_resched(); /* prevent soft lockup */
 			continue;
 		}
 
-		_NDn(trace_7_ib_net_scq_kthread_func, net, "transition back to IRQ after @N_TOTAL completions", tot);
-		tot = 0;
-
-		/* Step 7: Call schedule(), after checking to prevent lost wakeup from kthread-stop */
+		/* prevent lost wakeup from kthread-stop */
 		if (!kthread_should_stop())
 			/* if kthread-stop is called now, then:
 			   if stop-bit set BUT before wakeup, thread sched-out for a while
 			   if stop-bit set AND wakeup called, thread continue to run */
 			schedule();
 	}
-
-put_ref:
 	nvmeib_ref_put(&net->ib_rsrc_ref);
 out:
 	_NTn(trace_4_ib_net_scq_kthread_func, net, "scq thread done");
@@ -1216,7 +1097,7 @@ static inline int scq_kthread_create_(struct nvmeibc_ib_net *net, int comp_cpu)
 			clnt_proc_name_format_extd(pname, 'C', "PL", "ScqP",
 						   nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&net->admin_ch->base)),
 						   comp_cpu);
-			if (!IS_ERR(t = nvmeib_kthread_create_on_cpu(scq_kthread_func, net, comp_cpu, pname))) {
+			if (!IS_ERR(t = nvmeib_public_kthread_create_on_cpu(scq_kthread_func, net, comp_cpu, pname))) {
 				_NDn(trace_1_ib_net_scq_kthread_create, net, "scq thread created on cpu @INT", comp_cpu);
 				wake_up_process(t);
 				wait_for_completion(&net->scq_kth_ready);
@@ -1246,19 +1127,14 @@ void scq_kthread_stop(struct nvmeibc_ib_net *net)
 
 	__NFIN;
 
-	if (net->scq_kwq) {
-		/* Cancel kernel workqueue work */
-		_NTn(trace_ib_net_scq_kthread_stop, net, "canceling scq_kwq work");
-		cancel_work_sync(&net->scq_kwork);
-		net->scq_kwq = NULL;
-	} else if (net->scq_kthread) {
+	if (net->scq_kthread) {
 		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
 		t = net->scq_kthread;
 		net->scq_kthread = NULL;
 		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
 
 		if (t) {
-			_NTn(trace_ib_net_scq_kthread_stopx, net, "stopping kthread");
+			_NTn(trace_ib_net_scq_kthread_stop, net, "stopping kthread");
 			rv = kthread_stop(t);
 			_NTn(trace_1_ib_net_scq_kthread_stop, net, "scq kthread_stop (rv @RV)", rv);
 		}
@@ -1271,7 +1147,7 @@ void scq_kthread_stop(struct nvmeibc_ib_net *net)
 }
 
 static int process_send_cq_offload_enb_(struct nvmeibc_ib_net *net, int ne,
-	bool req_notify, bool in_interrupt, enum req_notify_state *req_notify_state)
+	bool req_notify, bool in_interrupt, bool *missed_events)
 {
 	int n, rearm_rv;
 	__NFIN;
@@ -1279,7 +1155,7 @@ static int process_send_cq_offload_enb_(struct nvmeibc_ib_net *net, int ne,
 	BUG_ON(!nvmeibc_channel_already_locked(net->ioch));
 	BUG_ON(ne > net->n_wc_s);
 
-	*req_notify_state = REQ_NOTIFY_STATE_NONE;
+	*missed_events = false;
 	do {
 		n = process_send_cq_(net, ne);
 		if (unlikely(n < 0)) {
@@ -1288,48 +1164,56 @@ static int process_send_cq_offload_enb_(struct nvmeibc_ib_net *net, int ne,
 			break;
 		}
 
+		if (!in_interrupt)
+			net->scq_stats.n_poll += n;
+		else
+			net->scq_stats.n_intr += n;
+
+		//Shall we consider 'net->drain_sq_done' ???
+
 		if (in_interrupt)
 			net->scq_stats.n_intr += n;
 		else
 			net->scq_stats.n_poll += n;
 
-		if (req_notify) {
-			if (n < ne) {
-				/* interrupt or poll-thread in last poll attempt */
+		if (n == 0) {
+			if (req_notify) { /* interrupt or poll-thread in last poll attempt */
+
 				if ((rearm_rv = ib_req_notify_cq(net->send_cq,
-						IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS))) 
-				{
+						IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS))) {
 					if (unlikely(rearm_rv < 0)) {
 						_NEn(xxx_02, net, "Failed poll-cq (@COUNT), disconnect net", rearm_rv);
 						nvmeibc_ib_net_disconnect(net);
-						*req_notify_state = REQ_NOTIFY_STATE_NOTIFY_FAILED;
 						break;
 					}
-					else {
+					else if (rearm_rv > 0) {
 						/* rearm_rv > 0 i.e. missed events:
-							signal interrupt handler to switch 2 polling
-							signal polling thread to keep-polling*/
-						BUG_ON(rearm_rv <= 0);
-						*req_notify_state = REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS;
+						   signal interrupt handler to switch 2 polling
+						   signal polling thread to keep-polling*/
+						*missed_events = true;
 						net->scq_stats.n_missed_events++;
 					}
-				} else {
-					/* we polled ZERO wcs && rearmed without missing an event */
-					*req_notify_state = REQ_NOTIFY_STATE_NOTIFY_OK;
 				}
-			} else {
-				*req_notify_state = REQ_NOTIFY_STATE_CQ_NOT_EMPTY;
-			}
-		} else {
-			if (in_interrupt) {
-				_NEn(xxx_03, net, "Caller is interrupt but didn't ask to rearm, BOOM!");
-				BUG();
+				else {
+					/* we polled ZERO wcs && rearmed without missing an event */
+				}
 			}
 			else {
-				/* the only case here is the polling thread in its
-					polling-loop, no need to signal anything */
+				if (in_interrupt) {
+					_NEn(xxx_03, net, "Caller is interrupt but didn't ask to rearm, BOOM!");
+					BUG();
+				}
+				else {
+					/* the only case here is the polling thread in its
+					   polling-loop, no need to signal anything */
+				}
 			}
 		}
+		else if (req_notify) {
+			/* n > 0, thus no point to rearm, so... */
+			*missed_events = true;
+		}
+
 	} while (0);
 
 	__NFOUT;
@@ -1338,58 +1222,47 @@ static int process_send_cq_offload_enb_(struct nvmeibc_ib_net *net, int ne,
 
 static inline void intr_process_send_cq_offload_enb_(struct nvmeibc_ib_net *net)
 {
-	enum nvmeib_intr_shaper_calc_ret wake_up_reason;
-	enum cq_poll_mode poll_mode = READ_ONCE(net->scq_poll_mode);
+	bool missed_events;
+	int ret;
 
 	__NFIN;
 
-	if (poll_mode == NVMEIBC_IB_CQ_INTR) {
+	BUG_ON(!net->scq_kthread);
+	if (net->scq_poll_mode == NVMEIBC_IB_CQ_INTR) {
 
 		/* if this is the first intr after polling period and
 		   we are in the same time-frame */
 sw2polling:
-		if (nvmeib_intr_shaper_intr_should_wake_up_reason(net->intr_shaper, &wake_up_reason)) {
+		if ((ret = nvmeib_intr_shaper_calc_percpu(net->intr_shaper, 0, 0))) {
 			_NDn(trace_ib_net_intr_process_send_cq_offload_enb, net, "sw2polling (# wakeups_burst @N_WAKEUPS wakeups_cycles @N_WAKEUPS)", net->scq_stats.n_wakeups_burst, net->scq_stats.n_wakeups_cycles);
 			scq_offload_trace(net, __LINE__);
 			nvmeib_qp_stats_on_offload_sched(net->qp_stats);
-			WRITE_ONCE(net->scq_poll_mode, NVMEIBC_IB_CQ_POLLING);
-			smp_mb();
-			if (net->scq_kwq) {
-				scq_queue_work(net);
-			} else {
-				BUG_ON(!net->scq_kthread);
-				wake_up_process(net->scq_kthread);
-			}
-			if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
+			net->scq_poll_mode = NVMEIBC_IB_CQ_POLLING;
+			wake_up_process(net->scq_kthread);
+			if (ret == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
 				net->scq_stats.n_wakeups_cycles++;
-			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST)
-				net->scq_stats.n_wakeups_burst++;
-			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME)
-				net->scq_stats.n_wakeups_irq_time++;
 			else
-				BUG();
+				net->scq_stats.n_wakeups_burst++;
 		}
 		else {
-			enum req_notify_state req_notify_state;
 			int n;
+			cycles_t start_tsc = nvmeib_public_get_cycles();
 			net->scq_stats.n_external++;
-			n = process_send_cq_offload_enb_(net, net->n_wc_s,
-												  REQ_NOTIFY_TRUE, true, &req_notify_state);
-			if (n < 0) {
-				goto out;
-			} else if (req_notify_state == REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS || 
-				req_notify_state == REQ_NOTIFY_STATE_CQ_NOT_EMPTY)
-			{
+			if ((n = process_send_cq_offload_enb_(net, net->n_wc_s,
+												  REQ_NOTIFY_TRUE, true, &missed_events)) > 0) {
+				nvmeib_intr_shaper_calc_percpu(net->intr_shaper, n, nvmeib_public_get_cycles() - start_tsc);
+			}
+			if (n >= 0 && missed_events) {
 				goto sw2polling;
 			}
 		}
 	}
-	else if (poll_mode == NVMEIBC_IB_CQ_POLLING) {
+	else if (net->scq_poll_mode == NVMEIBC_IB_CQ_POLLING) {
 		_NDn(trace_1_ib_net_intr_process_send_cq_offload_enb, net, "scq thread already running");
 		scq_offload_trace(net, __LINE__);
-		WRITE_ONCE(net->scq_poll_mode, NVMEIBC_IB_CQ_KEEP_POLLING);
+		net->scq_poll_mode = NVMEIBC_IB_CQ_KEEP_POLLING;
 	}
-	else if (poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING) {
+	else if (net->scq_poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING) {
 		/* Got an interrupt while we're still polling */
 		inc_scq_spurious_intr_and_report(net);
 
@@ -1401,7 +1274,7 @@ sw2polling:
 		if (P2NV(net->port)->dev_type != DT_siw)
 			WARN_ON_ONCE(true);
 	}
-out:
+
 	__NFOUT;
 }
 
@@ -1439,7 +1312,6 @@ static void intr_process_send_cq_pcpu_func(void *info)
 	unsigned long start, delta;
 
 	__NFIN;
-	nvmeib_intr_shaper_intr_enter(net->intr_shaper, INTR_SHAPER_INTR_TYPE_CLIENT_SCQ);
 	BUG_ON(!nvmeibc_channel_is_ll_pcpu_ch(net->ioch));
 	BUG_ON(nvmeibc_channel_pcpu_ch_get_cpu(net->ioch) != smp_processor_id());
 
@@ -1463,7 +1335,6 @@ static void intr_process_send_cq_pcpu_func(void *info)
 
 	//NOTE: Ref was increased by send_completion_intr */
 	nvmeib_ref_put(&net->ib_rsrc_ref);
-	nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 	__NFOUT;
 }
 
@@ -1505,6 +1376,7 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 	u64 start, delta;
 
 	__NFIN;
+
 	if (!(net = verify_net_generation(net_ptr)))
 		return;
 #if defined(DEBUG_USING_RADIX) && DEBUG_USING_RADIX
@@ -1530,7 +1402,6 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 			net, "failed to get ib_rsrc");
 		goto out;
 	}
-	nvmeib_intr_shaper_intr_enter(net->intr_shaper, INTR_SHAPER_INTR_TYPE_CLIENT_SCQ);
 
 	if (nvmeibc_channel_is_ll_pcpu_ch(net->ioch)) {
 		if (net->ioch->ct == ct_n_rdda &&
@@ -1540,13 +1411,12 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 		} else if (smp_processor_id() != nvmeibc_channel_pcpu_ch_get_cpu(net->ioch)) {
 			/* Interrupt came in on different CPU. Use IPI to switch to correct CPU (if not already pending) */
 			if (atomic_cmpxchg(&net->pcpu_send_comp_smp_call.call_pending, 0, 1) == 0) {
-				if (smp_call_function_single_async(
+				if (nvmeib_public_smp_call_function_single_async(
 						nvmeibc_channel_pcpu_ch_get_cpu(net->ioch),
 						&net->pcpu_send_comp_smp_call.call_data) < 0) {
 					_NEn(send_completion_intr_t2, net, "smp_call_function_single_async failed");
 					BUG_ON(atomic_xchg(&net->pcpu_send_comp_smp_call.call_pending, 0) != 1);
 				} else {
-					nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 					/* NOTE: We do not dec the ref count until the IPI runs so it does not get destroyed under out feet */
 					goto out;
 				}
@@ -1557,7 +1427,7 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 
 	start = jiffies;
 	nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
-	if (net->scq_kthread || net->scq_kwq)
+	if (net->scq_kthread)
 		intr_process_send_cq_offload_enb_(net); /* currently only lock-ch */
 	else
 		intr_process_send_cq_(net);
@@ -1571,14 +1441,13 @@ static void send_completion_intr(struct ib_cq *cq, void *net_ptr)
 	}
 
 ref_put:
-	nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 	nvmeib_ref_put(&net->ib_rsrc_ref);
 
 out:
 	__NFOUT;
 }
 
-/* --------------------------------------------------------------------- *
+/* -------------------------------------------------------------------------- *
  *                           recv-completions                                 *
  * -------------------------------------------------------------------------- */
 /* former version of send-comp handling, prior to polling-kthread support */
@@ -1690,35 +1559,26 @@ out:
 
 static inline int process_num_mixed_comps_(struct nvmeibc_ib_net *net, int n);
 #define nvmeibc_net_get_cinst(net) (nvmeibc_cinst_get_core_p((net)->ioch))			// Can also use nvmeibc_cinst_get_core_p((net)->admin_ch->base)
-static int process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify, enum req_notify_state *req_notify_state)
+static int process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify)
 {
-	int n, n_wc, rv = 0;
-	struct ib_wc *wc_arr;
+	int n, rv = 0, tot = 0;
+	bool keep_polling;
 
 	__NFIN;
 
 	BUG_ON(!nvmeibc_channel_already_locked(net->ioch)); /* process_recv_cq_ */
 
 	/* rearm (?) and poll */
-	*req_notify_state = REQ_NOTIFY_STATE_NONE;
 	do {
+		keep_polling = false;
 		BUG_ON(net->qp->recv_cq != net->recv_cq);
-		if (net->shared_cq) {
-			n_wc = net->n_wc_mixed;
-			wc_arr = net->wc_mixed;
-		} else {
-			n_wc = net->n_wc_r;
-			wc_arr = net->wc_r;
-		}
+		if (net->shared_cq)
+			n = ib_poll_cq(net->recv_cq, net->n_wc_mixed, net->wc_mixed);
+		else
+			n = ib_poll_cq(net->recv_cq, net->n_wc_r, net->wc_r);
 		/* process completions */
-		if ((n = ib_poll_cq(net->recv_cq, n_wc, wc_arr)) >= 0) {
-			if (n < 0) {
-				_NEn(error_3_ib_net_process_recv_cq, net, "Failed poll-cq (@COUNT), disconnect net", n);
-				nvmeibc_ib_net_disconnect(net);
-				rv = n;
-				break;
-			}
-			else if (n > 0) {
+		if (n >= 0) {
+			if (n > 0) {
 				if (net->shared_cq) {
 					nvmeib_qp_stats_on_poll_cq(net->qp_stats, n, mixed);
 					rv = process_num_mixed_comps_(net, n);
@@ -1729,29 +1589,34 @@ static int process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify, enum re
 				if (rv < 0 && rv != -EINTR) {
 					_NTn(error_ib_net_process_recv_cq, net, "comp processing error @RV, disconnect net (n: @COUNT, rq_post_count: @ATOMIC_READ)",
 							rv, n, atomic_read(&net->rq_post_count));
-					nvmeibc_ib_net_disconnect(net);
 					break;
+				}
+				tot += n;
+				if (tot > nvmeibc_net_get_cinst(net)->shaper_burst) {
+					if (net->rcq_kthread && net->rcq_poll_mode == NVMEIBC_IB_CQ_INTR) {
+						/* Processed more than the burst # Recv CQEs - Switch to polling thread */
+						_NDn(trace_ib_net_process_recv_cq, net, "transition to polling after @TOT completions", tot);
+						nvmeib_qp_stats_on_offload_sched(net->qp_stats);
+						net->rcq_poll_mode = NVMEIBC_IB_CQ_POLLING;
+						wake_up_process(net->rcq_kthread);
+						net->rcq_stats.n_wakeups_burst++;
+						break;
+					}
 				}
 			}
 			else {
 				nvmeib_qp_stats_on_poll_cq_empty(net->qp_stats);
 			}
-			if (req_notify && n < n_wc) {
+			if (req_notify && n == 0) {
 				BUG_ON(net->qp->recv_cq != net->recv_cq);
 				if ((rv = ib_req_notify_cq(net->recv_cq,
-					IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS))) 
-				{
-					if (rv < 0) {
-						_NEn(error_1_ib_net_process_recv_cq, net, "ib_req_notify_cq failed (@RV), disconnect net", rv);
-						nvmeibc_ib_net_disconnect(net);
-						*req_notify_state = REQ_NOTIFY_STATE_NOTIFY_FAILED;
-					}
-					else {
-						*req_notify_state = REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS;
+					IB_CQ_NEXT_COMP | IB_CQ_REPORT_MISSED_EVENTS))) {
+					if (rv < 0)
+						_NEn(error_1_ib_net_process_recv_cq, net, "ib_req_notify_cq failed (@RV)", rv);
+					else if (rv > 0) {
+						keep_polling = true;
 						net->rcq_stats.n_missed_events++;
 					}
-				} else {
-					*req_notify_state = REQ_NOTIFY_STATE_NOTIFY_OK;
 				}
 			}
 			else if (req_notify) {
@@ -1760,46 +1625,31 @@ static int process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify, enum re
 				   call to ib_req_notify_cq will not detect missed-events nor
 				   will we get interrupt for these pending CQEs.
 				   Thus, if @n > 0, we must keep polling (here or in thread) */
-				   *req_notify_state = REQ_NOTIFY_STATE_CQ_NOT_EMPTY;
+				keep_polling = true;
 			}
 		}
 		else if (n < 0) {
 			_NEn(error_2_ib_net_process_recv_cq, net, "Failed poll-cq (@COUNT), disconnect net", n);
 			nvmeibc_ib_net_disconnect(net);
 		}
-		rv = n;
-	} while (0);
+	//} while (n > 0 && req_notify);
+	} while (keep_polling);
 	/* Loop if we are not in the thread (req_notify = false) and events have been missed */
 
 	__NFOUT;
-	return n;
+	return rv < 0 ? rv : tot;
 }
 
-static int polling_process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify, bool *continue_polling, u64 *poll_time_ns)
+static int polling_process_recv_cq_(struct nvmeibc_ib_net *net, bool req_notify)
 {
 	unsigned long flags = 0;
 	int rv;
-	enum req_notify_state req_notify_state;
-	u64 start_ns, busy_ns;
 
 	__NFIN;
 
 	nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
-	start_ns = local_clock();
-	rv = process_recv_cq_(net, req_notify, &req_notify_state);
-	busy_ns = local_clock() - start_ns;
+	rv = process_recv_cq_(net, req_notify);
 	nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
-
-	if (continue_polling) {
-		*continue_polling = (req_notify && (
-			req_notify_state == REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS ||
-			req_notify_state == REQ_NOTIFY_STATE_CQ_NOT_EMPTY)
-		);
-	}
-
-	if (poll_time_ns) {
-		*poll_time_ns = busy_ns;
-	}
 
 	__NFOUT;
 	return rv;
@@ -1809,9 +1659,8 @@ static int rcq_kthread_func(void *arg)
 {
 	struct nvmeibc_ib_net *net = arg;
 	unsigned long flags;
+	enum cq_poll_mode new_mode;
 	int n, tot;
-	u64 busy_ns;
-	bool continue_polling;
 
 	_NTn(trace_ib_net_rcq_kthread_func, net, "rcq thread ready");
 	set_current_state(TASK_INTERRUPTIBLE);
@@ -1825,78 +1674,55 @@ static int rcq_kthread_func(void *arg)
 		goto out;
 	}
 	while (!kthread_should_stop()) {
-		continue_polling = false;
 		nvmeib_qp_stats_on_offth_iter(net->qp_stats);
 		if (net->rcq_poll_mode == NVMEIBC_IB_CQ_INTR) {
 			_NEn(error_ib_net_rcq_kthread_func, net, "Oops, intr-polling off");
 			BUG();
 		}
 
-		n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE, &continue_polling, &busy_ns);
-		if (continue_polling) {
-			cond_resched();
-			continue;
-		}
-
-		_NDn(trace_2_ib_net_rcq_kthread_func, net, "transition back to IRQ");
-
-		/* The correct sequence to prevent lost-wakeups is: 
-		* 1. Set state for interrupt to see
-		* 2. Set_current_state(TASK_INTERRUPTIBLE);
-		* 3. Write Barrier
-		* 4. Enable interrupts
-		* 5. Read Barrier
-		* 6. Check state if interrupt has changed it to polling mode
-		* 7. Schedule if state has not changed, otherwise continue polling
-		*/
-
-		/* Step 1: update poll-mode */
-		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
-		if (net->rcq_poll_mode == NVMEIBC_IB_CQ_POLLING)
-			net->rcq_poll_mode = NVMEIBC_IB_CQ_INTR;
-		else if (net->rcq_poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING) {
-			net->rcq_poll_mode = NVMEIBC_IB_CQ_POLLING;
-			continue_polling = true;
-		}
-		else BUG();
-		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
-
-		if (continue_polling) {
-			_NDn(trace_6_ib_net_rcq_kthread_func, net, "intr during transition to intr-mode, keep running");
-			if (kthread_should_stop())
-				goto put_ref;
+		n = polling_process_recv_cq_(net, REQ_NOTIFY_FALSE);
+		if (n > 0) {
+			tot += n;
 			/* prevent soft lockup */
 			cond_resched();
 			continue;
 		}
 
-		/* Step 2: Set task state for interrupt to see */
 		set_current_state(TASK_INTERRUPTIBLE);
+		if (!n) {
+			/* re-enable IRQ then poll CEs that were already queued */
+			_NDn(trace_2_ib_net_rcq_kthread_func, net, "transition back to IRQ");
+			n = polling_process_recv_cq_(net, REQ_NOTIFY_TRUE);
+			tot += n;
+		}
 
-		/* Step 3: Write Barrier */
-		smp_mb();
-
-		/* Step 6/7: Check state if interrupt has changed it to polling mode */
-		if ((READ_ONCE(net->rcq_poll_mode) != NVMEIBC_IB_CQ_INTR) && (n >= 0) &&
-			!atomic_read(&net->dying)) 
-		{
+		/* OL: update poll-mode within the if (!n), this also saves lock-unlock */
+		nvmeibc_channel_spin_lock_irqsave(net->ioch, &flags);
+		if (net->rcq_poll_mode == NVMEIBC_IB_CQ_POLLING)
+			net->rcq_poll_mode = NVMEIBC_IB_CQ_INTR;
+		else if (net->rcq_poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING)
+			net->rcq_poll_mode = NVMEIBC_IB_CQ_POLLING;
+		else BUG();
+		new_mode = net->rcq_poll_mode;
+		nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
+		if ((new_mode != NVMEIBC_IB_CQ_INTR) && (n >= 0) &&
+			!atomic_read(&net->dying)) {
 			_NDn(trace_3_ib_net_rcq_kthread_func, net, "intr during transition to intr-mode, keep running");
 			set_current_state(TASK_RUNNING);
 			cond_resched(); /* prevent soft lockup */
 			continue;
 		}
 
-		_NDn(trace_4_ib_net_rcq_kthread_func, net, "transition back to IRQ after @N_TOTAL completions", tot);
+		_NDn(trace_4_ib_net_rcq_kthread_func, net, "transition back to IRQ after @N_TOTAL completions", tot + n);
 		tot = 0;
 
-		/* Step 7: Call schedulle(), after checking to prevent lost wakeup from kthread-stop */
+		/* prevent lost wakeup from kthread-stop */
 		if (!kthread_should_stop())
 			/* if kthread-stop is called now, then:
 			   if stop-bit set BUT before wakeup, thread sched-out for a while
 			   if stop-bit set AND wakeup called, thread continue to run */
 			schedule();
 	}
-put_ref:
 	nvmeib_ref_put(&net->ib_rsrc_ref);
 out:
 	_NTn(trace_5_ib_net_rcq_kthread_func, net, "rcq thread done");
@@ -1918,7 +1744,7 @@ static inline int rcq_kthread_create_(struct nvmeibc_ib_net *net, int comp_cpu)
 			clnt_proc_name_format_extd(pname, 'C', "PL", "RcqP",
 						   nvmeibc_cinst_get_core_inst_num(nvmeibc_cinst_get_core_p(&net->admin_ch->base)),
 						comp_cpu);
-			if (!IS_ERR(t = nvmeib_kthread_create_on_cpu(rcq_kthread_func, net, comp_cpu, pname))) {
+			if (!IS_ERR(t = nvmeib_public_kthread_create_on_cpu(rcq_kthread_func, net, comp_cpu, pname))) {
 				_NDn(trace_1_ib_net_rcq_kthread_create, net, "rcq thread created on cpu @INT", comp_cpu);
 				wake_up_process(t);
 				wait_for_completion(&net->rcq_kth_ready);
@@ -1996,65 +1822,44 @@ void rcq_kthread_stop(struct nvmeibc_ib_net *net)
  */
 static inline void intr_process_recv_cq_(struct nvmeibc_ib_net *net)
 {
-	enum nvmeib_intr_shaper_calc_ret wake_up_reason;
-	enum cq_poll_mode poll_mode = READ_ONCE(net->rcq_poll_mode);
+	int ret;
 	__NFIN;
 
 	BUG_ON(!net->rcq_kthread);
-	if (poll_mode == NVMEIBC_IB_CQ_INTR) {
+	if (net->rcq_poll_mode == NVMEIBC_IB_CQ_INTR) {
 		/* if this is the first intr after polling period and
 		   we are in the same time-frame */
-		int ncqe;
-
-poll_again:
-		ncqe = (false && net->peek_cq) ? (*net->peek_cq)(net->recv_cq, net->n_wc_r) : 0;
-		if (nvmeib_intr_shaper_intr_should_wake_up_reason(net->intr_shaper, &wake_up_reason) ||
-			(ncqe > nvmeib_intr_shaper_get_max_burst(net->intr_shaper))) 
-		{
+		int ncqe = (false && net->peek_cq) ? (*net->peek_cq)(net->recv_cq,
+															 net->n_wc_r) : 0;
+		if ((ret = nvmeib_intr_shaper_calc_percpu(net->intr_shaper, 0, 0)) ||
+			(ncqe > nvmeibc_net_get_cinst(net)->shaper_burst)) {
 			_NDn(trace_ib_net_intr_process_recv_cq, net, "sw2polling (# wakeups_burst @N_WAKEUPS wakeups_cycles @N_WAKEUPS # rcqes @NCQE)", net->rcq_stats.n_wakeups_burst, net->rcq_stats.n_wakeups_cycles, ncqe);
 			nvmeib_qp_stats_on_offload_sched(net->qp_stats);
-			WRITE_ONCE(net->rcq_poll_mode, NVMEIBC_IB_CQ_POLLING);
-			smp_mb();
+			net->rcq_poll_mode = NVMEIBC_IB_CQ_POLLING;
 			wake_up_process(net->rcq_kthread);
-			if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
+			if (ret == NVMEIB_INTR_SHAPER_RET_WAKE_UP_CYCLES)
 				net->rcq_stats.n_wakeups_cycles++;
-			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_BURST)
-				net->rcq_stats.n_wakeups_burst++;
-			else if (wake_up_reason == NVMEIB_INTR_SHAPER_RET_WAKE_UP_IRQ_TIME)
-				net->rcq_stats.n_wakeups_irq_time++;
 			else
-				BUG();
+				net->rcq_stats.n_wakeups_burst++;
 		}
 		else {
-			enum req_notify_state req_notify_state;
-			int rv;
-			int n_iter = 0;
+			int n;
+			cycles_t start_tsc = nvmeib_public_get_cycles();
 			net->rcq_stats.n_external++;
-			/* NOTE: Further intr-shaper logic is handled in process_recv_cq_ */
-			rv = process_recv_cq_(net, REQ_NOTIFY_TRUE, &req_notify_state);
-			if (rv < 0) {
-				goto out;
-			} else if (req_notify_state == REQ_NOTIFY_STATE_NOTIFY_MISSED_EVENTS ||
-				req_notify_state == REQ_NOTIFY_STATE_CQ_NOT_EMPTY) 
-			{
-				if (++n_iter > nvmeibc_max_notify_cq_iterations) {
-					_NEn_dmesg(err_intr_process_recv_cq_, net, "Failed to arm recv cq after @INT iterations, disconnecting", n_iter);
-					nvmeibc_ib_net_disconnect(net);
-					goto out;
-				}
-				goto poll_again;
+			if ((n = process_recv_cq_(net, REQ_NOTIFY_TRUE)) > 0) {
+				nvmeib_intr_shaper_calc_percpu(net->intr_shaper, n, nvmeib_public_get_cycles() - start_tsc);
 			}
 		}
 	}
-	else if (poll_mode == NVMEIBC_IB_CQ_POLLING) {
+	else if (net->rcq_poll_mode == NVMEIBC_IB_CQ_POLLING) {
 		_NDn(trace_1_ib_net_intr_process_recv_cq, net, "rcq thread already running");
-		WRITE_ONCE(net->rcq_poll_mode, NVMEIBC_IB_CQ_KEEP_POLLING);
+		net->rcq_poll_mode = NVMEIBC_IB_CQ_KEEP_POLLING;
 	}
-	else if (poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING) {
+	else if (net->rcq_poll_mode == NVMEIBC_IB_CQ_KEEP_POLLING) {
 		/* Got an interrupt while we're still polling */
 		inc_rcq_spurious_intr_and_report(net);
 	}
-out:
+
 	__NFOUT;
 }
 
@@ -2187,11 +1992,11 @@ out:
 
 static int defer_recv_interrupts_(struct nvmeibc_ib_net *net);
 
-/* Common processing function for both custom and kernel workqueues */
-static inline void poll_cq_and_process_common(struct nvmeibc_ib_net *net)
+static inline void poll_cq_and_process_work(struct workqe_struct *work)
 {
+	struct nvmeibc_ib_net *net = container_of(
+		work, struct nvmeibc_ib_net, defer_recv_work);
 	bool resched = false;
-	u64 start_ns, busy_ns;
 	int rv;
 	__NFIN;
 
@@ -2202,13 +2007,7 @@ static inline void poll_cq_and_process_common(struct nvmeibc_ib_net *net)
 	nvmeib_qp_stats_on_offth_iter(net->qp_stats);
 
 	/* poll upto net->n_wc_mixed CQEs into net->wc_mixed */
-	start_ns = local_clock();
 	rv = poll_cq_and_process(net, &resched);
-	busy_ns = local_clock() - start_ns;
-
-	if (!resched) {
-		resched = rv > 0 && nvmeib_intr_shaper_should_continue_polling(net->intr_shaper, rv, busy_ns);
-	}
 
 	/* before we may rearm interrupts we must change state such that
 	   interrupt-handler will be able to add another defer-recv work.
@@ -2262,21 +2061,6 @@ out:
 	__NFOUT;
 }
 
-/* Kernel workqueue wrapper for poll_cq_and_process_work */
-static inline void poll_cq_and_process_kwork(struct work_struct *kwork)
-{
-	struct nvmeibc_ib_net *net = container_of(
-		kwork, struct nvmeibc_ib_net, defer_recv_kwork);
-	poll_cq_and_process_common(net);
-}
-
-static inline void poll_cq_and_process_work(struct workqe_struct *work)
-{
-	struct nvmeibc_ib_net *net = container_of(
-		work, struct nvmeibc_ib_net, defer_recv_work);
-	poll_cq_and_process_common(net);
-}
-
 static int defer_recv_interrupts_(struct nvmeibc_ib_net *net)
 {
 	int rv;
@@ -2300,19 +2084,13 @@ static int defer_recv_interrupts_(struct nvmeibc_ib_net *net)
 		goto out;
 	}
 
-	/* Use kernel workqueue if set, otherwise use custom workqueue */
-	if (net->defer_recv_intr_kwq) {
-		if (!queue_work(net->defer_recv_intr_kwq, &net->defer_recv_kwork)) {
-			rv = -EALREADY;
-			goto out;
-		}
-	} else if (!wq_add_work(net->defer_recv_intr_wq, &net->defer_recv_work)) {
+	/* poll_cq_and_process_work */
+	if (!wq_add_work(net->defer_recv_intr_wq, &net->defer_recv_work)) {
 		/* State check should prevent this from happening */
 		BUG_ON(1);
 		rv = -EALREADY;
 		goto out;
 	}
-
 	nvmeib_qp_stats_on_offload_sched(net->qp_stats);
 	net->rcq_stats.n_defer_poll++;
 	rv = 0;
@@ -2360,7 +2138,6 @@ static void intr_process_recv_cq_pcpu_func(void *info)
 	unsigned long start, delta;
 
 	__NFIN;
-	nvmeib_intr_shaper_intr_enter(net->intr_shaper, INTR_SHAPER_INTR_TYPE_CLIENT_RCQ);
 	BUG_ON(!nvmeibc_channel_is_ll_pcpu_ch(net->ioch));
 	BUG_ON(nvmeibc_channel_pcpu_ch_get_cpu(net->ioch) != smp_processor_id());
 
@@ -2369,21 +2146,8 @@ static void intr_process_recv_cq_pcpu_func(void *info)
 	net->rcq_stats.n_ipi_func++;
 	if (net->rcq_kthread)
 		intr_process_recv_cq_(net);
-	else {
-		enum req_notify_state req_notify_state;
-		int rv, n_iter = 0;
-		/* We have no offload thread, so no choice but to keep polling until notify works or we get an error */
-		do {
-			rv = process_recv_cq_(net, REQ_NOTIFY_TRUE, &req_notify_state);
-			if (rv < 0 || req_notify_state == REQ_NOTIFY_STATE_NOTIFY_OK)
-				break;
-			if (++n_iter > nvmeibc_max_notify_cq_iterations) {
-				_NEn_dmesg(err_intr_process_recv_cq_pcpu_func, net, "Failed to arm recv cq after @INT iterations, disconnecting", n_iter);
-				nvmeibc_ib_net_disconnect(net);
-				break;
-			}
-		} while (true);
-	}
+	else
+		process_recv_cq_(net, REQ_NOTIFY_TRUE);
 	nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
 	delta = jiffies - start;
 	if (delta > net->rcq_stats.max_intr_duration) {
@@ -2394,9 +2158,9 @@ static void intr_process_recv_cq_pcpu_func(void *info)
 
 	BUG_ON(atomic_xchg(&net->pcpu_recv_comp_smp_call.call_pending, 0) != 1);
 
-	nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 	//NOTE: Ref count already increased by recv_completion_intr
 	nvmeib_ref_put(&net->ib_rsrc_ref);
+
 	__NFOUT;
 }
 
@@ -2412,6 +2176,7 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 	int rv;
 
 	__NFIN;
+
 	net = verify_net_generation(net_ptr);
 	if (!net)
 		goto out;
@@ -2432,7 +2197,6 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 		_NTn(recv_completion_intr_t1, net, "failed to get ib_rsrc");
 		goto out;
 	}
-	nvmeib_intr_shaper_intr_enter(net->intr_shaper, INTR_SHAPER_INTR_TYPE_CLIENT_RCQ);
 
 	if (nvmeibc_channel_is_ll_pcpu_ch(net->ioch)) {
 		if (net->ioch->ct == ct_n_rdda &&
@@ -2444,14 +2208,13 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 			if ((rv = defer_recv_interrupts_(net)) < 0 && rv != -EALREADY) {
 				/* Deferring recv interrupts failed or not enabled. Use IPI to switch to correct CPU  (if not already pending) */
 				if (atomic_cmpxchg(&net->pcpu_recv_comp_smp_call.call_pending, 0, 1) == 0) {
-					if (smp_call_function_single_async(
+					if (nvmeib_public_smp_call_function_single_async(
 							nvmeibc_channel_pcpu_ch_get_cpu(net->ioch),
 							&net->pcpu_recv_comp_smp_call.call_data) < 0) {
 						_NEn(recv_completion_intr_t2, net, "smp_call_function_single_async failed");
 						BUG_ON(atomic_xchg(&net->pcpu_recv_comp_smp_call.call_pending, 0) != 1);
 					} else {
 						/* NOTE: We do not dec the ref count until the IPI runs so it does not get destroyed under out feet */
-						nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 						goto out;
 					}
 				}
@@ -2470,21 +2233,8 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 		nvmeibc_channel_spin_lock_irqsave(ioch, &flags);
 		if (net->rcq_kthread)
 			intr_process_recv_cq_(net);
-		else {
-			enum req_notify_state req_notify_state;
-			int rv, n_iter = 0;
-			/* We have no offload thread, so no choice but to keep polling until notify works or we get an error */
-			do {
-				rv = process_recv_cq_(net, REQ_NOTIFY_TRUE, &req_notify_state);
-				if (rv < 0 || req_notify_state == REQ_NOTIFY_STATE_NOTIFY_OK)
-					break;
-				if (++n_iter > nvmeibc_max_notify_cq_iterations) {
-					_NEn_dmesg(err_recv_completion_intr, net, "Failed to arm recv cq after @INT iterations, disconnecting", n_iter);
-					nvmeibc_ib_net_disconnect(net);
-					break;
-				}
-			} while (true);
-		}
+		else
+			process_recv_cq_(net, REQ_NOTIFY_TRUE);
 		nvmeibc_channel_spin_unlock_irqrestore(ioch, flags);
 	}
 
@@ -2496,7 +2246,6 @@ static void recv_completion_intr(struct ib_cq *cq, void *net_ptr)
 	}
 
 ref_put:
-	nvmeib_intr_shaper_intr_exit(net->intr_shaper);
 	nvmeib_ref_put(&net->ib_rsrc_ref);
 
 out:
@@ -2505,24 +2254,12 @@ out:
 
 int nvmeibc_ib_net_process_recv_cq(struct nvmeibc_ib_net *net, int n)
 {
-	int rv, n_iter = 0;
+	int rv;
 	__NFIN;
 
 	if (!nvmeibc_use_pcpu_cq) {
-		enum req_notify_state req_notify_state;
 		(void)n; /* TBD */
-		do {
-			rv = process_recv_cq_(net, REQ_NOTIFY_TRUE, &req_notify_state);
-			if (rv < 0 || req_notify_state == REQ_NOTIFY_STATE_NOTIFY_OK)
-				goto out;
-			if (++n_iter > nvmeibc_max_notify_cq_iterations) {
-				_NEn_dmesg(err_nvmeibc_ib_net_process_recv_cq, net, "Failed to arm recv cq after @INT iterations, disconnecting", n_iter);
-				nvmeibc_ib_net_disconnect(net);
-				rv = -EDEADLK;
-				goto out;
-			}
-			cond_resched();
-		} while(true);
+		rv = process_recv_cq_(net, REQ_NOTIFY_TRUE);
 	}
 	else {
 		_NEn(nvmeibc_ib_net_process_recv_cq_e1,
@@ -2532,7 +2269,7 @@ int nvmeibc_ib_net_process_recv_cq(struct nvmeibc_ib_net *net, int n)
 		WARN_ON_ONCE(1);
 		rv = -EINVAL;
 	}
-out:
+
 	__NFOUT;
 	return rv;
 }
@@ -2591,22 +2328,12 @@ static int create_qp_private_cq(struct nvmeibc_ib_net *net,
 	}
 
 	if (params->shared_cq) {
-		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->vector_type, params->ch_index, NULL, &recv_intr);
+		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->ch_index, NULL, &recv_intr);
 		_NTn(trace_0_ib_net_create_qp_shared_cq, net,
 		     "Shared CQ to use dev @DEV_NAME, intr_vect=@INT",
 			P2NV(net->port)->ib_dev->name, recv_intr);
 	} else {
-		int *recv_intr_ptr = &recv_intr;
-		if (params->max_recv_cq == 1) {
-			/* Recv CQ is not used (lock channel):
-				 - Don't ask for a vector or it will screw up the RR algorithm. 
-			 		Just give it vector 0. 
-			*/
-			recv_intr_ptr = NULL;
-			recv_intr = 0;
-		}
-
-		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->vector_type, params->ch_index, &send_intr, recv_intr_ptr);
+		nvmeib_cq_vector_get(P2NV(net->port), net->ioch ? net->ioch->name : "", params->ch_index, &send_intr, &recv_intr);
 		_NTn(trace_0_ib_net_create_qp, net,
 			"CQs to use dev @DEV_NAME, send_intr_vect=@INT, recv_intr_vec=@INT",
 			P2NV(net->port)->ib_dev->name, send_intr, recv_intr);
@@ -2682,14 +2409,11 @@ static int create_qp_private_cq(struct nvmeibc_ib_net *net,
 	net->recv_cq = recv_cq;
 	net->send_cq = send_cq;
 	net->defer_recv_intr_wq = params->defer_recv_intr_wq;
-	net->defer_recv_intr_kwq = params->defer_recv_intr_kwq;
 	net->recv_intr_vec = recv_intr;
 	net->send_intr_vec = send_intr;
 	nvmeibc_channel_spin_unlock_irqrestore(net->ioch, flags);
 	if (net->defer_recv_intr_wq)
 		_NTn(trace_ib_net_create_qp_defer_wq, net, "Using defer_recv_intr_wq pid @K_PID", wq_pid(net->defer_recv_intr_wq));
-	else if (net->defer_recv_intr_kwq)
-		_NTn(trace_ib_net_create_qp_defer_wqx, net, "Using defer_recv_intr_kwq");
 
 	rv = 0;
 	goto out;
@@ -3371,21 +3095,6 @@ void nvmeibc_ib_net_free(struct nvmeibc_ib_net *net)
 		/* in case net was not fully created/enabled */
 		rcq_kthread_stop(net);
 
-		/*
-		 * [NVMESH-8324] Drain any remaining un-polled CQEs immediately
-		 * before destroying the QP. SIW WARNs at siw_destroy_qp()
-		 * (softiwarp/kernel/siw_verbs.c:1371) if scq/rcq qp_ref_cnt is
-		 * non-zero at destroy time. nvmeibc_ib_net_break_qp() already
-		 * drains in its happy path, but if the LAST_WQE wait times out
-		 * or further CQEs are produced after that drain returns, the
-		 * leftover CQEs trip the WARN. Mirrors the server-side fix in
-		 * srv/nvmeibs_net.c::release_work() that drains CQs for the
-		 * QP_DRAINING / QP_RELEASING states right before the QP is
-		 * destroyed.
-		 */
-		 if (net->qp)
-		 	drain_cqs(net);
-
 		if (net->srq_info) {
 			nvmeib_srq_info_put(net->srq_info, net);
 			net->srq_info = NULL;
@@ -3577,13 +3286,8 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 #endif
 
 	if (!nvmeibc_use_pcpu_cq) {
-		if (params->rcq_offload_enb && (params->defer_recv_intr_wq || params->defer_recv_intr_kwq)) {
-			_NT(trace_defer_recv_intr_wq_invalid_params, "Invalid params: mutual exclusive features");
-			rv = -1;
-			goto out;
-		}
-		if (params->defer_recv_intr_wq && params->defer_recv_intr_kwq) {
-			_NT(trace_1_ib_net_nvmeibc_ib_net_alloc, "Invalid params: both defer_recv_intr_wq and defer_recv_intr_kwq set");
+		if (params->rcq_offload_enb && params->defer_recv_intr_wq) {
+			_NT(trace_1_ib_net_nvmeibc_ib_net_alloc, "Invalid params: mutual exclusive features");
 			rv = -1;
 			goto out;
 		}
@@ -3687,23 +3391,17 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 		//memset(&net->rcq_stats, 0, sizeof(net->rcq_stats));
 
 		net->scq_kthread = NULL;
-		net->scq_kwq = NULL;
 		net->scq_poll_mode = NVMEIBC_IB_CQ_INTR;
 		//memset(&net->scq_stats, 0, sizeof(net->scq_stats));
 
 		net->shared_cq = params->shared_cq;
 		net->defer_recv_intr_wq = params->defer_recv_intr_wq;
-		net->defer_recv_intr_kwq = params->defer_recv_intr_kwq;
 		nvmeib_init_state_guard(&net->defer_recv_state,
-							   ((params->defer_recv_intr_wq || params->defer_recv_intr_kwq) ? NVMEIBC_IB_NET_DEFER_RECV_IDLE : NVMEIBC_IB_NET_DEFER_RECV_DISABLED));
+							   (params->defer_recv_intr_wq ? NVMEIBC_IB_NET_DEFER_RECV_IDLE : NVMEIBC_IB_NET_DEFER_RECV_DISABLED));
 	}
 	//TODO: do we use this stats in pcpu-cq mode?
 	memset(&net->rcq_stats, 0, sizeof(net->rcq_stats));
 	memset(&net->scq_stats, 0, sizeof(net->scq_stats));
-
-	WQ_INIT_WORK(&net->defer_recv_work, poll_cq_and_process_work);
-	INIT_WORK(&net->defer_recv_kwork, poll_cq_and_process_kwork);
-	INIT_WORK(&net->scq_kwork, scq_kwork_func);
 
 	/* create rcq, scq, arm intrrupts, create QP and modify its state to INIT */
 	if ((rv = create_qp(net, params)) < 0) {
@@ -3754,12 +3452,7 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 			}
 		}
 
-		if (params->scq_kwq) {
-			/* Use kernel workqueue */
-			net->scq_kwq = params->scq_kwq;
-			net->scq_kthread = NULL;
-		} else if (params->scq_offload_enb) {
-			/* Use kthread */
+		if (params->scq_offload_enb) {
 			if ((rv = scq_kthread_create_(net, params->comp_cpu)) < 0) {
 				_NE(error_1_ib_net_nvmeibc_ib_net_alloc, "Fail to create scq thread");
 				goto err_free_ib;
@@ -3804,6 +3497,8 @@ int nvmeibc_ib_net_alloc(struct nvmeibc_ib_net *net,
 			goto out;
 		}
 	}
+
+	WQ_INIT_WORK(&net->defer_recv_work, poll_cq_and_process_work);
 
 	_NTn(trace_9_ib_net_nvmeibc_ib_net_alloc, net, "allocate - done");
 	goto out;
@@ -3927,7 +3622,6 @@ static int finish_mapping(struct nvmeibc_ib_net *net,
 	if (!rv) {
 		state->npages = 0;
 		state->dma_len = 0;
-		state->last_page_used = 0;
 	}
 
 out:
@@ -3952,9 +3646,8 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 	struct nvmeib_dev *nvdev = P2NV(net->port);
 	dma_addr_t dma_addr = sg_dma_address(sg);
 	unsigned dma_len = sg_dma_len(sg);
-	unsigned offset;
 	unsigned len;
-	int rv = 0;
+	int rv;
 
 	__NFIN;
 	_ND(trace_ib_net_map_sg_entry, "dma_addr=@DMA_ADDR, dma_len=@DMA_LEN", dma_addr, dma_len);
@@ -3985,132 +3678,76 @@ static int map_sg_entry(struct nvmeibc_ib_net *net,
 	}
 
 	/*
-	 * If this is the first sg that will be mapped via FMR or via FR, save
-	 * our position.  We need to know the first unmapped entry, its index,
+	 * Since not all RDMA HW drivers support non-zero page offsets for
+	 * FMR, if we start at an offset into a page, don't merge into the
+	 * current FMR mapping. Finish it out, and use the kernel's MR for
+	 * this sg entry.
+	 */
+	if ((!nvdev->use_fast_reg && (dma_addr & ~nvdev->mr_page_mask)) ||
+	    dma_len > nvdev->mr_max_size) {
+		_ND(trace_3_ib_net_map_sg_entry, "Must leave - dma_len=@DMA_LEN, "
+		   "nvdev->mr_max_size=@MR_MAX_SIZE, dma_addr=@DMA_ADDR, "
+		   "nvdev->use_fast_reg=@USE_FAST_REG",
+			dma_len, nvdev->mr_max_size, dma_addr,
+			nvdev->use_fast_reg ? 'Y' : 'N');
+		if ((rv = finish_mapping(net, state, key, okey))) {
+			_NT(trace_4_ib_net_map_sg_entry, "Finish mapping failed - @RV", rv);
+			goto out;
+		}
+		WARN_ON(!state->allow_dma_key);
+
+		map_desc(state, dma_addr, dma_len, key, okey);
+		map_update_start(state, NULL, 0, 0);
+		goto out;
+	}
+
+	/* If this is the first sg that will be mapped via FMR or via FR, save
+	 * our position. We need to know the first unmapped entry, its index,
 	 * and the first unmapped address within that entry to be able to
 	 * restart mapping after an error.
 	 */
 	if (!state->unmapped_sg) {
-		_ND(trace_3_ib_net_map_sg_entry, "state->unmapped_sg is true");
+		_ND(trace_5_ib_net_map_sg_entry, "state->unmapped_sg is true");
 		map_update_start(state, sg, sg_index, dma_addr);
 	}
 
-	/*
-	 * Decide whether this sg entry can extend the MR we're currently
-	 * building. An FR/FMR MR is a list of physical page slots, with
-	 * a possible offset into pages[0] and a possibly-partial last
-	 * page; middle pages must be fully consumed (page_size bytes
-	 * each). So we can append iff one of:
-	 *
-	 *   1. The new dma_addr continues the last consumed byte
-	 *      (same page slot, or seamless physical continuation that
-	 *      lands at the page boundary).
-	 *
-	 *   2. The new dma_addr is at offset 0 of a fresh page, AND the
-	 *      previous page slot is fully consumed, AND we have room
-	 *      for another slot (npages < max_pages_per_mr).
-	 *
-	 * Anything else (mid-page jump to a physically non-adjacent
-	 * address, or a new partial-start page while the previous slot
-	 * isn't full) requires a split.
-	 *
-	 * We track the physical end via state->pages[npages-1] +
-	 * last_page_used. Using state->unmapped_addr + state->dma_len
-	 * here would be wrong: that's a *linear* projection that
-	 * assumes all pages in the MR are virtually contiguous, which
-	 * is not true when sg entries come from discontiguous physical
-	 * pages (e.g. SIW, where dma_map_sg is a no-op stub and the
-	 * block layer's 4K-chunked sg list reaches us unchanged).
-	 *
-	 * map_update_start() sets unmapped_sg/unmapped_addr.
-	 * finish_mapping() resets npages/dma_len/last_page_used to 0.
-	 */
-	if (state->npages) {
-		dma_addr_t last_phys_end =
-		    state->pages[state->npages - 1] + state->last_page_used;
-		bool can_append;
-
-		if (dma_addr == last_phys_end) {
-			can_append = true;
-		} else if ((dma_addr & ~nvdev->mr_page_mask) == 0 &&
-			   state->last_page_used == nvdev->mr_page_size &&
-			   state->npages < nvdev->max_pages_per_mr) {
-			can_append = true;
-		} else {
-			can_append = false;
-		}
-
-		if (!can_append) {
-			_ND(trace_4_ib_net_map_sg_entry, "Finish entry - "
-			    "addr=@DMA_ADDR len=@DMA_LEN dma_addr=@DMA_ADDR",
-			    state->unmapped_addr, state->dma_len, dma_addr);
-			if ((rv = finish_mapping(net, state, key, okey))) {
-				_NT(trace_5_ib_net_map_sg_entry,
-				    "Finish mapping failed - @RV", rv);
-				goto out;
-			}
-			map_update_start(state, sg, sg_index, dma_addr);
-		}
-	}
-
 	while (dma_len) {
-		offset = dma_addr & ~nvdev->mr_page_mask;
+		/* we check the offset and can get into two scenarios:
+		   1. this is not the first page so we need to finish the current
+		      registration and start a new one
+		   2. this is the first page so we just marked it as being the first
+		*/
+		unsigned offset = dma_addr & ~nvdev->mr_page_mask;
 		_ND(trace_6_ib_net_map_sg_entry, "offset=@OFFSET_INT", offset);
-
-		/*
-		 * Since not all RDMA HW drivers support non-zero page offsets
-		 * for FMR, if we start at an offset into a new page, bail and
-		 * use the kernel's MR for this sg entry.
-		 */
-		if (!nvdev->use_fast_reg && offset && !state->npages) {
-			_ND(trace_7_ib_net_map_sg_entry, "Must leave - "
-			    "dma_addr=@DMA_ADDR offset=@OFFSET",
-			    dma_addr, offset);
+		if (state->npages == nvdev->max_pages_per_mr || offset != 0) {
 			if ((rv = finish_mapping(net, state, key, okey))) {
-				_NT(trace_8_ib_net_map_sg_entry,
-				    "Finish mapping failed - @RV", rv);
-				goto out;
-			}
-			WARN_ON(!state->allow_dma_key);
-
-			map_desc(state, dma_addr, dma_len, key, okey);
-			map_update_start(state, NULL, 0, 0);
-			goto out;
-		}
-
-		/* No offset, check that a new page can be added. */
-		if (!offset && state->npages == nvdev->max_pages_per_mr) {
-			_ND(trace_9_ib_net_map_sg_entry, "Start page - "
-				"dma_addr=@DMA_ADDR len=@DMA_LEN",
-				dma_addr, dma_len);
-			if ((rv = finish_mapping(net, state, key, okey))) {
-				_NT(trace_10_ib_net_map_sg_entry,
-				    "Finish mapping failed - @RV", rv);
+				_NT(trace_7_ib_net_map_sg_entry, "Finish mapping failed - @RV", rv);
 				goto out;
 			}
 			map_update_start(state, sg, sg_index, dma_addr);
 		}
+
+		len = min_t(unsigned int, dma_len, nvdev->mr_page_size - offset);
 
 		if (!state->npages)
 			state->base_dma_addr = dma_addr;
-		{
-			bool pushed_page = !state->npages || !offset;
-
-			if (pushed_page)
-				state->pages[state->npages++] =
-				    dma_addr & nvdev->mr_page_mask;
-
-			len = min_t(unsigned, dma_len,
-				    nvdev->mr_page_size - offset);
-			state->dma_len += len;
-			if (pushed_page)
-				state->last_page_used = offset + len;
-			else
-				state->last_page_used += len;
-		}
+		state->pages[state->npages++] = dma_addr & nvdev->mr_page_mask;
+		state->dma_len += len;
 		dma_addr += len;
 		dma_len -= len;
 	}
+
+	/*
+	 * Iff the last entry of the MR did not end on a page boundary we
+	 * must close it and start a new one.  If the last entry ends on
+	 * page boundary it is possible that if the next entry starts on a page
+	 * bounday we combine the two and save WQE. And this is real latency
+	 * boost.
+	 */
+	rv = 0;
+	if ((dma_addr & ~nvdev->mr_page_mask) != 0)
+		if (!(rv = finish_mapping(net, state, key, okey)))
+			map_update_start(state, NULL, 0, 0);
 
 out:
 	__NFOUT;
@@ -4985,30 +4622,23 @@ done:
 }
 #endif /* NVMEIBC_READ_POISON_BB */
 
-void nvmeibc_ib_net_complete_iocmd_sg_reuse(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int orig_sgcount, bool was_reuse)
+void nvmeibc_ib_net_complete_iocmd_sg(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req)
 {
 	struct nvmeibc_block_io_req *bcmd = &req->bcmd->reqs[0];
 
 	__NFIN;
-	if (orig_sgcount && bcmd->ndb->table.sgl) {
-		if (req->sgcount) {
-			/* JH IOMMU: req->dma_dir is set to DMA_FROM_DEVICE for Read Ops, DMA_TO_DEVICE for Write Ops */
-			ib_dma_unmap_sg(P2IB(net->port), bcmd->ndb->table.sgl,
-				bcmd->ndb->table.nents, req->dma_dir);
-			req->sgcount = 0;
-		}
-	}
-	else if (bcmd->op == NVMEIB_BLOCK_IO_OP_MD_READ ||
-		bcmd->op == NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR) 
-	{
+	if (req->sgcount && bcmd->ndb->table.sgl) {
+		/* JH IOMMU: req->dma_dir is set to DMA_FROM_DEVICE for Read Ops, DMA_TO_DEVICE for Write Ops */
+		ib_dma_unmap_sg(P2IB(net->port), bcmd->ndb->table.sgl,
+			bcmd->ndb->table.nents, req->dma_dir);
+		req->sgcount = 0;
+	} else if (bcmd->op == NVMEIB_BLOCK_IO_OP_MD_READ ||
+			bcmd->op == NVMEIB_BLOCK_IO_OP_MD_RD_MOD_WR) {
 		/* ops which SG's (if any), was not ib-dma-mapped */
-	}
-	else if (!(nvmeib_block_io_op_is_write(bcmd->op) && was_reuse)) 
-	{
+	} else if (!nvmeib_block_io_op_is_write(bcmd->op) || !req->reused_bb) {
 		_NE(error_ib_net_nvmeibc_ib_net_complete_iocmd_sg,
-			"Invalid I/O command: NULL S/G (req=@REQ, op=@BLOCK_IO_OP, reused_bb=@BOOL_YN, was_reuse=@BOOL_YN)", 
-			req, bcmd->op, req->reused_bb, was_reuse);
+			"Invalid I/O command: NULL S/G (req=@REQ, op=@BLOCK_IO_OP)", req, bcmd->op);
 	}
 
 	/* if we have mapped MD unmapped it here */
@@ -5019,12 +4649,8 @@ void nvmeibc_ib_net_complete_iocmd_sg_reuse(struct nvmeibc_ib_net *net,
 	__NFOUT;
 }
 
-static int nvmeibc_ib_io_channel_get_rsc_id_from_opaque_pointer(
-    struct nvmeibc_channel *ch)
-{
-	/* RDDA removed - stubbed */
-	return -1;
-}
+int nvmeibc_ib_io_channel_get_rsc_id_from_opaque_pointer(
+    struct nvmeibc_channel *ch);
 
 #ifdef DBGDI_REMOVED_IN_PRODUCTION
 	#define dp_dbgdi_add_info_core_post_with_magic(...)
@@ -5142,8 +4768,8 @@ void nvmeibc_ib_net_complete_iocmd_block(struct nvmeibc_ib_net *net,
 	__NFOUT;
 }
 
-void nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code, int orig_sgcount, bool was_reuse)
+void nvmeibc_ib_net_unmap_and_unlink_iocmd(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, int comp_code)
 {
 	struct nvmeibc_channel *ioch = net->ioch;
 	struct nvmeibc_disk_io_command *bcmd;
@@ -5154,7 +4780,7 @@ void nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(struct nvmeibc_ib_net *net,
 	   block's completion handler so that if block reruse
 	   these addreeses for a new io-req, we won't endup
 	   unmapping what we've just mapped for the new io-req */
-	nvmeibc_ib_net_complete_iocmd_sg_reuse(net, req, orig_sgcount, was_reuse);
+	nvmeibc_ib_net_complete_iocmd_sg(net, req);
 
 	nvmeibc_ib_net_poison_verify(net, req, &comp_code);
 	dp_dbgdi_add_info_core_post_with_magic(net, req, comp_code);
@@ -5175,7 +4801,7 @@ void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, struct nvme
 	struct nvmeibc_disk_io_command *bcmd = disk_to_block(dcmd);
 	//logic we've skipped @ nvmeibc_ib_net_complete_iocmd
 	if (bcmd->comp.comp_code == 0) {
-		ktime_t end_ts = ktime_get();
+		ktime_t end_ts = nvmeib_public_ktime_get();
 		if (ktime_after(end_ts, bcmd->disk_cmd.start_ts)) {
 			u64 latency = ktime_to_ns(ktime_sub(end_ts, bcmd->disk_cmd.start_ts));
 		
@@ -5215,15 +4841,15 @@ static void nvmeibc_ib_net_complete_bcmd_work(struct workqe_struct *work)
 			NVMEIB_NOISE_CTRS_IO_COMPLETE_CB_PCPU_WQ);
 }
 
-void nvmeibc_ib_net_complete_iocmd_reuse(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code, int orig_sgcount, bool was_reuse)
+void nvmeibc_ib_net_complete_iocmd(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, int comp_code)
 {
 	struct nvmeibc_disk_io_command *bcmd = req->bcmd;
 	const struct nvmeib_cpu_mask cpu_mask = req->bcmd->reqs[0].cpu_mask_info->mask;
 	static unsigned int pcpu_cntr = 0;
 
 	nvmeibc_in_net_warn_on_remote_cmd_wip(net, comp_code);
-	nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(net, req, comp_code, orig_sgcount, was_reuse);
+	nvmeibc_ib_net_unmap_and_unlink_iocmd(net, req, comp_code);
 
 	if (NVMEIBC_DISK_SHOULD_DEFER_TO_PCPU_WQ(nvmeibc_ib_net_complete_iocmd_use_pcpu_wq && \
 		!NVMEIBC_DISK_SAFE_TEST_CURRENT_CPU_IN_BITMAP(&cpu_mask), cpu_mask)) {
@@ -6031,43 +5657,18 @@ static void process_per_dev_cq(struct ib_wc *wc, void *ctx)
 
 int nvmeibc_ib_net_poll_cqs(struct nvmeibc_ib_net *net, bool notify)
 {
-	int n = 0, n_iter = 0;
+	int n = 0;
 	int rv;
-	bool continue_polling;
 
-	do {
-		if ((rv = polling_process_recv_cq_(net, notify, &continue_polling, NULL)) < 0)
-			goto out;
-		n += rv;
-		if (continue_polling) {
-			if (++n_iter > nvmeibc_max_notify_cq_iterations) {
-				_NEn_dmesg(err_nvmeibc_ib_net_poll_cqs, net, "Failed to arm recv cq after @INT iterations, disconnecting", n_iter);
-				nvmeibc_ib_net_disconnect(net);
-				rv = -EDEADLK;
-				goto out;
-			}
-			cond_resched();
-			continue;
-		}
-	} while (continue_polling);
+	if ((rv = polling_process_recv_cq_(net, notify ? REQ_NOTIFY_TRUE : REQ_NOTIFY_FALSE) < 0))
+		goto out;
+
+	n += rv;
 
 	if (!net->shared_cq) {
-		n_iter = 0;
-		do {
-			if ((rv = polling_process_send_cq_(net, notify, &continue_polling, NULL)) < 0)
-				goto out;
-			n += rv;
-
-			if (continue_polling) {
-				if (++n_iter > nvmeibc_max_notify_cq_iterations) {
-					_NEn_dmesg(err_2_nvmeibc_ib_net_poll_cqs, net, "Failed to arm send cq after @INT iterations, disconnecting", n_iter);
-					nvmeibc_ib_net_disconnect(net);
-					rv = -EDEADLK;
-					goto out;
-				}
-				cond_resched();
-			}
-		} while (continue_polling);
+		if ((rv = polling_process_send_cq_(net, notify ? REQ_NOTIFY_TRUE : REQ_NOTIFY_FALSE) < 0))
+			goto out;
+		n += rv;
 	}
 
 	rv = n;

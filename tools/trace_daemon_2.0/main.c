@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -25,11 +20,13 @@
 #define LIST_CHANNELS_PROC "/proc/nvmeib/tracer/chlist"
 #define MMAP_PROC "/proc/nvmeib/tracer/mmap"
 
+#define MAX_FILENAME 1024
+#define MAX_FILENAME_STR "1024"
 #define MAX_TRACE_CHANNELS 100
 #define TRACE_CHANNELS_READ_BUF_SIZE 4096
 #define MAX_TRACE_NAME 100
 #define PING_INTERVAL 3000000
-#include "../../common/nvmeib_macro_magic.h"
+#define MAX_CGROUP_NAME_STR "120"
 
 #define GLOBAL_CONFIG_FILE "/etc/nvmesh/nvmesh.conf"
 #define LOCAL_CONFIG_FILE ".tracedaemon.conf"
@@ -72,7 +69,7 @@ void reread_config(const char* config_file)
 		int _data;
 		char _channel[MAX_FILENAME];
 		char _logs_path[MAX_FILENAME];
-		char _loggers_cgroup[MAX_CGROUP_NAME_SIZE];
+		char _loggers_cgroup[MAX_FILENAME];
 
 		/*For simplicity to be able to use scanf, replace = with space*/
 		if(strchr(line, '='))
@@ -104,28 +101,28 @@ void reread_config(const char* config_file)
 			trace_cfg.compress = (_data ? 1 : 0);
 			continue;
 		}
-		if(sscanf(line, "TRACE_BUFS_PER_LOG_%" STRINGIFY(MAX_FILENAME_STRLEN) "s \"%d\"", _channel, &_data) == 2 ||
-			sscanf(line, "TRACE_BUFS_PER_LOG_%" STRINGIFY(MAX_FILENAME_STRLEN) "s=\"%d\"", _channel, &_data) == 2)
+		if(sscanf(line, "TRACE_BUFS_PER_LOG_%" MAX_FILENAME_STR "s \"%d\"", _channel, &_data) == 2 ||
+			sscanf(line, "TRACE_BUFS_PER_LOG_%" MAX_FILENAME_STR "s=\"%d\"", _channel, &_data) == 2)
 		{
 			_info("TRACE_BUFS_PER_LOG_%s=\"%d\"", _channel, _data);
 			get_trace_channel_cfg(&trace_cfg, _channel, 1)->buf_per_log = _data;
 			continue;
 		}
-		if(sscanf(line, "TRACE_MAX_LOGS_%" STRINGIFY(MAX_FILENAME_STRLEN) "s \"%d\"", _channel, &_data) == 2 ||
-			sscanf(line, "TRACE_MAX_LOGS_%" STRINGIFY(MAX_FILENAME_STRLEN) "s=\"%d\"", _channel, &_data) == 2)
+		if(sscanf(line, "TRACE_MAX_LOGS_%" MAX_FILENAME_STR "s \"%d\"", _channel, &_data) == 2 ||
+			sscanf(line, "TRACE_MAX_LOGS_%" MAX_FILENAME_STR "s=\"%d\"", _channel, &_data) == 2)
 		{
 			_info("TRACE_MAX_LOGS_%s=\"%d\"", _channel, _data);
 			get_trace_channel_cfg(&trace_cfg, _channel, 1)->max_logs = _data;
 			continue;
 		}
-		if(sscanf(line, "TRACE_LOGS_PATH \"%" STRINGIFY(MAX_FILENAME_STRLEN) "[^\"]\"", _logs_path) == 1 ||
-			sscanf(line, "TRACE_LOGS_PATH=\"%" STRINGIFY(MAX_FILENAME_STRLEN) "[^\"]\"", _logs_path) == 1)
+		if(sscanf(line, "TRACE_LOGS_PATH \"%" MAX_FILENAME_STR "[^\"]\"", _logs_path) == 1 ||
+			sscanf(line, "TRACE_LOGS_PATH=\"%" MAX_FILENAME_STR "[^\"]\"", _logs_path) == 1)
 		{
 			_info("TRACE_LOGS_PATH=\"%s\"", _logs_path);
 			strncpy(trace_cfg.logs_path, _logs_path, sizeof(trace_cfg.logs_path));
 			continue;
 		}
-		if(sscanf(line, "LOGGERS_CGROUP \"%" STRINGIFY(MAX_CGROUP_STRLEN) "[^\"]\"", _loggers_cgroup) == 1)
+		if(sscanf(line, "LOGGERS_CGROUP \"%" MAX_CGROUP_NAME_STR "[^\"]\"", _loggers_cgroup) == 1)
 		{
 			_info("LOGGERS_CGROUP=\"%s\"", _loggers_cgroup);
 			strncpy(trace_cfg.cgroup, _loggers_cgroup, sizeof(trace_cfg.cgroup));

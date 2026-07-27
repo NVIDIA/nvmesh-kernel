@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_CLI_SCRIPTS_SIMU_H
 #define NVMEIBC_CLI_SCRIPTS_SIMU_H
 /* Implementation of various client side cli scripts (attach/detach/cli ioctls): */

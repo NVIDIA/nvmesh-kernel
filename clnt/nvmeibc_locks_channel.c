@@ -1,11 +1,5 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "nvmeibc_locks_channel.h"
-#include "nvmeib.h"
 #include "nvmeibc_disk.h"
 #include "nvmeibc_defs.h"
 #include "nvmeibc_ib_admin_channel.h"
@@ -30,103 +24,64 @@
 
 static unsigned int nvmeibc_max_lock_channels = 5; /* backword-compat */
 module_param_named(max_lock_channels, nvmeibc_max_lock_channels, uint, 0644);
-MODULE_PARM_DESC(max_lock_channels, "The maximum number of lock channels for non-TCP transports per disk.");
+MODULE_PARM_DESC(max_lock_channels, "max lock channels - primary plus n-1 secondary channels");
 
 static unsigned int nvmeibc_max_lock_channels_tcp = NVMEIB_MAX_LOCK_TCP_CHANNELS; /* backword-compat */
 module_param_named(max_lock_channels_tcp, nvmeibc_max_lock_channels_tcp, uint, 0644);
-MODULE_PARM_DESC(max_lock_channels_tcp, "The maximum number of lock channels for TCP transports per disk.");
+MODULE_PARM_DESC(max_lock_channels_tcp, "max lock channels for TCP - primary plus n-1 secondary channels");
 
 static int nvmeibc_lock_channel_choosing_method = LOCK_CHANNEL_CHOOSING_METHOD_LRU;
 module_param_named(lock_ch_get_method, nvmeibc_lock_channel_choosing_method, int, 0644);
-MODULE_PARM_DESC(lock_ch_get_method, "Determines the method for choosing the lock channel for RDMA communication. Possible values: "
-									 "0 = LRU - tie break by sharding, "
-									 "1 = BY_CPU, "
-									 "2 = SHARDING by destination address");
+MODULE_PARM_DESC(lock_ch_get_method, "choose the lock channel based on, Possible values:"
+									 "0) LRU - Tie break by sharding, "
+									 "1) BY_CPU, "
+									 "2) SHARDING by destation address");
 
 static int nvmeibc_lock_channel_choosing_method_tcp = LOCK_CHANNEL_CHOOSING_METHOD_BY_CPU;
 module_param_named(lock_ch_get_method_tcp, nvmeibc_lock_channel_choosing_method_tcp, int, 0644);
-MODULE_PARM_DESC(lock_ch_get_method_tcp, "Determines the method for choosing the lock channel for TCP communication, same values as for RDMA, see above.");
+MODULE_PARM_DESC(lock_ch_get_method_tcp, "choose the lock channel based on (TCP), Possible values:"
+									 "0) LRU - Tie break by sharding, "
+									 "1) BY_CPU, "
+									 "2) SHARDING by destation address");
 
 static bool nvmeibc_lock_ch_scq_offload_thread = true;
 module_param_named(lock_ch_scq_offload_thread, nvmeibc_lock_ch_scq_offload_thread, bool, 0644);
-MODULE_PARM_DESC(lock_ch_scq_offload_thread, "Use a thread for offload processing for RDMA shared completion queue handling.");
+MODULE_PARM_DESC(lock_ch_scq_offload_thread, "Use a thread for SCQ offload processing");
 
 static bool nvmeibc_lock_ch_scq_offload_thread_tcp = true;
 module_param_named(lock_ch_scq_offload_thread_tcp, nvmeibc_lock_ch_scq_offload_thread_tcp, bool, 0644);
-MODULE_PARM_DESC(lock_ch_scq_offload_thread_tcp, "Use a thread for offload processing for SIW shared completion queue handling.");
-
-bool nvmeibc_lock_ch_scq_use_kwq = false;
-module_param_named(lock_ch_scq_use_kwq, nvmeibc_lock_ch_scq_use_kwq, bool, 0644);
-MODULE_PARM_DESC(lock_ch_scq_use_kwq, "Determines whether to use kernel workqueue instead of kthread for SCQ offload processing.");
-
-bool nvmeibc_locks_scq_wq_unbound = false;
-module_param_named(locks_scq_wq_unbound, nvmeibc_locks_scq_wq_unbound, bool, 0444);
-MODULE_PARM_DESC(locks_scq_wq_unbound, "Determines whether to use an unbound kernel workqueue for nvmeibc_locks_scq (true) or a bound one (false).");
-
-/* Kernel workqueue for locks channel SCQ operations */
-static struct workqueue_struct *nvmeibc_locks_channel_wq;
-
-int nvmeibc_locks_channel_wq_init(void)
-{
-	NFIN;
-	if (nvmeibc_lock_ch_scq_use_kwq) {
-		unsigned int flags = WQ_SYSFS;
-		if (nvmeibc_locks_scq_wq_unbound)
-			flags |= WQ_UNBOUND;
-		nvmeibc_locks_channel_wq = alloc_workqueue("nvmeibc_locks_scq", flags, 0);
-		if (!nvmeibc_locks_channel_wq) {
-			_NE(error_nvmeibc_locks_channel_wq_init, "Failed to allocate locks channel SCQ workqueue");
-			NFOUT;
-			return -ENOMEM;
-		}
-		_NT(trace_nvmeibc_locks_channel_wq_init, "Created locks channel SCQ workqueue");
-	}
-	NFOUT;
-	return 0;
-}
-
-void nvmeibc_locks_channel_wq_destroy(void)
-{
-	NFIN;
-	if (nvmeibc_locks_channel_wq) {
-		_ND(trace_nvmeibc_locks_channel_wq_destroy, "Destroying locks channel SCQ workqueue");
-		destroy_workqueue(nvmeibc_locks_channel_wq);
-		nvmeibc_locks_channel_wq = NULL;
-	}
-	NFOUT;
-}
-
-struct workqueue_struct *nvmeibc_locks_channel_get_wq(void)
-{
-	return nvmeibc_locks_channel_wq;
-}
-EXPORT_SYMBOL(nvmeibc_locks_channel_get_wq);
+MODULE_PARM_DESC(lock_ch_scq_offload_thread_tcp, "Use a thread for SCQ offload processing (TCP)");
 
 static unsigned int nvmeibc_lock_ch_2nd_ch_pcpu = 0;
 module_param_named(lock_ch_2nd_ch_pcpu, nvmeibc_lock_ch_2nd_ch_pcpu, uint, 0644);
 MODULE_PARM_DESC(lock_ch_2nd_ch_pcpu,
-		 "Enable, disable or set the number of secondary lock channels as per-cpu lock channels. "
-		 "Offline CPUs within the configured CPUs range are not compensated for. "
-		 "Possible values: "
-		 "0 = disabled, "
-		 "1 = use max possible channels (min(num-cpus, 128)), "
-		 "Other value (when lock_ch_pcpu_cpus=\"\") = cpu [0, i) use a per-cpu secondary-channel [0, i). Other cpus share the primary lock channel.");
+		 "Enable/Disable or Set number of secondary lock channels as percpu lock channels; "
+		 "Offline CPUs witnin this configured cpus-range are not compensated for. "
+		 "Possible values:  "
+		 "0 - Disabled, "
+		 "1 - Use max possible channels (min(num-cpus, 128)),"
+		 "Other value (when lock_ch_pcpu_cpus=\"\") -  cpu [0, i) uses per-cpu secondary-channel [0, i). Other cpus share primary channel."
+		);
 
 static bool nvmeibc_lock_ch_2nd_ch_pcpu_lockless = true;
 module_param_named(lock_ch_2nd_ch_pcpu_lockless, nvmeibc_lock_ch_2nd_ch_pcpu_lockless, bool, 0644);
-MODULE_PARM_DESC(lock_ch_2nd_ch_pcpu_lockless, "Determines whether the per-CPU storage-level lock channels are run lockless compared to other threads and CPUs. This reduces contention and increases performance. NOTE: There must be a pcpu channel for all submission cores or it will fallback to the shared channels with locking.");
+MODULE_PARM_DESC(lock_ch_2nd_ch_pcpu_lockless, "Per-CPU Lock Channels are lockless."
+						"This reduces contention and increases performance."
+						"NOTE: There must be a pcpu channel for all submission cores"
+						"or it will fallback to the shared channels with locking");
 
 static char *nvmeibc_lock_ch_pcpu_cpus = NULL;
 module_param_named(lock_ch_pcpu_cpus, nvmeibc_lock_ch_pcpu_cpus, charp, 0644);
-MODULE_PARM_DESC(lock_ch_pcpu_cpus, "A list of CPUs on which to pin the secondary per-cpu lock channels. The format is a hex-mask list where each entry is 32-bits, e.g., 1f,ff for CPUS 0-7, 32-36. If the list is empty, use all cores.");
+MODULE_PARM_DESC(lock_ch_pcpu_cpus, "CPUs for Secondary Lockless Per-CPU Channels as hex-mask list where each entry is 32-bits "
+					" (e.g. 1f,ff for CPUS 0-7, 32-36). NOTE: If empty, use all cores");
 
 static unsigned int nvmeibc_lock_ch_2nd_ch_coremask = 0;
 module_param_named(lock_ch_2nd_ch_coremask, nvmeibc_lock_ch_2nd_ch_coremask, uint, 0644);
-MODULE_PARM_DESC(lock_ch_2nd_ch_coremask, "Enable, disable or set whether to use secondary channels as coremasks channels. "
+MODULE_PARM_DESC(lock_ch_2nd_ch_coremask, "Enable/Disable/Set using secondary channels as coremasks channels"
 					"Possible values: "
 					"0 - Disabled, "
 					"> 0 - Max number of channels per mask to connect,"
-					"All other IOs use primary channel.");
+					"All other IOs use primary channel");
 
 static int handle_locks_message(struct nvmeibc_ib_net *net, struct ib_wc *wc)
 {
@@ -468,7 +423,7 @@ void nvmeibc_locks_channel_free(struct nvmeibc_locks_channel *ch)
 	if (ch) {
 		if (ch->callback_wq) {
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-			destroy_workqueue(ch->callback_wq);
+			nvmeib_public_destroy_workqueue(ch->callback_wq);
 #else
 			wq_destroy(ch->callback_wq);
 #endif
@@ -476,14 +431,14 @@ void nvmeibc_locks_channel_free(struct nvmeibc_locks_channel *ch)
 		}
 
 		if (ch->_2nd_ch_pcpu_wq) {
-			destroy_workqueue(ch->_2nd_ch_pcpu_wq);
+			nvmeib_public_destroy_workqueue(ch->_2nd_ch_pcpu_wq);
 			ch->_2nd_ch_pcpu_wq = NULL;
 		}
 		for (i = 0; i < NVMEIB_N_2ND_LOCK_CHS; i++) {
 			if (ch->_2nd_ch[i]) {
 				if (ch->callback_wq) {
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-					destroy_workqueue(ch->callback_wq);
+					nvmeib_public_destroy_workqueue(ch->callback_wq);
 #else
 					wq_destroy(ch->callback_wq);
 #endif
@@ -570,7 +525,7 @@ static struct nvmeibc_locks_channel *alloc(
 	}
 
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-	if (!(ch->callback_wq = alloc_workqueue("lock_cb_wq", WQ_UNBOUND, 0)))
+	if (!(ch->callback_wq = nvmeib_public_alloc_workqueue("lock_cb_wq", WQ_UNBOUND, 0)))
 #else
 	if (!(ch->callback_wq = wq_create(proc_name_format("C", "WQ", "lock_cb"))))
 #endif
@@ -606,7 +561,7 @@ static struct nvmeibc_locks_channel *alloc(
 			goto out_err;
 		}
 		if (ch->_2nd_ch_pcpu_lockless && 
-			!(ch->_2nd_ch_pcpu_wq = alloc_workqueue("lock_pcpu_wq", 0, 0))) 
+			!(ch->_2nd_ch_pcpu_wq = nvmeib_public_alloc_workqueue("lock_pcpu_wq", 0, 0))) 
 		{
 			_NE(error_3_locks_channel_alloc, "cannot allocate pcpu wq");
 			goto out_err;
@@ -627,11 +582,11 @@ out_err:
 		free_cpumask_var(ch->_2nd_ch_pcpu_mask);
 
 		if (ch->_2nd_ch_pcpu_wq)
-			destroy_workqueue(ch->_2nd_ch_pcpu_wq);
+			nvmeib_public_destroy_workqueue(ch->_2nd_ch_pcpu_wq);
 
 		if (ch->callback_wq) {
 #if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-			destroy_workqueue(ch->callback_wq);
+			nvmeib_public_destroy_workqueue(ch->callback_wq);
 #else
 			wq_destroy(ch->callback_wq);
 #endif
@@ -677,7 +632,7 @@ out:
 static int try_connect(struct nvmeibc_locks_channel *ch,
 	struct nvmeibc_admin_channel *admin_ch, union ib_gid *dgid,
 	struct nvmeibc_ib_port *lport, int tgt_atomic_ops,
-	unsigned tcp_base_port, unsigned tcp_num_ports);
+	unsigned tcp_base_port);
 
 static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch,
 	int n_idx, u64 cid, int comp_cpu,
@@ -687,32 +642,11 @@ static void free_2nd_ch(struct nvmeibc_locks_channel *ch);
 
 static int try_connect_2nd_ch(struct nvmeibc_locks_channel *ch);
 
-static void compute_max_2nd_lock_chs(struct nvmeibc_locks_channel *ch,
-	struct nvmeibc_admin_channel *admin_ch, struct nvmeibc_ib_port *port)
-{
-	struct nvmeibc_disk *disk = admin_ch->base.disk;
-
-	if (P2NV(port)->dev_type == DT_siw)
-		disk->max_2nd_lock_chs = min3((int)nvmeibc_max_lock_channels_tcp,
-						NVMEIB_DFLT_MAX_CPUS,
-						disk->tgt_num_cpus) - 1;
-	else
-		disk->max_2nd_lock_chs = min3((int)nvmeibc_max_lock_channels,
-						NVMEIB_DFLT_MAX_CPUS,
-						disk->tgt_num_cpus) - 1;
-
-	if (ch->_2nd_ch_pcpu) {
-		int max_pcpu_cpus = min_t(int, num_online_cpus(), NVMEIB_DFLT_MAX_CPUS);
-		disk->max_2nd_lock_chs = ch->_2nd_ch_pcpu == 1 ?
-			max_pcpu_cpus : min_t(int, max_pcpu_cpus, ch->_2nd_ch_pcpu - 1);
-	}
-}
-
 static struct nvmeibc_locks_channel *try_connect_with_lport(
 	struct nvmeibc_admin_channel *admin_ch,
 	struct nvmeibc_local_nic_port *lport, union ib_gid *dgid, int max_tgt_atomic_ops,
 	enum rdma_link_layer dest_link_layer, enum rdma_transport_type dest_transport_type, int rgid_idx, int lnic_idx,
-	unsigned tcp_base_port, unsigned tcp_num_ports)
+	unsigned tcp_base_port)
 {
 	int rv = -ENODEV;
 	struct nvmeibc_locks_channel *locks_channel = NULL;
@@ -727,14 +661,14 @@ static struct nvmeibc_locks_channel *try_connect_with_lport(
 		goto out;
 	}
 	if (lport->ib_port->layer != dest_link_layer) {
-		_NT(trace_locks_channel_try_connect_with_lport_transport_miss,
+		_NT(trace_locks_channel_try_connect_with_dev_transport_miss,
 			"Skip, connecting to dest @GID_IPV6 with transport_type @TRANSPORT_TYPE from lport @GID_IPV6 with transport_type @TRANSPORT_TYPE",
 			dgid, dest_transport_type, &lport->ib_port->gid.gid, lport->ib_port->transport_type);
 		goto out;
 	}
 	if (disk->access_local &&
 		memcmp(&lport->ib_port->gid.gid, dgid, sizeof(*dgid))) {
-		_NT(trace_0_locks_channel_try_connect_with_lport,
+		_NT(trace_0_locks_channel_try_connect_with_dev,
 			"Skip, loopback but l=@GID_IPV6 vs r=@GID_IPV6",
 			&lport->ib_port->gid.gid, dgid);
 		goto out;
@@ -743,11 +677,10 @@ static struct nvmeibc_locks_channel *try_connect_with_lport(
 	if ((locks_channel = alloc(admin_ch)) == NULL) {
 		goto out;
 	}
-	compute_max_2nd_lock_chs(locks_channel, admin_ch, lport->ib_port);
 
 	rv = try_connect(
 		locks_channel, admin_ch, dgid, lport->ib_port,
-		max_tgt_atomic_ops, tcp_base_port, tcp_num_ports);
+		max_tgt_atomic_ops, tcp_base_port);
 	if (rv) {
 		_NT(trace_locks_channel_try_connect_with_dev, "Could not connect lock channel");
 		nvmeibc_locks_channel_free(locks_channel);
@@ -763,7 +696,7 @@ static struct nvmeibc_locks_channel *try_connect_with_dev(
 	struct nvmeibc_admin_channel *admin_ch,
 	struct nvmeibc_local_nic *ln, union ib_gid *dgid, int max_tgt_atomic_ops,
 	enum rdma_link_layer dest_link_layer, enum rdma_transport_type dest_transport_type, int rgid_idx, int lnic_idx,
-	unsigned tcp_base_port, unsigned tcp_num_ports)
+	unsigned tcp_base_port)
 {
 	struct nvmeibc_local_nic_port *lport;
 	int rv = -ENODEV;
@@ -778,7 +711,7 @@ static struct nvmeibc_locks_channel *try_connect_with_dev(
 		_NT(trace_locks_channel_try_connect_with_dev_base,
 			"[@INT32_02][@INT32_02][@INT32_02] Try connect l=@GID_IPV6 --> r=@GID_IPV6",
 			rgid_idx, lnic_idx, i, &lport->ib_port->gid.gid, dgid);
-		if ((locks_channel = try_connect_with_lport(admin_ch, lport, dgid, max_tgt_atomic_ops, dest_link_layer, dest_transport_type, rgid_idx, lnic_idx, tcp_base_port, tcp_num_ports))) {
+		if ((locks_channel = try_connect_with_lport(admin_ch, lport, dgid, max_tgt_atomic_ops, dest_link_layer, dest_transport_type, rgid_idx, lnic_idx, tcp_base_port))) {
 			_NT(connect_lchannel_done, "Managed to connect lock channel!");
 			break;
 		}
@@ -932,12 +865,20 @@ static struct nvmeibc_locks_channel *connect_2nd_lock_chs(struct nvmeibc_locks_c
 
 	/* Now try and connect secondary lock channels */
 	if (P2NV(ch->net.port)->dev_type == DT_siw) {
+		admin_ch->base.disk->max_2nd_lock_chs = min3((int)nvmeibc_max_lock_channels_tcp,
+								NVMEIB_DFLT_MAX_CPUS,
+								admin_ch->base.disk->tgt_num_cpus) - 1;
 		ch->method = nvmeibc_lock_channel_choosing_method_tcp;
 	} else {
+		admin_ch->base.disk->max_2nd_lock_chs = min3((int)nvmeibc_max_lock_channels,
+								NVMEIB_DFLT_MAX_CPUS,
+								admin_ch->base.disk->tgt_num_cpus) - 1;
 		ch->method = nvmeibc_lock_channel_choosing_method;
 	}
 
 	if (ch->_2nd_ch_pcpu) {
+		int max_pcpu_cpus = min_t(int, num_online_cpus(), NVMEIB_DFLT_MAX_CPUS);
+		admin_ch->base.disk->max_2nd_lock_chs = ch->_2nd_ch_pcpu == 1 ? max_pcpu_cpus : min_t(int, max_pcpu_cpus, ch->_2nd_ch_pcpu - 1);
 		if (ch->_2nd_ch_pcpu_mask_str) {
 			if (cpumask_parse(ch->_2nd_ch_pcpu_mask_str, ch->_2nd_ch_pcpu_mask)) {
 				_NE_dmesg(error_connect_locks_inv_pcpu_mask, "Invalid cpumask for nr_pcpu_ch_ll_cpus: @MASK_STRING",
@@ -1081,7 +1022,7 @@ struct nvmeibc_locks_channel *nvmeibc_locks_channel_connect_locks(
 	list_for_each_entry(ln, &admin_ch->base.disk->local_nics, link) {
 		if ((ch = try_connect_with_dev(
 			admin_ch, ln, gid, max_tgt_atomic_ops,
-			dest_link_layer, dest_transport_type, rgid_idx, i, tcp_base_port, tcp_num_ports)) != NULL)
+			dest_link_layer, dest_transport_type, rgid_idx, i, tcp_base_port)) != NULL)
 		{
 			break;
 		}
@@ -1114,7 +1055,7 @@ struct nvmeibc_locks_channel *nvmeibc_locks_channel_connect_lock_by_path(
 
 	if ((ch = try_connect_with_lport(
 			admin_ch, lport, gid, max_tgt_atomic_ops,
-			dest_link_layer, dest_transport_type, rgid_idx, 0, tcp_base_port, tcp_num_ports)) == NULL) {
+			dest_link_layer, dest_transport_type, rgid_idx, 0, tcp_base_port)) == NULL) {
 		_NT(nvmeibc_locks_channel_connect_lock_by_path_failed, "could not find any port to connect to target gid @GID_IPV6", gid);
 		goto out;
 	}
@@ -1470,7 +1411,7 @@ out:
 static int try_connect(struct nvmeibc_locks_channel *ch,
 	struct nvmeibc_admin_channel *admin_ch, union ib_gid *dgid,
 	struct nvmeibc_ib_port *lport, int max_tgt_atomic_ops,
-	unsigned tcp_base_port, unsigned tcp_num_ports)
+	unsigned tcp_base_port)
 {
 	int rv = 0, i;
 	struct nvmeibc_lock_opr_in_progress *opr_ip;
@@ -1496,7 +1437,7 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	/* first get the local guid */
 	memcpy(&ch->net.path.sgid.raw, &lport->gid.gid, 16);
 	memcpy(&ch->net.path.dgid.raw, dgid, 16);
-	ch->net.path.service_id = cpu_to_be64(NVMEIB_SERVICE_ID);
+	ch->net.path.service_id = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID);
 	ch->net.path.pkey = cpu_to_be16(lport->pkey);
 	ch->net.ioch = &ch->base;
 	ch->net.admin_ch = admin_ch;
@@ -1512,24 +1453,17 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	info.src_port = lport->port;
 	if (lport->layer == IB_LINK_LAYER_INFINIBAND) {
 		_ND(trace_2_locks_channel_try_connect, "LOCKS: locks channel is trying to connect via infiniband");
-		info.service_id = NVMEIB_SERVICE_ID;
-		ch->net.service_id = NVMEIB_SERVICE_ID;
+		info.service_id = NVMEIB_EXCELERO_SERVICE_ID;
+		ch->net.service_id = NVMEIB_EXCELERO_SERVICE_ID;
 		info.pkey = lport->pkey;
 		info.service_port = 0;
 		ch->net.service_port = 0;
 	}
 	else {
 		bool is_tcp = lport->transport_type == RDMA_TRANSPORT_IWARP;
-		u16 service_port = NVMEIB_PORT_ID;
-
-		if (is_tcp) {
-			/* Lock channels use ports from the high end of the range (reverse of nordda) to spread target CPU load. */
-			uint offset = (ch->base.disk->create_id * (ch->base.disk->max_2nd_lock_chs + 1)) % tcp_num_ports;
-			service_port = tcp_base_port + (tcp_num_ports - 1 - offset);
-		}
-
+		u16 service_port = (is_tcp ? tcp_base_port : NVMEIB_EXCELERO_PORT_ID);
 		_ND(trace_3_locks_channel_try_connect,
-			"LOCKS locks channel is trying to connect via @STRING_LITERAL port @NVMEIB_PORT_ID",
+			"LOCKS locks channel is trying to connect via @STRING_LITERAL port @NVMEIB_EXCELERO_PORT_ID",
 			is_tcp ? "TCP" : "RoCE", service_port);
 		info.service_id = 0;
 		info.pkey = 0;
@@ -1590,26 +1524,12 @@ static int try_connect(struct nvmeibc_locks_channel *ch,
 	INIT_LIST_HEAD(&ch->in_progress);
 	ch->net.cm_id = NULL;
 	ch->send_enumerator = 0;
-	if (nvmeibc_lock_ch_scq_use_kwq) {
-		/* Use kernel workqueue */
-		params->scq_kwq = nvmeibc_locks_channel_get_wq();
-		params->scq_offload_enb = false;
-		if (!params->scq_kwq) {
-			_NE(error_locks_channel_scq_kwq, "Kernel workqueue not available for SCQ");
-			rv = -ENOMEM;
-			goto out_err;
-		}
-	} else {
-		/* Use kthread */
-		params->scq_kwq = NULL;
-		params->scq_offload_enb =
-			P2NV(lport)->dev_type == DT_siw ?
-				nvmeibc_lock_ch_scq_offload_thread_tcp :
-				nvmeibc_lock_ch_scq_offload_thread;
-	}
+	params->scq_offload_enb =
+		P2NV(lport)->dev_type == DT_siw ?
+			nvmeibc_lock_ch_scq_offload_thread_tcp :
+			nvmeibc_lock_ch_scq_offload_thread;
 	params->ch_index = 0;
 	params->comp_cpu = NVMEIB_CPU_INVALID;
-	params->vector_type = NVMEIB_CQ_VECTOR_GET_TYPE_LOCK;
 
 	if ((rv = nvmeibc_ib_net_alloc(&ch->net, params, &req)) < 0) {
 		_NT(error_1_locks_channel_try_connect, "cannot connect. error @RV",rv);
@@ -1710,7 +1630,7 @@ static void free_2nd_ch(struct nvmeibc_locks_channel *ch)
 {
 	if (ch->callback_wq) {
 		#if NVMEIBC_LOCK_CH_CB_KERNEL_WQ
-		destroy_workqueue(ch->callback_wq);
+		nvmeib_public_destroy_workqueue(ch->callback_wq);
 		#else
 		wq_destroy(ch->callback_wq);
 		#endif
@@ -1789,7 +1709,7 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	/* first get the local guid */
 	net->path.sgid = lport->gid.gid;
 	net->path.dgid = *dgid;
-	net->path.service_id = cpu_to_be64(NVMEIB_SERVICE_ID);
+	net->path.service_id = cpu_to_be64(NVMEIB_EXCELERO_SERVICE_ID);
 	net->path.pkey = cpu_to_be16(lport->pkey);
 	net->ioch = &ch->base;
 	net->admin_ch = primary_ch->net.admin_ch;
@@ -1804,8 +1724,8 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	info.path = &net->path;
 	info.src_port = lport->port;
 	if (lport->layer == IB_LINK_LAYER_INFINIBAND) {
-		info.service_id = NVMEIB_SERVICE_ID;
-		net->service_id = NVMEIB_SERVICE_ID;
+		info.service_id = NVMEIB_EXCELERO_SERVICE_ID;
+		net->service_id = NVMEIB_EXCELERO_SERVICE_ID;
 		info.pkey = lport->pkey;
 		info.service_port = 0;
 		net->service_port = 0;
@@ -1813,13 +1733,7 @@ static int init_2nd_ch(struct nvmeibc_locks_channel *primary_ch, int n_idx,
 	else {
 		info.service_id = 0;
 		info.pkey = 0;
-		if (lport->transport_type == RDMA_TRANSPORT_IWARP) {
-			/* Lock channels use ports from the high end of the range (reverse of nordda) to spread target CPU load. */
-			uint offset = (ch->base.disk->create_id * (ch->base.disk->max_2nd_lock_chs + 1) + ch->base.index) % tcp_num_ports;
-			info.service_port = tcp_base_port + (tcp_num_ports - 1 - offset);
-		} else {
-			info.service_port = NVMEIB_PORT_ID;
-		}
+		info.service_port = lport->transport_type == RDMA_TRANSPORT_IWARP ? tcp_base_port + (ch->base.index % tcp_num_ports) : NVMEIB_EXCELERO_PORT_ID;
 		net->service_id = 0;
 		net->service_port = info.service_port;
 	}

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include <linux/kref.h>
 #include <linux/module.h>
 #include <linux/netlink.h>
@@ -151,11 +146,11 @@ static int __corecomm_add_target_arnic(const char *node_id, const char *gid,
 
 	/* Other values */
 	if (type == CORECOMM_RDMA_IB) {
-		arnic->service_id   = NVMEIB_SERVICE_ID;
+		arnic->service_id   = NVMEIB_EXCELERO_SERVICE_ID;
 		arnic->service_port = 0;
 	} else if (type == CORECOMM_RDMA_ROCE) {
 		arnic->service_id   = 0;
-		arnic->service_port = NVMEIB_PORT_ID;
+		arnic->service_port = NVMEIB_EXCELERO_PORT_ID;
 	} else if (type == CORECOMM_RDMA_IWARP) {
 		arnic->service_id   = 0;
 		arnic->service_port = nvmeib_get_tcp_base_port_id();
@@ -1279,21 +1274,12 @@ NLRPC_SRV_ASYNC(corecomm_pd_free_jrnl_ents_, ctx, (cdisk_handle, cdisk),
 	free_ents_comp->ents = nvmeib_alloc(
 	    &free_ents_comp->ents_ai,
 	    free_ents_comp->num_ents * sizeof(struct nvmeib_free_ents_data), NULL);
-	if (!free_ents_comp->ents) {
-		kfree(op_ctx);
-		return -ENOMEM;
-	}
 	free_ents_comp->ents[0].rng_idx    = jrange;
 	free_ents_comp->ents[0].rng_gen_id = dinfo->disk->jour.rng_gen_id;
 	free_ents_comp->ents[0].ent_idx    = jentry;
 	free_ents_comp->ents[0].ent_md = (struct nvmeib_jrnl_ent_md){jentry_gen_id};
 	free_ents_comp->ents_enc_buf = nvmeib_alloc(&free_ents_comp->ents_enc_ai,
 						    free_ents_comp->num_ents * sizeof(struct wire_free_ents_entry), NULL);
-	if (!free_ents_comp->ents_enc_buf) {
-		nvmeib_release(&free_ents_comp->ents_ai, free_ents_comp->ents, NULL);
-		kfree(op_ctx);
-		return -ENOMEM;
-	}
 	free_ents_comp->ents_enc_buf_sz = free_ents_comp->ents_enc_ai.n << PAGE_SHIFT;
 	free_ents_comp->callback       = corecomm_pd_free_jrnl_ents_cb_;
 
@@ -1913,7 +1899,6 @@ NLRPC_SRV_SYNC(corecomm_alloc_jrnls_, struct corecomm_lbas_set, rsp, ctx,
                (int, n_disks), (struct corecomm_disks_set, disks), (int, txid),
                (struct corecomm_lbas_set, dlbas)) {
 	struct nvmeibc_disk *cdisks[ARRAY_SIZE(disks.disks)];
-	static unsigned long priority = 1;
 	int i;
 	if (n_disks > ARRAY_SIZE(disks.disks)) {
 		printk(KERN_ALERT "Error, not enough space for n_disks=%d\n", n_disks);
@@ -1928,7 +1913,7 @@ NLRPC_SRV_SYNC(corecomm_alloc_jrnls_, struct corecomm_lbas_set, rsp, ctx,
 		cdisks[i] = dinfo->disk;
 	}
 	return nvmeibc_jam_lbas_alloc(n_disks, cdisks, txid, dlbas.lbas, rsp->lbas,
-	                              true, NULL, NULL, jiffies + HZ, priority++, NULL);
+	                              true, NULL, NULL, HZ, NULL);
 }
 
 NLRPC_SRV_SYNC(corecomm_free_jrnls_, int, dummy, ctx, (int, n_disks),

@@ -1,6 +1,3 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-
 # nvmeibc.ko Makefile
 
 # Include common.mk
@@ -14,9 +11,8 @@ ARCH := $(shell uname -m | sed -e s/i.86/x86/ \
                                   -e s/sh[234].*/sh/ -e s/aarch64.*/arm64/ )
 
 ifeq ($(ARCH),x86_64)
-	DP_EC_GF_ASM := block/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.o
-	CFLAGS_REMOVE_block/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.o += -mgeneral-regs-only
-	CFLAGS_block/datapath_ec/nvmeibc_block_dp_ec_gf_avx2.o += -mavx2 -msse4.2
+	DP_EC_GF_ASM := block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o
+	OBJECT_FILES_NON_STANDARD_block/datapath_ec/nvmeibc_block_dp_ec_gf_asm.o := y
 endif
 ifeq ($(ARCH),arm64)
 	# DP_EC_GF_ASM := block/datapath_ec/nvmeibc_block_dp_ec_gf_asm_arm.o
@@ -41,10 +37,10 @@ endif
 obj-m += nvmeibc.o
 nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	nvmeibc_cc_api.o nvmeibc_nvme.o nvmeibc_targets.o nvmeibc_memmgr_metrics.o \
-	nvmeibc_channel.o \
+	nvmeibc_channel.o nvmeibc_ib_io_channel.o \
 	nvmeibc_admin_channel.o nvmeibc_ib_admin_channel.o \
 	nvmeibc_ib_net.o nvmeibc_ib_net_admin.o \
-	nvmeibc_disk.o nvmeibc_disk_locks.o \
+	nvmeibc_ib_net_io.o nvmeibc_disk.o nvmeibc_disk_locks.o \
 	nvmeibc_disk_local_dma_pools.o \
 	nvmeibc_locks_channel.o nvmeibc_toma.o \
 	nvmeibc_ib_nordda_channel.o nvmeibc_ib_net_nordda.o nvmeibc_jam.o \
@@ -55,7 +51,6 @@ nvmeibc-y := nvmeibc_main.o nvmeibc_volume.o nvmeibc_block.o \
 	nvmeibc_memmgr_metrics.o nvmeibc_common.o \
 	module/instance/nvmeibc_cinst.o \
 	block/nvmeibc_topology.o \
-	block/nvmeibc_nvmeiba_kapi.o \
 	block/nvmeibc_block_api_os.o \
 	block/nvmeibc_block_api_conf.o \
 	block/nvmeibc_block_api_nvmeshioctl.o \
@@ -123,6 +118,8 @@ endif
 ccflags-y += -DALLOW_SIMULATED_MD -DTRACE_INCLUDE_FILE=\"nvmeibc_trace.h\"
 ldflags-y += -T $(M)/clnt/nvmeibc.lds
 
+OBJECT_FILES_NON_STANDARD_nvmeibc_block_dp_ec_gf_asm.o := y
+STACKTOOL_nvmeibc_block_dp_ec_gf_asm.o := y
 
 # Compile gen_events and dictionary for binary tracing
 TRACE_MODULE := nvmeibc

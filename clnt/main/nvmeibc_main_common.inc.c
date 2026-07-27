@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "module/instance/nvmeibc_cinst_params.h"
 
 #pragma push_macro("__FILE_LITERAL__")
@@ -172,12 +167,12 @@ int t_main_clnt_globals_create(const struct nvmeibc_cinst_params_main *p)
 
 	// --------------- init ->com
 	/* Backwards compatibility*/
-	if (nvmeibc_cinst_is_first_main_instance(p)) {	// instace 0 uses hostname.           Example: n111.acme.com
+	if (nvmeibc_cinst_is_first_main_instance(p)) {	// instace 0 uses hostname.           Example: n111.excelero.com
 		strlcpy(mg->com.full_name, nvmeib_get_utsname_nodename(), sizeof(mg->com.full_name));
 		// When required add module param here to store MANAGEMENT_SERVERS and MANAGEMENT_PROTOCOL given from nvmeshclient (nvmesh.conf)
 		// mg->com.use_https = nvmeibc_clnt_to_mgmt_use_https;
 		// mg->com.management_cluster = kstrdup(nvmeibc_clnt_to_mgmt_cluster, GFP_KERNEL);
-	} else{				// instace 0 uses hostname.           Example: n111.acme.com_mc9
+	} else{				// instace 0 uses hostname.           Example: n111.excelero.com_mc9
 		snprintf(mg->com.full_name, sizeof(mg->com.full_name), "%.*s_%.*s",
 				 NVMEIB_HOST_NAME_LEN, nvmeib_get_utsname_nodename(),
 				 CINST_NAME_LEN,       mg->proc_dir.root_name);

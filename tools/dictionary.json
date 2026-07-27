@@ -365,11 +365,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 8
+            "%ps": 8
         },
         "__split": true
     },
@@ -377,11 +377,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 8
+            "%ps": 8
         },
         "__split": true
     },
@@ -389,11 +389,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 8
+            "%ps": 8
         },
         "__split": true
     },
@@ -1654,11 +1654,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 57
+            "%ps": 57
         },
         "__split": true
     },
@@ -1680,10 +1680,14 @@
             "%d": 58
         }
     },
-    "@LLD_18B": {
+    "@N_CALLS": {
         "size": 64,
         "type": "s64",
-        "fmt": "%18lld"
+        "fmt": "%18lld",
+        "final": true,
+        "__histogram": {
+            "%18lld": 46
+        }
     },
     "@CALL_FN": {
         "size": "string",
@@ -1790,12 +1794,11 @@
     "@CHAR": {
         "size": 8,
         "type": "char",
-        "fmt": "%c"
-    },
-    "@CHAR_K": {
-        "size": 8,
-        "type": "char",
-        "fmt": "<%c>"
+        "fmt": "%c",
+        "final": true,
+        "__histogram": {
+            "%c": 62
+        }
     },
     "@CHUNK": {
         "size": "string",
@@ -4387,10 +4390,10 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "__histogram": {
-            "%pF": 2
+            "%pS": 2
         }
     },
     "@ENTRY_INT": {
@@ -4815,6 +4818,16 @@
             "%#x": 8
         }
     },
+    "@E_TYPE": {
+        "size": 8,
+        "type": "char",
+        "fmt": "%c",
+        "final": true,
+        "__histogram": {
+            "%c": 46
+        },
+        "__split": true
+    },
     "@E_TYPE_INT": {
         "size": 32,
         "type": "s32",
@@ -5042,27 +5055,33 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "__split": true,
         "__histogram": {
-            "%pF": 4
+            "%pS": 4
         }
     },
     "@FNAME": {
         "size": "string",
         "type": "string",
-        "fmt": "%s"
+        "fmt": "%s",
+        "final": true,
+        "__histogram": {
+            "%-30s": 9,
+            "%s": 39
+        },
+        "__collision": true
     },
     "@FN_FUNC": {
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 4
+            "%ps": 4
         }
     },
     "@FORCE": {
@@ -5278,11 +5297,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 61
+            "%ps": 61
         }
     },
     "@FUNCTION": {
@@ -5299,10 +5318,10 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "__histogram": {
-            "%pF": 3
+            "%pS": 3
         }
     },
     "@F_RV": {
@@ -7260,12 +7279,6 @@
         "fmt": "%d",
         "fmt_func": "fmt_serjio_jentry_state"
     },
-    "@JENTRY_STATE_MASK": {
-        "size": 32,
-        "type": "u32",
-        "fmt": "%x",
-        "fmt_func": "fmt_serjio_jentry_state_mask"
-    },
     "@JGC_SEG_ID_STR": {
         "size": "string",
         "type": "string",
@@ -7563,12 +7576,6 @@
         "__histogram": {
             "%ld": 4
         }
-    },
-    "@KAFKA_OFST": {
-        "size": 64,
-        "type": "long",
-        "fmt": "k_offset[%zu]",
-        "fmt_func": "fmt_kafka_offset"
     },
     "@KERNEL_DEV": {
         "size": 64,
@@ -8251,7 +8258,11 @@
     "@LINE_NO": {
         "size": 32,
         "type": "s32",
-        "fmt": "%4d"
+        "fmt": "%4d",
+        "final": true,
+        "__histogram": {
+            "%4d": 46
+        }
     },
     "@LINK": {
         "size": 64,
@@ -9134,10 +9145,10 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "__histogram": {
-            "%pF": 3
+            "%pS": 3
         }
     },
     "@MASKED_ATOMIC_CAP": {
@@ -11487,7 +11498,7 @@
             "%d": 8
         }
     },
-    "@NVMEIB_PORT_ID": {
+    "@NVMEIB_EXCELERO_PORT_ID": {
         "size": 32,
         "type": "s32",
         "fmt": "%d",
@@ -12054,12 +12065,6 @@
         "fmt": "%d",
         "fmt_func": "fmt_yesno"
     },
-    "@NDU": {
-        "size": 8,
-        "type": "u8",
-        "fmt": "%d",
-        "fmt_func": "fmt_ndu"
-    },
     "@OWNER": {
         "size": "string",
         "type": "string",
@@ -12395,7 +12400,7 @@
     "@PBA": {
         "size": 64,
         "type": "long",
-        "fmt": "0x%zx",
+        "fmt": "%zx",
         "final": true,
         "__histogram": {
             "%zx": 42,
@@ -12418,7 +12423,7 @@
     "@PBA_LONG": {
         "size": 64,
         "type": "long",
-        "fmt": "0x%lx",
+        "fmt": "%lx",
         "final": true,
         "__histogram": {
             "%lx": 14
@@ -12932,32 +12937,32 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 58
+            "%ps": 58
         }
     },
     "@POST_SEND_ATOMIC": {
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "__histogram": {
-            "%pF": 3
+            "%pS": 3
         }
     },
     "@POST_SEND_ATOMIC_FN": {
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 8
+            "%ps": 8
         },
         "__split": true
     },
@@ -13160,11 +13165,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 59
+            "%ps": 59
         }
     },
     "@PRIORITY": {
@@ -16406,7 +16411,7 @@
     "@SOFTWARE_VERSION": {
         "size": 32,
         "type": "s32",
-        "fmt": "0x%x",
+        "fmt": "%x",
         "final": true,
         "__histogram": {
             "%x": 21
@@ -16882,14 +16887,6 @@
             "%d": 3
         }
     },
-    "@CURR_STATE": {
-        "size": 32,
-        "type": "s32",
-        "fmt": "state=%d",
-        "final": true,
-        "__split": true,
-        "__collision": true
-    },
     "@STATE": {
         "size": 32,
         "type": "s32",
@@ -17222,6 +17219,15 @@
             "%d": 62
         }
     },
+    "@SUM_ALLOCATED_SIZE": {
+        "size": 64,
+        "type": "s64",
+        "fmt": "%18lldK",
+        "final": true,
+        "__histogram": {
+            "%18lldK": 46
+        }
+    },
     "@SUM_ALL_PREVENTERS": {
         "size": 32,
         "type": "s32",
@@ -17229,6 +17235,15 @@
         "final": true,
         "__histogram": {
             "%d": 58
+        }
+    },
+    "@SUM_SIZES": {
+        "size": 64,
+        "type": "s64",
+        "fmt": "%18lld",
+        "final": true,
+        "__histogram": {
+            "%18lld": 46
         }
     },
     "@SWAP": {
@@ -19277,10 +19292,10 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "__histogram": {
-            "%pF": 9
+            "%pS": 9
         }
     },
     "@WRITE_IN_PROGRESS": {
@@ -19550,11 +19565,11 @@
         "size": "symbol",
         "type": "symbol",
         "fmt": "%s",
-        "dmesg_fmt": "%pf",
+        "dmesg_fmt": "%ps",
         "final": true,
         "func": true,
         "__histogram": {
-            "%pf": 20
+            "%ps": 20
         }
     },
     "@BUF_LEN": {
@@ -20463,37 +20478,5 @@
         "type": "s32",
         "fmt": "%d",
         "enum": true
-    },
-    "@IOSTATS_NAME" : {
-	    "size": "string",
-	    "type": "string",
-	    "fmt": "%s"
-    },
-    "@IOSTATS_VERB": {
-	    "size": 32,
-	    "type": "s32",
-	    "fmt": "%d",
-	    "fmt_func": "fmt_iostats_verb"
-    },
-    "@IOSTATS_IOPS_COUNT": {
-	    "size": 64,
-	    "type": "u64",
-	    "fmt": "%llu"
-    },
-    "@IOSTATS_IOPS_SIZE": {
-	    "size": 64,
-	    "type": "u64",
-	    "fmt": "%llu"
-    },
-    "@IOSTATS_IOPS_LATENCY": {
-	    "size": 64,
-	    "type": "u64",
-	    "fmt": "%llu"
-    },
-    "@SYMBOL_NAME": {
-	    "size": "string",
-	    "type": "string",
-	    "fmt": "%s",
-        "dmesg_fmt": "%s"
     }
 }

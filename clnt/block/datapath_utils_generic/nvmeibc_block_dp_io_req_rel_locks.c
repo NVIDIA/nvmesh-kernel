@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block_dp_io_req_rel_locks.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "nvmeibc_block_dp_dbg_tools.h"
@@ -18,12 +13,12 @@
 #define __COMPLAIN_LOCK_TIME     12000 /*  12[sec]  , If lock was not acquired for more then X[sec] from last complain, complain to toma */
 unsigned warn_if_lock_took_more_than_n_msec = __SUSPICIONS_LOCK_TIME;
 module_param(warn_if_lock_took_more_than_n_msec, uint, 0644);
-MODULE_PARM_DESC(warn_if_lock_took_more_than_n_msec, "If lock acquisition takes more than this value in milliseconds, issue a warning to the log.");
+MODULE_PARM_DESC(warn_if_lock_took_more_than_n_msec, "If lock acquisition takes more than X[msec], issue warning to log");
 
 #ifdef DEBUG_CONTENDED_LOCKS
 unsigned warn_if_lock_held_more_than_n_msec = __SUSPICIONS_LOCK_TIME / 4;
 module_param(warn_if_lock_held_more_than_n_msec, uint, 0644);
-MODULE_PARM_DESC(warn_if_lock_held_more_than_n_msec, "Defines the time in milli-seconds a lock is held before issuing a warning to the log.");
+MODULE_PARM_DESC(warn_if_lock_held_more_than_n_msec, "If lock held more than X[msec], issue warning to log");
 #endif
 
 /* YR: TODO: should be parameters received via some management system */
@@ -31,7 +26,7 @@ MODULE_PARM_DESC(warn_if_lock_held_more_than_n_msec, "Defines the time in milli-
 #define DEFAULT_RETRY_MULT			  (5000)		/* in microseconds */
 unsigned lock_retry_delay_multiplier = DEFAULT_RETRY_MULT;
 module_param(lock_retry_delay_multiplier, uint, 0644);
-MODULE_PARM_DESC(lock_retry_delay_multiplier, "Lock retry timeout in microseconds when failing to obtain a lock. The retry timeout undergoes exponential backoff.");
+MODULE_PARM_DESC(lock_retry_delay_multiplier, "Quadratic backoff retry with this factor [usec]");
 
 /* Formula : delay_time  = func(retry_count) * multiplier + random
  * note that the code arithmetic is in [usec] but the actual delay is based on
@@ -474,7 +469,7 @@ static bool must_do_full_blkset_sync(const struct nvmeibc_block_command *c) {
 
 bool nvmeibc_debug_ram_binfo = true;	// By default check binfo
 module_param(nvmeibc_debug_ram_binfo, bool, 0644);
-MODULE_PARM_DESC(nvmeibc_debug_ram_binfo, "Enforce detection of topological data corruptions in RAM.");
+MODULE_PARM_DESC(nvmeibc_debug_ram_binfo, "Enforce detection of topological data corruptions in RAM");
 
 bool verify_binfo_is_legal(struct nvmeibc_disk_segment *seg, const union nvmeib_blkset_info binfo, const u64 dlba, const char action)
 {
@@ -518,7 +513,6 @@ static void __squash_transport_lock_status(struct nvmeibc_cmd_lock *l, enum nvme
 	case NCL_STATUS_FAIL_NO_COMP:
 	case NCL_STATUS_FAIL_COMP:
 		__change_lock_status_to(l, NCL_STATUS_DISKDEAD);
-		FALLTHRU;
 	default:
 		break;
 	}
@@ -814,7 +808,6 @@ static int __retry_owner_lock_cb_sync_done(void* context, int err)
 	case 0:
 		__fix_release_val_after_full_sync(l);
 
-		FALLTHRU;
 	default:
 		break;  /* Daniel: Todo, analyze read failure error more precisely, TODO(EC-2584) */
 	}

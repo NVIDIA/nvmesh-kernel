@@ -7,9 +7,9 @@ Name:				nvmesh-target
 Version:			%{version}
 Release:			%{release}
 Group:				System Environment/Kernel
-Summary:			"nvmesh-target" by NVIDIA
+Summary:			"nvmesh-target" by Nvidia
 
-License:			GPL-2.0-only OR Apache-2.0 at your choice
+License:			Commercial Non OSI
 URL:				http://www.nvidia.com
 Source0:			%{name}
 
@@ -18,7 +18,7 @@ Autoreq:                        0
 
 %description
 
-Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+© Copyright 2025 Nvidia Corporation. All rights reserved. This document contains the confidential and proprietary information of Nvidia Corporation. Do not reproduce or distribute without the prior written consent of Nvidia.
 
 "Nvidia nvmesh-target" includes NVMesh target components.
 	Branch: %{branch}
@@ -92,9 +92,9 @@ echo "/opt/nvmesh
 
 %pre
 # an upgrade
-if [ "$1" = "2" ] || [ "$1" = "upgrade" ]; then
+if [ $1 -gt 1 ] || [ "$1" == "upgrade" ]; then
 	MDIR="/opt/nvmesh/target-repo"
-	compressed_kos=`find -L $MDIR -name '*.ko.xz*' -type f 2>/dev/null`
+	compressed_kos=`find -L $MDIR -name '*.ko.xz' -type f 2>/dev/null`
 	# if compressed kos found then remove old decompressed kos
 	if [ -d "$MDIR" ] && [ ! -z "$compressed_kos" ]; then
 		find -L $MDIR -name '*.ko' -type f -exec rm -f {} +
@@ -103,8 +103,7 @@ fi
 
 %post
 /opt/nvmesh/target-repo/installation-scripts-%{version}-%{release}/post_install "$1" "$2" "%{version}" "%{release}" "target"
-# this should either move to the infra post install phase or the rpm creation phase (since we now work with xz.bcp which is not recognized by modinfo)
-# modinfo $(find -L /opt/nvmesh/target-repo/ -name 'nvmeibs.ko' -o -name 'nvmeibs.ko.xz' -type f) -F nvmeibs_capabilities > /opt/nvmesh/target-repo/.capabilities
+modinfo $(find -L /opt/nvmesh/target-repo/ -name 'nvmeibs.ko' -o -name 'nvmeibs.ko.xz' -type f) -F nvmeibs_capabilities > /opt/nvmesh/target-repo/.capabilities
 
 
 %preun

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 /* Communication simulator includes 3 main parts:
    1. MCS simulator - recieveing and sending MCS messages from and to client
    2. Management simulator - recieveing and sending msgs to client */

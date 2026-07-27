@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBS_NORDDA_H
 #define NVMEIBS_NORDDA_H
 
@@ -158,7 +153,6 @@ struct nvmeibs_nr_channel {
 	struct nvmeib_recvq *recv_q;
 
 	spinlock_t spinlock;
-	int locking_cpu;
 
 	unsigned int n_scq_wcs;
 	unsigned int n_rcq_wcs;
@@ -166,7 +160,7 @@ struct nvmeibs_nr_channel {
 	struct ib_wc *scq_wcs;
 	struct ib_wc *rcq_wcs;
 
-	/* deferred io cmds wq (custom nvmeib_q, used when kernel wq is disabled) */
+	/* deferred io cmds wq */
 	struct workq_struct *wq;
 	/* io cmds */
 	int io_cmd_n_pages;
@@ -204,10 +198,6 @@ struct nvmeibs_nr_channel {
 	struct nvmeibs_async_cookie_channel_data *cookie_ch;
 	
 	struct nvmeibs_nrch_lat_meas lat_meas;
-
-	/* Deferred recv completion work */
-	struct work_struct recv_comp_work;
-	atomic_t recv_comp_work_ctr;
 };
 
 struct nvmeibs_nr_channel *nvmeibs_nordda_alloc_channel(void);
@@ -221,14 +211,5 @@ int nvmeibs_nordda_add_work(struct nvmeibs_nr_channel *nrch,
 int nvmeibs_nordda_io_cmds_alloc(struct nvmeibs_nr_channel *nrch);
 int nvmeibs_nordda_fill_config_alloc_nr_net_rsp(struct nvmeibs_nr_channel *nrch,
 	struct volume_server_config_alloc_nr_net_rsp *rsp);
-
-extern bool nvmeibs_nordda_use_kernel_wq;
-extern bool nvmeibs_nordda_kernel_wq_unbound;
-extern struct workqueue_struct *nvmeibs_nordda_kwq;
-
-int nvmeibs_nordda_kwq_init(void);
-void nvmeibs_nordda_kwq_exit(void);
-void nvmeibs_nordda_kwq_flush(void);
-
 #endif
 

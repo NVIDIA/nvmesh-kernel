@@ -1,6 +1,5 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
+# Auto generated files Makefile
+#
 # .a.tr is an empty target file where the corresponding a.sh file
 # serves as both the prerequisite and the recipe of that target,
 # with the exception of 'subdirs.tr'.

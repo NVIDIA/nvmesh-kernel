@@ -1,8 +1,4 @@
 #!/bin/sh
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 usage() {
 	echo "$0 <dev:port> <dev:port> <runtime> where:"
 	echo "    dev:port is the IB device name and port number e.g. mlx4_0:1"

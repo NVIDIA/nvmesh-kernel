@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #ifndef NVMEIBT_COMMON
 #define NVMEIBT_COMMON
 
@@ -259,10 +254,8 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 #define NVMEIBT_TOMA_ALLOC_COMMON(mode)																							\
 	static int nvmeibt_toma_alloc_common_idx;																					\
 	if (!nvmeibt_toma_alloc_common_idx) {																						\
-		const char *ignore_dir = strrchr(__FILE__, '/');																		\
-		const char *fname = (ignore_dir ? ignore_dir + 1 : __FILE__);															\
 		nvmeibt_toma_alloc_common_idx = nvmeibt_get_alloc_free_table_idx();														\
-		nvmeibt_strlcpy(nvmeibt_alloc_free_summary_table[nvmeibt_toma_alloc_common_idx].fname, fname, ALLOC_FREE_FNAME_LEN);	\
+		nvmeibt_strlcpy(nvmeibt_alloc_free_summary_table[nvmeibt_toma_alloc_common_idx].fname, __FILE__, ALLOC_FREE_FNAME_LEN);	\
 		nvmeibt_alloc_free_summary_table[nvmeibt_toma_alloc_common_idx].line_no = __LINE__;										\
 		nvmeibt_alloc_free_summary_table[nvmeibt_toma_alloc_common_idx].type = (mode);											\
 	}

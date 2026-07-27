@@ -2,27 +2,20 @@
 UNAME := $(shell uname)# Which operating system we use?
 HT = $(shell uname -m)
 $(info Building on $(UNAME)/$(HT))
-
-# Architecture-specific required flags (cannot be overridden)
-ARCH_CFLAGS :=
-
 ifeq ($(UNAME),Darwin)
 	USE_DARWIN=1
-	ARCH_CFLAGS += -m64
-	DP_EC_GF_ASM :=
-	DP_EC_GF_CFILES := nvmeibc_block_dp_ec_gf_avx2.c
+	CFLAGS += -m64
+	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm.S_shipped
 	LIBS_PATH = -L/usr/lib
 else ifeq ($(HT),x86_64)
 	USE_64_BITS=1
-	ARCH_CFLAGS += -m64
-	DP_EC_GF_ASM :=
-	DP_EC_GF_CFILES := nvmeibc_block_dp_ec_gf_avx2.c
+	CFLAGS += -m64
+	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm.S_shipped
 	LIBS_PATH = -L/usr/lib64
 else ifeq ($(HT),aarch64)
 	USE_ARM=1
-	ARCH_CFLAGS += -march=armv8.1-a+crc+fp+simd
-	DP_EC_GF_ASM :=
-	DP_EC_GF_CFILES := nvmeibc_block_dp_ec_gf_arm_neon4.c nvmeibc_block_dp_ec_gf_arm_recov_neon.c nvmeibc_block_dp_ec_gf_arm_um.c
+	CFLAGS += -march=armv8.1-a+crc+fp+simd
+	DP_EC_GF_ASM := nvmeibc_block_dp_ec_gf_asm_arm.S_shipped
 	LIBS_PATH = -L/usr/lib64
 else
 	$(error Unknown OS/Host)
@@ -69,14 +62,15 @@ LIBS = -lpthread # Libraries to link into executable (with -l): pthread is neede
 # ********** Define Files participating in the build *********
 EC_DIR=$(SSDA)/clnt/block/datapath_ec
 SOURCES = ./gen_md.c $(SSDA)/perfTest/io_stress/cmp_blocks/kr_incs.c $(SSDA)/scripts/target/nvme-cli/json.c
-SOURCES += $(patsubst %,$(EC_DIR)/%,$(DP_EC_GF_CFILES))
+ifeq ($(USE_ARM),1)
+	SOURCES += $(EC_DIR)/nvmeibc_block_dp_ec_gf_arm_neon4.c $(EC_DIR)/nvmeibc_block_dp_ec_gf_arm_recov_neon.c $(EC_DIR)/nvmeibc_block_dp_ec_gf_arm_um.c
+endif
 SOURCES += $(EC_DIR)/nvmeibc_block_dp_ec_gf.c $(EC_DIR)/nvmeibc_block_dp_ec_gf_praid.c
 SOURCES += $(SSDA)/clnt/block/datapath_utils_generic/nvmeibc_block_dp_block_md_tables.c
 
 EXE_NAME = gen_md
 OBJECTS =$(SOURCES:.c=_$(EXE_NAME).o)
-
-ASMSRC   = $(patsubst %,$(EC_DIR)/%,$(DP_EC_GF_ASM))
+ASMSRC   = $(EC_DIR)/$(DP_EC_GF_ASM)
 ASMOBJ   = $(ASMSRC:.S_shipped=.o_shipped)
 
 # ********** Define Rules for building *********
@@ -87,16 +81,13 @@ $(EXE_NAME): $(OBJECTS) $(ASMOBJ)
 	 @$(CC) $(LDFLAGS) $(OBJECTS) $(ASMOBJ) -o $(EXE_NAME) $(LIBS_PATH) $(LIBS)
 
 %_$(EXE_NAME).o : %.c
-	@$(CC) $(ARCH_CFLAGS) $(CFLAGS) $(INCLUDES) -c $< $(autocompdb) -o $@
-
-$(EC_DIR)/nvmeibc_block_dp_ec_gf_avx2_gen_md.o: $(EC_DIR)/nvmeibc_block_dp_ec_gf_avx2.c
-	@$(CC) $(ARCH_CFLAGS) $(CFLAGS) -mavx2 -msse4.2 $(INCLUDES) -c $< $(autocompdb) -o $@
+	@$(CC) $(CFLAGS) $(INCLUDES) -c $< $(autocompdb) -o $@
 
 %.o_shipped: %.S_shipped
 	$(CC) -c -x assembler-with-cpp -o $@ $<
 
 clean:
-	$(info -->Cleaning... |$(OBJECTS)|$(ASMOBJ))
-	@rm -f $(OBJECTS) $(EXE_NAME) $(ASMOBJ)
+	$(info -->Cleaning... |$(OBJECTS)|)
+	@rm -f $(OBJECTS) $(EXE_NAME)
 
 

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 /**
  * Utility that prints the GPT table of a given disk at a given offset and
  * prints it to the screen.
@@ -38,7 +33,7 @@ enum GPT_UTIL_ACTION {
 	ACTION_DISPLAY_MBR,			// -m: display MBR only
 	ACTION_FIX_GPT,				// -f: fix GPT from alternate copy
 	ACTION_FIX_MBR,				// -F: fix MBR
-	ACTION_CHECK_NVMESH		// -i: check if NVMESH_METADATA exists
+	ACTION_CHECK_EXCELERO		// -i: check if EXCELERO_METADATA exists
 };
 
 // Configuration structure for gpt_util operation
@@ -188,7 +183,7 @@ static int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 	nvmeibt_disk_metadata_init_gpt_structure(1, n_disk_blocks - 1, &main_gpt, pblk_size,
 											 LARGE_GPT_MAX_NUM_GPT_ENTRIES, &disk_uuid);
 
-	// 3. Add NVMESH_METADATA partition using all available space (test device)
+	// 3. Add EXCELERO_METADATA partition using all available space (test device)
 	{
 		uint64_t metadata_start = main_gpt.header.first_usable_pba;
 		uint64_t metadata_end = main_gpt.header.last_usable_pba;
@@ -197,11 +192,11 @@ static int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 		metadata_partition_uuid.ll[1] = 0x5566778899AABBCCULL;
 
 		metadata_partition = nvmeibt_disk_metadata_add_mem_gpt_entry(
-			&main_gpt, &NVMESH_METADATA_PARTITION_TYPE_GUID,
+			&main_gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID,
 			&metadata_partition_uuid,
 			metadata_start, metadata_end,
-			NVMESH_METADATA_PARTITION_NAME,
-			strlen(NVMESH_METADATA_PARTITION_NAME));
+			EXCELERO_METADATA_PARTITION_NAME,
+			strlen(EXCELERO_METADATA_PARTITION_NAME));
 
 		if (!metadata_partition) {
 			fprintf(stderr, "Failed to add metadata partition\n");
@@ -224,12 +219,12 @@ static int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 											 &metadata_gpt, pblk_size,
 											 MAX_NUM_GPT_ENTRIES, &metadata_disk_uuid);
 
-	// Add NVMESH_DISK_METADATA partition
+	// Add EXCELERO_DISK_METADATA partition
 	disk_metadata_partition_uuid.ll[0] = 0xDD11223344556677ULL;
 	disk_metadata_partition_uuid.ll[1] = 0x8899AABBCCDDEEF0ULL;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&metadata_gpt,
-												 &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
+												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
 												 &disk_metadata_partition_uuid,
 												 metadata_gpt.header.first_usable_pba,
 												 metadata_gpt.header.last_usable_pba,
@@ -248,9 +243,9 @@ static int SELF_TEST_generate_and_open_mock_nvmesh_disk(const char *filepath)
 	fsync(fd);
 	fprintf(stdout, "Mock NVMesh device created: %s (%lu blocks, %d KB)\n",
 			filepath, n_disk_blocks, (int)(n_disk_blocks * pblk_size / 1024));
-	fprintf(stdout, "  - Main GPT with NVMESH_METADATA partition (LBA %lu-%lu)\n",
+	fprintf(stdout, "  - Main GPT with EXCELERO_METADATA partition (LBA %lu-%lu)\n",
 			metadata_partition->pba_s, metadata_partition->pba_e);
-	fprintf(stdout, "  - Nested Metadata GPT with NVMESH_DISK_METADATA partition\n\n");
+	fprintf(stdout, "  - Nested Metadata GPT with EXCELERO_DISK_METADATA partition\n\n");
 
 	// Return the fd - caller will close it (which triggers sandbox auto-deletion)
 	rv = fd;
@@ -310,7 +305,7 @@ static int SELF_TEST_generate_mock_device_with_overlaps(const char *filepath)
 	partition1_uuid.ll[1] = 0x5566778899AABBCCULL;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&main_gpt,
-												 &NVMESH_METADATA_PARTITION_TYPE_GUID,
+												 &EXCELERO_METADATA_PARTITION_TYPE_GUID,
 												 &partition1_uuid,
 												 main_gpt.header.first_usable_pba,
 												 main_gpt.header.first_usable_pba + 1242,  // 1500 - 258
@@ -328,7 +323,7 @@ static int SELF_TEST_generate_mock_device_with_overlaps(const char *filepath)
 	overlap_end = main_gpt.header.last_usable_pba;
 
 	if (!nvmeibt_disk_metadata_add_mem_gpt_entry(&main_gpt,
-												 &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID,
+												 &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID,
 												 &partition2_uuid,
 												 overlap_start,
 												 overlap_end,
@@ -866,7 +861,7 @@ static int run_self_test(void)
 		test_argv[1] = "-a";
 		test_argv[2] = (char *)test_device_path;
 		test_argv[3] = "--filter-uuid";
-		test_argv[4] = "aabbccdd-1122-3344-5566-778899aabbcc";		// NVMESH_METADATA partition UUID
+		test_argv[4] = "aabbccdd-1122-3344-5566-778899aabbcc";		// EXCELERO_METADATA partition UUID
 
 		optind = 1;
 		if (run_gpt_util_op(test_argc, test_argv) != 0) {
@@ -893,7 +888,7 @@ static int run_self_test(void)
 		test_argv[1] = "-a";
 		test_argv[2] = (char *)test_device_path;
 		test_argv[3] = "--filter-lba";
-		test_argv[4] = "1000";		// LBA inside NVMESH_METADATA partition
+		test_argv[4] = "1000";		// LBA inside EXCELERO_METADATA partition
 
 		optind = 1;
 		if (run_gpt_util_op(test_argc, test_argv) != 0) {
@@ -972,7 +967,7 @@ static void print_usage(char *argv[])
 
 	fprintf(stdout, "Actions (choose one, default is display GPT):\n");
 	fprintf(stdout, "  -m, --print-mbr             Display MBR only\n");
-	fprintf(stdout, "  -i, --check-nvmesh        Check if NVMESH_METADATA partition exists\n");
+	fprintf(stdout, "  -i, --check-excelero        Check if EXCELERO_METADATA partition exists\n");
 	fprintf(stdout, "  -f, --fix-gpt               Fix GPT from alternate copy (and display)\n");
 	fprintf(stdout, "  -F, --fix-mbr               Fix MBR (and display)\n");
 	fprintf(stdout, "  (default: display GPT)      Display GPT structure\n\n");
@@ -1005,7 +1000,7 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 		{"pba-s",					required_argument,	0,	's'},
 		{"pba-e",					required_argument,	0,	'e'},
 		{"block-size",				required_argument,	0,	'b'},
-		{"check-nvmesh",			no_argument,		0,	'i'},
+		{"check-excelero",			no_argument,		0,	'i'},
 		{"print-mbr",				no_argument,		0,	'm'},
 		{"fix-gpt",					no_argument,		0,	'f'},
 		{"fix-mbr",					no_argument,		0,	'F'},
@@ -1184,8 +1179,8 @@ static int parse_arguments(int argc, char *argv[], struct gpt_util_config *confi
 				rv = -1;
 				goto out;
 			}
-			config->action = ACTION_CHECK_NVMESH;
-			fprintf(stdout, "Action: Check for NVMESH_METADATA partition\n");
+			config->action = ACTION_CHECK_EXCELERO;
+			fprintf(stdout, "Action: Check for EXCELERO_METADATA partition\n");
 			break;
 		case 'c':
 			nvmeibt_strlcpy(config->gpt_copy_option, optarg, sizeof(config->gpt_copy_option));
@@ -1261,9 +1256,9 @@ static int validate_config(struct gpt_util_config *config)
 }
 
 /**
- * Phase 3: Execute CHECK_NVMESH action
+ * Phase 3: Execute CHECK_EXCELERO action
  */
-static int execute_check_nvmesh(int disk_fd, struct gpt_util_config *config)
+static int execute_check_excelero(int disk_fd, struct gpt_util_config *config)
 {
 	int						rv = -1;
 	struct nvmeibt_disk_gpt	temp_gpt;
@@ -1272,10 +1267,10 @@ static int execute_check_nvmesh(int disk_fd, struct gpt_util_config *config)
 	if (nvmeibt_disk_metadata_restore_gpt(NULL, disk_fd, config->pblk_size, &temp_gpt,
 										  config->pba_s, config->pba_hw_e, false) == 0) {
 		if (nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(&temp_gpt)) {
-			fprintf(stdout, "%s NVMESH_METADATA_FOUND\n", config->device_path);
+			fprintf(stdout, "%s EXCELERO_METADATA_FOUND\n", config->device_path);
 			rv = 0;
 		} else {
-			fprintf(stdout, "%s NVMESH_METADATA_NOT_FOUND\n", config->device_path);
+			fprintf(stdout, "%s EXCELERO_METADATA_NOT_FOUND\n", config->device_path);
 			rv = 0;
 		}
 	} else {
@@ -1450,8 +1445,8 @@ static int run_gpt_util_op(int argc, char *argv[])
 		rv = execute_fix_mbr(disk_fd, &config);
 		break;
 
-	case ACTION_CHECK_NVMESH:
-		rv = execute_check_nvmesh(disk_fd, &config);
+	case ACTION_CHECK_EXCELERO:
+		rv = execute_check_excelero(disk_fd, &config);
 		break;
 
 	default:

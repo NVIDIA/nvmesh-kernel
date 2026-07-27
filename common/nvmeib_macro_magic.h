@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIB_MACRO_MAGIC_H
 #define NVMEIB_MACRO_MAGIC_H
 
@@ -753,8 +748,8 @@ IIF(BITAND(IS_COMPARABLE(x))(IS_COMPARABLE(y)) ) \
 
 #define EQUAL(x, y) COMPL(NOT_EQUAL(x, y))
 
-#define NV_COMMA() ,
+#define COMMA() ,
 
-#define COMMA_IF(n) IF(n)(NV_COMMA, EAT)()
+#define COMMA_IF(n) IF(n)(COMMA, EAT)()
 
 #endif

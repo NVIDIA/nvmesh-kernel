@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 usage_str="Usage: $0 [-a author] [-since '2019-01-15'] [-until '2019-01-20'] [-- './toma'] <branch_1> <branch_2>"
 # Parse the arguments
 author_str=""

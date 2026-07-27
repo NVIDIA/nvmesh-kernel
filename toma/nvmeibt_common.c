@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_debug.h"
 #include "nvmeibt_common.h"
 #include <ctype.h>
@@ -205,19 +200,36 @@ int nvmeibt_print_alloc_free_summary_table(int (*printf_fn)(void *ctx, const cha
 		goto skip;
 	}
 	total_alloc_minus_free_bytes = (nvmeibt_alloc_free_summary_table[0].sum_allocated_size + nvmeibt_alloc_free_summary_table[1].sum_allocated_size);
-	(*printf_fn)(printf_ctx, "total_alloc_minus_free=%jdM\n", total_alloc_minus_free_bytes >> 20);
-	(*printf_fn)(printf_ctx, "\n- - - - -   MEM alloc and free   - - - - -\n");
-	(*printf_fn)(printf_ctx, "File                          [Line] Type    n_calls|       sum_sizes[B]|  sum_allocated[MB]|\n");
+	if (printf_fn) {
+		(*printf_fn)(printf_ctx, "total_alloc_minus_free=%jdM\n", total_alloc_minus_free_bytes >> 20);
+		(*printf_fn)(printf_ctx, "\n- - - - -   MEM alloc and free   - - - - -\n");
+		(*printf_fn)(printf_ctx, "File                          [Line] Type         n_calls          sum_sizes  sum_allocated_size\n");
+	}
+	else {
+		N_Tf(trace_0_common_nvmeibt_print_alloc_free_summary_table, "total_alloc_minus_free=@ZU M\n", total_alloc_minus_free_bytes >> 20);
+		N_Tf(trace_common_nvmeibt_print_alloc_free_summary_table, "\n- - - - -   MEM alloc and free   - - - - -");
+		N_Tf(trace_1_common_nvmeibt_print_alloc_free_summary_table, "File                          [Line] Type         n_calls          sum_sizes  sum_allocated_size");
+	}
 	for (j = 0; j < 2; j++) {
 		for (i = 0; i < static_alloc_free_idx; i++) {
 			struct nvmeibt_alloc_free_summary_entry *e = &nvmeibt_alloc_free_summary_table[i];
 			if (((j == 0) && (e->type > 'Z')) || ((j == 1) && (e->type <= 'Z'))) {
 				continue;
 			}
-			(*printf_fn)(printf_ctx, "%-30s[%4d] %c| %12lld| %18lld| %18lld|\n", e->fname, e->line_no, e->type, e->n_calls, e->sum_sizes, e->sum_allocated_size >> 20);
+			if (printf_fn) {
+				(*printf_fn)(printf_ctx, "%-30s[%4d] %c %18lld %18lld %18lldK\n", e->fname, e->line_no, e->type, e->n_calls, e->sum_sizes, e->sum_allocated_size >> 10);
+			}
+			else {
+				N_Tf(trace_2_common_nvmeibt_print_alloc_free_summary_table, "@FNAME[@LINE_NO] @E_TYPE @N_CALLS @SUM_SIZES sum_allocated_size=@SUM_ALLOCATED_SIZE", e->fname, e->line_no, e->type, e->n_calls, e->sum_sizes, e->sum_allocated_size >> 10);
+			}
 		}
 		if (j == 0) {
-			(*printf_fn)(printf_ctx, "- - - - - - - - - - - - - - - - - - - - BM allocations - - - - - - - - - - - - - - - - - - -|\n");
+			if (printf_fn) {
+				(*printf_fn)(printf_ctx, "- - - - - - - - - - - - - - - - - - - - - BM allocations - - - - - - - - - - - - - - - - - - - -\n");
+			}
+			else {
+				N_Tf(trace_3_common_nvmeibt_print_alloc_free_summary_table, "- - - - - - - - - - - - - - - - - - - - - BM allocations - - - - - - - - - - - - - - - - - - - -");
+			}
 		}
 	}
 skip:
@@ -228,37 +240,29 @@ skip:
 	return 0;
 }
 
-static inline long get_current_rss_bytes(void)
-{
-	#if 0
-		const long page_bytes = sysconf(_SC_PAGESIZE);		// Slow method but gets more accurate info
-		long rss_pages = 0;
-		FILE *fp = fopen("/proc/self/statm", "r");
-		if (!fp)
-			return -1;
-		if (fscanf(fp, "%*s %ld", &rss_pages) != 1) {
-			rss_pages = -1;
-		}
-		fclose(fp);
-		return ((rss_pages > 0) && (page_bytes > 0)) ? rss_pages * page_bytes : -2;
-	#else
-		return (nvmeibt_alloc_free_summary_table[0].sum_allocated_size + nvmeibt_alloc_free_summary_table[1].sum_allocated_size);	// Only Toma internal allocator. Good enough for now
-	#endif
-}
-
-extern void print_status_str(enum nvmeibs_toma_status_type status_type, int (*fn)(void *ctx, const char *fmt, ...), void *ctx);
 void nvmeibt_validate_alloc_free_summary_table(void)
 {
-	const size_t MAX_UNFREED_BYTES = (30UL << 30);	// N[GB] mem. Todo: make configurable like raft_leader_heartbeat_timeout_usec
-	const size_t total_alloc_minus_free_bytes = get_current_rss_bytes();
-	if (total_alloc_minus_free_bytes >= MAX_UNFREED_BYTES) {		// Crash...
-		struct nvmeibt_Str *mem_print = NNVMEIBT_STR_ALLOC(ttvafst0);
-		NNVMEIBT_STR_RESIZE_BUF(ttvafst1, mem_print, (1<<14));
-		print_status_str(NVMEIBS_TOMA_STATUS_MEM_ALLOC, (nvmeibt_status_printf_fn_type)&nvmeibt_Str_sprintf, mem_print);
-		N_Ef(ttvafst4, "OOPS! total_alloc_minus_free=@ZU[MB], Crashing.... @STR", total_alloc_minus_free_bytes >> 20, mem_print->text_buf);
-		nvmeibt_abort(ES_FATAL);
-		NNVMEIBT_STR_FREE(ttvafst2, mem_print);
+#ifdef TOMA_DEBUG
+	size_t			total_alloc_minus_free_bytes;
+	size_t			total_alloc_since_last_print;
+	static size_t	last_print_total_alloc;
+	const size_t	MAX_UNFREED_BYTES = (1000 * 1024 * 1024);
+
+	NFIN;
+	total_alloc_minus_free_bytes = (nvmeibt_alloc_free_summary_table[0].sum_allocated_size + nvmeibt_alloc_free_summary_table[1].sum_allocated_size);
+	total_alloc_since_last_print = nvmeibt_alloc_free_summary_table[0].sum_allocated_size - last_print_total_alloc;
+	if (total_alloc_minus_free_bytes < MAX_UNFREED_BYTES && total_alloc_since_last_print < 0x400000) {
+		goto out;
 	}
+	nvmeibt_print_alloc_free_summary_table(NULL, NULL);
+	if (total_alloc_minus_free_bytes >= MAX_UNFREED_BYTES) {
+		N_Wf(warn_common_nvmeibt_validate_alloc_free_summary_table, "OOPS! total_alloc_minus_free=@ZU", total_alloc_minus_free_bytes >> 20);
+		nvmeibt_abort(ES_FATAL);
+	}
+	last_print_total_alloc = nvmeibt_alloc_free_summary_table[0].sum_allocated_size;
+out:
+	NFOUT;
+#endif	// #ifdef TOMA_DEBUG
 }
 
 const char *nvmeibt_zeroing_state_str(enum NVMEIBT_ZEROING_STATE s)

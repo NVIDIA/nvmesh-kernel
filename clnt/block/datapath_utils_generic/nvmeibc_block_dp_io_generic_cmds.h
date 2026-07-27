@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_DP_IO_GENERIC_CMDS_H
 #define NVMEIBC_DP_IO_GENERIC_CMDS_H
 /* Methods of generic IO commands. Each command is read/write/trim to a segment

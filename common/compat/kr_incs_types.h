@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef KERNEL_BASE_TYPES_H
 #define KERNEL_BASE_TYPES_H
 #ifdef __KERNEL__
@@ -24,7 +19,7 @@
 	typedef uint8_t		u8,	__u8;
 	typedef uint16_t	u16,__u16, __be16, umode_t, efi_char16_t;
 	typedef uint32_t	u32,__u32, __be32, __le32, gfp_t, fmode_t /*, dev_t*/;
-	typedef unsigned long long int /*uint64_t*/ u64,__u64, __le64, __be64, dma_addr_t, sector_t; // Wrong: NVMesh uses wrong definition of 64 bits as long long (which might be 128bits)
+	typedef unsigned long long int /*uint64_t*/ u64,__u64, __le64, __be64, dma_addr_t, sector_t; // Wrong: Excelero uses wrong definition of 64 bits as long long (which might be 128bits)
 	#if !(defined(NVASSERT_H_INCLUDED))				// UM_APP, In UM app/common/nvassert.h -> includes spdk rte_log.h -> rte_common.h which defines this.
 		typedef unsigned long long phys_addr_t;		//
 	#endif
@@ -84,7 +79,6 @@
 
 	// /linux/export.h
 	#define EXPORT_SYMBOL(sym)
-	#define EXPORT_SYMBOL_GPL(sym)
 
 	// include/linux/err.h
 	#define MAX_ERRNO	4095
@@ -95,7 +89,6 @@
 	static inline bool  IS_ERR_OR_NULL(const void *ptr) { return !ptr || IS_ERR(ptr); }
 #endif // __KERNEL__
 
-#ifndef __clang__
 #ifndef FALLTHRU
 	#if (__GNUC__ >= 7)
 		#if __has_attribute(__fallthrough__)
@@ -106,9 +99,6 @@
 	#else
 		#define FALLTHRU
 	#endif
-#endif
-#else
-	#define FALLTHRU __attribute__ ((__fallthrough__))
 #endif
 #ifndef __bitwise
 	#define __bitwise

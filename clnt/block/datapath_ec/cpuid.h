@@ -1,9 +1,4 @@
 /*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
-/*
  * Copyright (C) 2007-2017 Free Software Foundation, Inc.
  *
  * This file is free software; you can redistribute it and/or modify it

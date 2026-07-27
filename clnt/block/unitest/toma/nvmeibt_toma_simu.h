@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBT_TOMA_SIMU_H
 #define NVMEIBT_TOMA_SIMU_H
 /* Simulator of the appropriate toma file which implements the full
@@ -198,7 +193,6 @@ static const struct toma_recovery_args RCVR_DIRTY_REBUILD_ABORT	= {.type = NVMEI
 static const struct toma_recovery_args RCVR_DIRTY_REBUILD_CONV  = {.type = NVMEIBT_RECOVERY_TYPE_DIRTY_REBUILD, .cmd = NVMEIBT_CLIENT_MSG_TR_RECOVER_START, .on_start_wait_for_end = true,  .recov_caller = UNI_RECOV_CALLER_TOMA,   .has_dconv = 1};
 static const struct toma_recovery_args RCVR_EC_JOUR_GC			= {.type = NVMEIBT_RECOVERY_TYPE_EC_JOUR_GC,    .cmd = NVMEIBT_CLIENT_MSG_TR_RECOVER_START, .on_start_wait_for_end = true,  .recov_caller = UNI_RECOV_CALLER_TOMA,   .has_dconv = 0};
 static const struct toma_recovery_args RCVR_EC_JOUR_GC_ASYNC	= {.type = NVMEIBT_RECOVERY_TYPE_EC_JOUR_GC,    .cmd = NVMEIBT_CLIENT_MSG_TR_RECOVER_START, .on_start_wait_for_end = false, .recov_caller = UNI_RECOV_CALLER_SERJIO, .has_dconv = 0};
-static const struct toma_recovery_args RCVR_EC_FIX_UNK_BINFO	= {.type = NVMEIBT_RECOVERY_TYPE_EC_FIX_UNK_BINFO, .cmd = NVMEIBT_CLIENT_MSG_TR_RECOVER_START, .on_start_wait_for_end = true,  .recov_caller = UNI_RECOV_CALLER_TOMA,   .has_dconv = 0};
 
 int  tomaSimulator_recoverThing(      const struct tTopoOfPraid *r1, const struct disk_range *seg, const struct toma_recovery_args args);	// Instruct toma to send recovery request/abort/cancel message to client
 int  tomaSimulator_recoverThingStatus(const struct tTopoOfPraid *r1, const struct disk_range *seg, const struct toma_recovery_args args, int *recov_status);	// Same as above, but also returns the recovery result, if waited for.

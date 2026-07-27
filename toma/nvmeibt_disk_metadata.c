@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "nvmeibt_debug.h"
 #include "../common/nvmeib_shared.h"
 #include "nvmeibt_disk_metadata.h"
@@ -86,7 +81,7 @@ void hexdump(void *bufi, int len, char *str)
 
 static void netlink_io_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_rep *msg)
 {
-	struct netlink_io_context *nl_io_data = ctx;
+	struct netlink_context_io_data *nl_io_data = ctx;
 
 	NFIN;
 	NTOMA_ASSERT(trace_netlink_io_on_done_1, (!msg && !is_ok) || msg->opcode == csc_io_to_disk,
@@ -120,18 +115,28 @@ static void netlink_io_on_done(void *ctx, int is_ok, struct nvmeib_nl_uk_comm_re
 
 struct netlink_io_context *nvmeibt_make_netlink_context_from_config(struct nvmeibt_local_disk_config *ldc)
 {
-	struct netlink_io_context *nl_ctx = NNVMEIBT_BM_CALLOC(trace_mnl_1, sizeof(*nl_ctx));
+	struct netlink_io_context *nl_ctx = NULL;
 	struct nvmeib_disk_info di;
 	unsigned int max_blocks_per_call;
 	int rv = -1;
 
 	NFIN;
+	nl_ctx = NNVMEIBT_BM_CALLOC(trace_mnl_1, sizeof(*nl_ctx));
 	if (!nl_ctx) {
 		N_Ef(trace_mnl_11, "netlink context allocation failure!");
 		goto out;
 	}
-	{ _Static_assert((char *)&nl_ctx->nl_msg.data[0] == (char *)&nl_ctx->nl_msg_payload, "Bad packing of netlink struct"); }
-	if (pthread_mutex_init(&nl_ctx->guard_mutex, NULL) != 0) {
+
+#if defined(LLVM) || defined(__clang__)
+	if ((void *)nl_ctx->nl_msg.data != (void *)&nl_ctx->nl_msg_payload) {
+		N_Ef(trace_mnl_111, "Bad packing of netlink struct");
+		goto out;
+	}
+#else
+	{ _Static_assert((void *)nl_ctx->nl_msg.data == (void *)&nl_ctx->nl_msg_payload, "Bad packing of netlink struct"); }
+#endif
+
+	if (pthread_mutex_init(&nl_ctx->nl_io_data.guard_mutex, NULL) != 0) {
 		N_Ef(trace_mnl_2, "Failed to create netlink context guard @AUTO_ERRNO");
 		goto out;
 	}
@@ -139,13 +144,13 @@ struct netlink_io_context *nvmeibt_make_netlink_context_from_config(struct nvmei
 		N_Ef(trace_mnl_3, "Failed to create cond var attr @AUTO_ERRNO");
 		goto out;
 	}
-	if (pthread_cond_init(&nl_ctx->completion_signal, &nl_ctx->attr) != 0) {
+	if (pthread_cond_init(&nl_ctx->nl_io_data.completion_signal, &nl_ctx->attr) != 0) {
 		N_Ef(trace_mnl_4, "Failed to create netlink context cond var @AUTO_ERRNO");
 		goto out;
 	}
-	if (pthread_mutex_lock(&nl_ctx->guard_mutex) != 0) {
+	if (pthread_mutex_lock(&nl_ctx->nl_io_data.guard_mutex) != 0) {
 		N_Ef(trace_mnl_5, "Cannot wakeup caller thread, cannot lock_mutex=@LOCK_MUTEX error: @AUTO_ERRNO",
-				&nl_ctx->guard_mutex);
+				&nl_ctx->nl_io_data.guard_mutex);
 		goto out;
 	}
 
@@ -158,7 +163,7 @@ struct netlink_io_context *nvmeibt_make_netlink_context_from_config(struct nvmei
 	nl_ctx->nl_msg_payload.vendor_id = ldc->vendor;
 	nl_ctx->nl_msg.opcode = csc_io_to_disk;
 	nl_ctx->nl_msg.on_done = netlink_io_on_done;
-	nl_ctx->nl_msg.ctx = (void *)nl_ctx;
+	nl_ctx->nl_msg.ctx = (void *)&nl_ctx->nl_io_data;
 	nl_ctx->nl_msg.len = sizeof(nl_ctx->nl_msg_payload);
 	nl_ctx->nl_msg_payload.pid = getpid();
 	nl_ctx->pblk_size = ldc->pblk_size;
@@ -194,7 +199,7 @@ int nvmeibt_netlink_do_io_sync(struct netlink_io_context *nl_ctx)
 	max_blocks_per_call &= ~allign_bits;
 
 	remaining_n_pblks = divroundup(nl_ctx->nl_msg_payload.data_len, nl_ctx->pblk_size);
-	nl_ctx->rv = 0;	// Avoid old garbage
+	nl_ctx->nl_io_data.rv = 0;	// Avoid old garbage
 	do {
 		unsigned int n_pblks = min(remaining_n_pblks, max_blocks_per_call);
 		rv = -1;
@@ -221,13 +226,13 @@ int nvmeibt_netlink_do_io_sync(struct netlink_io_context *nl_ctx)
 		}
 
 		// Wait for netlink IO to finish
-		if (pthread_cond_wait(&nl_ctx->completion_signal, &nl_ctx->guard_mutex) != 0) {
-			N_Ef(trace_nnis_2, "Cannot wait for netlink IO to finish, cond_var=@COND_VAR error: @AUTO_ERRNO", &nl_ctx->completion_signal);
+		if (pthread_cond_wait(&nl_ctx->nl_io_data.completion_signal, &nl_ctx->nl_io_data.guard_mutex) != 0) {
+			N_Ef(trace_nnis_2, "Cannot wait for netlink IO to finish, cond_var=@COND_VAR error: @AUTO_ERRNO", &nl_ctx->nl_io_data.completion_signal);
 			goto out;
 		}
 
-		rv = nl_ctx->rv;
-		if (pthread_cond_init(&nl_ctx->completion_signal, &nl_ctx->attr)) { // for next call
+		rv = nl_ctx->nl_io_data.rv;
+		if (pthread_cond_init(&nl_ctx->nl_io_data.completion_signal, &nl_ctx->attr)) { // for next call
 			N_Ef(trace_nnis_3, "pthread_cond_init failed @AUTO_ERRNO");
 		}
 
@@ -246,13 +251,13 @@ void nvmeibt_netlink_io_free(struct netlink_io_context **nl_ctx_p)
 	if (nl_ctx_p && *nl_ctx_p) {
 		struct netlink_io_context *nl_ctx = *nl_ctx_p;
 
-		if (pthread_mutex_unlock(&nl_ctx->guard_mutex)) {
+		if (pthread_mutex_unlock(&nl_ctx->nl_io_data.guard_mutex)) {
 			N_Ef(xx_42, "pthread_mutex_unlock failed @AUTO_ERRNO");
 		}
-		if (pthread_cond_destroy(&nl_ctx->completion_signal)) {
+		if (pthread_cond_destroy(&nl_ctx->nl_io_data.completion_signal)) {
 			N_Ef(xx_43, "pthread_cond_destroy failed @AUTO_ERRNO");
 		}
-		if (pthread_mutex_destroy(&nl_ctx->guard_mutex)) {
+		if (pthread_mutex_destroy(&nl_ctx->nl_io_data.guard_mutex)) {
 			N_Ef(xx_44, "pthread_mutex_destroy failed @AUTO_ERRNO");
 		}
 		NNVMEIBT_BM_FREE(trace_nnif_1, nl_ctx);
@@ -599,7 +604,7 @@ int nvmeibt_disk_metadata_deprecate_entry_in_mem_gpt(struct nvmeibt_disk_gpt *gp
 		struct nvmeibt_disk_gpt_partition_entry *curr_gpt_entry = &(gpt->entries[entry_idx]);
 		// Check the partition uuid matches the disk segment uuid, and that the partition entry is not marked as unused.
 		if (nvmeibt_disk_metadata_is_gpt_entry_active_and_matching_uuid(uuid, curr_gpt_entry)) {
-			curr_gpt_entry->attributes |= NVMESH_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK;
+			curr_gpt_entry->attributes |= EXCELERO_JOURNAL_DATA_PARTITION_ATTRIBUTE_DEPRECATED_MASK;
 			N_Tf(vdge73h, "Deprecated entry=@ENTRY_INT partition name=@NAME from @STR n_active_partitions=@N_ACTIVE_PARTITIONS", entry_idx, part_name, gpt->main_or_metadata, gpt->n_entries_in_use);
 			rv = 0;	// Modified the GPT - need to save
 			goto out;
@@ -1806,8 +1811,8 @@ static const struct nvmeibt_disk_gpt_partition_entry* get_gpt_entry_by_type_uuid
 	for (i = 0; i < gpt->max_n_entries; ++i) {
 		const struct nvmeibt_disk_gpt_partition_entry *curr_metadata_gpt_entry = &(gpt->entries[i]);
 		if (	ARE_UUID_EQ(type_uuid, &curr_metadata_gpt_entry->partition_type_guid) ||
-				(ARE_UUID_EQ(type_uuid, &NVMESH_METADATA_PARTITION_TYPE_GUID) &&	// Support of old GUID read
-				 ARE_UUID_EQ(&NVMESH_METADATA_PARTITION_TYPE_GUID_OLD, &curr_metadata_gpt_entry->partition_type_guid))) {
+				(ARE_UUID_EQ(type_uuid, &EXCELERO_METADATA_PARTITION_TYPE_GUID) &&	// Support of old GUID read
+				 ARE_UUID_EQ(&EXCELERO_METADATA_PARTITION_TYPE_GUID_OLD, &curr_metadata_gpt_entry->partition_type_guid))) {
 			result = curr_metadata_gpt_entry;
 			goto out;
 		}
@@ -1830,7 +1835,7 @@ out:
  */
 const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_gpt_entry_of_metadata_gpt(const struct nvmeibt_disk_gpt *gpt)
 {
-	return get_gpt_entry_by_type_uuid(gpt, &NVMESH_METADATA_PARTITION_TYPE_GUID);
+	return get_gpt_entry_by_type_uuid(gpt, &EXCELERO_METADATA_PARTITION_TYPE_GUID);
 }
 
 /**
@@ -1845,7 +1850,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_gpt_ent
  */
 const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_journal_data_entry(const struct nvmeibt_disk_gpt *gpt)
 {
-	return get_gpt_entry_by_type_uuid(gpt, &NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID);
+	return get_gpt_entry_by_type_uuid(gpt, &EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID);
 }
 
 
@@ -1861,7 +1866,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_journal
  */
 const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_serjio_db_entry(const struct nvmeibt_disk_gpt *gpt)
 {
-	return get_gpt_entry_by_type_uuid(gpt, &NVMESH_SERJIO_DB_PARTITION_TYPE_GUID);}
+	return get_gpt_entry_by_type_uuid(gpt, &EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID);}
 
 /**
  * Locates the Excelero disk_metadata partition in the metadata GPT, return NULL
@@ -1875,7 +1880,7 @@ const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_serjio_
  */
 const struct nvmeibt_disk_gpt_partition_entry* nvmeibt_disk_metadata_get_disk_metadata_entry(const struct nvmeibt_disk_gpt *metadata_gpt)
 {
-	return get_gpt_entry_by_type_uuid(metadata_gpt, &NVMESH_DISK_METADATA_PARTITION_TYPE_GUID);}
+	return get_gpt_entry_by_type_uuid(metadata_gpt, &EXCELERO_DISK_METADATA_PARTITION_TYPE_GUID);}
 
 /**
  * Initializes an mbr structure of type gpt protective.
@@ -2144,16 +2149,16 @@ struct partition_guid_name {
 static struct partition_guid_name partition_mapping[] = {
 	{ .uuid = {.ll = {0x0000000000000000, 0x0000000000000000}}, .partition_type_name = "Unused entry" },
 	//
-	{ .uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero metadata
-	{ .uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero Serjio
-	{ .uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST,		.partition_type_name = "excelero_metadata" },	// Excelero Journal
-	{ .uuid = NVMESH_METADATA_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
-	{ .uuid = NVMESH_JOURNAL_DATA_PARTITION_TYPE_GUID_OLD_CONST,	.partition_type_name = "excelero_metadata" },	// OLD
-	{ .uuid = NVMESH_SERJIO_DB_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
+	{ .uuid = EXCELERO_METADATA_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero metadata
+	{ .uuid = EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID_CONST,			.partition_type_name = "excelero_metadata" },	// Excelero Serjio
+	{ .uuid = EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID_CONST,		.partition_type_name = "excelero_metadata" },	// Excelero Journal
+	{ .uuid = EXCELERO_METADATA_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
+	{ .uuid = EXCELERO_JOURNAL_DATA_PARTITION_TYPE_GUID_OLD_CONST,	.partition_type_name = "excelero_metadata" },	// OLD
+	{ .uuid = EXCELERO_SERJIO_DB_PARTITION_TYPE_GUID_OLD_CONST,		.partition_type_name = "excelero_metadata" },	// OLD
 	//
-	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST,	.partition_type_name = "data" },				// Excelero Segment Journaled
-	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST,	.partition_type_name = "data" },				// Excelero Segment non-Journaled
-	{ .uuid = NVMESH_DATA_PARTITION_TYPE_GUID_DATA_OLD_CONST,		.partition_type_name = "data" },				// OLD
+	{ .uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_JOURNALED_CONST,	.partition_type_name = "data" },				// Excelero Segment Journaled
+	{ .uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_NO_JOURNAL_CONST,	.partition_type_name = "data" },				// Excelero Segment non-Journaled
+	{ .uuid = EXCELERO_DATA_PARTITION_TYPE_GUID_DATA_OLD_CONST,		.partition_type_name = "data" },				// OLD
 	//
 	{ .uuid = {.ll = {0x024DEE4133E711D3, 0x9D690008C781F39F}}, .partition_type_name = "MBR partition scheme" },
 	{ .uuid = {.ll = {0xC12A7328F81F11D2, 0xBA4B00A0C93EC93B}}, .partition_type_name = "EFI System partition" },

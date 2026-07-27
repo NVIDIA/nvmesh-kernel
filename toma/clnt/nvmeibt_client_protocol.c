@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "common/kr_incs.h"
 #include "common/compat/kr_incs_crc32.h"		/*crc32() */
 #include "common/compat/kr_incs_compiler_types.h"
@@ -94,7 +89,6 @@ const char *nvmeibt_protocol_client_msg_reason_str(enum NVMEIBT_CLIENT_TR_REASON
 	case NVMEIBT_CLIENT_TR_REASON_PROTO_VERSION_MISMATCH:		return "PROTO_VER_MISMATCH";
 	case NVMEIBT_CLIENT_TR_REASON_PRAID_VERSION_BEHIND:			return "PRAID_VERSION_BEHIND";
 	case NVMEIBT_CLIENT_TR_REASON_PRAID_VERSION_AHEAD:			return "PRAID_VERSION_AHEAD";
-	case NVMEIBT_CLIENT_TR_REASON_UNREGISTER_IN_PROGRESS:		return "UNREGISTER_IN_PROGRESS";
 	case NVMEIBT_CLIENT_TR_REASON_INVALID_SEG_ID:				return "INVALID_SEG_ID";
 	case NVMEIBT_CLIENT_TR_REASON_SEG_STATE_MD_BROKEN:			return "SEG_MD_BROKEN";
 	case NVMEIBT_CLIENT_TR_REASON_SEG_STATE_MD_NOT_STORED:		return "SEG_MD_NOT_STORED";
@@ -241,7 +235,7 @@ static void __failed_lock_pl_conv(struct nvmeibt_client_failed_lock_pl *p, bool 
 	}
 }
 
-static __attribute__((unused)) void _cleaned_stalock_convert(struct nvmeibt_cleaned_stalock_info *r, bool do_enc)
+static void _cleaned_stalock_convert(struct nvmeibt_cleaned_stalock_info *r, bool do_enc)
 {
 	if (do_enc)	{
 		r->lock_id = nvmeib_htonl( r->lock_id);
@@ -250,7 +244,7 @@ static __attribute__((unused)) void _cleaned_stalock_convert(struct nvmeibt_clea
 	}
 }
 
-static __attribute__((unused)) void __lockid_cache_purge_pl_convert(struct nvmeibt_lockid_cache_purge_pl *pl, bool do_enc)
+static void __lockid_cache_purge_pl_convert(struct nvmeibt_lockid_cache_purge_pl *pl, bool do_enc)
 {
 	if (do_enc) {
 		pl->purge_seqno		= NVMEIB_HTONLL(pl->purge_seqno);
@@ -269,7 +263,7 @@ static void __recovery_hdr_convert(struct nvmeibt_client_recovery_generic_header
 	} else {      r->id = NVMEIB_NTONLL(r->id); r->type = nvmeib_ntohl(r->type); r->max_batch_size = nvmeib_ntohl(r->max_batch_size);}
 }
 
-static __attribute__((unused)) void __attr_no_alignment_sanity __recovery_start_pl_convert(struct nvmeibt_client_recovery_start_pl *r, bool do_enc)
+static void __attr_no_alignment_sanity __recovery_start_pl_convert(struct nvmeibt_client_recovery_start_pl *r, bool do_enc)
 {
 	if (do_enc)	{
 		const enum NVMEIBT_RECOVERY_TYPE r_type = r->task.type;
@@ -1075,4 +1069,7 @@ void nvmeibt_client_topo_disk_segment_read(struct nvmeibt_client_topo_disk_segme
 	#if (defined(__GNUC__) && (__GNUC__ >= 9)) || defined(__gcc__)
 		#pragma GCC diagnostic pop
 	#endif
+#endif
+#if defined(__clang__)
+	#pragma clang diagnostic pop
 #endif

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "uni_scenario_vol_config.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "nvmesh_sim.h"
@@ -44,7 +39,7 @@ TEST_FUNC void __unitest_issue_ioctls_todisk(struct gendisk *disk, struct nvmeib
 	BUG_ON(do_vfs_ioctl((struct file *)disk, 0, SG_IO, (ulong)&hdr) != __IOCTL_RV(0));
 	if (!is_detaching) {
 		BUG_ON(__scsi_get_u64(scsi_res, 0) != 0x200001f02060000LL);
-		BUG_ON(strncmp((char*)&scsi_res[2], "NVMesh  NVMesh 1.1.0-97", 24) != 0);			// 1.1.0-97 is deliberatly a ficticious version number, to be able to verify it via unitest
+		BUG_ON(strncmp((char*)&scsi_res[2], "ExceleroNVMesh 1.1.0-97", 24) != 0);			// 1.1.0-97 is deliberatly a ficticious version number, to be able to verify it via unitest
 		BUG_ON(strncmp(&(((char*)scsi_res)[32]), git_ver, 4) != 0);
 	}
 

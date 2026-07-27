@@ -1,8 +1,4 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
+#include "nvmeibc_ib_io_channel.h"
 #include "nvmeibc_nvme.h"
 #include "nvmeibc_disk.h"
 #include "nvmeib_utils.h"
@@ -55,7 +51,7 @@ int nvmeibc_fill_rwsq(u8 nvme_op, struct nvmeibc_disk_channel_rsc *info,
 
 	_ND(trace_nvme_nvmeibc_fill_rwsq, "cmd=@CMD_PTR, opcode=@OPCODE, cmdid=@CMDID, nsid=@NSID, slba=@SLBA_LLONG, "
 	   "length=@LENGTH_INT, nsid=@NSID, len_bytes=@LEN",
-		NULL, /* RDDA removed */
+		info->ch->net.req.bcmd,
 		p->opcode,
 		p->command_id,
 		p->nsid,

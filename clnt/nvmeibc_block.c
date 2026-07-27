@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "nvmeibc_block.h"
 #include "block/datapath_utils_generic/dp_io_stats/nvmeibc_b_dp_iostats.h"
 #include "nvmeib_event.h"
@@ -44,7 +39,7 @@
 int nvmeibc_block_cont(struct nvmeibc_block_device *nd, struct nvmeibc_disk *d)
 {
 	if (nd) {
-		_NI(t_09_blk_cont, "@NDU @DEV_NAME: CONT disk @D_FULL_NAME (disk=@DISK)", 0, nd->name, d->full_name, d);
+		_NT(t_09_blk_cont, "@DEV_NAME: CONT disk @D_FULL_NAME (disk=@DISK)", nd->name, d->full_name, d);
 		if (unlikely(nvmeibc_block_status_is_detaching(nd->status))) {
 			_NT(t_0a_blk_cont, "@DEV_NAME: CONT ignorred, detaching...", nd->name);
 		} else {
@@ -161,7 +156,7 @@ static int vdisk_disabled_work(void *param) {
 	struct nvmeibc_block_device *dev = (struct nvmeibc_block_device *)param;
 	char *uevents[] = {VDISK_UEVENT_IO_DISABLE, NULL};
 	_NT(trace_vdisk_disabled_work, "Sending uevent for io disable for @DEV_NAME", dev->name);
-	return kobject_uevent_env(&disk_to_dev(dev->os->atom.disk)->kobj,
+	return nvmeib_public_kobject_uevent_env(&disk_to_dev(dev->os->atom.disk)->kobj,
 									KOBJ_CHANGE, uevents);
 }
 
@@ -169,7 +164,7 @@ static int vdisk_enabled_work(void *param) {
 	struct nvmeibc_block_device *dev = (struct nvmeibc_block_device *)param;
 	char *uevents[] = {VDISK_UEVENT_IO_ENABLE, NULL};
 	_NT(trace_vdisk_enabled_work, "Sending uevent for io enable for @DEV_NAME", dev->name);
-	return kobject_uevent_env(&disk_to_dev(dev->os->atom.disk)->kobj,
+	return nvmeib_public_kobject_uevent_env(&disk_to_dev(dev->os->atom.disk)->kobj,
 									KOBJ_CHANGE, uevents);
 }
 
@@ -200,7 +195,7 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			}
 		} else if (old_io_perm_is_pok) {						// disabling bio
 			const char *reason = __get_reason_for_io_disable(nd, nt, ctx);
-			_NI(tr_3_block_bling, "@NDU @DEV_NAME: Disabling I/O@STR for a volume. Error code: 1049. Internal IO permissions: @IO_PERM. Internal additional info: @STR", 0, nd->name, (can_do_syncs? ", recoveries enabled" : " and recoveries"), new_io_perm, reason);
+			_NI(tr_3_block_bling, "@DEV_NAME: Disabling I/O@STR for a volume. Error code: 1049. Internal IO permissions: @IO_PERM. Internal additional info: @STR", nd->name, (can_do_syncs? ", recoveries enabled" : " and recoveries"), new_io_perm, reason);
 			__notify_all_riders_about_io_perm_change(nd);
 			WARN(nt->dbg_disabling_ts, wrong_ctr_msg, nd->name, new_io_perm);	//
 			nt->dbg_disabling_ts = jiffies;
@@ -222,7 +217,7 @@ static void __error_state_update(struct nvmeibc_topologies *nt, enum nvmeib_io_t
 			is_first_bio_enabled = nvmeibc_block_update_status(nd, 'I');
 			WARN(!nt->dbg_disabling_ts, wrong_ctr_msg, nd->name, new_io_perm);	//
 			nt->dbg_disabling_ts = 0;
-			_NI(tr_5_block_bling, "@NDU @DEV_NAME:Enabling I/O and recoveries for a volume after @SECONDS. Internal information (toggles=@DBG_NUM_ENABLING_IO_TOGGLES, IO permissions: @IO_PERM).", 0, nd->name, (size_t)(dt/HZ), nt->dbg_num_enabling_io_toggles, new_io_perm);  //. Error code: 0
+			_NI(tr_5_block_bling, "@DEV_NAME:Enabling I/O and recoveries for a volume after @SECONDS. Internal information (toggles=@DBG_NUM_ENABLING_IO_TOGGLES, IO permissions: @IO_PERM).", nd->name, (size_t)(dt/HZ), nt->dbg_num_enabling_io_toggles, new_io_perm);  //. Error code: 0
 			block_api_os_change_size(nd, is_first_bio_enabled);
 			__notify_all_riders_about_io_perm_change(nd);
 			if (unlikely(nt->debug_on_io_enabled.cb))
@@ -603,7 +598,7 @@ static int __cpu_mask_add_del_on_main_wq(void *_ctx)
 
 	nvmeibc_assert_on_main_wq(nvmeibc_isnt_params_blk2main(nvmeibc_cinst_get_blok_p(dev)));
 
-	rv = bitmap_parse(ctx->buf, strnlen(ctx->buf, ctx->len), cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS);
+	rv = bitmap_parse(ctx->buf, strlen(ctx->buf), cpu_mask.cpus, NVMEIB_CPU_MASK_MAX_CPUS);
 	if (rv) {
 		_NI_to_user(i_cpu_mask_add_del_bitmap_parse_fail, QA_BLOCK_PREFIX, "Failed to parse mask, rv=@RV", rv);
 		goto out;
@@ -1387,19 +1382,6 @@ enum_io_perm nvmeibc_get_io_perm_for_reporting(struct nvmeibc_block_device *dev)
 		rv = NVMEIB_IO_TYPE_PERMIT_NONE_SUS;	// Treat as if dev existed but detaching
 	}
 	return __to_mcs_io_perm_enum(rv);
-}
-
-bool nvmeibc_block_is_during_attach_stabilization_period(struct nvmeibc_block_device *dev)
-{
-	bool result = false;
-	if (dev){
-		ulong flags;
-		spin_lock_irqsave(&dev->dp.resub.lock, flags);
-	
-		result = nvmeibc_io_perm_alert_is_during_attach_stabilization_period(&dev->dp.io_perm_alert);
-		spin_unlock_irqrestore(&dev->dp.resub.lock, flags);
-	}
-	return result;
 }
 
 void nvmeibc_del_blkdev(struct nvmeibc_block_device	*dev)

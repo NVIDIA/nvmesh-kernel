@@ -1,17 +1,13 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "ib_incs.h"
 #include "nvmeibp_trace.h"
 
 #include "nvmeib_public_mlx4_imp.c"
+#include "nvmeib_public_mlx4p.h"
 
-MODULE_AUTHOR("NVIDIA CORPORATION");
+MODULE_AUTHOR("Excelero");
 MODULE_DESCRIPTION("NVMeIB Public mlx4");
-MODULE_LICENSE("GPL and additional rights");
+MODULE_LICENSE("Dual BSD/GPL");
 
 #define DEBUG_LEVEL (int)0
 static int (*debug_level_f)(void);
@@ -26,29 +22,56 @@ static void nvmeib_public_mlx4_set_debug_level(int (*dlf)(void))
 	debug_level_f = dlf;
 }
 
+static int
+nvmeib_public_mlx4_alloc_n_map(struct nvmeib_alloc_n_map *mem)
+{
+	return mlx4_alloc_n_map(mem);
+}
+
+static int
+nvmeib_public_mlx4_unmapn_n_free(struct nvmeib_alloc_n_map *mem)
+{
+	return mlx4_unmapn_n_free(mem);
+}
+
+static int
+nvmeib_public_mlx4_map_mr(struct ib_device *ibdev, struct ib_mr *mr,
+	phys_addr_t *pages, int n_pages)
+{
+	return mlx4_map_mr(ibdev, mr, pages, n_pages);
+}
+
+static int nvmeib_public_mlx4_peek_cq(struct ib_cq *ibcq, int max)
+{
+	return mlx4_peek_cq(ibcq, max);
+}
 
 static struct nvmeib_device_public_ops mlx4 = {
 	.module = THIS_MODULE,
-	.alloc_n_map = mlx4_alloc_n_map,
-	.unmapn_n_free = mlx4_unmapn_n_free,
-	.map_mr = mlx4_map_mr,
+	.alloc_n_map = nvmeib_public_mlx4_alloc_n_map,
+	.unmapn_n_free = nvmeib_public_mlx4_unmapn_n_free,
+	.map_mr = nvmeib_public_mlx4_map_mr,
 
 	.query_device = ib_query_device,
 	.post_send_atomic = nvmeib_public_generic_post_send_atomic,
 	.set_debug_level = nvmeib_public_mlx4_set_debug_level,
-	.peek_cq = mlx4_peek_cq,
+	.peek_cq = nvmeib_public_mlx4_peek_cq,
+	.create_rdda_qp = ib_create_qp,
+	.destroy_rdda_qp = ib_destroy_qp,
 };
 
 static struct nvmeib_device_public_ops mlx4_odp = {
 	.module = THIS_MODULE,
-	.alloc_n_map = mlx4_alloc_n_map,
-	.unmapn_n_free = mlx4_unmapn_n_free,
-	.map_mr = mlx4_map_mr,
+	.alloc_n_map = nvmeib_public_mlx4p_alloc_n_map,
+	.unmapn_n_free = nvmeib_public_mlx4p_unmapn_n_free,
+	.map_mr = nvmeib_public_mlx4p_map_mr,
 
 	.query_device = ib_query_device,
 	.post_send_atomic = nvmeib_public_generic_post_send_atomic,
 	.set_debug_level = nvmeib_public_mlx4_set_debug_level,
-	.peek_cq = mlx4_peek_cq,
+	.peek_cq = nvmeib_public_mlx4_peek_cq,
+	.create_rdda_qp = ib_create_qp,
+	.destroy_rdda_qp = ib_destroy_qp,
 };
 
 #define DEV_MODNAME "mlx4_ib"

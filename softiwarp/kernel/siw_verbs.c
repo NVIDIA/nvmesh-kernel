@@ -56,20 +56,6 @@
 #include "siw_obj.h"
 #include "siw_cm.h"
 
-/*
- * When set, advertise a page_size_cap that allows MR pages as small as
- * SIW_MR_MIN_PAGE_SIZE (4 KiB) even on kernels whose PAGE_SIZE is larger
- * (e.g. 64 KiB ARM64 kernels). The TX path is unconditionally PBE-bounded
- * so this is purely an advertisement toggle; consumers that pick the
- * smallest supported page size (e.g. NVMesh's nvmeib_init_fast_reg via
- * ffs(page_size_cap)) will then build sub-PAGE_SIZE PBL entries.
- */
-bool mr_min_page_4k = true;
-module_param(mr_min_page_4k, bool, 0644);
-MODULE_PARM_DESC(mr_min_page_4k,
-	"Advertise 4 KiB as the minimum MR page size in page_size_cap, "
-	"even when the kernel PAGE_SIZE is larger (bool, default true).");
-
 static int ib_qp_state_to_siw_qp_state[IB_QPS_ERR+1] = {
 	[IB_QPS_RESET]	= SIW_QP_STATE_IDLE,
 	[IB_QPS_INIT]	= SIW_QP_STATE_IDLE,
@@ -393,20 +379,6 @@ int siw_query_device(struct ib_device *ofa_dev, struct ib_device_attr *attr,
 	memcpy(&attr->sys_image_guid, sdev->netdev->dev_addr, 6);
 
 	attr->atomic_cap = SIW_ATOMIC_CAP;
-
-	/*
-	 * page_size_cap is a bitmask of supported MR page sizes (every
-	 * set bit is a supported page size, expressed as "min and up").
-	 * SIW's TX path is PBE-bounded, so any page size >= SIW_MR_MIN_PAGE_SIZE
-	 * is correct; the module parameter just selects whether we
-	 * advertise SIW_MR_MIN_PAGE_SIZE or the kernel's PAGE_SIZE as the
-	 * smallest supported size. On a 4 KiB-page kernel both are the
-	 * same; on a 64 KiB-page kernel mr_min_page_4k=true lets consumers
-	 * register 4 KiB MR pages instead of being forced to 64 KiB.
-	 */
-	attr->page_size_cap = mr_min_page_4k
-		? ~((u64)SIW_MR_MIN_PAGE_SIZE - 1)
-		: ~((u64)PAGE_SIZE - 1);
 
 	/*
 	 * TODO: understand what of the following should
@@ -968,7 +940,6 @@ struct ib_qp* siw_create_qp(struct ib_pd *ofa_pd,
 	INIT_LIST_HEAD(&qp->tx_ctx.sent_fpdus);
 	atomic_set(&qp->tx_ctx.n_completed_fpdus, 0);
 	INIT_LIST_HEAD(&qp->tx_ctx.completed_fpdus);
-	qp->tx_ctx.fpdu_needs_prepare = false;
 #endif
 
 #if KS_IB_DEVICE_OPS_HAS_QP_SIZE
@@ -1158,9 +1129,7 @@ struct ib_qp* siw_create_qp(struct ib_pd *ofa_pd,
 	qp->cpu = (smp_processor_id() + 1) % NR_CPUS;
 
 #ifdef USE_SQ_KTHREAD
-	if (sdev->num_tx_vector > 0)
-		qp->cpu = sdev->tx_vector_cpu[scq->comp_vector % sdev->num_tx_vector];
-	else
+	if (scq)
 		qp->cpu = qp_tx_vector_cpu[scq->comp_vector % num_tx_vector];
 #endif
 
@@ -2637,11 +2606,6 @@ struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd,
 	u64 len = attr->length;
 	u64 rnic_va = attr->hca_va;
 	int rights = attr->access_flags;
-#elif KS_IB_REG_USER_MR_HAS_DMAH
-struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd, u64 start, u64 len,
-			      u64 rnic_va, int rights,
-			      struct ib_dmah *dmah __attribute__((unused)), struct ib_udata *udata)
-{
 #else
 struct ib_mr *siw_reg_user_mr(struct ib_pd *ofa_pd, u64 start, u64 len,
 			      u64 rnic_va, int rights, struct ib_udata *udata)
@@ -2774,14 +2738,7 @@ static struct ib_mr *__siw_alloc_mr(struct ib_pd *ofa_pd, enum ib_mr_type mr_typ
 	//kzalloc() mr,
 	//siw_mem_add mr->mem (which gets unique id),
 	//set lkey, rky etc...
-	/*
-	 * iova/length/page_size are intentionally left at 0; they are
-	 * always overwritten before the MR is used, either by
-	 * ib_map_mr_sg() (sets ofa_mr->page_size, iova, length) or by
-	 * nvmeib_map_fr()'s page-array branch (which pre-stuffs
-	 * desc->mr->page_size, iova and length itself).
-	 */
-	mr = siw_create_mr(sdev, pbl, 0, 0, 0);
+	mr = siw_create_mr(sdev, pbl, 0, max_sge * PAGE_SIZE, 0); //vmap???
 	if (!mr) {
 		rv = -ENOMEM;
 		goto err_out;
@@ -2789,6 +2746,7 @@ static struct ib_mr *__siw_alloc_mr(struct ib_pd *ofa_pd, enum ib_mr_type mr_typ
 	mr->ofa_mr.device = &sdev->ofa_dev;
 	mr->mem.is_pbl = 1;
 	mr->pd = pd;
+	mr->ofa_mr.page_size = PAGE_SIZE;
 	siw_pd_get(pd);
 
 	dprint(DBG_MM, " MEM(%d): Created with %u SGEs\n", OBJ_ID(&mr->mem),
@@ -2886,118 +2844,275 @@ int siw_mr_free(struct ib_mr *ofa_mr)
 }
 EXPORT_SYMBOL(siw_mr_free);
 
-/*
- * ib_sg_to_pages() callback: append one PBE per mr->page_size-aligned page.
- *
- * ib_sg_to_pages() guarantees @page_addr is aligned to ofa_mr->page_size and
- * that pages are delivered in order across the entire SG list.  Each PBE is
- * initialized with the full mr->page_size; siw_map_mr_sg() patches up the
- * first and last entries afterwards to account for the iova offset and the
- * partial trailing page (mirroring the layout produced by siw_map_mr() in
- * the NVMesh-private path).
- */
-static int siw_set_pbl_page(struct ib_mr *ofa_mr, u64 page_addr)
+/* Just used to count number of pages being mapped */
+static int siw_set_pbl_page(struct ib_mr *ofa_mr, u64 buf_addr)
 {
-	struct siw_mr *mr = siw_mr_ofa2siw(ofa_mr);
-	struct siw_pbl *pbl = mr->pbl;
-	struct siw_pble *pble;
-
-	if (pbl->num_buf >= pbl->max_buf)
-		return -ENOMEM;
-
-	pble = &pbl->pbe[pbl->num_buf];
-	pble->addr    = page_addr;
-	pble->size    = ofa_mr->page_size;
-	pble->pbl_off = (u64)pbl->num_buf << pbl->pbe_fixed_shift;
-	pbl->num_buf++;
 	return 0;
 }
 
-/*
- * siw_map_mr_sg() - ib_map_mr_sg() driver hook.
- *
- * The core verb has already stored the caller-supplied page_size in
- * ofa_mr->page_size before dispatching to us.  We:
- *   1) Reset the PBL state (MRs are recycled from the FR pool).
- *   2) Set pbe_fixed_shift so siw_pbl_get_buffer() can use its O(1) lookup.
- *   3) Defer the SG walk to ib_sg_to_pages(), which calls our
- *      siw_set_pbl_page() callback once per mr->page_size-aligned page and
- *      fills in ofa_mr->iova / ofa_mr->length.
- *   4) Patch up the first and last PBEs to account for a non-aligned iova
- *      (partial first page) and a partial trailing page, and recompute the
- *      cumulative pbl_off values.  This produces the same PBL layout as
- *      siw_map_mr() in common_public/nvmeib_public_siw_imp.c so that both
- *      registration paths look identical to siw_pbl_get_buffer().
- */
-int siw_map_mr_sg(struct ib_mr *ofa_mr, struct scatterlist *sl, int num_sle,
-		  unsigned int *sg_off)
+#if 0
+static int siw_map_mr_sg_bypass(struct ib_mr *ofa_mr)
 {
 	struct siw_mr *mr = siw_mr_ofa2siw(ofa_mr);
 	struct siw_pbl *pbl = mr->pbl;
+	struct siw_pble *pble = pbl->pbe;
+	u64 pbl_size = 0;
 	unsigned int mr_page_size = ofa_mr->page_size;
-	int rv;
+	u32 first_offset;
+	u64 first_size, last_size, size;
+	int last_page;
+	int i, rv = -1;
+	unsigned int n_pages;
 
-	dprint(DBG_OBJ|DBG_MM, "mr=" dprint_ptr_str() ", ofa_mr=" dprint_ptr_str() ", ofa_mr->device=" dprint_ptr_str() ", page_size=%u\n",
-		mr, ofa_mr, ofa_mr->device, mr_page_size);
+	if (!pbl) {
+		dprint(DBG_MM, "No mr-pages\n");
+		return -EINVAL;
+	}
+	if (pbl->max_buf < n_pages) {
+		dprint(DBG_MM, "Exceed max mr pages (%d, %u)\n", n_pages, pbl->max_buf);
+		return -ENOMEM;
+	}
+	if (is_power_of_2(mr_page_size)) {
+		dprint(DBG_MM, "mr_page_size not power of 2 (%u)\n", mr_page_size);
+		return -EINVAL;
+	}
+
+	n_pages = pbl->num_buf;
+	last_page = n_pages - 1;
+	first_offset = ofa_mr->iova & (mr_page_size - 1);
+	first_size = mr_page_size - first_offset;
+	last_size = ofa_mr->length - first_size - (n_pages - 2) * mr_page_size;
+	if (last_size <= 0 || last_size > mr_page_size) {
+		dprint(DBG_MM, "Bad last-page-size=%llu (mr_page_size=%u, length=%u, "
+		   "first_size=%llu, n_pages=%d)\n",
+			last_size, mr_page_size, ofa_mr->length, first_size, n_pages);
+		rv = -EINVAL;
+		goto out;
+	}
+
+	/* re-format pble */
+	//omril: maybe all we need is seeting the size and pbl_off
+	for (i = 0; i < n_pages; i++) {
+		if (pble[i].addr & (PAGE_SIZE - 1)) {
+			dprint(DBG_MM, "page %d is not aligned %llx\n", i, pble[i].addr);
+			rv = -EINVAL;
+			goto out;
+		}
+
+		if (i == 0) {
+			pble->addr = pble[0].addr | first_offset;
+			pble->size = first_size;
+			pble->pbl_off = 0;
+			pbl->num_buf = 1;
+			size = pble->size;
+		}
+		else {
+			size = (i == last_page) ? last_size : mr_page_size;
+			if (pble->addr + pble->size != pble[i].addr) {
+				pble++;
+				pbl->num_buf++;
+				pble->addr = pble[i].addr;
+				pble->size = size;
+				pble->pbl_off = pbl_size;
+			}
+			else
+				pble->size += size;
+		}
+
+		pbl_size += size;
+
+		dprint(DBG_MM, "mr " dprint_ptr_str() ": page %d, addr=%llx, size=%llu, total %llu\n",
+			mr, i, pble->addr, pble->size, pbl_size);
+	}
+
+	if (pbl_size != ofa_mr->length) {
+		dprint(DBG_MM, "Total calc size (%llu) and mr's length (%u) differ\n",
+			pbl_size, ofa_mr->length);
+		rv = -EINVAL;
+		goto out;
+	}
+
+	rv = pbl->num_buf;
+
+//	mr->mem.len = ofa_mr->length;
+//	mr->mem.va = ofa_mr->iova;
+
+out:
+	return rv;
+}
+#else
+//omril: same code just changed rv of success
+#if 0
+static int siw_mr_ulp_map_finalize(struct ib_mr *ofa_mr)
+{
+	struct siw_mr *mr = siw_mr_ofa2siw(ofa_mr);
+	struct siw_pbl *pbl = mr->pbl;
+	struct siw_pble *pble = pbl->pbe;
+	u64 pbl_size = 0;
+	unsigned int mr_page_size = ofa_mr->page_size;
+	u32 first_offset;
+	u64 first_size, last_size, size;
+	int last_page;
+	int i, rv = -1;
+	unsigned int n_pages;
+
+	if (!pbl) {
+		dprint(DBG_MM, "No mr-pages\n");
+		return -EINVAL;
+	}
+	if (pbl->max_buf < n_pages) {
+		dprint(DBG_MM, "Exceed max mr pages (%d, %u)\n", n_pages, pbl->max_buf);
+		return -ENOMEM;
+	}
+	if (is_power_of_2(mr_page_size)) {
+		dprint(DBG_MM, "mr_page_size not power of 2 (%u)\n", mr_page_size);
+		return -EINVAL;
+	}
+
+	n_pages = pbl->num_buf;
+	last_page = n_pages - 1;
+	first_offset = ofa_mr->iova & (mr_page_size - 1);
+	first_size = mr_page_size - first_offset;
+	last_size = ofa_mr->length - first_size - (n_pages - 2) * mr_page_size;
+	if (last_size <= 0 || last_size > mr_page_size) {
+		dprint(DBG_MM, "Bad last-page-size=%llu (mr_page_size=%u, length=%u, "
+		   "first_size=%llu, n_pages=%d)\n",
+			last_size, mr_page_size, ofa_mr->length, first_size, n_pages);
+		rv = -EINVAL;
+		goto out;
+	}
+
+	/* re-format pble */
+	//omril: maybe all we need is seeting the size and pbl_off
+	for (i = 0; i < n_pages; i++) {
+		if (pble[i].addr & (PAGE_SIZE - 1)) {
+			dprint(DBG_MM, "page %d is not aligned %llx\n", i, pble[i].addr);
+			rv = -EINVAL;
+			goto out;
+		}
+
+		if (i == 0) {
+			pble->addr = pble[0].addr | first_offset;
+			pble->size = first_size;
+			pble->pbl_off = 0;
+			pbl->num_buf = 1;
+			size = pble->size;
+		}
+		else {
+			size = (i == last_page) ? last_size : mr_page_size;
+			if (pble->addr + pble->size != pble[i].addr) {
+				pble++;
+				pbl->num_buf++;
+				pble->addr = pble[i].addr;
+				pble->size = size;
+				pble->pbl_off = pbl_size;
+			}
+			else
+				pble->size += size;
+		}
+
+		pbl_size += size;
+
+		dprint(DBG_MM, "mr " dprint_ptr_str() ": page %d, addr=%llx, size=%llu, total %llu\n",
+			mr, i, pble->addr, pble->size, pbl_size);
+	}
+
+	if (pbl_size != ofa_mr->length) {
+		dprint(DBG_MM, "Total calc size (%llu) and mr's length (%u) differ\n",
+			pbl_size, ofa_mr->length);
+		rv = -EINVAL;
+		goto out;
+	}
+
+	mr->mem.len = ofa_mr->length;
+	mr->mem.va = ofa_mr->iova;
+	rv = 0;
+out:
+	return rv;
+}
+#endif
+#endif
+
+//omril:
+//called from ib_map_mr_sg() verb which first
+//sets mr->page_size to the given @page_size
+//
+//This function will set the mr->length and mr->iova
+int siw_map_mr_sg(struct ib_mr *ofa_mr, struct scatterlist *sl, int num_sle,
+		  unsigned int *sg_off)
+{
+	struct scatterlist *slp;
+	struct siw_mr *mr = siw_mr_ofa2siw(ofa_mr);
+	struct siw_pbl *pbl = mr->pbl;
+	struct siw_pble *pble = pbl->pbe;
+	u64 pbl_size;
+	int i, rv;
+
+//	if (!sl && !num_sle) {
+//		dprint(DBG_ON, ": calling map-mr-sg bypass...\n");
+//		return siw_map_mr_sg_bypass(ofa_mr);
+//	}
+
+	dprint(DBG_OBJ|DBG_MM, "mr=" dprint_ptr_str() ", ofa_mr=" dprint_ptr_str() ", ofa_mr->device=" dprint_ptr_str() "\n",
+		mr, ofa_mr, ofa_mr->device);
+
 
 	if (!pbl) {
 		dprint(DBG_ON, ": No PBL allocated\n");
 		return -EINVAL;
 	}
-	if (!mr_page_size || !is_power_of_2(mr_page_size)) {
-		dprint(DBG_ON, ": Bad mr->page_size %u\n", mr_page_size);
-		return -EINVAL;
+	if (pbl->max_buf < num_sle) {
+		dprint(DBG_ON, ": Too many SG entries: %u : %u\n",
+			mr->pbl->max_buf, num_sle);
+		return -ENOMEM;
 	}
 
-	pbl->num_buf = 0;
-	pbl->pbe_fixed_shift = ilog2(mr_page_size);
+	for_each_sg(sl, slp, num_sle, i) {
+		if (sg_dma_len(slp) == 0)
+			return -EINVAL;
 
+		if (i == 0) {
+			pble->addr = sg_dma_address(slp); //omril: why do we need DMA-able address if we are going to acess from CPU?
+			pble->size = sg_dma_len(slp);
+			pble->pbl_off = 0; //omril: Q: why offset=0 is assumed? A: coz it represents the offset from pbl
+			pbl_size = pble->size;
+			pbl->num_buf = 1;
+
+			dprint(DBG_MM, " MEM(%d): SGE[%d], reg. %llu byte, "
+				"addr " dprint_ptr_str() ", total %llu\n",
+				OBJ_ID(&mr->mem), i, pble->size, (void *)pble->addr,
+				pbl_size);
+
+			continue;
+		}
+		if (pble->addr + pble->size != sg_dma_address(slp)) {
+			pble++;
+			pbl->num_buf++;
+			pble->addr = sg_dma_address(slp);
+			pble->size = sg_dma_len(slp);
+			pble->pbl_off = pbl_size;
+		} else
+			//omril: append to current pble
+			pble->size += sg_dma_len(slp);
+
+		pbl_size += sg_dma_len(slp);
+
+		dprint(DBG_MM, " MEM(%d): SGE[%d], reg. %llu byte, "
+			"addr " dprint_ptr_str() ", total %llu\n",
+			OBJ_ID(&mr->mem), i, pble->size, (void *)pble->addr,
+			pbl_size);
+	}
 	rv = ib_sg_to_pages(ofa_mr, sl, num_sle, sg_off, siw_set_pbl_page);
-	if (rv <= 0)
-		return rv;
-
-	if (pbl->num_buf > 0) {
-		u32 first_off = ofa_mr->iova & (mr_page_size - 1);
-		u64 first_size = min_t(u64,
-				       (u64)mr_page_size - first_off,
-				       ofa_mr->length);
-		u32 i;
-		u64 off;
-
-		pbl->pbe[0].addr   |= first_off;
-		pbl->pbe[0].size    = first_size;
-		pbl->pbe[0].pbl_off = 0;
-
-		if (pbl->num_buf > 1) {
-			u64 used = first_size +
-				   (u64)(pbl->num_buf - 2) * mr_page_size;
-
-			if (used > ofa_mr->length) {
-				dprint(DBG_ON,
-				       ": Bad length %llu (mr_page_size=%u, "
-				       "first_size=%llu, num_buf=%u)\n",
-				       (u64)ofa_mr->length, mr_page_size,
-				       first_size, pbl->num_buf);
-				return -EINVAL;
-			}
-			pbl->pbe[pbl->num_buf - 1].size =
-				ofa_mr->length - used;
-		}
-
-		off = pbl->pbe[0].size;
-		for (i = 1; i < pbl->num_buf; i++) {
-			pbl->pbe[i].pbl_off = off;
-			off += pbl->pbe[i].size;
-		}
+	if (rv > 0) {
+		//omril:
+		//Q: where ofa_mr->length and  ofa_mr->iova getting assigned?
+		//A: in ib_sg_to_pages()
+		mr->mem.len = ofa_mr->length;
+		mr->mem.va = ofa_mr->iova;
+		dprint(DBG_MM, " MEM(%d): got %llu byte, %u SLE "
+			"into %u entries\n",
+			OBJ_ID(&mr->mem), mr->mem.len, num_sle, pbl->num_buf);
 	}
-
-	mr->mem.len = ofa_mr->length;
-	mr->mem.va  = ofa_mr->iova;
-
-	dprint(DBG_MM, " MEM(%d): got %llu byte, %u SLE into %u entries (page_size=%u, shift=%u)\n",
-		OBJ_ID(&mr->mem), mr->mem.len, num_sle, pbl->num_buf,
-		mr_page_size, pbl->pbe_fixed_shift);
-
 	return rv;
 }
 
@@ -3494,14 +3609,14 @@ int siw_post_srq_recv(struct ib_srq *ofa_srq, struct ib_recv_wr *wr,
 			for (i = 0; i < srq->num_rqe; i++) {
 				struct siw_rqe *chk_rqe = &srq->recvq[i % srq->num_rqe];
 				if (chk_rqe->id == wr->wr_id && _load_shared(chk_rqe->flags)) {
-					pr_err("SIW: SRQ " dprint_ptr_str() " double-post of id 0x%llx in wr " dprint_ptr_str() ". Previous post in idx %u - Post call-stack %pF <- %pF <- %pF <- %pF <- %pF\n",
+					pr_err("SIW: SRQ " dprint_ptr_str() " double-post of id 0x%llx in wr " dprint_ptr_str() ". Previous post in idx %u - Post call-stack %pS <- %pS <- %pS <- %pS <- %pS\n",
 					       srq, wr->wr_id, wr, i, (void *)srqe_md->post_bt[0], (void *)srqe_md->post_bt[1], (void *)srqe_md->post_bt[2], (void *)srqe_md->post_bt[3], (void *)srqe_md->post_bt[4]);
 					BUG_ON(1);
 				}
 			}
 			save_stack_trace(&st);
 			srqe_md->post_pid = current->pid;
-			trace_printk("SRQ " dprint_ptr_str() " posting wr_id %llx - Post call-stack %pF <- %pF <- %pF <- %pF <- %pF\n", 
+			trace_printk("SRQ " dprint_ptr_str() " posting wr_id %llx - Post call-stack %pS <- %pS <- %pS <- %pS <- %pS\n", 
 				     srq, wr->wr_id, (void *)srqe_md->post_bt[0], (void *)srqe_md->post_bt[1], (void *)srqe_md->post_bt[2], (void *)srqe_md->post_bt[3], (void *)srqe_md->post_bt[4]);
 			for (i = 0; i < wr->num_sge; i++) {
 				struct siw_mem *mem = siw_mem_id2obj(srq->pd->hdr.sdev, wr->sg_list[i].lkey >> 8);

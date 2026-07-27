@@ -1,8 +1,4 @@
 # .bashrc
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 [ "`hostname`" == "danielhsh-laptop" ] && IS_LOCAL="Y" || IS_LOCAL="N";
 if [ -f /etc/bashrc ]; then
 	. /etc/bashrc
@@ -630,6 +626,8 @@ if [[ $IS_LOCAL == "Y" ]]; then
 		echo -e "  \e[0;31mRed\e[0;39m  \e[0;32mgreen\e[0;39m  \e[16;34mBlue\e[0;39m  \e[1;31mBold\e[0;39m  \e[2;31mDark\e[0;39m  \e[4mUnd\e[0;39m  \e[5mBlink\e[0m  "
 		echo "LineWrap off: " 'echo -ne "\x1b[?7l"' " LineWrap on: " 'echo -ne "\x1b[?7h"';
 		echo_title "GOODIES";
+		echo "* Employee ID 49355, Desk: 31-268, IT 24x7: 074-7238000 ext 1, " 'Wifi: NV-Mobile: 99$@2000';
+		echo "* Ahmash: 0747236000/3, RSOC-Israel@nvidia.com"
 		echo "* DEV: $MY_DEV_SERVER";
 		#eval ${DISABLE_LINE_WRAP};
 		if [[ "$1" == "edit" ]] || [[ "$1" == "bashrc" ]]; then
@@ -1486,6 +1484,10 @@ else
 		[ ! -f $pg_path ] && pg_path=${NVMESH_DIR_SRC}/common-repo/tools/traces_post_processor/pager.py
 		[ ! -f $pg_path ] && pg_path=".${pg_path}";		# try local to current dir
 		[ ! -f $pg_path ] && echo_red "pager.py could not be found!";
+		# From Laptop: tools/connect_interactive.sh n111;
+		# lba = VLBA("tv-38788-13", 5940581)
+		# lba.dlba; lba.tab
+		#param="'-f (not file = nvmeibs_serjio.c) and (not file = nvmeibc_jam.c)'"
 		param=""
 		if [ "$1" == "clnt" ]; then
 			cmd="sudo $pg_path $tr_path -l nvmeibc_trace_long nvmeibc_trace_eter $param | less"; echo $cmd; eval $cmd;
@@ -1767,7 +1769,7 @@ else
 		PARAM=/sys/module/nvmeibc/parameters/max_ios_per_cpu; sudo bash -c "echo 1 > ${PARAM}"; cat $PARAM;
 		PARAM=/sys/module/nvmeibc/parameters/bio_noexec;      sudo bash -c "echo Y > ${PARAM}"; cat $PARAM;
 		PARAM=/sys/module/nvmeibc/parameters/max_ios_per_cpu; sudo bash -c "echo 100000000 > ${PARAM}"; cat $PARAM;
-		PARAM=/sys/module/nvmeibc/parameters/use_block_external_major; cat $PARAM;
+		PARAM=/sys/module/nvmeibc/parameters/use_block_extrenal_major; cat $PARAM;
 		#strace -tt -o ~/z_fio.txt
 		time fio --direct=1 --numjobs=8 --iodepth=256 --bs 4k --filename=/dev/nvmesh/J1 --name=test --rw=randrw --ioengine=libaio --rwmixwrite 100 --group_reporting --time_based --runtime 10 --refill_buffers
 		#time fio --direct=0 --bs 4k --filename /dev/nvmesh/J1 --name test --rw randrw --numjobs=8 --iodepth 1 --ioengine psync --rwmixwrite 99 --group_reporting --time_based --runtime 20 --refill_buffers

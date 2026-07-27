@@ -1,11 +1,7 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 #
 # nvmeshtarget	This shell script takes care of starting and stopping
-#		the NVMesh(r) target / controller
+#		the Excelero NVMesh(r) target / controller
 #
 # chkconfig: 345 19 81
 # description: NVMesh target / controller
@@ -168,7 +164,7 @@ find_devname_by_serial() {
                 exit 1
         elif [ "${#matched_devices[@]}" -ne 1 ]; then
 		if ! $gptUtilPath -a $main_devname -i 2> /dev/null | grep 'EXCELERO_METADATA_FOUND' > /dev/null 2>&1; then
-	                echo "The current serial resolves to multiple devicenames, probably partitions not used by nvmesh, to avoid data loss we won't use it."
+	                echo "The current serial resolves to multiple devicenames, probably partitions not used by excelero, to avoid data loss we won't use it."
         	        exit 1
 		fi
         fi
@@ -325,6 +321,11 @@ start() {
 
 	check_nics_validity
 
+	# must come after check_nics_validity
+	if [ "$MLX5_RDDA_ENABLED" == "Yes" ] || [ "$MLX5_RDDA_ENABLED" == "True" ]; then
+		check_cx5_64b_doorbell_fix
+	fi
+
 	if [ "$conflinklayer" == "Ethernet" ]; then
 		set_roce_version_in_config
 	fi
@@ -479,6 +480,10 @@ status() {
 		success=1
 	fi
 
+	if [ "$MLX5_RDDA_ENABLED" == "Yes" ] || [ "$MLX5_RDDA_ENABLED" == "True" ]; then
+		check_cx5_64b_doorbell_fix
+	fi
+
 	check_roce_multipath_config
 
 	return $success
@@ -501,28 +506,31 @@ set_toma_conf() {
 	done
 
 	_NVMESH_MODE="${NVMESH_MODE:-nvmesh}"
-	TOMA_DEFAULT_CONF=/opt/nvmesh/common-repo/toma.d/default.rpc
 	TOMA_CONF=/opt/nvmesh/common-repo/toma.d/${_NVMESH_MODE}.rpc
 	if [ $try -lt $maxtries ]; then
-		# Skip blank lines or comments.  Note - ignore errors because bbbb
-		sed -e 's/^ *//;s/#.*//;/^$/d;' $TOMA_DEFAULT_CONF $TOMA_CONF 2>/dev/null | while read cmd
-		do
-			# remove leading white-space
-			cmd=${cmd##*( )}
+		if [ -f "$TOMA_CONF" ]; then
+			# Skip blank lines or comments.  Note - ignore errors because bbbb
+			sed -e 's/^ *//;s/#.*//;/^$/d;' $TOMA_CONF | while read cmd
+			do
+				# remove leading white-space
+				cmd=${cmd##*( )}
 
-			# check the first-word of cmd
-			case ${cmd%% *} in
-			config|disk-models)
-				echo "$TOMA_RPC $cmd"
-				$TOMA_RPC $cmd
-				;;
-			*)
-				# backwards-compatibility - assume is a config command
-				echo "$TOMA_RPC config $cmd"
-				$TOMA_RPC config $cmd
-				;;
-			esac
-		done
+				# check the first-word of cmd
+				case ${cmd%% *} in
+				config|disk-models)
+					echo "$TOMA_RPC $cmd"
+					$TOMA_RPC $cmd
+					;;
+				*)
+					# backwards-compatibility - assume is a config command
+					echo "$TOMA_RPC config $cmd"
+					$TOMA_RPC config $cmd
+					;;
+				esac
+			done
+		else
+			echo "$TOMA_CONF not exists, skip"
+		fi
 	else
 		echo "Could not connect to TOMA-RPC after $try tries."
 		exit 1

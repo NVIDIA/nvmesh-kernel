@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_MAIN_H
 #define NVMEIBC_MAIN_H
 
@@ -162,7 +157,5 @@ void *nvmeibc_get_poison_area(int *n_pages);
 
 bool nvmeibc_support_srq(struct nvmeib_dev *dev);
 extern unsigned int nvmeibc_tcp_mode;
-
-struct nvmeib_intr_shaper *nvmeib_get_intr_shaper(void);
 
 #endif /* NVMEIBC_MAIN_H */

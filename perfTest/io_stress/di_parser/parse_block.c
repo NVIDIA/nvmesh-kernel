@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: Apache-2.0
-*/
-
 #include "kr_incs.h"
 #include "../../../common/nvmeib_types.h"
 #include "../../../clnt/block/datapath_utils_debug_di/nvmeibc_block_dp_dbgdi_blk.h"

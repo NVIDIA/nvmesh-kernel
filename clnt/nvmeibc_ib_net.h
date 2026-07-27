@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #ifndef NVMEIBC_IB_NET_H
 #define NVMEIBC_IB_NET_H
 
@@ -90,17 +85,6 @@ struct nvmeibc_map_state {
 	int unmapped_index;
 	dma_addr_t unmapped_addr;
 	bool allow_dma_key;
-	/*
-	 * Bytes consumed in pages[npages-1] (the slot currently being
-	 * filled). Range (0, mr_page_size] when npages>0; 0 when npages==0.
-	 * Used to decide whether a new sg entry can extend the in-progress
-	 * MR by checking against the page's physical end, rather than
-	 * relying on a linear VA projection (unmapped_addr + dma_len)
-	 * which is invalid for MRs whose PBL slots are physically
-	 * discontiguous - the case SIW hits because its dma_map_sg is a
-	 * no-op stub and 4K-chunked sg entries leak through unchanged.
-	 */
-	u32 last_page_used;
 };
 
 struct ib_pool_fmr;
@@ -267,9 +251,6 @@ struct nvmeibc_ib_net_params {
 	
 	int rcq_offload_cpu;
 	int scq_offload_cpu;
-	
-	/* kernel workqueue for SCQ - mutually exclusive with scq_offload_enb kthread */
-	struct workqueue_struct *scq_kwq;
 
 	/*will loop for all interrupts*/
 	bool poll_interrupts;
@@ -280,9 +261,8 @@ struct nvmeibc_ib_net_params {
 	/* send and recv shared CQ */
 	bool shared_cq;
 
-	/* defer receive interrupt handling - either custom wq or kernel wq, not both */
+	/* defer receive interrupt handling */
 	struct workq_struct *defer_recv_intr_wq;
-	struct workqueue_struct *defer_recv_intr_kwq;
 	
 	/* allocate metadata for SIW WCs */
 	bool alloc_siw_wc_md;
@@ -293,8 +273,6 @@ struct nvmeibc_ib_net_params {
 
 	/* if != NVMEIBC_COMP_CPU_INVALID && use-pcpu-cq is enabled, select cq of this cpu */
 	int comp_cpu;
-
-	enum nvmeib_cq_vector_get_type vector_type;
 };
 
 struct cq_stats {
@@ -306,7 +284,6 @@ struct cq_stats {
 	/* num wakeups of polling kthread */
 	u64 n_wakeups_burst;
 	u64 n_wakeups_cycles;
-	u64 n_wakeups_irq_time;
 	/* num send comps their processing was not done directly
 	   by interrupt or polling-kthread e.g. when post-send
 	   fails we try to process scq to get free send iu */
@@ -461,8 +438,6 @@ struct nvmeibc_ib_net {
 	struct task_struct *scq_kthread;
 	enum cq_poll_mode scq_poll_mode;
 	struct completion scq_kth_ready;
-	struct workqueue_struct *scq_kwq;  /* Kernel workqueue for SCQ - mutually exclusive with scq_kthread */
-	struct work_struct scq_kwork;  /* Kernel workqueue work for SCQ */
 #if SCQ_OFFLOAD_TRACE
 	struct {
 		int cnt;
@@ -485,8 +460,7 @@ struct nvmeibc_ib_net {
 				// net object is reused
 
 	bool shared_cq;
-	struct workq_struct *defer_recv_intr_wq;  /* Custom workqueue for defer recv */
-	struct workqueue_struct *defer_recv_intr_kwq;  /* Kernel workqueue for defer recv - mutually exclusive with defer_recv_intr_wq */
+	struct workq_struct *defer_recv_intr_wq;
 	struct nvmeib_state_guard defer_recv_state;
 
 	struct {
@@ -502,7 +476,6 @@ struct nvmeibc_ib_net {
 	struct list_head qp_action_list;
 
 	struct workqe_struct defer_recv_work;
-	struct work_struct defer_recv_kwork;  /* Kernel workqueue work for nordda channels */
 
 	struct nvmeib_ref ib_rsrc_ref;
 
@@ -613,27 +586,15 @@ int nvmeibc_ib_net_build_wriu(struct nvmeibc_ib_net *net,
        __rv;                                                       	\
 })
 
-void nvmeibc_ib_net_complete_iocmd_sg_reuse(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int orig_sgcount, bool was_reuse);
-
-#define nvmeibc_ib_net_complete_iocmd_sg(_n, _r) \
-	nvmeibc_ib_net_complete_iocmd_sg_reuse(_n, _r, (_r)->sgcount, false)
-
+void nvmeibc_ib_net_complete_iocmd_sg(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req);
 void nvmeibc_ib_net_unmap_sg_to_ib_sge(struct nvmeib_iu *iu);
 void nvmeibc_ib_net_complete_iocmd_block(struct nvmeibc_ib_net *net,
 	struct nvmeibc_volume_request *req, int comp_code);
-
-void nvmeibc_ib_net_complete_iocmd_reuse(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code, int orig_sgcount, bool was_reuse);
-
-#define nvmeibc_ib_net_complete_iocmd(_n, _r, _c) \
-	nvmeibc_ib_net_complete_iocmd_reuse(_n, _r, _c, (_r)->sgcount, false)
-
-void nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(struct nvmeibc_ib_net *net,
-	struct nvmeibc_volume_request *req, int comp_code, int orig_sgcount, bool was_reuse);
-
-#define nvmeibc_ib_net_unmap_and_unlink_iocmd(_n, _r, _c) \
-	nvmeibc_ib_net_unmap_and_unlink_iocmd_reuse(_n, _r, _c, (_r)->sgcount, false)
+void nvmeibc_ib_net_complete_iocmd(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, int comp_code);
+void nvmeibc_ib_net_unmap_and_unlink_iocmd(struct nvmeibc_ib_net *net,
+	struct nvmeibc_volume_request *req, int comp_code);
 
 struct nvmeibc_dev;
 void nvmeibc_ib_net_complete_bcmd(struct nvmeibc_disk_command *dcmd, struct nvmeibc_dev *local_dev);
@@ -790,14 +751,10 @@ void req_reused_bb_lru_is_timeout_stats(struct nvmeibc_channel *ch);
    1) mark it as unused before adding its parent req to available-(ch)-pool.
    2) destroy ulp's cookie so it won't rerurn it
  */
-#define del_reuse_request(req, disk) ({	\
-	bool ret = false;\
-	if ((req)->reused_bb == 1) { 				\
-		__del_reuse_request(req, disk);\
-		ret = true;\
-	}\
-	ret;\
-})
+#define del_reuse_request(req, disk) do {	\
+	if ((req)->reused_bb == 1) 				\
+		__del_reuse_request(req, disk); 	\
+} while (0)
 
 /* called by ulp to return bb to our ownership, cookie was already destroyed */
 #define del_reuse_request_no_rcookie(ch, req) do {\

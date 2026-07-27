@@ -1,8 +1,4 @@
 #!/bin/bash
-
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 kind="$1"
 sources_path="$2"
 spec_path="$3"
@@ -13,10 +9,10 @@ toma_udp="${6:-UNSET}" # if target rpm
 rpm_build_type="$RPM_BUILD_TYPE" #exported: kmod/kmod_only/regular (default)
 is_development="$IS_DEVELOPMENT" #exported via build.sh using build_sh_conf: IS_DEVELOPMENT=yes (default=no)
 rpm_build_dir=`readlink -f ~/rpmbuild`
-OLD_NVMESH_PREFIX="NVMesh-"
-NVMESH_PREFIX="nvmesh-"
-rpm_name=${NVMESH_PREFIX}${kind}
-old_rpm_name=${OLD_NVMESH_PREFIX}${kind}
+OLD_EXCELERO_PREFIX="NVMesh-"
+EXCELERO_PREFIX="nvmesh-"
+rpm_name=${EXCELERO_PREFIX}${kind}
+old_rpm_name=${OLD_EXCELERO_PREFIX}${kind}
 rpm_source_path="$rpm_build_dir/SOURCES/$rpm_name"
 ARCH=`uname -m`
 TOOLS_DIR=`realpath "./\`dirname "${BASH_SOURCE[0]}"\`/../tools/"`
@@ -214,8 +210,8 @@ fi
 
 for rpm_kind in $rpms_to_build; do
 	if $create_kmod && [ "$rpm_kind" == "kmod-core" ]; then
-		rpm_name="kmod-${NVMESH_PREFIX}core-${KERN_VER_NO_ARCH}"
-		old_rpm_name="kmod-${OLD_NVMESH_PREFIX}core-${KERN_VER_NO_ARCH}"
+		rpm_name="kmod-${EXCELERO_PREFIX}core-${KERN_VER_NO_ARCH}"
+		old_rpm_name="kmod-${OLD_EXCELERO_PREFIX}core-${KERN_VER_NO_ARCH}"
 		rpm_source_path="$rpm_build_dir/SOURCES/$rpm_name"
 	fi
 
@@ -291,7 +287,6 @@ for rpm_kind in $rpms_to_build; do
 	if [ "$rpm_kind" == "client" ] || [ "$rpm_kind" == "target" ]; then
 		echo Copying post-install and uninstall scripts.
 		cp $installers_dir/post_install $rpm_source_path
-		cp $installers_dir/post_install_ib_core_mod $rpm_source_path
 		cp $installers_dir/install.py $rpm_source_path
 		cp $installers_dir/uninstall-$rpm_kind $rpm_source_path
 
@@ -301,15 +296,6 @@ for rpm_kind in $rpms_to_build; do
 
 		#filtering out upgrade scripts not in the correct version format
 		find "$rpm_source_path/upgrade_scripts/" -maxdepth 2 ! -name '[0-9a-zA-Z]*' -type f -exec rm -f {} +
-
-		echo "Changing ko.xz suffix to ko.xz.bcp to avoid kernel xz recognition"
-		compressed_kos=`find $rpm_source_path -name '*.ko.xz' -type f 2>/dev/null`
-		if [ ! -z "$compressed_kos" ]; then
-			# renaming the ko.xz to ko.xz.bcp so the kernel would not be able to load it (allow only ko load while making the decompress only one time)
-			for ko_xz in $compressed_kos; do
-				mv "$ko_xz" "$ko_xz.bcp"
-			done
-		fi
 	fi
 
 	echo Copying specfile

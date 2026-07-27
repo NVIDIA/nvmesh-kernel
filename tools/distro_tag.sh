@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 distro_tag=""
 if [ -z "$DISTRO_TAG" ]; then
 	if [ -e /etc/redhat-release ]; then

@@ -1,8 +1,3 @@
-/*
-* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-* SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
-*/
-
 #pragma once
 /* Sets of unitest utils for enumeration of topologies */
 #include "../bunitest.h"
@@ -77,10 +72,10 @@ struct topologies_enumerator{
 };
 
 // Randomly Enumerates all possible non/single/double degraded topologies
-struct topologies_enumerator create_topo_random_enum(struct TstPRaid sraid, u16 max_non_deg, u16 max_1_deg, u16 max_2_deg);
+struct topologies_enumerator create_all_topo_random_enum(struct TstPRaid sraid, u16 n_perms, bool all_topos);
 
-// Enumerates all possible non/single/double degraded (according to n_deg) topologies
-struct topologies_enumerator create_all_topo_enum(struct TstPRaid sraid, u16 n_deg);
+// Enumerates all possible non/single/double degraded topologies
+struct topologies_enumerator create_all_topo_enum(struct TstPRaid sraid);
 
 // Enumerates single/double degraded topologies
 struct topologies_enumerator create_no_protection_topo_enum(struct TstPRaid sraid);
