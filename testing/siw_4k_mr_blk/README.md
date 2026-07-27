@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+-->
+
 # `siw_4k_mr_blk_test` &mdash; NVMESH-8849 corner-case driver
 
 User-space round-trip test for the SIW *MR page size = 4 KiB on a 64 KiB

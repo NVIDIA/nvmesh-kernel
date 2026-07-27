@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+-->
+
 ---
 name: dp-io-pet
 description: Use when adding, reviewing, or interpreting NVMesh datapath IO PET journal messages emitted with NVMEIBC_IO_PET_MSG* macros.

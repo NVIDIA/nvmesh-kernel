@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+-->
+
 # NVMesh Server Architecture Documentation
 
 This directory contains the NVMesh server module implementation, which provides remote access to local NVMe storage devices over RDMA networks.

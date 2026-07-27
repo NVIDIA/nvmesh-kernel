@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+-->
+
 # `the-calculator.py` — LBA translation helper
 
 Interactive Python shell for translating addresses across **volume → chunk → RAID → segment → disk** for NVMesh block volumes loaded from **`/proc`** or from **UM trace JSONL** exports.

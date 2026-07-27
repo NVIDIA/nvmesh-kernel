@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 BUILD_DIR := build
 TESTS_DIR := tests
 ROTATIONS_DIR := $(BUILD_DIR)/rotations

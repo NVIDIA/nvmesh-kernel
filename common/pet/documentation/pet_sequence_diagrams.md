@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: GPL-2.0-only OR Apache-2.0
+-->
+
 # PET Controller Initialization and Propagation Sequence Diagrams
 
 This document describes the initialization and propagation flow of `nvmeib_pet_base_controller` derived structures through the NVMesh system.

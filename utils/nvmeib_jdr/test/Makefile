@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 CC          = gcc
 BASE_CFLAGS = -Wall -Wextra -O2 -I../ -ggdb
 CFLAGS      ?= $(BASE_CFLAGS)
