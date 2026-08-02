@@ -1,0 +1,22 @@
+version: "1.0"
+project: "nvmesh"
+last_updated: "2026-07-21T00:00:00Z"
+
+repository_exposure_classification:
+  visibility: "Public"
+  basis: "Permissive license (Apache-2.0; kernel parts dual GPL-2.0-only OR Apache-2.0) and README lists public open-source mirrors of the NVMesh components; SECURITY.md written to public-safe detail"
+  confirmed_by: "batch-run"
+  date: "2026-07-21"
+
+service_exposure_classification:
+  tier: "External / Regulated"
+  confidence: "high"
+  basis: "Externally distributed, enterprise-supported storage product packaged as RPMs and containers and mirrored open source; handles customer block-storage data and integrates with host kernel and NVMe hardware"
+  confirmed_by: "batch-run"
+  date: "2026-07-21"
+
+false_positives: []
+
+accepted_risks: []
+
+suppressed_cves: []
