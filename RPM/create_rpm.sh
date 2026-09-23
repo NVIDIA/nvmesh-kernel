@@ -110,7 +110,6 @@ if [ "$is_development" != "yes" ]; then
 fi
 
 utils_version=${translate_branch_to_version[$UTILS_BRANCH]}
-librkfaka_minimal_version="1.6.1"
 
 nvmeshBasicRequires="ethtool, util-linux, smartmontools, systemd"
 
@@ -127,8 +126,8 @@ elif [ ${kind} == "client" ]; then # core
 	DEB_REQUIRES="$nvmeshBasicRequires, kmod, xz-utils $xz_version_cond_ubuntu, nvmesh-base (>= $VERSION)"
 	SLES_REQUIRES="$nvmeshBasicRequires, kmod, xz $xz_version_cond, nvmesh-base >= $VERSION"
 elif [ ${kind} == "target" ]; then # core
-	RPM_REQUIRES="$nvmeshBasicRequires, kmod, xz $xz_version_cond, pciutils, nvmesh-client >= $VERSION, librdkafka >= $librkfaka_minimal_version"
-	DEB_REQUIRES="$nvmeshBasicRequires, kmod, xz-utils $xz_version_cond_ubuntu, pciutils, nvmesh-client (>= $VERSION), librdkafka1 (>= $librkfaka_minimal_version)"
+	RPM_REQUIRES="$nvmeshBasicRequires, kmod, xz $xz_version_cond, pciutils, nvmesh-client >= $VERSION"
+	DEB_REQUIRES="$nvmeshBasicRequires, kmod, xz-utils $xz_version_cond_ubuntu, pciutils, nvmesh-client (>= $VERSION)"
 	SLES_REQUIRES="$nvmeshBasicRequires, kmod, xz $xz_version_cond, pciutils, nvmesh-client >= $VERSION, librdkafka"
 fi
 
